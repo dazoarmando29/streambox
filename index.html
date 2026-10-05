@@ -27,6 +27,7 @@
 <style>
   * { scrollbar-width: thin; scrollbar-color: #e50914 #111; }
   html { -webkit-text-size-adjust: 100%; }
+  body.modal-open { overflow: hidden; }
   body {
     background: #0a0a0f; color: #eee; font-family: Inter, Segoe UI, Arial, sans-serif;
     padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
@@ -133,7 +134,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 
 <!-- WATCH VIEW -->
 <div id="watchView" class="hidden min-h-screen pt-20 px-4 md:px-10 pb-16">
-  <button onclick="goHome(event)" class="mb-4 text-sm bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full">← Back to Browse</button>
+  <button id="backBtn" onclick="goHome(event)" class="mb-4 text-sm bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full">← Back to Browse</button>
   <div class="grid lg:grid-cols-3 gap-6">
     <div class="lg:col-span-2">
       <div id="playerBox" class="player-wrap relative w-full rounded-xl overflow-hidden border border-white/10">
@@ -296,6 +297,52 @@ function preconnectCinesrc(){
     }
   } catch(e){}
 }
+
+/* ---------- Hardening: focus + activation guards (TV remotes repeat keys) ---------- */
+function safeFocus(el){
+  if (!el) return false;
+  try {
+    if (el.offsetParent === null || el.disabled) return false;
+    el.focus({ preventScroll: true });
+    return document.activeElement === el;
+  } catch(e){ return false; }
+}
+function topPopup(){
+  // topmost visible popup wins (guide sits above details)
+  const ps = [...document.querySelectorAll("#tvGuide,#modal")].filter(p => !p.classList.contains("hidden"));
+  return ps.length ? ps[ps.length - 1] : null;
+}
+let detailReq = 0;      // stale-response guard for slow TMDB calls
+let lastActivate = 0;   // double OK-press guard (remotes send repeats)
+function activatable(fn){
+  return function(...a){
+    const n = Date.now();
+    if (n - lastActivate < 450) return;
+    lastActivate = n;
+    return fn.apply(this, a);
+  };
+}
+// Auto-tag anything added later (episode buttons, rows, future popups) so the
+// D-pad can never strand focus on an untagged control again
+try {
+  new MutationObserver((muts) => {
+    for (const m of muts) for (const n of m.addedNodes) {
+      if (!n || n.nodeType !== 1) continue;
+      if (n.matches && n.matches("button,select,input,a")) n.setAttribute("data-focusable", "1");
+      if (n.classList && n.classList.contains("card") && !n.hasAttribute("tabindex")) {
+        n.tabIndex = 0; n.setAttribute("data-focusable", "1");
+        if (!n.hasAttribute("role")) n.setAttribute("role", "button");
+      }
+      if (n.querySelectorAll) {
+        n.querySelectorAll("button,select,input,a").forEach(el => el.setAttribute("data-focusable", "1"));
+        n.querySelectorAll(".card").forEach(c => {
+          if (!c.hasAttribute("tabindex")) { c.tabIndex = 0; c.setAttribute("data-focusable", "1"); }
+          if (!c.hasAttribute("role")) c.setAttribute("role", "button");
+        });
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+} catch(e){}
 let currentType = "all", currentItem = null, currentDetail = null;
 let watchState = { type:"movie", id:null, s:1, e:1 };
 let searchTimer = null, searchCtrl = null;
@@ -325,21 +372,32 @@ const yearOf = x => (x.release_date || x.first_air_date || "").slice(0,4);
 /* ---------- HOME ---------- */
 async function init(){
   renderContinue();
-  const [trend, popM, popT, topM, topT] = await Promise.all([
-    tmdb("/trending/all/week"),
-    tmdb("/movie/popular"),
-    tmdb("/tv/popular"),
-    tmdb("/movie/top_rated"),
-    tmdb("/tv/top_rated")
-  ]);
-  buildHero(trend.results.slice(0,5));
   const rows = document.getElementById("rows");
-  rows.innerHTML = "";
-  rows.appendChild(makeRow("Trending Now", trend.results));
-  rows.appendChild(makeRow("Popular Movies", popM.results, "movie"));
-  rows.appendChild(makeRow("Popular TV Shows", popT.results, "tv"));
-  rows.appendChild(makeRow("Top Rated Movies", topM.results, "movie"));
-  rows.appendChild(makeRow("Top Rated TV", topT.results, "tv"));
+  try {
+    const [trend, popM, popT, topM, topT] = await Promise.all([
+      tmdb("/trending/all/week"),
+      tmdb("/movie/popular"),
+      tmdb("/tv/popular"),
+      tmdb("/movie/top_rated"),
+      tmdb("/tv/top_rated")
+    ]);
+    if (!trend || !trend.results) throw new Error("empty catalog");
+    buildHero(trend.results.slice(0,5));
+    rows.innerHTML = "";
+    rows.appendChild(makeRow("Trending Now", trend.results));
+    rows.appendChild(makeRow("Popular Movies", popM.results, "movie"));
+    rows.appendChild(makeRow("Popular TV Shows", popT.results, "tv"));
+    rows.appendChild(makeRow("Top Rated Movies", topM.results, "movie"));
+    rows.appendChild(makeRow("Top Rated TV", topT.results, "tv"));
+  } catch(err) {
+    // never leave a dead empty page (offline / API down): offer retry
+    rows.innerHTML = `<div class="bg-white/5 border border-white/10 rounded-xl p-8 text-center max-w-lg mx-auto">
+      <p class="font-bold text-lg">Couldn't load the catalog</p>
+      <p class="text-sm text-gray-400 mt-1">Check your connection, then try again.</p>
+      <button onclick="init()" class="mt-4 bg-red-600 hover:bg-red-500 font-bold px-6 py-2.5 rounded-full">↻ Retry</button>
+    </div>`;
+    return;
+  }
   // TV: start with focus on content so the remote works immediately
   if (document.body.classList.contains("tv-mode")) {
     setTimeout(() => {
@@ -373,10 +431,10 @@ function cardEl(x, type){
     <img loading="lazy" decoding="async" src="${IMG(x.poster_path,"w342")}" class="rounded-lg w-full aspect-[2/3] object-cover bg-white/5">
     <p class="text-xs mt-1.5 font-semibold truncate">${titleOf(x)}</p>
     <p class="text-[11px] text-gray-500">★ ${Number(x.vote_average||0).toFixed(1)} • ${yearOf(x)} • ${type.toUpperCase()}</p>`;
-  d.onclick = () => openDetail(type, x.id);
+  d.onclick = activatable(() => openDetail(type, x.id));
   d.onmouseenter = preconnectCinesrc;
   d.onfocus = preconnectCinesrc;
-  d.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openDetail(type, x.id); } };
+  d.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); activatable(() => openDetail(type, x.id))(); } };
   return d;
 }
 
@@ -420,10 +478,9 @@ function cardEl(x, type){
       return;
     }
     if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
-      // Focus trap: when a popup is open, the remote stays inside it (guide wins over details)
-      const guideOpen = !document.getElementById("tvGuide").classList.contains("hidden");
-      const modalOpen = guideOpen || !document.getElementById("modal").classList.contains("hidden");
-      const scope = guideOpen ? document.getElementById("tvGuide") : (modalOpen ? document.getElementById("modal") : document);
+      // Focus trap: when a popup is open, the remote stays inside the TOPMOST one
+      const top = topPopup();
+      const scope = top || document;
       const items = [...scope.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
         .filter(el => el.offsetParent !== null && !el.disabled);
       if (!items.length) return;
@@ -460,19 +517,20 @@ function cardEl(x, type){
         }
         document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
         best.classList.add("tv-focus");
-      } else if (modalOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      } else if (top && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
         // bottom/top of popup reached: scroll its content instead of doing nothing
         e.preventDefault();
-        const panel = document.querySelector("#tvGuide:not(.hidden) > div, #modal:not(.hidden) > div");
+        const panel = top.querySelector(":scope > div");
         if (panel) panel.scrollBy({ top: e.key === "ArrowDown" ? 240 : -240, behavior: "auto" });
       }
     }
-    // TV Back / Esc: close guide, then details popup, else go home
+    // TV Back / Esc: close topmost popup first, else go home
     if (e.key === "Escape" || e.key === "Backspace" || e.keyCode === 461 || e.keyCode === 10009) {
-      const guide = document.getElementById("tvGuide");
-      if (guide && !guide.classList.contains("hidden")) { closeTvGuide(); e.preventDefault(); return; }
-      const modal = document.getElementById("modal");
-      if (modal && !modal.classList.contains("hidden")) { closeModal(); e.preventDefault(); return; }
+      const top = topPopup();
+      if (top) {
+        if (top.id === "tvGuide") closeTvGuide(); else closeModal();
+        e.preventDefault(); return;
+      }
       const watch = document.getElementById("watchView");
       if (watch && !watch.classList.contains("hidden")) { goHome(e); e.preventDefault(); }
     }
@@ -558,13 +616,21 @@ async function filterType(type, ev){
   const r = await tmdb(type==="movie" ? "/movie/popular" : "/tv/popular");
   showGrid(type==="movie" ? "Popular Movies" : "Popular TV Shows", r.results.map(x=>({...x, media_type:type})));
 }
-function showContinue(ev){ if(ev) ev.preventDefault(); goHome(ev); document.getElementById("continueRow").scrollIntoView({behavior:"smooth"}); }
+function showContinue(ev){ if(ev) ev.preventDefault(); goHome(ev); document.getElementById("continueRow").scrollIntoView({behavior: document.body.classList.contains("tv-mode") ? "auto" : "smooth"}); }
 
 /* ---------- DETAIL MODAL ---------- */
 let modalSeasons = [], modalSeasonIdx = 0, modalEpisodes = [], modalEpIdx = 0, lastOpener = null;
 async function openDetail(type, id){
   lastOpener = document.activeElement;
-  const d = await tmdb(`/${type}/${id}?append_to_response=credits`);
+  const my = ++detailReq; // ignore stale responses if user already moved on
+  let d;
+  try {
+    d = await tmdb(`/${type}/${id}?append_to_response=credits`);
+  } catch(err) {
+    alert("Couldn't load details. Check your connection and try again.");
+    return;
+  }
+  if (my !== detailReq) return; // a newer open/close superseded this one
   currentDetail = { type, id, data: d };
   document.getElementById("mBackdrop").src = IMG(d.backdrop_path, "w780");
   document.getElementById("mBackdrop").loading = "eager";
@@ -618,6 +684,7 @@ function modalEpStep(dir){
   updateModalEpLabel();
 }
 function closeModal(){
+  detailReq++; // invalidate any in-flight detail fetch
   document.getElementById("modal").classList.add("hidden");
   document.body.classList.remove("modal-open");
   if (lastOpener && lastOpener.focus) { try { lastOpener.focus({ preventScroll: true }); } catch(e){} }
@@ -642,7 +709,15 @@ async function openWatch(type, id, s=1, e=1){
   document.getElementById("homeView").classList.add("hidden");
   document.getElementById("watchView").classList.remove("hidden");
   window.scrollTo(0,0);
-  const d = await tmdb(`/${type}/${id}?append_to_response=credits`);
+  // remote lands on Back immediately so TV users are never stranded
+  if (document.body.classList.contains("tv-mode")) setTimeout(()=>safeFocus(document.getElementById("backBtn")), 80);
+  let d;
+  try {
+    d = await tmdb(`/${type}/${id}?append_to_response=credits`);
+  } catch(err) {
+    document.getElementById("watchStatus").textContent = "Couldn't load details — check connection, then press Back and retry.";
+    return;
+  }
   currentItem = d;
   document.getElementById("wPoster").src = IMG(d.poster_path, "w342");
   document.getElementById("wPoster").loading = "eager";
@@ -766,8 +841,8 @@ function renderContinue(){
       d.setAttribute("data-focusable", "1");
       d.setAttribute("aria-label", `${x.title||""} (${x.type})`);
       d.innerHTML = `<img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" class="rounded-lg w-full aspect-[2/3] object-cover"><p class="text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p><button class="absolute top-1 right-1 bg-black/70 w-6 h-6 rounded-full text-xs" aria-label="Remove">✕</button>`;
-      d.onclick = ()=>openWatch(x.type, x.id, x.s||1, x.e||1);
-      d.onkeydown = (ev)=>{ if(ev.key==="Enter"||ev.key===" "){ ev.preventDefault(); openWatch(x.type, x.id, x.s||1, x.e||1); } };
+      d.onclick = activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1));
+      d.onkeydown = (ev)=>{ if(ev.key==="Enter"||ev.key===" "){ ev.preventDefault(); activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1))(); } };
       d.querySelector("button").onclick = (ev)=>{ ev.stopPropagation(); removeContinue(x.type,x.id); };
       grid.appendChild(d);
     });
