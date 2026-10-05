@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#0a0a0f">
+<meta name="theme-color" content="#0b1426">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -12,7 +12,7 @@
 <meta name="format-detection" content="telephone=no">
 <title>StreamBox - Watch Movies & TV Shows Free</title>
 <meta name="description" content="StreamBox — fast, free movies & TV shows. Search, browse trending, and watch HD with ad-shield player.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect x='2' y='6' width='44' height='36' rx='9' fill='%23e50914'/%3E%3Cpath d='M20 17.5v13l11-6.5z' fill='white'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237dd3fc'/%3E%3Cstop offset='1' stop-color='%232dd4bf'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='4' y='4' width='40' height='40' rx='11' fill='url(%23g)'/%3E%3Cpath d='M20 17l12 7-12 7z' fill='%230b1426'/%3E%3C/svg%3E">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -25,11 +25,11 @@
 <link rel="preconnect" href="https://cinesrc.st" crossorigin>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
-  * { scrollbar-width: thin; scrollbar-color: #e50914 #111; }
+  * { scrollbar-width: thin; scrollbar-color: #14b8a6 #111; }
   html { -webkit-text-size-adjust: 100%; }
   body.modal-open { overflow: hidden; }
   body {
-    background: #0a0a0f; color: #eee; font-family: Inter, Segoe UI, Arial, sans-serif;
+    background: #0b1426; color: #eee; font-family: Inter, Segoe UI, Arial, sans-serif;
     padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
@@ -39,10 +39,10 @@
   .card { transition: transform .2s; cursor: pointer; border-radius: 12px; }
   .card:hover { transform: scale(1.06); z-index: 10; }
   .card:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible {
-    outline: 3px solid #e50914; outline-offset: 2px;
+    outline: 3px solid #14b8a6; outline-offset: 2px;
   }
-  .tv-focus { outline: 4px solid #e50914 !important; outline-offset: 3px; transform: scale(1.08); z-index: 20; }
-  .hero-gradient { background: linear-gradient(to top, #0a0a0f 5%, transparent 60%), linear-gradient(to right, rgba(0,0,0,.85) 20%, transparent 70%); }
+  .tv-focus { outline: 4px solid #14b8a6 !important; outline-offset: 3px; transform: scale(1.08); z-index: 20; }
+  .hero-gradient { background: linear-gradient(to top, #0b1426 5%, transparent 60%), linear-gradient(to right, rgba(0,0,0,.85) 20%, transparent 70%); }
   .player-wrap { aspect-ratio: 16/9; background: #000; }
   iframe { border: 0; }
   .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -75,10 +75,10 @@
   /* subtitles coach-tip arrow + highlight on the 🎯 button */
   .tip-arrow {
     position: absolute; bottom: -8px; right: 110px; width: 16px; height: 16px;
-    background: #1c1c28; border-right: 1px solid rgba(229,9,20,.4); border-bottom: 1px solid rgba(229,9,20,.4);
+    background: #1a2745; border-right: 1px solid rgba(229,9,20,.4); border-bottom: 1px solid rgba(229,9,20,.4);
     transform: rotate(45deg);
   }
-  .tip-glow { outline: 3px solid #e50914 !important; outline-offset: 2px; }
+  .tip-glow { outline: 3px solid #14b8a6 !important; outline-offset: 2px; }
   @media (min-width: 1600px), (pointer: coarse) and (min-width: 1100px) {
     .card { min-width: 180px; }
   }
@@ -98,10 +98,10 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 <!-- NAVBAR -->
 <nav class="fixed top-0 w-full z-50 px-4 md:px-10 py-4 flex items-center gap-6 bg-gradient-to-b from-black/90 to-transparent">
   <a href="#" onclick="goHome(event)" class="flex items-center gap-2.5 shrink-0" aria-label="StreamBox home">
-    <span class="grid place-items-center w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-red-700 shadow-lg shadow-red-900/40">
-      <svg width="22" height="22" viewBox="0 0 48 48" fill="none"><rect x="2" y="6" width="44" height="36" rx="9" fill="white" fill-opacity="0.18"/><path d="M20 17.5v13l11-6.5z" fill="white"/></svg>
+    <span class="grid place-items-center w-10 h-10 rounded-2xl bg-gradient-to-br from-sky-300 via-cyan-400 to-teal-400 shadow-lg shadow-teal-900/40 ring-2 ring-[#22345c]">
+      <svg width="22" height="22" viewBox="0 0 48 48" fill="none"><path d="M18 15.5v17c0 1.6 1.7 2.6 3.1 1.8l13.5-8.5c1.3-.8 1.3-2.8 0-3.6L21.1 13.7c-1.4-.8-3.1.2-3.1 1.8z" stroke="#0b1426" stroke-width="3.5" stroke-linejoin="round"/></svg>
     </span>
-    <span class="text-2xl font-black tracking-tight text-white">Stream<span class="text-red-600">Box</span></span>
+    <span class="text-2xl font-black tracking-tight text-white">Stream<span class="text-teal-400">Box</span></span>
   </a>
   <div class="hidden md:flex gap-5 text-sm text-gray-300">
     <button onclick="goHome(event)" class="hover:text-white">Home</button>
@@ -111,13 +111,13 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     <button onclick="openTvGuide(event)" class="hover:text-white" title="How to install & use on TV">📺 TV Setup</button>
   </div>
   <div class="ml-auto flex gap-2 w-full md:w-auto">
-    <input id="search" enterkeyhint="search" inputmode="search" autocomplete="off" placeholder="Search movies & shows..." class="w-full md:w-72 px-4 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm focus:border-red-600" oninput="onSearch(this.value)">
+    <input id="search" enterkeyhint="search" inputmode="search" autocomplete="off" placeholder="Search movies & shows..." class="w-full md:w-72 px-4 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm focus:border-teal-500" oninput="onSearch(this.value)">
   </div>
 </nav>
 
 <!-- Floating TV-help button (phones / small screens where the nav link is hidden) -->
 <button onclick="openTvGuide(event)" aria-label="TV setup guide" title="TV setup guide"
-  class="md:hidden fixed bottom-5 right-5 z-50 w-12 h-12 rounded-full bg-red-600 text-xl shadow-lg shadow-red-900/50">📺</button>
+  class="md:hidden fixed bottom-5 right-5 z-50 w-12 h-12 rounded-full bg-teal-500 text-xl shadow-lg shadow-teal-900/50">📺</button>
 
 <!-- HOME VIEW -->
 <div id="homeView">
@@ -147,7 +147,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       <div id="playerBox" class="player-wrap relative w-full rounded-xl overflow-hidden border border-white/10">
         <div id="playerSpin" class="absolute inset-0 grid place-items-center bg-black">
           <div class="flex flex-col items-center gap-2 text-gray-400 text-sm">
-            <div class="w-10 h-10 rounded-full border-2 border-white/20 border-t-red-600 animate-spin"></div>
+            <div class="w-10 h-10 rounded-full border-2 border-white/20 border-t-teal-500 animate-spin"></div>
             <span>Loading player…</span>
           </div>
         </div>
@@ -158,12 +158,12 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       </div>
       <!-- Netflix-style remote control bar (drives the player via its command API) -->
       <div id="ctlBar" class="mt-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-2">
-        <button id="ctlPlay" onclick="ctlToggle()" aria-label="Play or pause" title="Play/Pause (OK)" class="w-11 h-11 rounded-full bg-red-600 hover:bg-red-500 text-xl font-bold grid place-items-center">▶</button>
+        <button id="ctlPlay" onclick="ctlToggle()" aria-label="Play or pause" title="Play/Pause (OK)" class="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-400 text-xl font-bold grid place-items-center">▶</button>
         <button onclick="ctlSeekRel(-10)" aria-label="Back 10 seconds" title="Back 10s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">−10s</button>
         <button onclick="ctlSeekRel(30)" aria-label="Forward 30 seconds" title="Forward 30s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">+30s</button>
         <span id="ctlCur" class="text-xs text-gray-300 tabular-nums ml-1">0:00</span>
         <input id="ctlSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek" title="Left/Right to seek, OK to jump"
-          class="flex-1 min-w-[120px] h-11 accent-red-600 cursor-pointer">
+          class="flex-1 min-w-[120px] h-11 accent-teal-500 cursor-pointer">
         <span id="ctlDur" class="text-xs text-gray-500 tabular-nums">0:00</span>
         <button id="ctlMute" onclick="ctlMuteToggle()" aria-label="Mute or unmute" title="Mute" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🔊</button>
         <button id="ctlRate" onclick="ctlRateCycle()" aria-label="Playback speed" title="Speed" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">1×</button>
@@ -171,7 +171,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button onclick="focusPlayer()" id="focusPlayerBtn" aria-label="Control player menu" title="Focus the player itself: arrows + OK work its menu (subtitles ⚙, quality). Press Back afterwards." class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">🎯 Player</button>
       </div>
       <!-- One-time subtitles coach tip (arrow points at 🎯 Player) -->
-      <div id="subTip" class="hidden relative mt-3 bg-[#1c1c28] border border-red-600/40 rounded-xl p-4 pr-12 text-sm">
+      <div id="subTip" class="hidden relative mt-3 bg-[#1a2745] border border-teal-500/40 rounded-xl p-4 pr-12 text-sm">
         <button onclick="hideSubTip(false)" aria-label="Dismiss tip" class="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/80">✕</button>
         <p class="font-bold">💬 Want subtitles?</p>
         <ol class="text-gray-300 mt-1 space-y-1 list-decimal ml-5 text-[13px]">
@@ -180,7 +180,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
           <li>Press <b>Back</b> to return to these controls.</li>
         </ol>
         <div class="flex flex-wrap gap-2 mt-3">
-          <button onclick="hideSubTip(true)" class="bg-red-600 hover:bg-red-500 font-bold px-4 py-2 rounded-full text-[13px]">Got it — don't show again</button>
+          <button onclick="hideSubTip(true)" class="bg-teal-500 hover:bg-teal-400 font-bold px-4 py-2 rounded-full text-[13px]">Got it — don't show again</button>
           <button onclick="hideSubTip(false)" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full text-[13px]">Later</button>
         </div>
         <div class="tip-arrow"></div>
@@ -188,17 +188,17 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       <p class="text-[11px] text-gray-600 mt-2">Remote tips: <b>OK</b> = play/pause • <b>◀ ▶ on the bar</b> = seek • <b>🎯 Player</b> focuses the video itself so you can open its ⚙ menu for <b>subtitles & quality</b>, then Back returns here. <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
       <!-- player options -->
       <div class="flex flex-wrap items-center gap-3 mt-3 text-xs text-gray-300">
-        <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="accent-red-600" onchange="toggleShield()"> Ad Shield</label>
-        <label class="flex items-center gap-1"><input type="checkbox" id="optAutoplay" checked class="accent-red-600"> Autoplay</label>
-        <label class="flex items-center gap-1"><input type="checkbox" id="optAutonext" checked class="accent-red-600"> Auto-next</label>
-        <label class="flex items-center gap-1"><input type="checkbox" id="optAutoskip" class="accent-red-600"> Auto-skip intro</label>
-        <label class="flex items-center gap-1">Accent <input type="color" id="optColor" value="#e50914" class="w-8 h-6 bg-transparent"></label>
+        <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="accent-teal-500" onchange="toggleShield()"> Ad Shield</label>
+        <label class="flex items-center gap-1"><input type="checkbox" id="optAutoplay" checked class="accent-teal-500"> Autoplay</label>
+        <label class="flex items-center gap-1"><input type="checkbox" id="optAutonext" checked class="accent-teal-500"> Auto-next</label>
+        <label class="flex items-center gap-1"><input type="checkbox" id="optAutoskip" class="accent-teal-500"> Auto-skip intro</label>
+        <label class="flex items-center gap-1">Accent <input type="color" id="optColor" value="#14b8a6" class="w-8 h-6 bg-transparent"></label>
         <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5" title="Preferred video quality — 4K only plays if the source carries it, otherwise best available">
           <button onclick="qualityStep(-1)" aria-label="Lower quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
           <span id="qualityLabel" class="text-xs font-bold min-w-[52px] text-center">Auto</span>
           <button onclick="qualityStep(1)" aria-label="Higher quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
         </div>
-        <button onclick="applyPlayerOpts()" class="ml-2 bg-red-600 px-3 py-1.5 rounded-full font-semibold hover:bg-red-500">Apply</button>
+        <button onclick="applyPlayerOpts()" class="ml-2 bg-teal-500 px-3 py-1.5 rounded-full font-semibold hover:bg-teal-400">Apply</button>
         <button onclick="reloadPlayer()" class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">↻ Reload</button>
         <span id="watchStatus" class="ml-auto text-gray-500"></span>
       </div>
@@ -233,10 +233,10 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 
 <!-- DETAIL MODAL -->
 <div id="modal" class="hidden fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
-  <div class="bg-[#14141c] max-w-2xl w-full rounded-2xl overflow-hidden border border-white/10 max-h-[90vh] overflow-y-auto">
+  <div class="bg-[#131e35] max-w-2xl w-full rounded-2xl overflow-hidden border border-white/10 max-h-[90vh] overflow-y-auto">
     <div class="relative h-64 md:h-80">
       <img id="mBackdrop" class="w-full h-full object-cover" src="">
-      <div class="absolute inset-0 bg-gradient-to-t from-[#14141c] to-transparent"></div>
+      <div class="absolute inset-0 bg-gradient-to-t from-[#131e35] to-transparent"></div>
       <button onclick="closeModal()" class="absolute top-3 right-3 bg-black/60 w-9 h-9 rounded-full">✕</button>
     </div>
     <div class="p-6 -mt-10 relative">
@@ -244,7 +244,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       <p id="mMeta" class="text-sm text-gray-400 mt-1"></p>
       <p id="mOverview" class="text-sm text-gray-300 mt-3 leading-relaxed"></p>
       <div class="flex flex-wrap gap-3 mt-5 items-center">
-        <button id="mWatch" class="bg-red-600 hover:bg-red-500 font-bold px-6 py-2.5 rounded-full">▶ Watch Now</button>
+        <button id="mWatch" class="bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">▶ Watch Now</button>
         <button onclick="addToList()" class="bg-white/10 hover:bg-white/20 px-5 py-2.5 rounded-full text-sm">+ My List</button>
       </div>
       <div id="mSeasons" class="mt-5 hidden">
@@ -269,7 +269,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 
 <!-- TV SETUP GUIDE -->
 <div id="tvGuide" class="hidden fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-4" onclick="if(event.target===this)closeTvGuide()">
-  <div class="bg-[#14141c] max-w-2xl w-full rounded-2xl overflow-hidden border border-white/10 max-h-[90vh] overflow-y-auto p-6 md:p-8 relative">
+  <div class="bg-[#131e35] max-w-2xl w-full rounded-2xl overflow-hidden border border-white/10 max-h-[90vh] overflow-y-auto p-6 md:p-8 relative">
     <button onclick="closeTvGuide()" aria-label="Close guide" class="absolute top-3 right-3 bg-black/60 w-9 h-9 rounded-full">✕</button>
     <h2 class="text-2xl font-black">📺 StreamBox on your TV</h2>
     <p class="text-sm text-gray-400 mt-1">Get the app on Android TV / Fire TV and drive it with your remote.</p>
@@ -310,7 +310,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       <li><b>Remote does nothing?</b> — press any arrow once to wake focus, then navigate.</li>
     </ul>
 
-    <button onclick="closeTvGuide()" class="mt-7 bg-red-600 hover:bg-red-500 font-bold px-6 py-2.5 rounded-full">Got it ✓</button>
+    <button onclick="closeTvGuide()" class="mt-7 bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">Got it ✓</button>
   </div>
 </div>
 
@@ -436,7 +436,7 @@ async function init(){
     rows.innerHTML = `<div class="bg-white/5 border border-white/10 rounded-xl p-8 text-center max-w-lg mx-auto">
       <p class="font-bold text-lg">Couldn't load the catalog</p>
       <p class="text-sm text-gray-400 mt-1">Check your connection, then try again.</p>
-      <button onclick="init()" class="mt-4 bg-red-600 hover:bg-red-500 font-bold px-6 py-2.5 rounded-full">↻ Retry</button>
+      <button onclick="init()" class="mt-4 bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">↻ Retry</button>
     </div>`;
     return;
   }
@@ -600,11 +600,11 @@ function setHero(i){
     <img src="${IMG(x.backdrop_path,"w1280")}" fetchpriority="high" decoding="async" class="absolute inset-0 w-full h-full object-cover">
     <div class="absolute inset-0 hero-gradient"></div>
     <div class="relative px-4 md:px-10 pb-16 max-w-2xl">
-      <span class="text-xs bg-red-600 px-3 py-1 rounded-full font-bold">#${i+1} TRENDING • ${type.toUpperCase()}</span>
+      <span class="text-xs bg-teal-500 px-3 py-1 rounded-full font-bold">#${i+1} TRENDING • ${type.toUpperCase()}</span>
       <h1 class="text-3xl md:text-5xl font-black mt-3">${titleOf(x)}</h1>
       <p class="text-sm text-gray-300 mt-2 line-clamp-3">${x.overview||""}</p>
       <div class="flex gap-3 mt-4">
-        <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="bg-red-600 hover:bg-red-500 font-bold px-6 py-2.5 rounded-full">▶ Watch</button>
+        <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">▶ Watch</button>
         <button onclick='openDetail("${type}",${x.id})' class="bg-white/20 hover:bg-white/30 px-6 py-2.5 rounded-full">Details</button>
       </div>
     </div>`;
@@ -791,7 +791,7 @@ async function loadEpisodes(){
     b.textContent = "E" + ep.episode_number;
     b.title = ep.name;
     b.setAttribute("data-focusable", "1");
-    b.className = "text-xs px-2 py-2 rounded-lg " + (ep.episode_number==e ? "bg-red-600 font-bold" : "bg-white/10 hover:bg-white/20");
+    b.className = "text-xs px-2 py-2 rounded-lg " + (ep.episode_number==e ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
     b.onclick = ()=>{ watchState.e = ep.episode_number; loadPlayer(); loadEpisodes(); saveContinue(); };
     grid.appendChild(b);
   });
@@ -836,7 +836,7 @@ function qualityStep(dir){
   window._qT = setTimeout(loadPlayer, 500);
 }
 function buildEmbedUrlClean(){
-  const color = encodeURIComponent(document.getElementById("optColor").value||"#e50914");
+  const color = encodeURIComponent(document.getElementById("optColor").value||"#14b8a6");
   let p = `autoplay=${document.getElementById("optAutoplay").checked}&autonext=${document.getElementById("optAutonext").checked}&autoskip=${document.getElementById("optAutoskip").checked}&color=${color}`;
   if (QLEVELS[qIdx].v) p += `&quality=${QLEVELS[qIdx].v}`;
   // remember the last working server so repeat watches start faster
