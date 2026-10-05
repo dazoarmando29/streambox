@@ -44,6 +44,7 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        s.setTextZoom(100);
         // TV remotes + keyboards navigate page focus; keep default UA so site tv-mode detection works
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
@@ -128,6 +129,7 @@ public class MainActivity extends Activity {
         // through its own navigation: player -> browse -> close popup -> exit.
         web.evaluateJavascript(
             "(function(){"
+            + "if(document.body.classList.contains('video-fs')){document.body.classList.remove('video-fs');return 'fs';}"
             + "var g=document.getElementById('tvGuide');"
             + "if(g&&!g.classList.contains('hidden')){closeTvGuide();return 'guide';}"
             + "var m=document.getElementById('modal');"

@@ -82,6 +82,20 @@
   /* true fullscreen: fill the screen, no letterbox box, no clipped controls */
   #playerBox:fullscreen { aspect-ratio: auto; width: 100vw; height: 100dvh; border-radius: 0; border: 0; background: #000; }
   #playerBox:fullscreen #playerSpin { border-radius: 0; }
+  /* fallback fullscreen (TV WebViews ignore element fullscreen requests):
+     pin video + our bar, hide the rest */
+  body.video-fs { overflow: hidden; }
+  body.video-fs nav { display: none; }
+  body.video-fs #playerBox {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 80;
+    width: 100vw; height: calc(100dvh - 78px);
+    aspect-ratio: auto; border-radius: 0; border: 0; background: #000;
+  }
+  body.video-fs #ctlBar {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 81;
+    min-height: 78px; border-radius: 0; background: #0b1426;
+    border-top: 1px solid rgba(255,255,255,.12);
+  }
   @media (min-width: 1600px), (pointer: coarse) and (min-width: 1100px) {
     .card { min-width: 180px; }
   }
@@ -526,9 +540,14 @@ function cardEl(x, type){
       return;
     }
     if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
-      // Focus trap: when a popup is open, the remote stays inside the TOPMOST one
+      // native fullscreen shows ONLY the video: hand keys straight to it
+      try {
+        if (document.fullscreenElement) { e.preventDefault(); focusPlayer(true); return; }
+      } catch(err){}
+      // Focus trap: popup wins, else fallback-fullscreen locks to our bar
       const top = topPopup();
-      const scope = top || document;
+      const bar = document.body.classList.contains("video-fs") ? document.getElementById("ctlBar") : null;
+      const scope = top || bar || document;
       const items = [...scope.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
         .filter(el => el.offsetParent !== null && !el.disabled);
       if (!items.length) return;
@@ -572,13 +591,17 @@ function cardEl(x, type){
         if (panel) panel.scrollBy({ top: e.key === "ArrowDown" ? 240 : -240, behavior: "auto" });
       }
     }
-    // TV Back / Esc: close topmost popup first, else go home
+    // TV Back / Esc: popups, then fullscreen(s), then go home
     if (e.key === "Escape" || e.key === "Backspace" || e.keyCode === 461 || e.keyCode === 10009) {
       const top = topPopup();
       if (top) {
         if (top.id === "tvGuide") closeTvGuide(); else closeModal();
         e.preventDefault(); return;
       }
+      try {
+        if (document.fullscreenElement) { document.exitFullscreen(); e.preventDefault(); return; }
+      } catch(err){}
+      if (document.body.classList.contains("video-fs")) { exitVideoFs(); e.preventDefault(); return; }
       const watch = document.getElementById("watchView");
       if (watch && !watch.classList.contains("hidden")) { goHome(e); e.preventDefault(); }
     }
@@ -888,6 +911,7 @@ function goHome(ev){
   if(ev) ev.preventDefault();
   ctlPollStop();
   clearTimeout(window._tipT);
+  exitVideoFs();
   hideSubTip(false);
   if (!document.getElementById("tvGuide").classList.contains("hidden")) closeTvGuide();
   if (!document.getElementById("modal").classList.contains("hidden")) closeModal();
@@ -1005,13 +1029,43 @@ function ctlFullscreen(){
   try {
     if (document.fullscreenElement) { document.exitFullscreen(); return; }
   } catch(e){}
+  if (document.body.classList.contains("video-fs")) { exitVideoFs(); return; }
   const box = document.getElementById("playerBox");
+  let requested = false;
   try {
-    const r = box.requestFullscreen ? box.requestFullscreen() : null;
-    if (r && r.catch) r.catch(()=>{});
+    if (box.requestFullscreen) {
+      const r = box.requestFullscreen();
+      requested = true;
+      if (r && r.catch) r.catch(() => enterVideoFs());
+    }
   } catch(e){}
+  // TV WebViews silently ignore element fullscreen: verify, else use fallback
+  setTimeout(() => {
+    let still = false;
+    try { still = !!document.fullscreenElement; } catch(e){}
+    if (!still && !document.body.classList.contains("video-fs")) enterVideoFs();
+  }, requested ? 700 : 0);
+  nudgePlayerSize();
   focusPlayer(true);
 }
+function enterVideoFs(){
+  document.body.classList.add("video-fs");
+  const b = document.getElementById("ctlPlay");
+  if (b) { try { b.focus({ preventScroll: true }); } catch(e){} }
+}
+function exitVideoFs(){ document.body.classList.remove("video-fs"); }
+function nudgePlayerSize(){
+  // force the player to re-measure its frame (fixes stale/zoomed layouts)
+  try {
+    const box = document.getElementById("playerBox");
+    box.style.width = "99.9%";
+    void box.offsetWidth;
+    box.style.width = "";
+  } catch(e){}
+}
+document.addEventListener("fullscreenchange", () => {
+  try { if (!document.fullscreenElement) nudgePlayerSize(); } catch(e){}
+});
 function focusPlayer(fromFs){
   // give the remote to the player itself: its own buttons/menu (subs ⚙, quality)
   // become drivable with arrows + OK. Our Back/Esc returns here.
