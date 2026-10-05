@@ -887,8 +887,10 @@ async function openWatch(type, id, s=1, e=1){
   document.getElementById("homeView").classList.add("hidden");
   document.getElementById("watchView").classList.remove("hidden");
   window.scrollTo(0,0);
-  // remote lands on Back immediately so TV users are never stranded
-  if (document.body.classList.contains("tv-mode")) setTimeout(()=>safeFocus(document.getElementById("backBtn")), 80);
+  // viewing modes: TV goes straight into cinema view (video first, no ⛶ needed);
+  // desktop/phone just zoom-scrolls to the video, ⛶ gives true fullscreen
+  if (document.body.classList.contains("tv-mode")) enterVideoFs();
+  else { try { document.getElementById("playerBox").scrollIntoView({ block: "center", behavior: "smooth" }); } catch(e){} }
   paintQuality();
   let d;
   try {
@@ -918,9 +920,9 @@ async function openWatch(type, id, s=1, e=1){
   }
   loadPlayer();
   saveContinue();
-  // subtitles coach tip (once — never again after "don't show again")
+  // subtitles coach tip (once — never again after "don't show again"; skipped in cinema view)
   clearTimeout(window._tipT);
-  window._tipT = setTimeout(() => showSubTip(false), 2500);
+  window._tipT = setTimeout(() => { if (!document.body.classList.contains("video-fs")) showSubTip(false); }, 2500);
 }
 async function loadEpisodes(){
   const { id, s, e } = watchState;
@@ -1141,7 +1143,7 @@ function ctlFullscreen(){
   try {
     if (document.fullscreenElement) { document.exitFullscreen(); return; }
   } catch(e){}
-  if (document.body.classList.contains("video-fs")) { exitVideoFs(); return; }
+  if (document.body.classList.contains("video-fs")) { exitVideoFs(); nudgePlayerSize(); return; }
   const box = document.getElementById("playerBox");
   let requested = false;
   try {
