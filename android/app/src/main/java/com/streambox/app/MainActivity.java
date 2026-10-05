@@ -74,6 +74,14 @@ public class MainActivity extends Activity {
                 fullscreenView = view;
                 fullscreenCallback = callback;
                 FrameLayout decor = (FrameLayout) getWindow().getDecorView();
+                // immersive fullscreen so player controls are never clipped by system bars
+                decor.setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
                 decor.addView(fullscreenView, new FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
                 web.setVisibility(View.GONE);
@@ -84,6 +92,7 @@ public class MainActivity extends Activity {
                 if (fullscreenView == null) return;
                 FrameLayout decor = (FrameLayout) getWindow().getDecorView();
                 decor.removeView(fullscreenView);
+                decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
                 fullscreenView = null;
                 fullscreenCallback = null;
                 web.setVisibility(View.VISIBLE);
