@@ -67,7 +67,10 @@
     scroll-behavior: auto !important;
   }
   .tv-mode .card:hover { transform: none; }
-  .tv-mode .tv-focus { transform: none; }
+  /* ...except one cheap(UI-thread-free) highlight so browsing feels alive */
+  .tv-mode .card { transition: transform .12s ease-out !important; }
+  .tv-mode .card.tv-focus { transform: scale(1.1); }
+  #modal .tv-focus { outline-width: 4px; }
   @media (min-width: 1600px), (pointer: coarse) and (min-width: 1100px) {
     .card { min-width: 180px; }
   }
@@ -99,7 +102,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     <button onclick="showContinue(event)" class="hover:text-white">My List</button>
   </div>
   <div class="ml-auto flex gap-2 w-full md:w-auto">
-    <input id="search" placeholder="Search movies & shows..." class="w-full md:w-72 px-4 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm focus:border-red-600" oninput="onSearch(this.value)">
+    <input id="search" enterkeyhint="search" inputmode="search" autocomplete="off" placeholder="Search movies & shows..." class="w-full md:w-72 px-4 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm focus:border-red-600" oninput="onSearch(this.value)">
   </div>
 </nav>
 
@@ -155,7 +158,11 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       <div id="epNav" class="mt-4 hidden">
         <div class="flex items-center gap-3 mb-2">
           <h3 class="font-bold">Episodes</h3>
-          <select id="seasonSel" onchange="onSeasonChange()" class="bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-sm"></select>
+          <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
+            <button onclick="watchSeasonStep(-1)" aria-label="Previous season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
+            <span id="seasonLabel" class="text-sm font-semibold min-w-[86px] text-center">Season 1</span>
+            <button onclick="watchSeasonStep(1)" aria-label="Next season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
+          </div>
           <button onclick="nextEpisode(1)" class="text-xs bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">Next Ep →</button>
         </div>
         <div id="epGrid" class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 max-h-56 overflow-y-auto"></div>
@@ -193,8 +200,20 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button onclick="addToList()" class="bg-white/10 hover:bg-white/20 px-5 py-2.5 rounded-full text-sm">+ My List</button>
       </div>
       <div id="mSeasons" class="mt-5 hidden">
-        <label class="text-sm text-gray-400">Season <select id="mSeason" onchange="loadModalEpisodes()" class="bg-white/10 border border-white/20 rounded-lg px-2 py-1 ml-2"></select></label>
-        <label class="text-sm text-gray-400 ml-4">Episode <select id="mEpisode" class="bg-white/10 border border-white/20 rounded-lg px-2 py-1 ml-2"></select></label>
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="text-sm text-gray-400">Season</span>
+          <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-1">
+            <button onclick="modalSeasonStep(-1)" aria-label="Previous season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
+            <span id="mSeasonLabel" class="text-sm font-semibold min-w-[76px] text-center">S1</span>
+            <button onclick="modalSeasonStep(1)" aria-label="Next season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
+          </div>
+          <span class="text-sm text-gray-400">Episode</span>
+          <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-1">
+            <button onclick="modalEpStep(-1)" aria-label="Previous episode" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
+            <span id="mEpisodeLabel" class="text-sm font-semibold min-w-[130px] text-center">E1</span>
+            <button onclick="modalEpStep(1)" aria-label="Next episode" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -269,6 +288,13 @@ async function init(){
   rows.appendChild(makeRow("Popular TV Shows", popT.results, "tv"));
   rows.appendChild(makeRow("Top Rated Movies", topM.results, "movie"));
   rows.appendChild(makeRow("Top Rated TV", topT.results, "tv"));
+  // TV: start with focus on content so the remote works immediately
+  if (document.body.classList.contains("tv-mode")) {
+    setTimeout(() => {
+      const first = document.querySelector("#hero button") || document.querySelector("#rows .card");
+      if (first) first.focus();
+    }, 400);
+  }
 }
 
 function makeRow(title, items, forceType){
@@ -333,11 +359,19 @@ function cardEl(x, type){
   document.addEventListener("keydown", (e) => {
     const tag = (document.activeElement && document.activeElement.tagName) || "";
     if (/INPUT|SELECT|TEXTAREA/.test(tag)) {
-      if (e.key === "Escape") document.activeElement.blur();
+      if (e.key === "Escape") { document.activeElement.blur(); return; }
+      // TV: arrows leave the search box into results instead of being trapped
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && document.activeElement.id === "search") {
+        const first = document.querySelector("#grid .card, #rows .card");
+        if (first) { e.preventDefault(); first.focus(); }
+      }
       return;
     }
     if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
-      const items = [...document.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
+      // Focus trap: when the details popup is open, the remote stays inside it
+      const modalOpen = !document.getElementById("modal").classList.contains("hidden");
+      const scope = modalOpen ? document.getElementById("modal") : document;
+      const items = [...scope.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
         .filter(el => el.offsetParent !== null && !el.disabled);
       if (!items.length) return;
       const cur = document.activeElement;
@@ -364,8 +398,20 @@ function cardEl(x, type){
         best.focus({ preventScroll: false });
         const instant = document.body.classList.contains("tv-mode");
         best.scrollIntoView({ block: "nearest", inline: "nearest", behavior: instant ? "auto" : "smooth" });
+        // keep horizontal rows glued to the focused card (Netflix-style)
+        const row = best.closest && best.closest(".row-scroll");
+        if (row) {
+          const rr = row.getBoundingClientRect(), br = best.getBoundingClientRect();
+          if (br.left < rr.left + 16) row.scrollBy({ left: br.left - rr.left - 32, behavior: instant ? "auto" : "smooth" });
+          else if (br.right > rr.right - 16) row.scrollBy({ left: br.right - rr.right + 32, behavior: instant ? "auto" : "smooth" });
+        }
         document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
         best.classList.add("tv-focus");
+      } else if (modalOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        // bottom/top of popup reached: scroll its content instead of doing nothing
+        e.preventDefault();
+        const panel = document.querySelector("#modal > div");
+        if (panel) panel.scrollBy({ top: e.key === "ArrowDown" ? 240 : -240, behavior: "auto" });
       }
     }
     // TV Back / Esc: close modal first, else go home
@@ -460,7 +506,9 @@ async function filterType(type, ev){
 function showContinue(ev){ if(ev) ev.preventDefault(); goHome(ev); document.getElementById("continueRow").scrollIntoView({behavior:"smooth"}); }
 
 /* ---------- DETAIL MODAL ---------- */
+let modalSeasons = [], modalSeasonIdx = 0, modalEpisodes = [], modalEpIdx = 0, lastOpener = null;
 async function openDetail(type, id){
+  lastOpener = document.activeElement;
   const d = await tmdb(`/${type}/${id}?append_to_response=credits`);
   currentDetail = { type, id, data: d };
   document.getElementById("mBackdrop").src = IMG(d.backdrop_path, "w780");
@@ -470,26 +518,55 @@ async function openDetail(type, id){
   document.getElementById("mOverview").textContent = d.overview || "No overview.";
   document.getElementById("mWatch").onclick = () => {
     if(type==="tv"){
-      const s = Number(document.getElementById("mSeason").value||1);
-      const e = Number(document.getElementById("mEpisode").value||1);
+      const s = (modalSeasons[modalSeasonIdx]||{}).season_number || 1;
+      const e = (modalEpisodes[modalEpIdx]||{}).episode_number || 1;
       closeModal(); openWatch(type, id, s, e);
     } else { closeModal(); openWatch(type, id); }
   };
   const sWrap = document.getElementById("mSeasons");
   if(type==="tv"){
     sWrap.classList.remove("hidden");
-    const sSel = document.getElementById("mSeason");
-    sSel.innerHTML = (d.seasons||[]).filter(s=>s.season_number>0).map(s=>`<option value="${s.season_number}">S${s.season_number} (${s.episode_count} eps)</option>`).join("");
+    modalSeasons = (d.seasons||[]).filter(s=>s.season_number>0);
+    modalSeasonIdx = 0;
+    updateModalSeasonLabel();
     await loadModalEpisodes();
   } else sWrap.classList.add("hidden");
   document.getElementById("modal").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  // Netflix-style: land focus on the primary action so remotes work instantly
+  setTimeout(()=>{ const w = document.getElementById("mWatch"); if (w) w.focus(); }, 60);
+}
+function updateModalSeasonLabel(){
+  const s = modalSeasons[modalSeasonIdx] || { season_number: 1, episode_count: "?" };
+  document.getElementById("mSeasonLabel").textContent = `S${s.season_number} (${s.episode_count} eps)`;
+}
+function updateModalEpLabel(){
+  const e = modalEpisodes[modalEpIdx];
+  document.getElementById("mEpisodeLabel").textContent = e ? `E${e.episode_number} — ${(e.name||"").slice(0,18)}` : "E1";
 }
 async function loadModalEpisodes(){
-  const s = Number(document.getElementById("mSeason").value||1);
+  const s = (modalSeasons[modalSeasonIdx]||{}).season_number || 1;
   const d = await tmdb(`/tv/${currentDetail.id}/season/${s}`);
-  document.getElementById("mEpisode").innerHTML = (d.episodes||[]).map(e=>`<option value="${e.episode_number}">E${e.episode_number} — ${e.name}</option>`).join("");
+  modalEpisodes = d.episodes || [];
+  modalEpIdx = 0;
+  updateModalEpLabel();
 }
-function closeModal(){ document.getElementById("modal").classList.add("hidden"); }
+function modalSeasonStep(dir){
+  if (!modalSeasons.length) return;
+  modalSeasonIdx = (modalSeasonIdx + dir + modalSeasons.length) % modalSeasons.length;
+  updateModalSeasonLabel();
+  loadModalEpisodes();
+}
+function modalEpStep(dir){
+  if (!modalEpisodes.length) return;
+  modalEpIdx = (modalEpIdx + dir + modalEpisodes.length) % modalEpisodes.length;
+  updateModalEpLabel();
+}
+function closeModal(){
+  document.getElementById("modal").classList.add("hidden");
+  document.body.classList.remove("modal-open");
+  if (lastOpener && lastOpener.focus) { try { lastOpener.focus({ preventScroll: true }); } catch(e){} }
+}
 
 /* ---------- WATCH ---------- */
 async function openWatch(type, id, s=1, e=1){
@@ -509,8 +586,8 @@ async function openWatch(type, id, s=1, e=1){
   // TV episode UI
   if(type==="tv"){
     document.getElementById("epNav").classList.remove("hidden");
-    const seasons = (d.seasons||[]).filter(x=>x.season_number>0);
-    document.getElementById("seasonSel").innerHTML = seasons.map(x=>`<option value="${x.season_number}" ${x.season_number==s?"selected":""}>Season ${x.season_number}</option>`).join("");
+    watchSeasons = (d.seasons||[]).filter(x=>x.season_number>0);
+    updateSeasonLabel();
     await loadEpisodes();
   } else document.getElementById("epNav").classList.add("hidden");
   loadPlayer();
@@ -530,7 +607,19 @@ async function loadEpisodes(){
     grid.appendChild(b);
   });
 }
-function onSeasonChange(){ watchState.s = Number(document.getElementById("seasonSel").value); watchState.e = 1; loadEpisodes(); loadPlayer(); }
+let watchSeasons = [];
+function updateSeasonLabel(){
+  document.getElementById("seasonLabel").textContent = `Season ${watchState.s}`;
+}
+function watchSeasonStep(dir){
+  if (!watchSeasons.length) return;
+  const nums = watchSeasons.map(x=>x.season_number).sort((a,b)=>a-b);
+  let i = nums.indexOf(watchState.s);
+  if (i < 0) i = 0;
+  watchState.s = nums[(i + dir + nums.length) % nums.length];
+  watchState.e = 1;
+  updateSeasonLabel(); loadEpisodes(); loadPlayer(); saveContinue();
+}
 function nextEpisode(dir){
   watchState.e += dir;
   if(watchState.e < 1) watchState.e = 1;
@@ -569,6 +658,7 @@ function applyPlayerOpts(){ loadPlayer(); }
 
 function goHome(ev){
   if(ev) ev.preventDefault();
+  if (!document.getElementById("modal").classList.contains("hidden")) closeModal();
   document.getElementById("watchView").classList.add("hidden");
   document.getElementById("homeView").classList.remove("hidden");
   document.getElementById("player").src = "";
