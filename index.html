@@ -61,6 +61,13 @@
   .tv-mode { font-size: 18px; }
   .tv-mode .card { min-width: 200px !important; max-width: 200px !important; }
   .tv-mode h1 { font-size: 3rem !important; }
+  /* TV SoCs are weak: kill costly animations, focus change is instant */
+  .tv-mode *, .tv-mode *::before, .tv-mode *::after {
+    transition: none !important; animation: none !important;
+    scroll-behavior: auto !important;
+  }
+  .tv-mode .card:hover { transform: none; }
+  .tv-mode .tv-focus { transform: none; }
   @media (min-width: 1600px), (pointer: coarse) and (min-width: 1100px) {
     .card { min-width: 180px; }
   }
@@ -355,7 +362,8 @@ function cardEl(x, type){
       if (best) {
         e.preventDefault();
         best.focus({ preventScroll: false });
-        best.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+        const instant = document.body.classList.contains("tv-mode");
+        best.scrollIntoView({ block: "nearest", inline: "nearest", behavior: instant ? "auto" : "smooth" });
         document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
         best.classList.add("tv-focus");
       }
@@ -378,7 +386,10 @@ let heroIdx = 0, heroItems = [];
 function buildHero(items){
   heroItems = items;
   setHero(0);
-  setInterval(()=>{ if(!document.getElementById("homeView").classList.contains("hidden")) setHero((heroIdx+1)%heroItems.length); }, 8000);
+  setInterval(()=>{
+    if(!document.getElementById("homeView").classList.contains("hidden"))
+      setHero((heroIdx+1)%heroItems.length);
+  }, document.body.classList.contains("tv-mode") ? 15000 : 8000);
 }
 function setHero(i){
   heroIdx = i;
