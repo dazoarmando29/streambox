@@ -129,6 +129,8 @@ public class MainActivity extends Activity {
         // through its own navigation: player -> browse -> close popup -> exit.
         web.evaluateJavascript(
             "(function(){"
+            + "var ae=document.activeElement;"
+            + "if(ae&&ae.tagName==='IFRAME'){ae.blur();var b=document.getElementById('ctlPlay');if(b)b.focus();return 'refocus';}"
             + "if(document.body.classList.contains('video-fs')){document.body.classList.remove('video-fs');return 'fs';}"
             + "var p=document.getElementById('epDrawer');"
             + "if(p&&!p.classList.contains('hidden')){closePanels();return 'panel';}"

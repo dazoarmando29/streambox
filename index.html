@@ -635,10 +635,25 @@ function cardEl(x, type){
       }
       return;
     }
-    if (dir) {
-      // native fullscreen shows ONLY the video: hand keys straight to it
+    // native fullscreen: OK toggles play (no visible buttons to press)
+    if (okPressed(e)) {
       try {
-        if (document.fullscreenElement) { e.preventDefault(); focusPlayer(true); return; }
+        if (document.fullscreenElement) { e.preventDefault(); ctlToggle(); return; }
+      } catch(err){}
+    }
+    if (dir) {
+      // native fullscreen shows ONLY the video: drive it with OUR command API
+      // (never hand focus to the frame — its menu ignores TV remotes).
+      // fallback cinema keeps our bar visible, so arrows navigate it instead.
+      try {
+        if (document.fullscreenElement) {
+          e.preventDefault();
+          if (dir === "left") ctlSeekRel(-10);
+          else if (dir === "right") ctlSeekRel(30);
+          else if (dir === "up") volStep(0.1);
+          else if (dir === "down") volStep(-0.1);
+          return;
+        }
       } catch(err){}
       // Focus trap: popup wins, else fallback-fullscreen locks to our bar.
       // Range/color inputs are NEVER arrow targets: on remotes they swallow
@@ -1160,7 +1175,10 @@ function ctlFullscreen(){
     if (!still && !document.body.classList.contains("video-fs")) enterVideoFs();
   }, requested ? 700 : 0);
   nudgePlayerSize();
-  focusPlayer(true);
+  // stay on OUR bar: focusing the frame hands all keys to the player's menu,
+  // which ignores TV remotes and strands you (only Back escapes)
+  const cp = document.getElementById("ctlPlay");
+  if (cp) { try { cp.focus({ preventScroll: true }); } catch(e){} }
 }
 function enterVideoFs(){
   document.body.classList.add("video-fs");
@@ -1186,7 +1204,7 @@ function focusPlayer(fromFs){
   const f = document.getElementById("player");
   if (!fromFs) { try { f.scrollIntoView({ block: "center", behavior: "auto" }); } catch(e){} }
   try { f.focus({ preventScroll: true }); } catch(e){}
-  document.getElementById("watchStatus").textContent = "Player focused — arrows + OK drive its menu (⚙ = subtitles/quality) • Back returns";
+  document.getElementById("watchStatus").textContent = "Player focused — its menu takes all keys. TV app: Back returns here • Browser: click our bar below to return";
 }
 /* Subtitles coach tip: shows until permanently dismissed */
 function showSubTip(force){
