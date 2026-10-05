@@ -30,6 +30,7 @@
   body.modal-open { overflow: hidden; }
   body {
     background: #0b1426; color: #eee; font-family: Inter, Segoe UI, Arial, sans-serif;
+    overflow-x: hidden;
     padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
@@ -80,7 +81,7 @@
   }
   .tip-glow { outline: 3px solid #14b8a6 !important; outline-offset: 2px; }
   /* true fullscreen: fill the screen, no letterbox box, no clipped controls */
-  #playerBox:fullscreen { aspect-ratio: auto; width: 100vw; height: 100dvh; border-radius: 0; border: 0; background: #000; }
+  #playerBox:fullscreen { aspect-ratio: auto; width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; border: 0; background: #000; }
   #playerBox:fullscreen #playerSpin { border-radius: 0; }
   /* fallback fullscreen (TV WebViews ignore element fullscreen requests):
      pin video + our bar, hide the rest */
@@ -88,7 +89,7 @@
   body.video-fs nav { display: none; }
   body.video-fs #playerBox {
     position: fixed; top: 0; left: 0; right: 0; z-index: 80;
-    width: 100vw; height: calc(100dvh - 78px);
+    width: 100vw; height: calc(100vh - 78px); height: calc(100dvh - 78px);
     aspect-ratio: auto; border-radius: 0; border: 0; background: #000;
   }
   body.video-fs #ctlBar {
@@ -179,7 +180,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button onclick="ctlSeekRel(-10)" aria-label="Back 10 seconds" title="Back 10s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">−10s</button>
         <button onclick="ctlSeekRel(30)" aria-label="Forward 30 seconds" title="Forward 30s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">+30s</button>
         <span id="ctlCur" class="text-xs text-gray-300 tabular-nums ml-1">0:00</span>
-        <input id="ctlSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek" title="Left/Right to seek, OK to jump"
+        <input id="ctlSeek" type="range" min="0" max="1000" value="0" step="1" tabindex="-1" aria-label="Seek (pointer drag; remote uses −10s/+30s)" title="Drag to seek (remote: use −10s/+30s buttons)"
           class="flex-1 min-w-[120px] h-11 accent-teal-500 cursor-pointer">
         <span id="ctlDur" class="text-xs text-gray-500 tabular-nums">0:00</span>
         <button id="ctlMute" onclick="ctlMuteToggle()" aria-label="Mute or unmute" title="Mute" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🔊</button>
@@ -374,6 +375,19 @@ function topPopup(){
   const ps = [...document.querySelectorAll("#tvGuide,#modal")].filter(p => !p.classList.contains("hidden"));
   return ps.length ? ps[ps.length - 1] : null;
 }
+function dirOf(e){
+  // TV remotes/WebViews often send keyCodes (or legacy names) instead of "ArrowX"
+  const k = e.key || "";
+  if (k === "ArrowLeft" || k === "Left" || e.keyCode === 37) return "left";
+  if (k === "ArrowRight" || k === "Right" || e.keyCode === 39) return "right";
+  if (k === "ArrowUp" || k === "Up" || e.keyCode === 38) return "up";
+  if (k === "ArrowDown" || k === "Down" || e.keyCode === 40) return "down";
+  return null;
+}
+function okPressed(e){
+  const k = e.key || "";
+  return k === "Enter" || k === " " || e.keyCode === 13 || e.keyCode === 32;
+}
 let detailReq = 0;      // stale-response guard for slow TMDB calls
 let lastActivate = 0;   // double OK-press guard (remotes send repeats)
 function activatable(fn){
@@ -496,7 +510,7 @@ function cardEl(x, type){
   d.onclick = activatable(() => openDetail(type, x.id));
   d.onmouseenter = preconnectCinesrc;
   d.onfocus = preconnectCinesrc;
-  d.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); activatable(() => openDetail(type, x.id))(); } };
+  d.onkeydown = (ev) => { if (okPressed(ev)) { ev.preventDefault(); activatable(() => openDetail(type, x.id))(); } };
   return d;
 }
 
@@ -529,32 +543,40 @@ function cardEl(x, type){
   }
   // D-pad / arrow-key spatial navigation (Android TV remotes, keyboards)
   document.addEventListener("keydown", (e) => {
+    const dir = dirOf(e);
     const tag = (document.activeElement && document.activeElement.tagName) || "";
     if (/INPUT|SELECT|TEXTAREA/.test(tag)) {
-      if (e.key === "Escape") { document.activeElement.blur(); return; }
+      if (e.key === "Escape" || e.keyCode === 27) { document.activeElement.blur(); return; }
       // TV: arrows leave the search box into results instead of being trapped
-      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && document.activeElement.id === "search") {
+      if ((dir === "down" || dir === "up") && document.activeElement.id === "search") {
         const first = document.querySelector("#grid .card, #rows .card");
         if (first) { e.preventDefault(); first.focus(); }
       }
       return;
     }
-    if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
+    if (dir) {
       // native fullscreen shows ONLY the video: hand keys straight to it
       try {
         if (document.fullscreenElement) { e.preventDefault(); focusPlayer(true); return; }
       } catch(err){}
-      // Focus trap: popup wins, else fallback-fullscreen locks to our bar
+      // Focus trap: popup wins, else fallback-fullscreen locks to our bar.
+      // Range/color inputs are NEVER arrow targets: on remotes they swallow
+      // Left/Right (scrubbing forever) and can strand focus with no way out.
       const top = topPopup();
       const bar = document.body.classList.contains("video-fs") ? document.getElementById("ctlBar") : null;
       const scope = top || bar || document;
       const items = [...scope.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
-        .filter(el => el.offsetParent !== null && !el.disabled);
+        .filter(el => el.offsetParent !== null && !el.disabled
+          && !(el.tagName === "INPUT" && (el.type === "range" || el.type === "color")));
       if (!items.length) return;
       const cur = document.activeElement;
-      if (!cur || !items.includes(cur)) { items[0].focus(); e.preventDefault(); return; }
-      const r1 = cur.getBoundingClientRect();
-      const cx = r1.left + r1.width / 2, cy = r1.top + r1.height / 2;
+      let cx, cy;
+      if (cur && cur.getBoundingClientRect) {
+        // origin = wherever focus actually is, even if that element isn't
+        // itself navigable (tapped slider, focused player, etc.)
+        const r1 = cur.getBoundingClientRect();
+        cx = r1.left + r1.width / 2; cy = r1.top + r1.height / 2;
+      } else { items[0].focus(); e.preventDefault(); return; }
       let best = null, bestScore = Infinity;
       for (const el of items) {
         if (el === cur) continue;
@@ -562,10 +584,10 @@ function cardEl(x, type){
         const ex = r.left + r.width / 2, ey = r.top + r.height / 2;
         const dx = ex - cx, dy = ey - cy;
         let ok = false, primary = 0, secondary = 0;
-        if (e.key === "ArrowRight" && dx > 10) { ok = true; primary = dx; secondary = Math.abs(dy); }
-        if (e.key === "ArrowLeft" && dx < -10) { ok = true; primary = -dx; secondary = Math.abs(dy); }
-        if (e.key === "ArrowDown" && dy > 10) { ok = true; primary = dy; secondary = Math.abs(dx); }
-        if (e.key === "ArrowUp" && dy < -10) { ok = true; primary = -dy; secondary = Math.abs(dx); }
+        if (dir === "right" && dx > 10) { ok = true; primary = dx; secondary = Math.abs(dy); }
+        if (dir === "left" && dx < -10) { ok = true; primary = -dx; secondary = Math.abs(dy); }
+        if (dir === "down" && dy > 10) { ok = true; primary = dy; secondary = Math.abs(dx); }
+        if (dir === "up" && dy < -10) { ok = true; primary = -dy; secondary = Math.abs(dx); }
         if (!ok) continue;
         const score = primary + secondary * 2.5;
         if (score < bestScore) { bestScore = score; best = el; }
@@ -584,15 +606,15 @@ function cardEl(x, type){
         }
         document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
         best.classList.add("tv-focus");
-      } else if (top && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      } else if (top && (dir === "down" || dir === "up")) {
         // bottom/top of popup reached: scroll its content instead of doing nothing
         e.preventDefault();
         const panel = top.querySelector(":scope > div");
-        if (panel) panel.scrollBy({ top: e.key === "ArrowDown" ? 240 : -240, behavior: "auto" });
+        if (panel) panel.scrollBy({ top: dir === "down" ? 240 : -240, behavior: "auto" });
       }
     }
     // TV Back / Esc: popups, then fullscreen(s), then go home
-    if (e.key === "Escape" || e.key === "Backspace" || e.keyCode === 461 || e.keyCode === 10009) {
+    if (e.key === "Escape" || e.keyCode === 27 || e.key === "Backspace" || e.keyCode === 461 || e.keyCode === 10009) {
       const top = topPopup();
       if (top) {
         if (top.id === "tvGuide") closeTvGuide(); else closeModal();
@@ -954,7 +976,7 @@ function renderContinue(){
       d.setAttribute("aria-label", `${x.title||""} (${x.type})`);
       d.innerHTML = `<img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" class="rounded-lg w-full aspect-[2/3] object-cover"><p class="text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p><button class="absolute top-1 right-1 bg-black/70 w-6 h-6 rounded-full text-xs" aria-label="Remove">✕</button>`;
       d.onclick = activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1));
-      d.onkeydown = (ev)=>{ if(ev.key==="Enter"||ev.key===" "){ ev.preventDefault(); activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1))(); } };
+      d.onkeydown = (ev)=>{ if(okPressed(ev)){ ev.preventDefault(); activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1))(); } };
       d.querySelector("button").onclick = (ev)=>{ ev.stopPropagation(); removeContinue(x.type,x.id); };
       grid.appendChild(d);
     });
