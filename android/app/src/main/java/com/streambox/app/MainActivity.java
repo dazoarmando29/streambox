@@ -114,11 +114,24 @@ public class MainActivity extends Activity {
             web.getWebChromeClient().onHideCustomView();
             return;
         }
-        if (web != null && web.canGoBack()) {
-            web.goBack();
-            return;
-        }
-        super.onBackPressed();
+        if (web == null) { super.onBackPressed(); return; }
+        // The site is a single-page app (no history entries), so route Back
+        // through its own navigation: player -> browse -> close popup -> exit.
+        web.evaluateJavascript(
+            "(function(){"
+            + "var g=document.getElementById('tvGuide');"
+            + "if(g&&!g.classList.contains('hidden')){closeTvGuide();return 'guide';}"
+            + "var m=document.getElementById('modal');"
+            + "if(m&&!m.classList.contains('hidden')){closeModal();return 'modal';}"
+            + "var w=document.getElementById('watchView');"
+            + "if(w&&!w.classList.contains('hidden')){goHome();return 'home';}"
+            + "return 'exit';})();",
+            value -> {
+                String v = value == null ? "" : value.replace("\"", "");
+                if ("exit".equals(v)) {
+                    MainActivity.super.onBackPressed();
+                }
+            });
     }
 
     @Override
