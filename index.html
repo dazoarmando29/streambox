@@ -72,6 +72,13 @@
   .tv-mode .card { transition: transform .12s ease-out !important; }
   .tv-mode .card.tv-focus { transform: scale(1.1); }
   #modal .tv-focus { outline-width: 4px; }
+  /* subtitles coach-tip arrow + highlight on the 🎯 button */
+  .tip-arrow {
+    position: absolute; bottom: -8px; right: 110px; width: 16px; height: 16px;
+    background: #1c1c28; border-right: 1px solid rgba(229,9,20,.4); border-bottom: 1px solid rgba(229,9,20,.4);
+    transform: rotate(45deg);
+  }
+  .tip-glow { outline: 3px solid #e50914 !important; outline-offset: 2px; }
   @media (min-width: 1600px), (pointer: coarse) and (min-width: 1100px) {
     .card { min-width: 180px; }
   }
@@ -161,9 +168,24 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button id="ctlMute" onclick="ctlMuteToggle()" aria-label="Mute or unmute" title="Mute" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🔊</button>
         <button id="ctlRate" onclick="ctlRateCycle()" aria-label="Playback speed" title="Speed" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">1×</button>
         <button onclick="ctlFullscreen()" aria-label="Fullscreen" title="Fullscreen" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⛶</button>
-        <button onclick="focusPlayer()" aria-label="Control player menu" title="Focus the player itself: arrows + OK work its menu (subtitles ⚙, quality). Press Back afterwards." class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">🎯 Player</button>
+        <button onclick="focusPlayer()" id="focusPlayerBtn" aria-label="Control player menu" title="Focus the player itself: arrows + OK work its menu (subtitles ⚙, quality). Press Back afterwards." class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">🎯 Player</button>
       </div>
-      <p class="text-[11px] text-gray-600 mt-2">Remote tips: <b>OK</b> = play/pause • <b>◀ ▶ on the bar</b> = seek • <b>🎯 Player</b> focuses the video itself so you can open its ⚙ menu for <b>subtitles & quality</b>, then Back returns here.</p>
+      <!-- One-time subtitles coach tip (arrow points at 🎯 Player) -->
+      <div id="subTip" class="hidden relative mt-3 bg-[#1c1c28] border border-red-600/40 rounded-xl p-4 pr-12 text-sm">
+        <button onclick="hideSubTip(false)" aria-label="Dismiss tip" class="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/80">✕</button>
+        <p class="font-bold">💬 Want subtitles?</p>
+        <ol class="text-gray-300 mt-1 space-y-1 list-decimal ml-5 text-[13px]">
+          <li>Press <b>🎯 Player</b> below — your remote now drives the video itself.</li>
+          <li>Move to the <b>CC icon</b> to toggle subs, or open <b>⚙ → Subtitles</b> to pick a language.</li>
+          <li>Press <b>Back</b> to return to these controls.</li>
+        </ol>
+        <div class="flex flex-wrap gap-2 mt-3">
+          <button onclick="hideSubTip(true)" class="bg-red-600 hover:bg-red-500 font-bold px-4 py-2 rounded-full text-[13px]">Got it — don't show again</button>
+          <button onclick="hideSubTip(false)" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full text-[13px]">Later</button>
+        </div>
+        <div class="tip-arrow"></div>
+      </div>
+      <p class="text-[11px] text-gray-600 mt-2">Remote tips: <b>OK</b> = play/pause • <b>◀ ▶ on the bar</b> = seek • <b>🎯 Player</b> focuses the video itself so you can open its ⚙ menu for <b>subtitles & quality</b>, then Back returns here. <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
       <!-- player options -->
       <div class="flex flex-wrap items-center gap-3 mt-3 text-xs text-gray-300">
         <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="accent-red-600" onchange="toggleShield()"> Ad Shield</label>
@@ -750,6 +772,9 @@ async function openWatch(type, id, s=1, e=1){
   } else document.getElementById("epNav").classList.add("hidden");
   loadPlayer();
   saveContinue();
+  // subtitles coach tip (once — never again after "don't show again")
+  clearTimeout(window._tipT);
+  window._tipT = setTimeout(() => showSubTip(false), 2500);
 }
 async function loadEpisodes(){
   const { id, s, e } = watchState;
@@ -819,6 +844,8 @@ function applyPlayerOpts(){ loadPlayer(); }
 function goHome(ev){
   if(ev) ev.preventDefault();
   ctlPollStop();
+  clearTimeout(window._tipT);
+  hideSubTip(false);
   if (!document.getElementById("tvGuide").classList.contains("hidden")) closeTvGuide();
   if (!document.getElementById("modal").classList.contains("hidden")) closeModal();
   document.getElementById("watchView").classList.add("hidden");
@@ -946,6 +973,23 @@ function focusPlayer(){
   try { f.scrollIntoView({ block: "center", behavior: "auto" }); } catch(e){}
   try { f.focus({ preventScroll: true }); } catch(e){}
   document.getElementById("watchStatus").textContent = "Player focused — arrows + OK drive its menu (⚙ = subtitles/quality) • Back returns";
+}
+/* Subtitles coach tip: shows until permanently dismissed */
+function showSubTip(force){
+  try {
+    if (!force && localStorage.getItem("streambox_subtip_off") === "1") return;
+  } catch(e){}
+  const t = document.getElementById("subTip");
+  if (!t) return;
+  t.classList.remove("hidden");
+  const b = document.getElementById("focusPlayerBtn");
+  if (b) b.classList.add("tip-glow");
+}
+function hideSubTip(forever){
+  document.getElementById("subTip").classList.add("hidden");
+  const b = document.getElementById("focusPlayerBtn");
+  if (b) b.classList.remove("tip-glow");
+  if (forever) { try { localStorage.setItem("streambox_subtip_off", "1"); } catch(e){} }
 }
 function ctlPollStart(){
   ctlPollStop();
