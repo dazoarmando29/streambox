@@ -193,7 +193,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <label class="flex items-center gap-1"><input type="checkbox" id="optAutonext" checked class="accent-red-600"> Auto-next</label>
         <label class="flex items-center gap-1"><input type="checkbox" id="optAutoskip" class="accent-red-600"> Auto-skip intro</label>
         <label class="flex items-center gap-1">Accent <input type="color" id="optColor" value="#e50914" class="w-8 h-6 bg-transparent"></label>
-        <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5" title="Preferred video quality (reloads player)">
+        <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5" title="Preferred video quality — 4K only plays if the source carries it, otherwise best available">
           <button onclick="qualityStep(-1)" aria-label="Lower quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
           <span id="qualityLabel" class="text-xs font-bold min-w-[52px] text-center">Auto</span>
           <button onclick="qualityStep(1)" aria-label="Higher quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
@@ -816,7 +816,7 @@ function nextEpisode(dir){
 }
 
 /* Embed URL per https://cinesrc.st/docs */
-const QLEVELS = [{ v: "", l: "Auto" }, { v: "1080", l: "1080p" }, { v: "720", l: "720p" }, { v: "480", l: "480p" }];
+const QLEVELS = [{ v: "", l: "Auto" }, { v: "2160", l: "4K" }, { v: "1080", l: "1080p" }, { v: "720", l: "720p" }, { v: "480", l: "480p" }];
 let qIdx = 0;
 try {
   const savedQ = localStorage.getItem("streambox_quality") || "";
