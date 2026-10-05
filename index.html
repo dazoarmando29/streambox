@@ -177,10 +177,17 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
           allowfullscreen allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
           referrerpolicy="strict-origin-when-cross-origin" loading="eager"
           sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"></iframe>
-        <!-- fullscreen HUD: time remaining, auto-hides with the bar when idle -->
+        <!-- fullscreen HUD: time remaining + quick buttons, auto-hides when idle -->
         <div id="fsHud" class="hud-hidden absolute left-0 right-0 bottom-0 z-10 px-4 py-2.5 bg-gradient-to-t from-black/85 to-transparent pointer-events-none">
           <p id="fsHudTitle" class="text-sm font-bold truncate"></p>
-          <p class="text-xs text-gray-300 tabular-nums"><span id="fsHudState">▶</span> <span id="fsHudTime">0:00 / 0:00</span> • <span id="fsHudRemain"></span> • <span id="fsHudPct"></span></p>
+          <p class="text-xs text-gray-300 tabular-nums"><span id="fsHudState">▶</span> <span id="fsHudTime">0:00 / 0:00</span> • <span id="fsHudRemain"></span> • <span id="fsHudPct"></span> • <span id="fsHudQ"></span></p>
+          <div class="pointer-events-auto flex gap-2 mt-1.5">
+            <button id="fsHudPlay" onclick="ctlToggle()" aria-label="Play or pause" class="h-10 px-4 rounded-full bg-white/15 hover:bg-white/25 text-sm font-bold">⏯</button>
+            <button onclick="ctlSeekRel(-10)" aria-label="Back 10 seconds" class="h-10 px-3 rounded-full bg-white/15 hover:bg-white/25 text-sm font-bold">−10s</button>
+            <button onclick="ctlSeekRel(30)" aria-label="Forward 30 seconds" class="h-10 px-3 rounded-full bg-white/15 hover:bg-white/25 text-sm font-bold">+30s</button>
+            <button onclick="fsSettings()" aria-label="Settings" title="Settings" class="h-10 w-10 rounded-full bg-white/15 hover:bg-white/25 text-base">⚙</button>
+            <button onclick="ctlFullscreen()" aria-label="Exit fullscreen" title="Exit fullscreen" class="h-10 w-10 rounded-full bg-white/15 hover:bg-white/25 text-base">⛶</button>
+          </div>
         </div>
       </div>
       <!-- Netflix-style remote control bar (drives the player via its command API) -->
@@ -391,7 +398,14 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       <div class="bg-white/5 border border-white/10 rounded-xl p-4 text-sm space-y-1.5">
         <p>Current: <b id="srvCur">auto</b></p>
         <p>Preferred: <b id="srvPin">none</b></p>
-        <p>Quality: <b id="srvQ">Auto</b></p>
+        <div class="flex items-center gap-2">
+          <span>Quality:</span>
+          <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
+            <button onclick="qualityStep(-1)" aria-label="Lower quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
+            <span id="srvQLabel" class="text-xs font-bold min-w-[52px] text-center">Auto</span>
+            <button onclick="qualityStep(1)" aria-label="Higher quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
+          </div>
+        </div>
       </div>
       <div class="flex flex-col gap-2 mt-4">
         <button onclick="otherSource()" class="py-2.5 rounded-full bg-teal-500 hover:bg-teal-400 font-bold text-sm">⇄ Try another source</button>
@@ -644,30 +658,42 @@ function cardEl(x, type){
       }
       return;
     }
-    // native fullscreen: OK toggles play (no visible buttons to press)
+    // native fullscreen: OK toggles play AND lands focus on the on-screen
+    // buttons, so follow-up arrows walk the HUD instead of firing blind commands
     if (okPressed(e)) {
       pokeHud();
       try {
-        if (document.fullscreenElement) { e.preventDefault(); ctlToggle(); return; }
+        if (document.fullscreenElement) {
+          e.preventDefault(); ctlToggle();
+          safeFocus(document.getElementById("fsHudPlay"));
+          return;
+        }
       } catch(err){}
     }
     if (dir) {
       pokeHud(); // every keypress restarts the 4s idle clock
-      // native fullscreen shows ONLY the video: drive it with OUR command API
-      // native fullscreen shows ONLY the video: drive it with OUR command API
+      // native fullscreen: if focus is already on the on-screen HUD buttons,
+      // navigate them; otherwise arrows are quick commands (seek/volume).
       // (never hand focus to the frame — its menu ignores TV remotes).
       // fallback cinema keeps our bar visible, so arrows navigate it instead.
+      let fsBox = null;
       try {
         if (document.fullscreenElement) {
-          e.preventDefault();
-          pokeHud(); // flash time-remaining on every fullscreen keypress
-          if (dir === "left") ctlSeekRel(-10);
-          else if (dir === "right") ctlSeekRel(30);
-          else if (dir === "up") volStep(0.1);
-          else if (dir === "down") volStep(-0.1);
-          return;
+          const f = document.activeElement;
+          const box = document.getElementById("playerBox");
+          if (f && f !== document.getElementById("player") && box.contains(f)) fsBox = box;
+          else {
+            e.preventDefault();
+            if (dir === "left") ctlSeekRel(-10);
+            else if (dir === "right") ctlSeekRel(30);
+            else if (dir === "up") volStep(0.1);
+            else if (dir === "down") volStep(-0.1);
+            return;
+          }
         }
       } catch(err){}
+      // Focus trap: popup wins, else fallback-fullscreen locks to our bar,
+      // else native-fullscreen HUD, else the whole page.
       // Focus trap: popup wins, else fallback-fullscreen locks to our bar.
       // Range/color inputs are NEVER arrow targets: on remotes they swallow
       // Left/Right (scrubbing forever) and can strand focus with no way out.
@@ -677,7 +703,7 @@ function cardEl(x, type){
         // first press after idle just wakes the UI (Netflix-style)
         e.preventDefault(); pokeHud(); safeFocus(document.getElementById("ctlPlay")); return;
       }
-      const scope = top || bar || document;
+      const scope = top || bar || fsBox || document;
       const items = [...scope.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
         .filter(el => el.offsetParent !== null && !el.disabled
           && !(el.tagName === "INPUT" && (el.type === "range" || el.type === "color")));
@@ -1007,9 +1033,20 @@ try {
   const qi = QLEVELS.findIndex(x => x.v === savedQ);
   if (qi >= 0) qIdx = qi;
 } catch(e){}
+function fsSettings(){
+  // HUD shortcut: leave fullscreen (panels render outside the frame), then open settings
+  try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+  if (document.body.classList.contains("video-fs")) exitVideoFs();
+  setTimeout(openSettings, 60);
+}
 function paintQuality(){
-  const el = document.getElementById("qualityLabel");
-  if (el) el.textContent = QLEVELS[qIdx].l;
+  const t = QLEVELS[qIdx].l;
+  ["qualityLabel", "srvQLabel"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = t;
+  });
+  const s = document.getElementById("srvQ");
+  if (s) s.textContent = t;
 }
 function qualityStep(dir){
   qIdx = (qIdx + dir + QLEVELS.length) % QLEVELS.length;
@@ -1147,6 +1184,7 @@ function paintHud(){
     const rem = Math.max(0, (pState.dur || 0) - (pState.cur || 0));
     document.getElementById("fsHudRemain").textContent = pState.dur > 0 ? "ends in " + fmtT(rem) : "";
     document.getElementById("fsHudPct").textContent = pState.dur > 0 ? Math.round(pState.cur / pState.dur * 100) + "%" : "";
+    document.getElementById("fsHudQ").textContent = QLEVELS[qIdx].l;
   } catch(e){}
 }
 function pokeHud(){
@@ -1160,6 +1198,12 @@ function pokeHud(){
   window._idleT = setTimeout(() => {
     document.getElementById("fsHud").classList.add("hud-hidden");
     document.getElementById("ctlBar").classList.add("bar-hidden");
+    // drop focus off the now-invisible buttons so the next press wakes UI
+    // instead of walking unseen controls
+    try {
+      const a = document.activeElement, hud = document.getElementById("fsHud");
+      if (hud && hud.contains(a)) a.blur();
+    } catch(e){}
   }, 4000);
 }
 
@@ -1312,6 +1356,9 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
 /* ---------- Settings panel + Episodes drawer ---------- */
 let panelOpener = null;
 function openSettings(){
+  // panels live outside the fullscreen frame: step out first so they're visible
+  try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+  if (document.body.classList.contains("video-fs")) exitVideoFs();
   panelOpener = document.activeElement;
   paintSettings();
   setTab("playback");
@@ -1321,6 +1368,8 @@ function openSettings(){
 }
 async function openEpisodes(){
   if (watchState.type !== "tv") return;
+  try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+  if (document.body.classList.contains("video-fs")) exitVideoFs();
   panelOpener = document.activeElement;
   document.getElementById("epDrawer").classList.remove("hidden");
   document.body.classList.add("modal-open");
@@ -1437,7 +1486,7 @@ function paintSettings(){
     document.getElementById("srvCur").textContent = pState.server || "auto";
     document.getElementById("srvPin").textContent = localStorage.getItem("streambox_lastserver") || "none";
   } catch(e){}
-  document.getElementById("srvQ").textContent = QLEVELS[qIdx].l;
+  paintQuality();
 }
 function forgetServer(){
   try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
