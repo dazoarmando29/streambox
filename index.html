@@ -193,6 +193,11 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <label class="flex items-center gap-1"><input type="checkbox" id="optAutonext" checked class="accent-red-600"> Auto-next</label>
         <label class="flex items-center gap-1"><input type="checkbox" id="optAutoskip" class="accent-red-600"> Auto-skip intro</label>
         <label class="flex items-center gap-1">Accent <input type="color" id="optColor" value="#e50914" class="w-8 h-6 bg-transparent"></label>
+        <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5" title="Preferred video quality (reloads player)">
+          <button onclick="qualityStep(-1)" aria-label="Lower quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
+          <span id="qualityLabel" class="text-xs font-bold min-w-[52px] text-center">Auto</span>
+          <button onclick="qualityStep(1)" aria-label="Higher quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
+        </div>
         <button onclick="applyPlayerOpts()" class="ml-2 bg-red-600 px-3 py-1.5 rounded-full font-semibold hover:bg-red-500">Apply</button>
         <button onclick="reloadPlayer()" class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">↻ Reload</button>
         <span id="watchStatus" class="ml-auto text-gray-500"></span>
@@ -748,6 +753,7 @@ async function openWatch(type, id, s=1, e=1){
   window.scrollTo(0,0);
   // remote lands on Back immediately so TV users are never stranded
   if (document.body.classList.contains("tv-mode")) setTimeout(()=>safeFocus(document.getElementById("backBtn")), 80);
+  paintQuality();
   let d;
   try {
     d = await tmdb(`/${type}/${id}?append_to_response=credits`);
@@ -810,9 +816,34 @@ function nextEpisode(dir){
 }
 
 /* Embed URL per https://cinesrc.st/docs */
+const QLEVELS = [{ v: "", l: "Auto" }, { v: "1080", l: "1080p" }, { v: "720", l: "720p" }, { v: "480", l: "480p" }];
+let qIdx = 0;
+try {
+  const savedQ = localStorage.getItem("streambox_quality") || "";
+  const qi = QLEVELS.findIndex(x => x.v === savedQ);
+  if (qi >= 0) qIdx = qi;
+} catch(e){}
+function paintQuality(){
+  const el = document.getElementById("qualityLabel");
+  if (el) el.textContent = QLEVELS[qIdx].l;
+}
+function qualityStep(dir){
+  qIdx = (qIdx + dir + QLEVELS.length) % QLEVELS.length;
+  paintQuality();
+  try { localStorage.setItem("streambox_quality", QLEVELS[qIdx].v); } catch(e){}
+  // debounce remote repeats: reload once the user settles
+  clearTimeout(window._qT);
+  window._qT = setTimeout(loadPlayer, 500);
+}
 function buildEmbedUrlClean(){
   const color = encodeURIComponent(document.getElementById("optColor").value||"#e50914");
-  const p = `autoplay=${document.getElementById("optAutoplay").checked}&autonext=${document.getElementById("optAutonext").checked}&autoskip=${document.getElementById("optAutoskip").checked}&color=${color}`;
+  let p = `autoplay=${document.getElementById("optAutoplay").checked}&autonext=${document.getElementById("optAutonext").checked}&autoskip=${document.getElementById("optAutoskip").checked}&color=${color}`;
+  if (QLEVELS[qIdx].v) p += `&quality=${QLEVELS[qIdx].v}`;
+  // remember the last working server so repeat watches start faster
+  try {
+    const ls = localStorage.getItem("streambox_lastserver");
+    if (ls) p += `&prioritize=true&lastserver=${encodeURIComponent(ls)}`;
+  } catch(e){}
   if(watchState.type==="movie") return `https://cinesrc.st/embed/movie/${watchState.id}?${p}`;
   return `https://cinesrc.st/embed/tv/${watchState.id}?s=${watchState.s}&e=${watchState.e}&${p}`;
 }
@@ -1047,8 +1078,17 @@ window.addEventListener("message", (event)=>{
     // player advanced internally — sync our UI, do NOT reload iframe
     if(data.season) watchState.s = data.season;
     if(data.episode) watchState.e = data.episode;
+    if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
     loadEpisodes(); saveContinue();
     document.getElementById("watchStatus").textContent = `Now playing S${watchState.s} E${watchState.e}`;
+  }
+  if(type === "cinesrc:skipintro" && typeof data.time === "number"){
+    pState.cur = data.time; ctlPaint();
+    document.getElementById("watchStatus").textContent = "Intro skipped ✓";
+  }
+  if(type === "cinesrc:sourceused" && data.sourceId){
+    // remember working server for faster repeat loads (used as lastserver)
+    try { localStorage.setItem("streambox_lastserver", String(data.sourceId)); } catch(e){}
   }
   if(type === "cinesrc:error"){
     document.getElementById("watchStatus").textContent = "Stream error — try again or pick another episode.";
