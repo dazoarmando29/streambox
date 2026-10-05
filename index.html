@@ -70,8 +70,8 @@
   }
   .tv-mode .card:hover { transform: none; }
   /* ...except one cheap(UI-thread-free) highlight so browsing feels alive */
-  .tv-mode .card { transition: transform .12s ease-out !important; }
-  .tv-mode .card.tv-focus { transform: scale(1.1); }
+  .tv-mode .card { transition: none !important; transform: none !important; }
+  .tv-mode .card.tv-focus { transform: none; outline: 3px solid #14b8a6; outline-offset: 2px; }
   #modal .tv-focus { outline-width: 4px; }
   /* subtitles coach-tip arrow + highlight on the 🎯 button */
   .tip-arrow {
@@ -237,7 +237,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     </div>
     <div class="bg-white/5 border border-white/10 rounded-xl p-5 h-fit">
       <div class="flex gap-4">
-        <img id="wPoster" class="w-24 rounded-lg" src="">
+        <img id="wPoster" class="w-24 rounded-lg" src="" onerror="this.style.display='none'">
         <div>
           <h1 id="wTitle" class="text-xl font-bold"></h1>
           <p id="wMeta" class="text-sm text-gray-400 mt-1"></p>
@@ -254,7 +254,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 <div id="modal" class="hidden fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
   <div class="bg-[#131e35] max-w-2xl w-full rounded-2xl overflow-hidden border border-white/10 max-h-[90vh] overflow-y-auto">
     <div class="relative h-64 md:h-80">
-      <img id="mBackdrop" class="w-full h-full object-cover" src="">
+      <img id="mBackdrop" class="w-full h-full object-cover" src="" onerror="this.style.display='none'">
       <div class="absolute inset-0 bg-gradient-to-t from-[#131e35] to-transparent"></div>
       <button onclick="closeModal()" class="absolute top-3 right-3 bg-black/60 w-9 h-9 rounded-full">✕</button>
     </div>
@@ -647,8 +647,10 @@ function setHero(i){
   heroIdx = i;
   const x = heroItems[i]; if(!x) return;
   const type = x.media_type === "tv" ? "tv" : "movie";
+  // backdrop may be missing/broken on some items: fall back to poster, else hide art (text stays)
+  const bg = x.backdrop_path ? IMG(x.backdrop_path,"w1280") : (x.poster_path ? IMG(x.poster_path,"w780") : "");
   document.getElementById("hero").innerHTML = `
-    <img src="${IMG(x.backdrop_path,"w1280")}" fetchpriority="high" decoding="async" class="absolute inset-0 w-full h-full object-cover">
+    ${bg ? `<img src="${bg}" fetchpriority="high" decoding="async" onerror="this.style.display='none'" class="absolute inset-0 w-full h-full object-cover">` : ""}
     <div class="absolute inset-0 hero-gradient"></div>
     <div class="relative px-4 md:px-10 pb-16 max-w-2xl">
       <span class="text-xs bg-teal-500 px-3 py-1 rounded-full font-bold">#${i+1} TRENDING • ${type.toUpperCase()}</span>
