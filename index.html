@@ -186,6 +186,8 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button id="ctlMute" onclick="ctlMuteToggle()" aria-label="Mute or unmute" title="Mute" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🔊</button>
         <button id="ctlRate" onclick="ctlRateCycle()" aria-label="Playback speed" title="Speed" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">1×</button>
         <button onclick="ctlFullscreen()" aria-label="Fullscreen" title="Fullscreen" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⛶</button>
+        <button onclick="openSettings()" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⚙</button>
+        <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">☰ Episodes</button>
         <button onclick="focusPlayer()" id="focusPlayerBtn" aria-label="Control player menu" title="Focus the player itself: arrows + OK work its menu (subtitles ⚙, quality). Press Back afterwards." class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">🎯 Player</button>
       </div>
       <!-- One-time subtitles coach tip (arrow points at 🎯 Player) -->
@@ -335,6 +337,85 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
   </div>
 </div>
 
+<!-- SETTINGS PANEL -->
+<div id="setPanel" class="hidden fixed inset-0 z-[66] bg-black/70" onclick="if(event.target===this)closePanels()">
+  <div class="absolute right-0 top-0 h-full w-full max-w-md bg-[#131e35] border-l border-white/10 overflow-y-auto p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-xl font-black">⚙ Settings</h2>
+      <button onclick="closePanels()" aria-label="Close settings" class="w-9 h-9 rounded-full bg-black/50 hover:bg-black/80">✕</button>
+    </div>
+    <div class="flex gap-2 mb-5 text-sm" role="tablist">
+      <button id="tabPlayback" onclick="setTab('playback')" class="flex-1 py-2 rounded-full font-bold">Playback</button>
+      <button id="tabSubs" onclick="setTab('subs')" class="flex-1 py-2 rounded-full">Subs</button>
+      <button id="tabServers" onclick="setTab('servers')" class="flex-1 py-2 rounded-full">Servers</button>
+    </div>
+
+    <div id="panePlayback">
+      <p class="text-xs text-gray-400 font-bold mb-2">SPEED</p>
+      <div id="speedRow" class="flex flex-wrap gap-2 mb-5"></div>
+      <p class="text-xs text-gray-400 font-bold mb-2">VOLUME <span id="volLabel" class="text-gray-200 ml-1">100%</span></p>
+      <div class="flex items-center gap-2 mb-5">
+        <button onclick="volStep(-0.1)" aria-label="Volume down" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-xl">−</button>
+        <button onclick="volStep(0.1)" aria-label="Volume up" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-xl">+</button>
+        <button onclick="ctlMuteToggle()" class="h-11 px-4 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">🔊 Mute</button>
+      </div>
+      <p class="text-xs text-gray-400 font-bold mb-2">SLEEP TIMER <span id="sleepLabel" class="text-gray-200 ml-1">Off</span></p>
+      <div id="sleepRow" class="flex flex-wrap gap-2 mb-3"></div>
+      <button id="sleepEndBtn" onclick="sleepEndToggle()" class="w-full py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm mb-1">😴 Sleep when video ends: Off</button>
+      <p class="text-[11px] text-gray-500">Timer pauses playback after the set time. TV-safe: survives channel surfing within this page.</p>
+    </div>
+
+    <div id="paneSubs" class="hidden">
+      <p class="text-xs text-gray-400 font-bold mb-2">SUBTITLES</p>
+      <p class="text-sm text-gray-300 leading-relaxed">Subtitle tracks live inside the video player's own menu — outside apps can't switch them.</p>
+      <ol class="text-sm text-gray-300 mt-2 space-y-1 list-decimal ml-5">
+        <li>Press the button below (same as 🎯 Player).</li>
+        <li>Move to the <b>CC icon</b> or open <b>⚙ → Subtitles</b>.</li>
+        <li>Pick a language, then <b>Back</b> returns here.</li>
+      </ol>
+      <button onclick="closePanels();focusPlayer(true)" class="mt-4 w-full py-2.5 rounded-full bg-teal-500 hover:bg-teal-400 font-bold text-sm">Open player menu</button>
+      <p class="text-[11px] text-gray-500 mt-2">No languages listed? That server carries no subs — try ⇄ Source on the watch screen.</p>
+    </div>
+
+    <div id="paneServers" class="hidden">
+      <p class="text-xs text-gray-400 font-bold mb-2">STREAM SERVER</p>
+      <div class="bg-white/5 border border-white/10 rounded-xl p-4 text-sm space-y-1.5">
+        <p>Current: <b id="srvCur">auto</b></p>
+        <p>Preferred: <b id="srvPin">none</b></p>
+        <p>Quality: <b id="srvQ">Auto</b></p>
+      </div>
+      <div class="flex flex-col gap-2 mt-4">
+        <button onclick="otherSource()" class="py-2.5 rounded-full bg-teal-500 hover:bg-teal-400 font-bold text-sm">⇄ Try another source</button>
+        <button onclick="forgetServer()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Forget preferred server (Auto)</button>
+        <button onclick="reloadPlayer()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">↻ Reload player</button>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-3">The server list lives inside the player — StreamBox only remembers your last working one to start faster.</p>
+    </div>
+  </div>
+</div>
+
+<!-- EPISODES DRAWER -->
+<div id="epDrawer" class="hidden fixed inset-0 z-[67] bg-black/70" onclick="if(event.target===this)closePanels()">
+  <div class="absolute right-0 top-0 h-full w-full max-w-md bg-[#131e35] border-l border-white/10 overflow-y-auto p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-xl font-black">Episodes</h2>
+      <div class="flex gap-2">
+        <button id="spoilerBtn" onclick="spoilerToggle()" title="Hide episode details to avoid spoilers" class="h-9 px-3 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🙈 Spoilers: Off</button>
+        <button onclick="closePanels()" aria-label="Close episodes" class="w-9 h-9 rounded-full bg-black/50 hover:bg-black/80">✕</button>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 mb-3">
+      <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
+        <button onclick="drawerSeasonStep(-1)" aria-label="Previous season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
+        <span id="drawerSeasonLabel" class="text-sm font-semibold min-w-[86px] text-center">Season 1</span>
+        <button onclick="drawerSeasonStep(1)" aria-label="Next season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
+      </div>
+      <input id="epFilter" oninput="renderEpDrawer()" placeholder="Filter…" autocomplete="off" class="flex-1 min-w-0 px-3 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm">
+    </div>
+    <div id="epDrawerList" class="space-y-3 pb-4"></div>
+  </div>
+</div>
+
 <script>
 /* Popup-ads safety net for our own page (iframe popups are blocked by sandbox above) */
 (function(){
@@ -371,8 +452,8 @@ function safeFocus(el){
   } catch(e){ return false; }
 }
 function topPopup(){
-  // topmost visible popup wins (guide sits above details)
-  const ps = [...document.querySelectorAll("#tvGuide,#modal")].filter(p => !p.classList.contains("hidden"));
+  // topmost visible popup wins (drawers sit above guide, guide above details)
+  const ps = [...document.querySelectorAll("#epDrawer,#setPanel,#tvGuide,#modal")].filter(p => !p.classList.contains("hidden"));
   return ps.length ? ps[ps.length - 1] : null;
 }
 function dirOf(e){
@@ -617,7 +698,9 @@ function cardEl(x, type){
     if (e.key === "Escape" || e.keyCode === 27 || e.key === "Backspace" || e.keyCode === 461 || e.keyCode === 10009) {
       const top = topPopup();
       if (top) {
-        if (top.id === "tvGuide") closeTvGuide(); else closeModal();
+        if (top.id === "tvGuide") closeTvGuide();
+        else if (top.id === "modal") closeModal();
+        else closePanels();
         e.preventDefault(); return;
       }
       try {
@@ -825,10 +908,14 @@ async function openWatch(type, id, s=1, e=1){
   // TV episode UI
   if(type==="tv"){
     document.getElementById("epNav").classList.remove("hidden");
+    document.getElementById("epDrawerBtn").classList.remove("hidden");
     watchSeasons = (d.seasons||[]).filter(x=>x.season_number>0);
     updateSeasonLabel();
     await loadEpisodes();
-  } else document.getElementById("epNav").classList.add("hidden");
+  } else {
+    document.getElementById("epNav").classList.add("hidden");
+    document.getElementById("epDrawerBtn").classList.add("hidden");
+  }
   loadPlayer();
   saveContinue();
   // subtitles coach tip (once — never again after "don't show again")
@@ -936,6 +1023,7 @@ function goHome(ev){
   ctlPollStop();
   clearTimeout(window._tipT);
   exitVideoFs();
+  closePanels();
   hideSubTip(false);
   if (!document.getElementById("tvGuide").classList.contains("hidden")) closeTvGuide();
   if (!document.getElementById("modal").classList.contains("hidden")) closeModal();
@@ -1122,6 +1210,7 @@ function ctlPollStart(){
     if (!document.getElementById("player").src) return;
     sendCmd("getCurrentTime");
     sendCmd("getDuration");
+    sleepTick();
   }, 1000);
 }
 function ctlPollStop(){ clearInterval(window._ctlPoll); }
@@ -1136,6 +1225,221 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
   });
 })();
 
+/* ---------- Settings panel + Episodes drawer ---------- */
+let panelOpener = null;
+function openSettings(){
+  panelOpener = document.activeElement;
+  paintSettings();
+  setTab("playback");
+  document.getElementById("setPanel").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  setTimeout(() => safeFocus(document.querySelector("#setPanel button")), 60);
+}
+async function openEpisodes(){
+  if (watchState.type !== "tv") return;
+  panelOpener = document.activeElement;
+  document.getElementById("epDrawer").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  updateDrawerSeasonLabel();
+  await renderEpDrawer();
+  setTimeout(() => safeFocus(document.querySelector("#epDrawer button")), 60);
+}
+function closePanels(){
+  document.getElementById("setPanel").classList.add("hidden");
+  document.getElementById("epDrawer").classList.add("hidden");
+  if (document.getElementById("modal").classList.contains("hidden")
+      && document.getElementById("tvGuide").classList.contains("hidden"))
+    document.body.classList.remove("modal-open");
+  if (panelOpener && panelOpener.focus) { try { panelOpener.focus({ preventScroll: true }); } catch(e){} }
+}
+function setTab(name){
+  ["playback", "subs", "servers"].forEach(t => {
+    document.getElementById("pane" + t[0].toUpperCase() + t.slice(1)).classList.toggle("hidden", t !== name);
+    const b = document.getElementById("tab" + t[0].toUpperCase() + t.slice(1));
+    b.className = "flex-1 py-2 rounded-full " + (t === name ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
+  });
+}
+/* speed presets */
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+function speedSet(r){
+  pState.rate = r;
+  sendCmd("setPlaybackRate", [r]);
+  ctlPaint(); paintSpeed();
+}
+function paintSpeed(){
+  const row = document.getElementById("speedRow");
+  if (!row) return;
+  row.innerHTML = "";
+  SPEEDS.forEach(r => {
+    const b = document.createElement("button");
+    b.textContent = (r + "").replace("0.", ".") + "×";
+    b.className = "px-3 h-10 rounded-full text-sm font-bold " + (pState.rate === r ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
+    b.onclick = () => speedSet(r);
+    row.appendChild(b);
+  });
+}
+/* volume 0-100 in remote-friendly steps (player caps at 100: no boost API exists) */
+function volStep(d){
+  pState.vol = Math.min(1, Math.max(0, Math.round(((pState.vol == null ? 1 : pState.vol) + d) * 10) / 10));
+  sendCmd("setVolume", [pState.vol]);
+  if (pState.vol > 0 && pState.muted) { pState.muted = false; sendCmd("setMuted", [false]); }
+  ctlPaint(); paintVol();
+}
+function paintVol(){
+  const el = document.getElementById("volLabel");
+  if (el) el.textContent = Math.round((pState.vol == null ? 1 : pState.vol) * 100) + "%";
+}
+/* sleep timer: pause after N minutes, or when the video ends */
+const SLEEPS = [0, 15, 30, 45, 60, 90, 120];
+const sleep = { endAt: 0 };
+let sleepOnEnd = false;
+try {
+  sleepOnEnd = localStorage.getItem("streambox_sleep_onend") === "1";
+  const sm = Number(localStorage.getItem("streambox_sleep_min") || 0);
+  if (SLEEPS.includes(sm) && sm > 0) sleep.endAt = Date.now() + sm * 60000;
+} catch(e){}
+function sleepSet(min){
+  try { localStorage.setItem("streambox_sleep_min", String(min)); } catch(e){}
+  sleep.endAt = min > 0 ? Date.now() + min * 60000 : 0;
+  paintSleep();
+}
+function sleepEndToggle(){
+  sleepOnEnd = !sleepOnEnd;
+  try { localStorage.setItem("streambox_sleep_onend", sleepOnEnd ? "1" : "0"); } catch(e){}
+  paintSleep();
+}
+function fmtRemain(ms){
+  const m = Math.ceil(ms / 60000);
+  return m >= 60 ? Math.floor(m / 60) + "h " + (m % 60) + "m left" : m + "m left";
+}
+function paintSleep(){
+  const row = document.getElementById("sleepRow");
+  if (row) {
+    row.innerHTML = "";
+    SLEEPS.forEach(m => {
+      const active = (m === 0 && !sleep.endAt) || (m > 0 && sleep.endAt && (sleep.endAt - Date.now()) / 60000 <= m + 1 && (sleep.endAt - Date.now()) / 60000 > m - 14);
+      const b = document.createElement("button");
+      b.textContent = m === 0 ? "Off" : m + "m";
+      b.className = "px-3 h-10 rounded-full text-sm font-bold " + (active ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
+      b.onclick = () => sleepSet(m);
+      row.appendChild(b);
+    });
+  }
+  const l = document.getElementById("sleepLabel");
+  if (l) l.textContent = sleep.endAt ? fmtRemain(sleep.endAt - Date.now()) : "Off";
+  const e = document.getElementById("sleepEndBtn");
+  if (e) {
+    e.textContent = "😴 Sleep when video ends: " + (sleepOnEnd ? "On" : "Off");
+    e.className = "w-full py-2.5 rounded-full text-sm mb-1 " + (sleepOnEnd ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
+  }
+}
+function sleepTick(){
+  if (sleep.endAt && Date.now() >= sleep.endAt) {
+    sleep.endAt = 0;
+    try { localStorage.setItem("streambox_sleep_min", "0"); } catch(e){}
+    sendCmd("pause");
+    pState.paused = true; ctlPaint(); paintSleep();
+    const ws = document.getElementById("watchStatus");
+    if (ws) ws.textContent = "😴 Sleep timer — playback paused";
+  }
+  const l = document.getElementById("sleepLabel");
+  if (l && sleep.endAt && !document.getElementById("setPanel").classList.contains("hidden"))
+    l.textContent = fmtRemain(sleep.endAt - Date.now());
+}
+/* servers tab */
+function paintSettings(){
+  paintSpeed(); paintVol(); paintSleep();
+  try {
+    document.getElementById("srvCur").textContent = pState.server || "auto";
+    document.getElementById("srvPin").textContent = localStorage.getItem("streambox_lastserver") || "none";
+  } catch(e){}
+  document.getElementById("srvQ").textContent = QLEVELS[qIdx].l;
+}
+function forgetServer(){
+  try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
+  pState.server = null;
+  paintSettings();
+  document.getElementById("watchStatus").textContent = "Server preference cleared — Auto mode";
+}
+/* episodes drawer */
+let drawerEps = [], drawerRevealed = new Set(), spoilerOn = false;
+try { spoilerOn = localStorage.getItem("streambox_spoiler") === "1"; } catch(e){}
+function updateDrawerSeasonLabel(){
+  document.getElementById("drawerSeasonLabel").textContent = `Season ${watchState.s}`;
+  paintSpoilerBtn();
+}
+function paintSpoilerBtn(){
+  const b = document.getElementById("spoilerBtn");
+  if (b) b.textContent = spoilerOn ? "🙈 Spoilers: On" : "🙈 Spoilers: Off";
+}
+function spoilerToggle(){
+  spoilerOn = !spoilerOn;
+  try { localStorage.setItem("streambox_spoiler", spoilerOn ? "1" : "0"); } catch(e){}
+  paintSpoilerBtn();
+  renderEpDrawer();
+}
+function drawerSeasonStep(dir){
+  if (!watchSeasons.length) return;
+  const nums = watchSeasons.map(x => x.season_number).sort((a, b) => a - b);
+  let i = nums.indexOf(watchState.s);
+  if (i < 0) i = 0;
+  watchState.s = nums[(i + dir + nums.length) % nums.length];
+  watchState.e = 1;
+  drawerRevealed = new Set();
+  updateDrawerSeasonLabel(); updateSeasonLabel(); loadEpisodes(); loadPlayer(); saveContinue();
+  renderEpDrawer();
+}
+async function renderEpDrawer(){
+  const list = document.getElementById("epDrawerList");
+  if (!list) return;
+  const q = (document.getElementById("epFilter").value || "").trim().toLowerCase();
+  list.innerHTML = `<p class="text-sm text-gray-500">Loading…</p>`;
+  let d;
+  try {
+    d = await tmdb(`/tv/${watchState.id}/season/${watchState.s}`);
+  } catch(err) {
+    list.innerHTML = `<p class="text-sm text-gray-500">Couldn't load episodes. Check connection.</p>`;
+    return;
+  }
+  drawerEps = d.episodes || [];
+  list.innerHTML = "";
+  const shown = drawerEps.filter(ep =>
+    !q || ("e" + ep.episode_number).includes(q) || (ep.name || "").toLowerCase().includes(q));
+  if (!shown.length) list.innerHTML = `<p class="text-sm text-gray-500">No episodes match.</p>`;
+  shown.forEach(ep => {
+    const isCur = ep.episode_number === watchState.e;
+    const hidden = spoilerOn && !drawerRevealed.has(ep.episode_number) && !isCur;
+    const card = document.createElement("div");
+    card.className = "relative bg-white/5 border rounded-xl overflow-hidden " + (isCur ? "border-teal-500" : "border-white/10");
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `Episode ${ep.episode_number}: ${ep.name}`);
+    const still = ep.still_path ? IMG(ep.still_path, "w300") : "";
+    card.innerHTML = `
+      ${still ? `<img loading="lazy" decoding="async" src="${still}" class="w-full aspect-video object-cover ${hidden ? "blur-md" : ""}" onerror="this.style.display='none'">` : ""}
+      ${isCur ? `<span class="absolute top-2 right-2 text-[11px] font-bold bg-teal-500 px-2 py-0.5 rounded-full">WATCHING</span>` : ""}
+      <div class="p-3">
+        <p class="font-bold text-sm">E${ep.episode_number} — ${ep.name || ""}</p>
+        <p class="text-[11px] text-gray-500">${ep.runtime ? ep.runtime + "m" : ""}</p>
+        <p class="text-xs text-gray-400 mt-1 ${hidden ? "blur-sm select-none" : ""}">${ep.overview || "No synopsis."}</p>
+        ${hidden ? `<button class="mt-2 text-xs font-bold bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full">Click to reveal</button>` : ""}
+      </div>`;
+    const play = activatable(() => {
+      watchState.e = ep.episode_number;
+      closePanels();
+      loadPlayer(); loadEpisodes(); saveContinue();
+      const ws = document.getElementById("watchStatus");
+      if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e}`;
+    });
+    card.onclick = () => {
+      if (hidden) { drawerRevealed.add(ep.episode_number); renderEpDrawer(); }
+      else play();
+    };
+    card.onkeydown = (ev) => { if (okPressed(ev)) { ev.preventDefault(); card.onclick(); } };
+    list.appendChild(card);
+  });
+}
+
 /* ---------- CineSrc player events (per docs) ---------- */
 function hideSpin(){ const s = document.getElementById("playerSpin"); if (s) s.style.display = "none"; }
 document.getElementById("player").addEventListener("load", ()=>{ setTimeout(hideSpin, 800); });
@@ -1145,7 +1449,7 @@ window.addEventListener("message", (event)=>{
   if(type === "cinesrc:ready" || type === "cinesrc:play" || type === "cinesrc:loadedmetadata") hideSpin();
   if(type === "cinesrc:ready") {
     // pull initial state for the control bar
-    sendCmd("getPaused"); sendCmd("getDuration"); sendCmd("getMuted"); sendCmd("getPlaybackRate");
+    sendCmd("getPaused"); sendCmd("getDuration"); sendCmd("getMuted"); sendCmd("getPlaybackRate"); sendCmd("getVolume");
   }
   if(type === "cinesrc:play") { pState.paused = false; ctlPaint(); }
   if(type === "cinesrc:pause") { pState.paused = true; ctlPaint(); }
@@ -1157,7 +1461,8 @@ window.addEventListener("message", (event)=>{
   if(type === "cinesrc:loadedmetadata" && typeof data.duration === "number") { pState.dur = data.duration; ctlPaint(); }
   if(type === "cinesrc:volumechange") {
     if (typeof data.muted === "boolean") pState.muted = data.muted;
-    ctlPaint();
+    if (typeof data.volume === "number") pState.vol = Math.min(1, Math.max(0, data.volume));
+    ctlPaint(); paintVol();
   }
   if(type === "cinesrc:ratechange" && typeof data.playbackRate === "number") { pState.rate = data.playbackRate; ctlPaint(); }
   if(type === "cinesrc:response") {
@@ -1165,7 +1470,8 @@ window.addEventListener("message", (event)=>{
     if (data.command === "getDuration" && typeof data.result === "number" && data.result > 0) { pState.dur = data.result; ctlPaint(); }
     if (data.command === "getPaused" && typeof data.result === "boolean") { pState.paused = data.result; ctlPaint(); }
     if (data.command === "getMuted" && typeof data.result === "boolean") { pState.muted = data.result; ctlPaint(); }
-    if (data.command === "getPlaybackRate" && typeof data.result === "number") { pState.rate = data.result; ctlPaint(); }
+    if (data.command === "getPlaybackRate" && typeof data.result === "number") { pState.rate = data.result; ctlPaint(); paintSpeed(); }
+    if (data.command === "getVolume" && typeof data.result === "number") { pState.vol = data.result; ctlPaint(); paintVol(); }
   }
   if(type === "cinesrc:nextepisode" && data.internalNavigation){
     // player advanced internally — sync our UI, do NOT reload iframe
@@ -1181,7 +1487,15 @@ window.addEventListener("message", (event)=>{
   }
   if(type === "cinesrc:sourceused" && data.sourceId){
     // remember working server for faster repeat loads (used as lastserver)
-    try { localStorage.setItem("streambox_lastserver", String(data.sourceId)); } catch(e){}
+    pState.server = String(data.sourceId);
+    try { localStorage.setItem("streambox_lastserver", pState.server); } catch(e){}
+    if (!document.getElementById("setPanel").classList.contains("hidden")) paintSettings();
+  }
+  if(type === "cinesrc:ended" && sleepOnEnd){
+    sendCmd("pause");
+    pState.paused = true; ctlPaint();
+    const ws = document.getElementById("watchStatus");
+    if (ws) ws.textContent = "😴 Sleep when video ends — playback paused";
   }
   if(type === "cinesrc:error"){
     // drop the pinned server so a bad source is never reused

@@ -130,6 +130,10 @@ public class MainActivity extends Activity {
         web.evaluateJavascript(
             "(function(){"
             + "if(document.body.classList.contains('video-fs')){document.body.classList.remove('video-fs');return 'fs';}"
+            + "var p=document.getElementById('epDrawer');"
+            + "if(p&&!p.classList.contains('hidden')){closePanels();return 'panel';}"
+            + "var s=document.getElementById('setPanel');"
+            + "if(s&&!s.classList.contains('hidden')){closePanels();return 'panel';}"
             + "var g=document.getElementById('tvGuide');"
             + "if(g&&!g.classList.contains('hidden')){closeTvGuide();return 'guide';}"
             + "var m=document.getElementById('modal');"
