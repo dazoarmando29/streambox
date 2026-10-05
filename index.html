@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StreamBox - Watch Movies & TV Shows Free</title>
+<meta name="description" content="StreamBox — fast, free movies & TV shows. Search, browse trending, and watch HD with ad-shield player.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect x='2' y='6' width='44' height='36' rx='9' fill='%23e50914'/%3E%3Cpath d='M20 17.5v13l11-6.5z' fill='white'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://api.themoviedb.org" crossorigin>
+<link rel="preconnect" href="https://image.tmdb.org" crossorigin>
+<link rel="dns-prefetch" href="https://api.themoviedb.org">
+<link rel="dns-prefetch" href="https://image.tmdb.org">
+<link rel="dns-prefetch" href="https://cinesrc.st">
+<link rel="preconnect" href="https://cinesrc.st" crossorigin>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  * { scrollbar-width: thin; scrollbar-color: #e50914 #111; }
+  body { background: #0a0a0f; color: #eee; font-family: Inter, Segoe UI, Arial, sans-serif; }
+  .row-scroll::-webkit-scrollbar { height: 8px; }
+  .row-scroll::-webkit-scrollbar-thumb { background: #333; border-radius: 8px; }
+  .card { transition: transform .2s; cursor: pointer; }
+  .card:hover { transform: scale(1.06); z-index: 10; }
+  .hero-gradient { background: linear-gradient(to top, #0a0a0f 5%, transparent 60%), linear-gradient(to right, rgba(0,0,0,.85) 20%, transparent 70%); }
+  .player-wrap { aspect-ratio: 16/9; background: #000; }
+  iframe { border: 0; }
+  .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+</style>
+</head>
+<body>
+
+<!-- ============ CONFIG: your TMDB key is already filled in ============ -->
+<script>
+const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
+const TMDB_BASE = "https://api.themoviedb.org/3";
+const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
+const CINESRC_MOVIE = id => `https://cinesrc.st/embed/movie/${id}`;
+const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`;
+</script>
+
+<!-- NAVBAR -->
+<nav class="fixed top-0 w-full z-50 px-4 md:px-10 py-4 flex items-center gap-6 bg-gradient-to-b from-black/90 to-transparent">
+  <a href="#" onclick="goHome(event)" class="flex items-center gap-2.5 shrink-0" aria-label="StreamBox home">
+    <span class="grid place-items-center w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-red-700 shadow-lg shadow-red-900/40">
+      <svg width="22" height="22" viewBox="0 0 48 48" fill="none"><rect x="2" y="6" width="44" height="36" rx="9" fill="white" fill-opacity="0.18"/><path d="M20 17.5v13l11-6.5z" fill="white"/></svg>
+    </span>
+    <span class="text-2xl font-black tracking-tight text-white">Stream<span class="text-red-600">Box</span></span>
+  </a>
+  <div class="hidden md:flex gap-5 text-sm text-gray-300">
+    <button onclick="goHome(event)" class="hover:text-white">Home</button>
+    <button onclick="filterType('movie',event)" class="hover:text-white">Movies</button>
+    <button onclick="filterType('tv',event)" class="hover:text-white">TV Shows</button>
+    <button onclick="showContinue(event)" class="hover:text-white">My List</button>
+  </div>
+  <div class="ml-auto flex gap-2 w-full md:w-auto">
+    <input id="search" placeholder="Search movies & shows..." class="w-full md:w-72 px-4 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm focus:border-red-600" oninput="onSearch(this.value)">
+  </div>
+</nav>
+
+<!-- HOME VIEW -->
+<div id="homeView">
+  <!-- HERO -->
+  <header id="hero" class="relative h-[75vh] w-full flex items-end"></header>
+
+  <!-- CONTINUE WATCHING -->
+  <div id="continueRow" class="px-4 md:px-10 mt-4 hidden">
+    <h2 class="text-lg font-bold mb-2">Continue Watching</h2>
+    <div id="continueGrid" class="flex gap-3 overflow-x-auto row-scroll pb-2"></div>
+  </div>
+
+  <main id="rows" class="px-4 md:px-10 pb-20 space-y-8 mt-6"></main>
+
+  <!-- SEARCH / BROWSE GRID -->
+  <main id="gridView" class="hidden px-4 md:px-10 pt-24 pb-20">
+    <h2 id="gridTitle" class="text-xl font-bold mb-4"></h2>
+    <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
+  </main>
+</div>
+
+<!-- WATCH VIEW -->
+<div id="watchView" class="hidden min-h-screen pt-20 px-4 md:px-10 pb-16">
+  <button onclick="goHome(event)" class="mb-4 text-sm bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full">← Back to Browse</button>
+  <div class="grid lg:grid-cols-3 gap-6">
+    <div class="lg:col-span-2">
+      <div id="playerBox" class="player-wrap relative w-full rounded-xl overflow-hidden border border-white/10">
+        <div id="playerSpin" class="absolute inset-0 grid place-items-center bg-black">
+          <div class="flex flex-col items-center gap-2 text-gray-400 text-sm">
+            <div class="w-10 h-10 rounded-full border-2 border-white/20 border-t-red-600 animate-spin"></div>
+            <span>Loading player…</span>
+          </div>
+        </div>
+        <iframe id="player" title="StreamBox player" class="relative w-full h-full" src="" width="100%" height="100%"
+          allowfullscreen allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+          referrerpolicy="strict-origin-when-cross-origin" loading="eager"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"></iframe>
+      </div>
+      <!-- player options -->
+      <div class="flex flex-wrap items-center gap-3 mt-3 text-xs text-gray-300">
+        <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="accent-red-600" onchange="toggleShield()"> Ad Shield</label>
+        <label class="flex items-center gap-1"><input type="checkbox" id="optAutoplay" checked class="accent-red-600"> Autoplay</label>
+        <label class="flex items-center gap-1"><input type="checkbox" id="optAutonext" checked class="accent-red-600"> Auto-next</label>
+        <label class="flex items-center gap-1"><input type="checkbox" id="optAutoskip" class="accent-red-600"> Auto-skip intro</label>
+        <label class="flex items-center gap-1">Accent <input type="color" id="optColor" value="#e50914" class="w-8 h-6 bg-transparent"></label>
+        <button onclick="applyPlayerOpts()" class="ml-2 bg-red-600 px-3 py-1.5 rounded-full font-semibold hover:bg-red-500">Apply</button>
+        <button onclick="reloadPlayer()" class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">↻ Reload</button>
+        <span id="watchStatus" class="ml-auto text-gray-500"></span>
+      </div>
+      <p class="text-[11px] text-gray-600 mt-2">Ad Shield uses a sandboxed player (no popups / no tab-hijacks). For full in-stream ad removal also use Brave or uBlock Origin — browsers block sites from stripping ads <em>inside</em> a third-party iframe.</p>
+      <div id="epNav" class="mt-4 hidden">
+        <div class="flex items-center gap-3 mb-2">
+          <h3 class="font-bold">Episodes</h3>
+          <select id="seasonSel" onchange="onSeasonChange()" class="bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-sm"></select>
+          <button onclick="nextEpisode(1)" class="text-xs bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">Next Ep →</button>
+        </div>
+        <div id="epGrid" class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 max-h-56 overflow-y-auto"></div>
+      </div>
+    </div>
+    <div class="bg-white/5 border border-white/10 rounded-xl p-5 h-fit">
+      <div class="flex gap-4">
+        <img id="wPoster" class="w-24 rounded-lg" src="">
+        <div>
+          <h1 id="wTitle" class="text-xl font-bold"></h1>
+          <p id="wMeta" class="text-sm text-gray-400 mt-1"></p>
+          <p id="wRating" class="text-sm text-yellow-400 mt-1"></p>
+        </div>
+      </div>
+      <p id="wOverview" class="text-sm text-gray-300 mt-4 leading-relaxed"></p>
+      <div id="wCast" class="text-xs text-gray-500 mt-3"></div>
+    </div>
+  </div>
+</div>
+
+<!-- DETAIL MODAL -->
+<div id="modal" class="hidden fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
+  <div class="bg-[#14141c] max-w-2xl w-full rounded-2xl overflow-hidden border border-white/10 max-h-[90vh] overflow-y-auto">
+    <div class="relative h-64 md:h-80">
+      <img id="mBackdrop" class="w-full h-full object-cover" src="">
+      <div class="absolute inset-0 bg-gradient-to-t from-[#14141c] to-transparent"></div>
+      <button onclick="closeModal()" class="absolute top-3 right-3 bg-black/60 w-9 h-9 rounded-full">✕</button>
+    </div>
+    <div class="p-6 -mt-10 relative">
+      <h2 id="mTitle" class="text-2xl font-bold"></h2>
+      <p id="mMeta" class="text-sm text-gray-400 mt-1"></p>
+      <p id="mOverview" class="text-sm text-gray-300 mt-3 leading-relaxed"></p>
+      <div class="flex flex-wrap gap-3 mt-5 items-center">
+        <button id="mWatch" class="bg-red-600 hover:bg-red-500 font-bold px-6 py-2.5 rounded-full">▶ Watch Now</button>
+        <button onclick="addToList()" class="bg-white/10 hover:bg-white/20 px-5 py-2.5 rounded-full text-sm">+ My List</button>
+      </div>
+      <div id="mSeasons" class="mt-5 hidden">
+        <label class="text-sm text-gray-400">Season <select id="mSeason" onchange="loadModalEpisodes()" class="bg-white/10 border border-white/20 rounded-lg px-2 py-1 ml-2"></select></label>
+        <label class="text-sm text-gray-400 ml-4">Episode <select id="mEpisode" class="bg-white/10 border border-white/20 rounded-lg px-2 py-1 ml-2"></select></label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Popup-ads safety net for our own page (iframe popups are blocked by sandbox above) */
+(function(){
+  try {
+    const _open = window.open;
+    window.open = function(url, ...rest){
+      // allow only player-origin navigations triggered by user on our buttons; block the rest
+      if (typeof url === "string" && /cinesrc\.st|themoviedb\.org|image\.tmdb\.org/i.test(url)) return _open.call(window, url, ...rest);
+      return null;
+    };
+    document.addEventListener("click", e => {
+      const a = e.target.closest && e.target.closest('a[target="_blank"]');
+      if (a && !/cinesrc\.st|themoviedb/i.test(a.href)) { e.preventDefault(); }
+    }, true);
+  } catch(e){}
+})();
+function preconnectCinesrc(){
+  try {
+    if (!document.querySelector('link[href="https://cinesrc.st"][rel="preconnect"]')) {
+      const l = document.createElement("link");
+      l.rel = "preconnect"; l.href = "https://cinesrc.st"; l.crossOrigin = "";
+      document.head.appendChild(l);
+    }
+  } catch(e){}
+}
+let currentType = "all", currentItem = null, currentDetail = null;
+let watchState = { type:"movie", id:null, s:1, e:1 };
+let searchTimer = null, searchCtrl = null;
+
+/* ---------- TMDB helpers (cached: memory + sessionStorage, 10-min TTL) ---------- */
+const _mem = new Map();
+function tmdb(path){
+  const sep = path.includes("?") ? "&" : "?";
+  const url = `${TMDB_BASE}${path}${sep}api_key=${TMDB_API_KEY}&language=en-US`;
+  const now = Date.now(), TTL = 10 * 60 * 1000;
+  const hit = _mem.get(url);
+  if (hit && now - hit.t < TTL) return Promise.resolve(hit.d);
+  try {
+    const raw = sessionStorage.getItem("sb:" + url);
+    if (raw) { const c = JSON.parse(raw); if (now - c.t < TTL) { _mem.set(url, c); return Promise.resolve(c.d); } }
+  } catch(e){}
+  return fetch(url).then(r => r.json()).then(d => {
+    const c = { t: now, d };
+    _mem.set(url, c);
+    try { sessionStorage.setItem("sb:" + url, JSON.stringify(c)); } catch(e){}
+    return d;
+  });
+}
+const titleOf = x => x.title || x.name || "Untitled";
+const yearOf = x => (x.release_date || x.first_air_date || "").slice(0,4);
+
+/* ---------- HOME ---------- */
+async function init(){
+  renderContinue();
+  const [trend, popM, popT, topM, topT] = await Promise.all([
+    tmdb("/trending/all/week"),
+    tmdb("/movie/popular"),
+    tmdb("/tv/popular"),
+    tmdb("/movie/top_rated"),
+    tmdb("/tv/top_rated")
+  ]);
+  buildHero(trend.results.slice(0,5));
+  const rows = document.getElementById("rows");
+  rows.innerHTML = "";
+  rows.appendChild(makeRow("Trending Now", trend.results));
+  rows.appendChild(makeRow("Popular Movies", popM.results, "movie"));
+  rows.appendChild(makeRow("Popular TV Shows", popT.results, "tv"));
+  rows.appendChild(makeRow("Top Rated Movies", topM.results, "movie"));
+  rows.appendChild(makeRow("Top Rated TV", topT.results, "tv"));
+}
+
+function makeRow(title, items, forceType){
+  const div = document.createElement("div");
+  div.innerHTML = `<h2 class="text-lg font-bold mb-2">${title}</h2>`;
+  const sc = document.createElement("div");
+  sc.className = "flex gap-3 overflow-x-auto row-scroll pb-2";
+  items.filter(x=>x.poster_path).forEach(x=>{
+    const type = forceType || (x.media_type === "tv" ? "tv" : "movie");
+    sc.appendChild(cardEl(x, type));
+  });
+  div.appendChild(sc);
+  return div;
+}
+
+function cardEl(x, type){
+  const d = document.createElement("div");
+  d.className = "card min-w-[130px] md:min-w-[160px] max-w-[130px] md:max-w-[160px]";
+  d.innerHTML = `
+    <img loading="lazy" decoding="async" src="${IMG(x.poster_path,"w342")}" class="rounded-lg w-full aspect-[2/3] object-cover bg-white/5">
+    <p class="text-xs mt-1.5 font-semibold truncate">${titleOf(x)}</p>
+    <p class="text-[11px] text-gray-500">★ ${Number(x.vote_average||0).toFixed(1)} • ${yearOf(x)} • ${type.toUpperCase()}</p>`;
+  d.onclick = () => openDetail(type, x.id);
+  d.onmouseenter = preconnectCinesrc;
+  return d;
+}
+
+let heroIdx = 0, heroItems = [];
+function buildHero(items){
+  heroItems = items;
+  setHero(0);
+  setInterval(()=>{ if(!document.getElementById("homeView").classList.contains("hidden")) setHero((heroIdx+1)%heroItems.length); }, 8000);
+}
+function setHero(i){
+  heroIdx = i;
+  const x = heroItems[i]; if(!x) return;
+  const type = x.media_type === "tv" ? "tv" : "movie";
+  document.getElementById("hero").innerHTML = `
+    <img src="${IMG(x.backdrop_path,"w1280")}" fetchpriority="high" decoding="async" class="absolute inset-0 w-full h-full object-cover">
+    <div class="absolute inset-0 hero-gradient"></div>
+    <div class="relative px-4 md:px-10 pb-16 max-w-2xl">
+      <span class="text-xs bg-red-600 px-3 py-1 rounded-full font-bold">#${i+1} TRENDING • ${type.toUpperCase()}</span>
+      <h1 class="text-3xl md:text-5xl font-black mt-3">${titleOf(x)}</h1>
+      <p class="text-sm text-gray-300 mt-2 line-clamp-3">${x.overview||""}</p>
+      <div class="flex gap-3 mt-4">
+        <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="bg-red-600 hover:bg-red-500 font-bold px-6 py-2.5 rounded-full">▶ Watch</button>
+        <button onclick='openDetail("${type}",${x.id})' class="bg-white/20 hover:bg-white/30 px-6 py-2.5 rounded-full">Details</button>
+      </div>
+    </div>`;
+  // preload next hero backdrop so rotation is instant
+  try {
+    const nxt = heroItems[(i+1)%heroItems.length];
+    if (nxt && nxt.backdrop_path) { const im = new Image(); im.decoding = "async"; im.src = IMG(nxt.backdrop_path, "w1280"); }
+  } catch(e){}
+}
+
+/* ---------- SEARCH / FILTER ---------- */
+function onSearch(q){
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async ()=>{
+    q = q.trim();
+    if(!q){ showRows(); return; }
+    try { if (searchCtrl) searchCtrl.abort(); } catch(e){}
+    searchCtrl = new AbortController();
+    try {
+      const sep = "/search/multi?".includes("?") ? "&" : "?";
+      const url = `${TMDB_BASE}/search/multi?query=${encodeURIComponent(q)}&include_adult=false&api_key=${TMDB_API_KEY}&language=en-US`;
+      const r = await fetch(url, { signal: searchCtrl.signal });
+      const data = await r.json();
+      showGrid(`Results for "${q}"`, (data.results||[]).filter(x=>(x.media_type==="movie"||x.media_type==="tv") && x.poster_path));
+    } catch(e){ /* aborted or offline — ignore */ }
+  }, 400);
+}
+function showGrid(title, items){
+  document.getElementById("rows").classList.add("hidden");
+  document.getElementById("hero").classList.add("hidden");
+  document.getElementById("continueRow").classList.add("hidden");
+  const gv = document.getElementById("gridView");
+  gv.classList.remove("hidden");
+  document.getElementById("gridTitle").textContent = title;
+  const g = document.getElementById("grid"); g.innerHTML = "";
+  items.forEach(x=>{
+    const type = x.media_type === "tv" ? "tv" : "movie";
+    g.appendChild(cardEl(x, type));
+  });
+  if(!items.length) g.innerHTML = "<p class='text-gray-500'>No results found.</p>";
+}
+function showRows(){
+  document.getElementById("gridView").classList.add("hidden");
+  document.getElementById("rows").classList.remove("hidden");
+  document.getElementById("hero").classList.remove("hidden");
+  renderContinue();
+}
+async function filterType(type, ev){
+  if(ev) ev.preventDefault();
+  document.getElementById("search").value = "";
+  const r = await tmdb(type==="movie" ? "/movie/popular" : "/tv/popular");
+  showGrid(type==="movie" ? "Popular Movies" : "Popular TV Shows", r.results.map(x=>({...x, media_type:type})));
+}
+function showContinue(ev){ if(ev) ev.preventDefault(); goHome(ev); document.getElementById("continueRow").scrollIntoView({behavior:"smooth"}); }
+
+/* ---------- DETAIL MODAL ---------- */
+async function openDetail(type, id){
+  const d = await tmdb(`/${type}/${id}?append_to_response=credits`);
+  currentDetail = { type, id, data: d };
+  document.getElementById("mBackdrop").src = IMG(d.backdrop_path, "w780");
+  document.getElementById("mBackdrop").loading = "eager";
+  document.getElementById("mTitle").textContent = titleOf(d);
+  document.getElementById("mMeta").textContent = `★ ${Number(d.vote_average||0).toFixed(1)} • ${(d.release_date||d.first_air_date||"").slice(0,4)} • ${(d.genres||[]).map(g=>g.name).join(", ")}`;
+  document.getElementById("mOverview").textContent = d.overview || "No overview.";
+  document.getElementById("mWatch").onclick = () => {
+    if(type==="tv"){
+      const s = Number(document.getElementById("mSeason").value||1);
+      const e = Number(document.getElementById("mEpisode").value||1);
+      closeModal(); openWatch(type, id, s, e);
+    } else { closeModal(); openWatch(type, id); }
+  };
+  const sWrap = document.getElementById("mSeasons");
+  if(type==="tv"){
+    sWrap.classList.remove("hidden");
+    const sSel = document.getElementById("mSeason");
+    sSel.innerHTML = (d.seasons||[]).filter(s=>s.season_number>0).map(s=>`<option value="${s.season_number}">S${s.season_number} (${s.episode_count} eps)</option>`).join("");
+    await loadModalEpisodes();
+  } else sWrap.classList.add("hidden");
+  document.getElementById("modal").classList.remove("hidden");
+}
+async function loadModalEpisodes(){
+  const s = Number(document.getElementById("mSeason").value||1);
+  const d = await tmdb(`/tv/${currentDetail.id}/season/${s}`);
+  document.getElementById("mEpisode").innerHTML = (d.episodes||[]).map(e=>`<option value="${e.episode_number}">E${e.episode_number} — ${e.name}</option>`).join("");
+}
+function closeModal(){ document.getElementById("modal").classList.add("hidden"); }
+
+/* ---------- WATCH ---------- */
+async function openWatch(type, id, s=1, e=1){
+  watchState = { type, id, s, e };
+  document.getElementById("homeView").classList.add("hidden");
+  document.getElementById("watchView").classList.remove("hidden");
+  window.scrollTo(0,0);
+  const d = await tmdb(`/${type}/${id}?append_to_response=credits`);
+  currentItem = d;
+  document.getElementById("wPoster").src = IMG(d.poster_path, "w342");
+  document.getElementById("wPoster").loading = "eager";
+  document.getElementById("wTitle").textContent = titleOf(d);
+  document.getElementById("wMeta").textContent = `${type.toUpperCase()} • ${(d.release_date||d.first_air_date||"").slice(0,4)} • ${(d.genres||[]).map(g=>g.name).join(", ")}`;
+  document.getElementById("wRating").textContent = `★ ${Number(d.vote_average||0).toFixed(1)} (${d.vote_count||0} votes)`;
+  document.getElementById("wOverview").textContent = d.overview || "";
+  document.getElementById("wCast").textContent = "Cast: " + ((d.credits&&d.credits.cast||[]).slice(0,6).map(c=>c.name).join(", ") || "");
+  // TV episode UI
+  if(type==="tv"){
+    document.getElementById("epNav").classList.remove("hidden");
+    const seasons = (d.seasons||[]).filter(x=>x.season_number>0);
+    document.getElementById("seasonSel").innerHTML = seasons.map(x=>`<option value="${x.season_number}" ${x.season_number==s?"selected":""}>Season ${x.season_number}</option>`).join("");
+    await loadEpisodes();
+  } else document.getElementById("epNav").classList.add("hidden");
+  loadPlayer();
+  saveContinue();
+}
+async function loadEpisodes(){
+  const { id, s, e } = watchState;
+  const d = await tmdb(`/tv/${id}/season/${s}`);
+  const grid = document.getElementById("epGrid"); grid.innerHTML = "";
+  (d.episodes||[]).forEach(ep=>{
+    const b = document.createElement("button");
+    b.textContent = "E" + ep.episode_number;
+    b.title = ep.name;
+    b.className = "text-xs px-2 py-2 rounded-lg " + (ep.episode_number==e ? "bg-red-600 font-bold" : "bg-white/10 hover:bg-white/20");
+    b.onclick = ()=>{ watchState.e = ep.episode_number; loadPlayer(); loadEpisodes(); saveContinue(); };
+    grid.appendChild(b);
+  });
+}
+function onSeasonChange(){ watchState.s = Number(document.getElementById("seasonSel").value); watchState.e = 1; loadEpisodes(); loadPlayer(); }
+function nextEpisode(dir){
+  watchState.e += dir;
+  if(watchState.e < 1) watchState.e = 1;
+  loadPlayer(); loadEpisodes(); saveContinue();
+}
+
+/* Embed URL per https://cinesrc.st/docs */
+function buildEmbedUrlClean(){
+  const color = encodeURIComponent(document.getElementById("optColor").value||"#e50914");
+  const p = `autoplay=${document.getElementById("optAutoplay").checked}&autonext=${document.getElementById("optAutonext").checked}&autoskip=${document.getElementById("optAutoskip").checked}&color=${color}`;
+  if(watchState.type==="movie") return `https://cinesrc.st/embed/movie/${watchState.id}?${p}`;
+  return `https://cinesrc.st/embed/tv/${watchState.id}?s=${watchState.s}&e=${watchState.e}&${p}`;
+}
+function loadPlayer(){
+  preconnectCinesrc();
+  const spin = document.getElementById("playerSpin");
+  if (spin) spin.style.display = "grid";
+  const f = document.getElementById("player");
+  // cache-bust only when re-loading same URL so back-to-back episode clicks always refresh
+  f.src = buildEmbedUrlClean() + (buildEmbedUrlClean().includes("?") ? "&" : "?") + "_=" + Date.now();
+  const { type, s, e } = watchState;
+  document.getElementById("watchStatus").textContent = type==="tv" ? `Now playing S${s} E${e}` : "Now playing";
+  // fallback: hide spinner after 12s even if player never fires ready (ad-blocked network etc.)
+  clearTimeout(window._spinT);
+  window._spinT = setTimeout(()=>{ if (spin) spin.style.display = "none"; }, 12000);
+}
+function reloadPlayer(){ loadPlayer(); }
+function toggleShield(){
+  const on = document.getElementById("optShield").checked;
+  const f = document.getElementById("player");
+  // Shield ON = sandbox without popups/top-navigation. OFF = allow popups (only if a server breaks).
+  f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-modals");
+  loadPlayer();
+}
+function applyPlayerOpts(){ loadPlayer(); }
+
+function goHome(ev){
+  if(ev) ev.preventDefault();
+  document.getElementById("watchView").classList.add("hidden");
+  document.getElementById("homeView").classList.remove("hidden");
+  document.getElementById("player").src = "";
+  showRows();
+}
+
+/* ---------- Continue watching + My List (localStorage) ---------- */
+// one-time migration from old CineStream key
+try {
+  if (!localStorage.getItem("streambox_continue") && localStorage.getItem("cine_continue")) {
+    localStorage.setItem("streambox_continue", localStorage.getItem("cine_continue"));
+  }
+} catch(e){}
+function saveContinue(){
+  try{
+    const k = "streambox_continue";
+    let arr = JSON.parse(localStorage.getItem(k)||"[]");
+    const item = { type: watchState.type, id: watchState.id, s: watchState.s, e: watchState.e,
+      title: titleOf(currentItem||{}), poster: (currentItem||{}).poster_path, t: Date.now() };
+    arr = [item, ...arr.filter(x=>!(x.type===item.type&&x.id===item.id))].slice(0,20);
+    localStorage.setItem(k, JSON.stringify(arr));
+    renderContinue();
+  }catch(e){}
+}
+function renderContinue(){
+  try{
+    const arr = JSON.parse(localStorage.getItem("streambox_continue")||"[]");
+    const row = document.getElementById("continueRow"), grid = document.getElementById("continueGrid");
+    if(!arr.length){ row.classList.add("hidden"); return; }
+    row.classList.remove("hidden"); grid.innerHTML = "";
+    arr.forEach(x=>{
+      const d = document.createElement("div");
+      d.className = "card min-w-[130px] max-w-[130px] relative";
+      d.innerHTML = `<img src="${IMG(x.poster)}" class="rounded-lg w-full aspect-[2/3] object-cover"><p class="text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p><button class="absolute top-1 right-1 bg-black/70 w-6 h-6 rounded-full text-xs">✕</button>`;
+      d.onclick = ()=>openWatch(x.type, x.id, x.s||1, x.e||1);
+      d.querySelector("button").onclick = (ev)=>{ ev.stopPropagation(); removeContinue(x.type,x.id); };
+      grid.appendChild(d);
+    });
+  }catch(e){}
+}
+function removeContinue(type,id){
+  let arr = JSON.parse(localStorage.getItem("streambox_continue")||"[]");
+  arr = arr.filter(x=>!(x.type===type&&x.id===id));
+  localStorage.setItem("streambox_continue", JSON.stringify(arr));
+  renderContinue();
+}
+function addToList(){
+  if(!currentDetail) return;
+  let arr = JSON.parse(localStorage.getItem("streambox_continue")||"[]");
+  const d = currentDetail.data;
+  const item = { type: currentDetail.type, id: currentDetail.id, s:1, e:1, title: titleOf(d), poster: d.poster_path, t: Date.now() };
+  arr = [item, ...arr.filter(x=>!(x.type===item.type&&x.id===item.id))].slice(0,20);
+  localStorage.setItem("streambox_continue", JSON.stringify(arr));
+  alert("Added to My List ✓");
+}
+
+/* ---------- CineSrc player events (per docs) ---------- */
+function hideSpin(){ const s = document.getElementById("playerSpin"); if (s) s.style.display = "none"; }
+document.getElementById("player").addEventListener("load", ()=>{ setTimeout(hideSpin, 800); });
+window.addEventListener("message", (event)=>{
+  if(event.origin !== "https://cinesrc.st") return;
+  const { type, ...data } = event.data || {};
+  if(type === "cinesrc:ready" || type === "cinesrc:play" || type === "cinesrc:loadedmetadata") hideSpin();
+  if(type === "cinesrc:nextepisode" && data.internalNavigation){
+    // player advanced internally — sync our UI, do NOT reload iframe
+    if(data.season) watchState.s = data.season;
+    if(data.episode) watchState.e = data.episode;
+    loadEpisodes(); saveContinue();
+    document.getElementById("watchStatus").textContent = `Now playing S${watchState.s} E${watchState.e}`;
+  }
+  if(type === "cinesrc:timeupdate"){
+    // could save progress here: data.currentTime / data.duration
+  }
+  if(type === "cinesrc:error"){
+    document.getElementById("watchStatus").textContent = "Stream error — try again or pick another episode.";
+  }
+});
+
+// deep-link support: watch.html style ?type=tv&id=1396&s=1&e=1
+(function(){
+  const q = new URLSearchParams(location.search);
+  if(q.get("id")){
+    const t = q.get("type")==="tv" ? "tv" : "movie";
+    openWatch(t, q.get("id"), Number(q.get("s")||1), Number(q.get("e")||1));
+  } else init();
+})();
+</script>
+</body>
+</html>
