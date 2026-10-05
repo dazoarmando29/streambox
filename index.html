@@ -100,11 +100,16 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     <button onclick="filterType('movie',event)" class="hover:text-white">Movies</button>
     <button onclick="filterType('tv',event)" class="hover:text-white">TV Shows</button>
     <button onclick="showContinue(event)" class="hover:text-white">My List</button>
+    <button onclick="openTvGuide(event)" class="hover:text-white" title="How to install & use on TV">📺 TV Setup</button>
   </div>
   <div class="ml-auto flex gap-2 w-full md:w-auto">
     <input id="search" enterkeyhint="search" inputmode="search" autocomplete="off" placeholder="Search movies & shows..." class="w-full md:w-72 px-4 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm focus:border-red-600" oninput="onSearch(this.value)">
   </div>
 </nav>
+
+<!-- Floating TV-help button (phones / small screens where the nav link is hidden) -->
+<button onclick="openTvGuide(event)" aria-label="TV setup guide" title="TV setup guide"
+  class="md:hidden fixed bottom-5 right-5 z-50 w-12 h-12 rounded-full bg-red-600 text-xl shadow-lg shadow-red-900/50">📺</button>
 
 <!-- HOME VIEW -->
 <div id="homeView">
@@ -216,6 +221,53 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- TV SETUP GUIDE -->
+<div id="tvGuide" class="hidden fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-4" onclick="if(event.target===this)closeTvGuide()">
+  <div class="bg-[#14141c] max-w-2xl w-full rounded-2xl overflow-hidden border border-white/10 max-h-[90vh] overflow-y-auto p-6 md:p-8 relative">
+    <button onclick="closeTvGuide()" aria-label="Close guide" class="absolute top-3 right-3 bg-black/60 w-9 h-9 rounded-full">✕</button>
+    <h2 class="text-2xl font-black">📺 StreamBox on your TV</h2>
+    <p class="text-sm text-gray-400 mt-1">Get the app on Android TV / Fire TV and drive it with your remote.</p>
+
+    <h3 class="font-bold mt-6 mb-2">1 · Install the APK (one time)</h3>
+    <ol class="text-sm text-gray-300 space-y-1.5 list-decimal ml-5">
+      <li>On GitHub, open <b>Actions → Build StreamBox APK</b> → download the <b>streambox-apk</b> file and unzip it.</li>
+      <li>Send the APK to your TV: use the <b>Send Files to TV</b> app (phone + TV), a USB stick, or the <b>Downloader</b> app.</li>
+      <li>On the TV, open the file with a file manager and choose <b>Install</b>. If asked, allow <b>Install unknown apps</b> for that app (Settings → Apps → Special access).</li>
+      <li>Find <b>StreamBox</b> in your app list / Leanback launcher and open it.</li>
+    </ol>
+
+    <h3 class="font-bold mt-6 mb-2">2 · Remote controls</h3>
+    <ul class="text-sm text-gray-300 space-y-1.5 ml-1">
+      <li>⬅️ ➡️ ⬆️ ⬇️ — move between posters, buttons and episodes</li>
+      <li>✅ <b>OK</b> — open details / press ▶ Watch Now / start an episode</li>
+      <li>🔙 <b>Back</b> — close popup → back to browsing → exit app</li>
+      <li>On a movie popup, focus starts on <b>▶ Watch Now</b> — one OK press plays.</li>
+      <li>Change season/episode with the <b>‹ ›</b> steppers, never a dropdown.</li>
+    </ul>
+
+    <h3 class="font-bold mt-6 mb-2">3 · Smooth-playback tips</h3>
+    <ul class="text-sm text-gray-300 space-y-1.5 ml-1">
+      <li>📶 Use <b>5 GHz Wi-Fi or Ethernet</b> — 2.4 GHz stutters on HD streams.</li>
+      <li>🛡️ Keep <b>Ad Shield ON</b> (blocks popup ads and tab hijacks).</li>
+      <li>↻ If a video stalls, press <b>Reload</b> under the player, or try another episode/server.</li>
+      <li>🔌 Close other apps on cheap TV sticks to free RAM.</li>
+    </ul>
+
+    <h3 class="font-bold mt-6 mb-2">4 · Phone & tablet</h3>
+    <p class="text-sm text-gray-300">Open the website in Chrome/Safari → menu → <b>Add to Home Screen / Install</b>. No APK needed.</p>
+
+    <h3 class="font-bold mt-6 mb-2">Troubleshooting</h3>
+    <ul class="text-sm text-gray-300 space-y-1.5 ml-1">
+      <li><b>App not in launcher?</b> — check Settings → Apps → StreamBox, or reboot the TV.</li>
+      <li><b>Can't press Install?</b> — enable “Install unknown apps” for your file manager first.</li>
+      <li><b>Black player?</b> — press Reload; if it persists the stream server is down, try later.</li>
+      <li><b>Remote does nothing?</b> — press any arrow once to wake focus, then navigate.</li>
+    </ul>
+
+    <button onclick="closeTvGuide()" class="mt-7 bg-red-600 hover:bg-red-500 font-bold px-6 py-2.5 rounded-full">Got it ✓</button>
   </div>
 </div>
 
@@ -368,9 +420,10 @@ function cardEl(x, type){
       return;
     }
     if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
-      // Focus trap: when the details popup is open, the remote stays inside it
-      const modalOpen = !document.getElementById("modal").classList.contains("hidden");
-      const scope = modalOpen ? document.getElementById("modal") : document;
+      // Focus trap: when a popup is open, the remote stays inside it (guide wins over details)
+      const guideOpen = !document.getElementById("tvGuide").classList.contains("hidden");
+      const modalOpen = guideOpen || !document.getElementById("modal").classList.contains("hidden");
+      const scope = guideOpen ? document.getElementById("tvGuide") : (modalOpen ? document.getElementById("modal") : document);
       const items = [...scope.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
         .filter(el => el.offsetParent !== null && !el.disabled);
       if (!items.length) return;
@@ -410,12 +463,14 @@ function cardEl(x, type){
       } else if (modalOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
         // bottom/top of popup reached: scroll its content instead of doing nothing
         e.preventDefault();
-        const panel = document.querySelector("#modal > div");
+        const panel = document.querySelector("#tvGuide:not(.hidden) > div, #modal:not(.hidden) > div");
         if (panel) panel.scrollBy({ top: e.key === "ArrowDown" ? 240 : -240, behavior: "auto" });
       }
     }
-    // TV Back / Esc: close modal first, else go home
+    // TV Back / Esc: close guide, then details popup, else go home
     if (e.key === "Escape" || e.key === "Backspace" || e.keyCode === 461 || e.keyCode === 10009) {
+      const guide = document.getElementById("tvGuide");
+      if (guide && !guide.classList.contains("hidden")) { closeTvGuide(); e.preventDefault(); return; }
       const modal = document.getElementById("modal");
       if (modal && !modal.classList.contains("hidden")) { closeModal(); e.preventDefault(); return; }
       const watch = document.getElementById("watchView");
@@ -567,6 +622,19 @@ function closeModal(){
   document.body.classList.remove("modal-open");
   if (lastOpener && lastOpener.focus) { try { lastOpener.focus({ preventScroll: true }); } catch(e){} }
 }
+let guideOpener = null;
+function openTvGuide(ev){
+  if (ev) ev.preventDefault();
+  guideOpener = document.activeElement;
+  document.getElementById("tvGuide").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  setTimeout(()=>{ const b = document.querySelector("#tvGuide button"); if (b) b.focus(); }, 60);
+}
+function closeTvGuide(){
+  document.getElementById("tvGuide").classList.add("hidden");
+  if (document.getElementById("modal").classList.contains("hidden")) document.body.classList.remove("modal-open");
+  if (guideOpener && guideOpener.focus) { try { guideOpener.focus({ preventScroll: true }); } catch(e){} }
+}
 
 /* ---------- WATCH ---------- */
 async function openWatch(type, id, s=1, e=1){
@@ -658,6 +726,7 @@ function applyPlayerOpts(){ loadPlayer(); }
 
 function goHome(ev){
   if(ev) ev.preventDefault();
+  if (!document.getElementById("tvGuide").classList.contains("hidden")) closeTvGuide();
   if (!document.getElementById("modal").classList.contains("hidden")) closeModal();
   document.getElementById("watchView").classList.add("hidden");
   document.getElementById("homeView").classList.remove("hidden");
