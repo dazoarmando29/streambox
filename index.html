@@ -2,10 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="StreamBox">
+<meta name="application-name" content="StreamBox">
+<meta name="format-detection" content="telephone=no">
 <title>StreamBox - Watch Movies & TV Shows Free</title>
 <meta name="description" content="StreamBox — fast, free movies & TV shows. Search, browse trending, and watch HD with ad-shield player.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect x='2' y='6' width='44' height='36' rx='9' fill='%23e50914'/%3E%3Cpath d='M20 17.5v13l11-6.5z' fill='white'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="preconnect" href="https://api.themoviedb.org" crossorigin>
 <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
 <link rel="dns-prefetch" href="https://api.themoviedb.org">
@@ -15,15 +26,44 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   * { scrollbar-width: thin; scrollbar-color: #e50914 #111; }
-  body { background: #0a0a0f; color: #eee; font-family: Inter, Segoe UI, Arial, sans-serif; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: #0a0a0f; color: #eee; font-family: Inter, Segoe UI, Arial, sans-serif;
+    padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  nav { padding-top: calc(1rem + env(safe-area-inset-top, 0px)); }
   .row-scroll::-webkit-scrollbar { height: 8px; }
   .row-scroll::-webkit-scrollbar-thumb { background: #333; border-radius: 8px; }
-  .card { transition: transform .2s; cursor: pointer; }
+  .card { transition: transform .2s; cursor: pointer; border-radius: 12px; }
   .card:hover { transform: scale(1.06); z-index: 10; }
+  .card:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible {
+    outline: 3px solid #e50914; outline-offset: 2px;
+  }
+  .tv-focus { outline: 4px solid #e50914 !important; outline-offset: 3px; transform: scale(1.08); z-index: 20; }
   .hero-gradient { background: linear-gradient(to top, #0a0a0f 5%, transparent 60%), linear-gradient(to right, rgba(0,0,0,.85) 20%, transparent 70%); }
   .player-wrap { aspect-ratio: 16/9; background: #000; }
   iframe { border: 0; }
   .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  /* touch targets: min 44px for fingers + remotes */
+  button, select { min-height: 40px; }
+  #epGrid button { min-height: 44px; }
+  /* phones: tighter hero, full-width player controls */
+  @media (max-width: 640px) {
+    #hero { height: 62vh !important; }
+    .player-wrap { border-radius: 0; margin: 0 -1rem; }
+  }
+  /* tablets landscape: 2-col watch layout breathes */
+  @media (min-width: 641px) and (max-width: 1024px) {
+    #grid { grid-template-columns: repeat(4, minmax(0,1fr)); }
+  }
+  /* Android TV / large TV: bigger text + cards, show focus ring always */
+  .tv-mode { font-size: 18px; }
+  .tv-mode .card { min-width: 200px !important; max-width: 200px !important; }
+  .tv-mode h1 { font-size: 3rem !important; }
+  @media (min-width: 1600px), (pointer: coarse) and (min-width: 1100px) {
+    .card { min-width: 180px; }
+  }
 </style>
 </head>
 <body>
@@ -239,15 +279,100 @@ function makeRow(title, items, forceType){
 
 function cardEl(x, type){
   const d = document.createElement("div");
-  d.className = "card min-w-[130px] md:min-w-[160px] max-w-[130px] md:max-w-[160px]";
+  d.className = "card min-w-[130px] md:min-w-[160px] max-w-[130px] md:max-w-[160px] focusable";
+  d.tabIndex = 0;
+  d.setAttribute("role", "button");
+  d.setAttribute("aria-label", `${titleOf(x)} (${type})`);
+  d.setAttribute("data-focusable", "1");
   d.innerHTML = `
     <img loading="lazy" decoding="async" src="${IMG(x.poster_path,"w342")}" class="rounded-lg w-full aspect-[2/3] object-cover bg-white/5">
     <p class="text-xs mt-1.5 font-semibold truncate">${titleOf(x)}</p>
     <p class="text-[11px] text-gray-500">★ ${Number(x.vote_average||0).toFixed(1)} • ${yearOf(x)} • ${type.toUpperCase()}</p>`;
   d.onclick = () => openDetail(type, x.id);
   d.onmouseenter = preconnectCinesrc;
+  d.onfocus = preconnectCinesrc;
+  d.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openDetail(type, x.id); } };
   return d;
 }
+
+/* ---------- Devices: PWA + Android TV / tablets / iOS ---------- */
+(function setupDevices(){
+  // TV detection: Android TV, Fire TV, Tizen, WebOS, Smart TV UAs
+  const ua = navigator.userAgent || "";
+  const isTV = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVIA|Fire TV|AFT/i.test(ua) || new URLSearchParams(location.search).has("tv");
+  if (isTV) document.body.classList.add("tv-mode");
+  // mark static buttons focusable for D-pad
+  document.querySelectorAll("button, select, input, a").forEach(el => el.setAttribute("data-focusable", "1"));
+  // install prompt (Android Chrome): show Install button when available
+  let deferred = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault(); deferred = e;
+    try {
+      if (document.getElementById("installBtn")) return;
+      const b = document.createElement("button");
+      b.id = "installBtn";
+      b.textContent = "⤓ Install";
+      b.className = "text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full";
+      b.setAttribute("data-focusable", "1");
+      b.onclick = async () => { if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; b.remove(); } };
+      document.querySelector("nav").appendChild(b);
+    } catch(err){}
+  });
+  // service worker (offline shell + repeat-visit speed; skipped on file:// )
+  if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
+  }
+  // D-pad / arrow-key spatial navigation (Android TV remotes, keyboards)
+  document.addEventListener("keydown", (e) => {
+    const tag = (document.activeElement && document.activeElement.tagName) || "";
+    if (/INPUT|SELECT|TEXTAREA/.test(tag)) {
+      if (e.key === "Escape") document.activeElement.blur();
+      return;
+    }
+    if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
+      const items = [...document.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
+        .filter(el => el.offsetParent !== null && !el.disabled);
+      if (!items.length) return;
+      const cur = document.activeElement;
+      if (!cur || !items.includes(cur)) { items[0].focus(); e.preventDefault(); return; }
+      const r1 = cur.getBoundingClientRect();
+      const cx = r1.left + r1.width / 2, cy = r1.top + r1.height / 2;
+      let best = null, bestScore = Infinity;
+      for (const el of items) {
+        if (el === cur) continue;
+        const r = el.getBoundingClientRect();
+        const ex = r.left + r.width / 2, ey = r.top + r.height / 2;
+        const dx = ex - cx, dy = ey - cy;
+        let ok = false, primary = 0, secondary = 0;
+        if (e.key === "ArrowRight" && dx > 10) { ok = true; primary = dx; secondary = Math.abs(dy); }
+        if (e.key === "ArrowLeft" && dx < -10) { ok = true; primary = -dx; secondary = Math.abs(dy); }
+        if (e.key === "ArrowDown" && dy > 10) { ok = true; primary = dy; secondary = Math.abs(dx); }
+        if (e.key === "ArrowUp" && dy < -10) { ok = true; primary = -dy; secondary = Math.abs(dx); }
+        if (!ok) continue;
+        const score = primary + secondary * 2.5;
+        if (score < bestScore) { bestScore = score; best = el; }
+      }
+      if (best) {
+        e.preventDefault();
+        best.focus({ preventScroll: false });
+        best.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+        document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
+        best.classList.add("tv-focus");
+      }
+    }
+    // TV Back / Esc: close modal first, else go home
+    if (e.key === "Escape" || e.key === "Backspace" || e.keyCode === 461 || e.keyCode === 10009) {
+      const modal = document.getElementById("modal");
+      if (modal && !modal.classList.contains("hidden")) { closeModal(); e.preventDefault(); return; }
+      const watch = document.getElementById("watchView");
+      if (watch && !watch.classList.contains("hidden")) { goHome(e); e.preventDefault(); }
+    }
+  }, true);
+  document.addEventListener("focusin", (e) => {
+    document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
+    if (e.target && e.target.classList) e.target.classList.add("tv-focus");
+  });
+})();
 
 let heroIdx = 0, heroItems = [];
 function buildHero(items){
@@ -384,10 +509,11 @@ async function loadEpisodes(){
   const { id, s, e } = watchState;
   const d = await tmdb(`/tv/${id}/season/${s}`);
   const grid = document.getElementById("epGrid"); grid.innerHTML = "";
-  (d.episodes||[]).forEach(ep=>{
+    (d.episodes||[]).forEach(ep=>{
     const b = document.createElement("button");
     b.textContent = "E" + ep.episode_number;
     b.title = ep.name;
+    b.setAttribute("data-focusable", "1");
     b.className = "text-xs px-2 py-2 rounded-lg " + (ep.episode_number==e ? "bg-red-600 font-bold" : "bg-white/10 hover:bg-white/20");
     b.onclick = ()=>{ watchState.e = ep.episode_number; loadPlayer(); loadEpisodes(); saveContinue(); };
     grid.appendChild(b);
@@ -464,9 +590,14 @@ function renderContinue(){
     row.classList.remove("hidden"); grid.innerHTML = "";
     arr.forEach(x=>{
       const d = document.createElement("div");
-      d.className = "card min-w-[130px] max-w-[130px] relative";
-      d.innerHTML = `<img src="${IMG(x.poster)}" class="rounded-lg w-full aspect-[2/3] object-cover"><p class="text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p><button class="absolute top-1 right-1 bg-black/70 w-6 h-6 rounded-full text-xs">✕</button>`;
+      d.className = "card min-w-[130px] max-w-[130px] relative focusable";
+      d.tabIndex = 0;
+      d.setAttribute("role", "button");
+      d.setAttribute("data-focusable", "1");
+      d.setAttribute("aria-label", `${x.title||""} (${x.type})`);
+      d.innerHTML = `<img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" class="rounded-lg w-full aspect-[2/3] object-cover"><p class="text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p><button class="absolute top-1 right-1 bg-black/70 w-6 h-6 rounded-full text-xs" aria-label="Remove">✕</button>`;
       d.onclick = ()=>openWatch(x.type, x.id, x.s||1, x.e||1);
+      d.onkeydown = (ev)=>{ if(ev.key==="Enter"||ev.key===" "){ ev.preventDefault(); openWatch(x.type, x.id, x.s||1, x.e||1); } };
       d.querySelector("button").onclick = (ev)=>{ ev.stopPropagation(); removeContinue(x.type,x.id); };
       grid.appendChild(d);
     });
