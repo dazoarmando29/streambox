@@ -63,6 +63,8 @@
   @media (min-width: 641px) and (max-width: 1024px) {
     #grid { grid-template-columns: repeat(4, minmax(0,1fr)); }
   }
+  /* render speed: skip off-screen rows until needed */
+  #rows > div { content-visibility: auto; contain-intrinsic-size: auto 320px; }
   /* Android TV / large TV: bigger text + cards, show focus ring always */
   .tv-mode { font-size: 18px; }
   .tv-mode .card { min-width: 200px !important; max-width: 200px !important; }
@@ -133,6 +135,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     <button onclick="openTvGuide(event)" class="hover:text-white" title="How to install & use on TV">📺 TV Setup</button>
   </div>
   <div class="ml-auto flex gap-2 w-full md:w-auto">
+    <button onclick="openSearch(event)" aria-label="Open search" title="Search (TV-friendly)" class="shrink-0 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 border border-white/20">🔍</button>
     <input id="search" enterkeyhint="search" inputmode="search" autocomplete="off" placeholder="Search movies & shows..." class="w-full md:w-72 px-4 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm focus:border-teal-500" oninput="onSearch(this.value)">
   </div>
 </nav>
@@ -439,6 +442,28 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
   </div>
 </div>
 
+<!-- SEARCH WINDOW (TV-friendly overlay) -->
+<div id="searchPanel" class="hidden fixed inset-0 z-[68] bg-black/85 p-4" onclick="if(event.target===this)closeSearch()">
+  <div class="max-w-4xl mx-auto mt-[6vh] bg-[#131e35] border border-white/10 rounded-2xl p-4 md:p-5 max-h-[86vh] flex flex-col">
+    <div class="flex gap-2 items-center">
+      <span class="text-xl pl-1">🔍</span>
+      <input id="searchBox" enterkeyhint="search" inputmode="search" autocomplete="off" placeholder="Titles, shows…"
+        oninput="onOverlaySearch(this.value)"
+        class="flex-1 min-w-0 px-4 py-3 rounded-full bg-white/10 border border-white/20 outline-none text-base focus:border-teal-500">
+      <button onclick="closeSearch()" aria-label="Close search" class="w-11 h-11 shrink-0 rounded-full bg-black/50 hover:bg-black/80">✕</button>
+    </div>
+    <div id="recentWrap" class="mt-3">
+      <div class="flex items-center justify-between mb-1.5">
+        <p class="text-xs text-gray-400 font-bold">RECENT</p>
+        <button onclick="clearRecent()" class="text-[11px] text-gray-500 hover:text-gray-300">Clear</button>
+      </div>
+      <div id="recentRow" class="flex flex-wrap gap-2"></div>
+    </div>
+    <p id="searchHint" class="text-xs text-gray-500 mt-3">Type to search — use ↓ to jump into results, OK to open, Back to close.</p>
+    <div id="searchResults" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mt-2 overflow-y-auto pb-2"></div>
+  </div>
+</div>
+
 <script>
 /* Popup-ads safety net for our own page (iframe popups are blocked by sandbox above) */
 (function(){
@@ -475,8 +500,8 @@ function safeFocus(el){
   } catch(e){ return false; }
 }
 function topPopup(){
-  // topmost visible popup wins (drawers sit above guide, guide above details)
-  const ps = [...document.querySelectorAll("#epDrawer,#setPanel,#tvGuide,#modal")].filter(p => !p.classList.contains("hidden"));
+  // topmost visible popup wins (search sits above drawers, guide above all)
+  const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal")].filter(p => !p.classList.contains("hidden"));
   return ps.length ? ps[ps.length - 1] : null;
 }
 function dirOf(e){
@@ -651,9 +676,9 @@ function cardEl(x, type){
     const tag = (document.activeElement && document.activeElement.tagName) || "";
     if (/INPUT|SELECT|TEXTAREA/.test(tag)) {
       if (e.key === "Escape" || e.keyCode === 27) { document.activeElement.blur(); return; }
-      // TV: arrows leave the search box into results instead of being trapped
-      if ((dir === "down" || dir === "up") && document.activeElement.id === "search") {
-        const first = document.querySelector("#grid .card, #rows .card");
+      // TV: arrows leave search boxes into results instead of being trapped
+      if ((dir === "down" || dir === "up") && (document.activeElement.id === "search" || document.activeElement.id === "searchBox")) {
+        const first = document.querySelector("#searchPanel:not(.hidden) #searchResults .card, #grid .card, #rows .card");
         if (first) { e.preventDefault(); first.focus(); }
       }
       return;
@@ -758,6 +783,7 @@ function cardEl(x, type){
       if (top) {
         if (top.id === "tvGuide") closeTvGuide();
         else if (top.id === "modal") closeModal();
+        else if (top.id === "searchPanel") closeSearch();
         else closePanels();
         e.preventDefault(); return;
       }
@@ -816,7 +842,89 @@ function setHero(i){
   } catch(e){}
 }
 
-/* ---------- SEARCH / FILTER ---------- */
+/* ---------- SEARCH WINDOW (overlay) ---------- */
+let searchOpener = null, overlayTimer = null, overlayCtrl = null;
+let recentSearches = [];
+try { recentSearches = JSON.parse(localStorage.getItem("streambox_recent") || "[]"); } catch(e){ recentSearches = []; }
+function openSearch(ev){
+  if (ev) ev.preventDefault();
+  searchOpener = document.activeElement;
+  document.getElementById("searchPanel").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  renderRecent();
+  document.getElementById("searchResults").innerHTML = "";
+  document.getElementById("searchHint").textContent = "Type to search — use ↓ to jump into results, OK to open, Back to close.";
+  const box = document.getElementById("searchBox");
+  box.value = "";
+  setTimeout(() => safeFocus(box), 60);
+}
+function closeSearch(){
+  document.getElementById("searchPanel").classList.add("hidden");
+  try { if (overlayCtrl) overlayCtrl.abort(); } catch(e){}
+  clearTimeout(overlayTimer);
+  if (document.getElementById("modal").classList.contains("hidden")
+      && document.getElementById("tvGuide").classList.contains("hidden")
+      && document.getElementById("setPanel").classList.contains("hidden")
+      && document.getElementById("epDrawer").classList.contains("hidden"))
+    document.body.classList.remove("modal-open");
+  if (searchOpener && searchOpener.focus) { try { searchOpener.focus({ preventScroll: true }); } catch(e){} }
+}
+function onOverlaySearch(q){
+  clearTimeout(overlayTimer);
+  overlayTimer = setTimeout(() => runOverlaySearch(q.trim()), 400);
+}
+async function runOverlaySearch(q){
+  const grid = document.getElementById("searchResults");
+  const hint = document.getElementById("searchHint");
+  if (!q) { grid.innerHTML = ""; hint.textContent = "Type to search — use ↓ to jump into results, OK to open, Back to close."; return; }
+  try { if (overlayCtrl) overlayCtrl.abort(); } catch(e){}
+  overlayCtrl = new AbortController();
+  grid.innerHTML = `<p class="text-sm text-gray-500 col-span-full">Searching…</p>`;
+  try {
+    const r = await fetch(`${TMDB_BASE}/search/multi?query=${encodeURIComponent(q)}&include_adult=false&api_key=${TMDB_API_KEY}&language=en-US`, { signal: overlayCtrl.signal });
+    const data = await r.json();
+    const items = (data.results || []).filter(x => (x.media_type === "movie" || x.media_type === "tv") && x.poster_path);
+    grid.innerHTML = "";
+    hint.textContent = items.length ? `${items.length} result${items.length > 1 ? "s" : ""} — ↓ to browse, OK to open` : "No results found.";
+    items.slice(0, 30).forEach(x => {
+      const type = x.media_type === "tv" ? "tv" : "movie";
+      const card = cardEl(x, type);
+      const open = activatable(() => { saveRecent(q); closeSearch(); openDetail(type, x.id); });
+      card.onclick = open;
+      card.onkeydown = (ev) => { if (okPressed(ev)) { ev.preventDefault(); open(); } };
+      grid.appendChild(card);
+    });
+  } catch(e){ /* aborted or offline — ignore */ }
+}
+function saveRecent(q){
+  recentSearches = [q, ...recentSearches.filter(x => x.toLowerCase() !== q.toLowerCase())].slice(0, 8);
+  try { localStorage.setItem("streambox_recent", JSON.stringify(recentSearches)); } catch(e){}
+}
+function clearRecent(){
+  recentSearches = [];
+  try { localStorage.removeItem("streambox_recent"); } catch(e){}
+  renderRecent();
+}
+function renderRecent(){
+  const row = document.getElementById("recentRow");
+  const wrap = document.getElementById("recentWrap");
+  if (!row || !wrap) return;
+  row.innerHTML = "";
+  if (!recentSearches.length) { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
+  recentSearches.forEach(q => {
+    const b = document.createElement("button");
+    b.textContent = q;
+    b.className = "text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full truncate max-w-[160px]";
+    b.onclick = () => {
+      document.getElementById("searchBox").value = q;
+      runOverlaySearch(q);
+    };
+    row.appendChild(b);
+  });
+}
+
+/* ---------- SEARCH / FILTER (inline nav) ---------- */
 function onSearch(q){
   clearTimeout(searchTimer);
   searchTimer = setTimeout(async ()=>{
@@ -1106,6 +1214,7 @@ function goHome(ev){
   clearTimeout(window._tipT);
   exitVideoFs();
   closePanels();
+  if (!document.getElementById("searchPanel").classList.contains("hidden")) closeSearch();
   hideSubTip(false);
   if (!document.getElementById("tvGuide").classList.contains("hidden")) closeTvGuide();
   if (!document.getElementById("modal").classList.contains("hidden")) closeModal();
@@ -1381,6 +1490,7 @@ function closePanels(){
   document.getElementById("setPanel").classList.add("hidden");
   document.getElementById("epDrawer").classList.add("hidden");
   if (document.getElementById("modal").classList.contains("hidden")
+      && document.getElementById("searchPanel").classList.contains("hidden")
       && document.getElementById("tvGuide").classList.contains("hidden"))
     document.body.classList.remove("modal-open");
   if (panelOpener && panelOpener.focus) { try { panelOpener.focus({ preventScroll: true }); } catch(e){} }
