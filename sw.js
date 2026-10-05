@@ -1,5 +1,7 @@
-/* StreamBox service worker: offline app-shell + faster repeat loads */
-const CACHE = "streambox-v1";
+/* StreamBox service worker: offline app-shell + faster repeat loads.
+   Pages (navigations) are NETWORK-FIRST so site updates always reach you;
+   icons/manifest are cache-first. Bump CACHE on shell changes. */
+const CACHE = "streambox-v2";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -11,15 +13,26 @@ self.addEventListener("activate", (e) => {
       .then(() => self.clients.claim())
   );
 });
-// Cache-first for our own shell; network-first for everything else (TMDB / images / streams stay fresh)
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET") return;
-  if (url.origin === location.origin) {
-    e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE).then((c) => c.put(e.request, copy));
-      return res;
-    }).catch(() => caches.match("./index.html"))));
+  if (e.request.method !== "GET" || url.origin !== location.origin) return;
+  const isPage = e.request.mode === "navigate" || url.pathname.endsWith("index.html") || url.pathname === "/" || /\/streambox\/?$/.test(url.pathname);
+  if (isPage) {
+    // network-first: fresh HTML every visit, cached copy only when offline
+    e.respondWith(
+      fetch(e.request).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put("./index.html", copy));
+        return res;
+      }).catch(() => caches.match("./index.html"))
+    );
+  } else {
+    e.respondWith(
+      caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy));
+        return res;
+      }))
+    );
   }
 });
