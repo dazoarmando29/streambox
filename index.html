@@ -148,8 +148,15 @@
   <p class="splash-sub">Loading movies &amp; shows…</p>
 </div>
 
+<!-- UPDATE BANNER: shown when this copy is older than the live site -->
+<div id="updateBar" class="hidden fixed top-0 left-0 right-0 z-[95] bg-teal-500 text-[#0b1426] text-sm font-bold px-4 py-2.5 flex items-center gap-3">
+  <span class="flex-1">⬆ New StreamBox version available — refresh the page (TV app: reinstall / clear data) to get it.</span>
+  <button onclick="document.getElementById('updateBar').classList.add('hidden')" aria-label="Dismiss" class="shrink-0 w-8 h-8 rounded-full bg-black/20 font-black">✕</button>
+</div>
+
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
+const BUILD_NUM = 20; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -619,6 +626,18 @@ function hideSplash(){
   setTimeout(() => { try { s.remove(); } catch(e){} }, 500);
 }
 setTimeout(hideSplash, 15000); // failsafe: never trap users on the splash
+/* update checker: compares baked build against live version.txt (cache-busted,
+   so even a sticky service worker can't hide a new release) */
+async function checkUpdate(){
+  try {
+    const r = await fetch("version.txt?_=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return;
+    const n = parseInt((await r.text()).trim(), 10);
+    if (n > BUILD_NUM) document.getElementById("updateBar").classList.remove("hidden");
+  } catch(e){ /* offline — ignore */ }
+}
+checkUpdate();
+setInterval(checkUpdate, 30 * 60 * 1000);
 
 /* ---------- HOME ---------- */
 async function init(){
