@@ -171,8 +171,11 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 35; // bump every release alongside version.txt
-const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
+const BUILD_NUM = 36; // bump every release alongside version.txt
+/* key shards: base64 pieces stored reversed so the plaintext key never
+   appears in page source (inspect → Sources shows only these blobs) */
+const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
+const TMDB_API_KEY = atob(_sbk.map(s => s.split("").reverse().join("")).join(""));
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
 const CINESRC_MOVIE = id => `https://cinesrc.st/embed/movie/${id}`;
