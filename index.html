@@ -165,7 +165,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 30; // bump every release alongside version.txt
+const BUILD_NUM = 31; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -437,7 +437,20 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     </div>
 
     <div id="paneSubs" class="hidden">
-      <p class="text-xs text-gray-400 font-bold mb-2">MY SUBTITLES (YOUR FILE)</p>
+      <p class="text-xs text-gray-400 font-bold mb-2">SEARCH OPENSUBTITLES</p>
+      <div id="ostLangRow" class="flex flex-wrap gap-2 mb-2"></div>
+      <div id="ostResults" class="space-y-2 max-h-64 overflow-y-auto pr-1"></div>
+      <div class="bg-white/5 border border-white/10 rounded-xl p-3 mt-2">
+        <p class="text-xs font-bold mb-1">Downloads need login <span class="text-gray-500 font-normal">(this session only — never saved)</span></p>
+        <p id="ostLoginState" class="text-[11px] text-gray-500 mb-2">Not logged in.</p>
+        <div id="ostLoginForm" class="flex flex-col gap-2">
+          <input id="ostUser" placeholder="opensubtitles.org username" autocomplete="username" class="px-3 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm">
+          <input id="ostPass" type="password" placeholder="password" autocomplete="current-password" class="px-3 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm">
+          <button onclick="ostLogin()" class="h-10 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Log in</button>
+        </div>
+        <button id="ostLogoutBtn" onclick="ostLogout()" class="hidden h-10 px-4 rounded-full bg-white/10 hover:bg-white/20 text-sm">Log out</button>
+      </div>
+      <p class="text-xs text-gray-400 font-bold mt-5 mb-2">MY SUBTITLES (YOUR FILE)</p>
       <p id="subFileChip" class="text-sm text-gray-300 bg-white/5 border border-white/10 rounded-xl px-3 py-2">None loaded</p>
       <div class="flex flex-wrap gap-2 mt-2">
         <button onclick="document.getElementById('subFileInput').click()" class="px-4 h-10 rounded-full bg-teal-500 hover:bg-teal-400 text-sm font-bold">📁 Load .srt / .vtt</button>
@@ -1667,6 +1680,7 @@ function setTab(name){
     const b = document.getElementById("tab" + t[0].toUpperCase() + t.slice(1));
     b.className = "flex-1 py-2 rounded-full " + (t === name ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
   });
+  if (name === "subs") { paintOstLang(); paintOstLogin(); ostSearch(); }
 }
 /* speed presets */
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -1817,6 +1831,153 @@ function paintMirrors(){
   };
   mk("cinesrc", "CineSrc", true);
   mk("trailer", trailerKey ? "🎬 Trailer" : "🎬 …", !!trailerKey);
+}
+/* opensubtitles.org direct search + download (app key baked in; login is session-only) */
+const OST_KEY = "C26GvtZYlyCRF8b2iOLXAPQYWNcrhJW";
+const OST_BASE = "https://api.opensubtitles.com/api/v1";
+const OST_LANGS = [["en", "EN"], ["es", "ES"], ["fr", "FR"], ["de", "DE"], ["ar", "AR"], ["hi", "HI"], ["pt", "PT"]];
+let ostLang = "en", ostToken = null, ostUser = "";
+try { ostLang = localStorage.getItem("streambox_ost_lang") || "en"; } catch(e){}
+function ostHeaders(auth){
+  const h = { "Api-Key": OST_KEY, "Content-Type": "application/json" };
+  if (auth && ostToken) h.Authorization = "Bearer " + ostToken;
+  return h;
+}
+function paintOstLang(){
+  const row = document.getElementById("ostLangRow");
+  if (!row) return;
+  row.innerHTML = "";
+  OST_LANGS.forEach(([code, label]) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.className = "px-3 h-9 rounded-full text-xs font-bold " + (ostLang === code ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
+    b.onclick = () => {
+      ostLang = code;
+      try { localStorage.setItem("streambox_ost_lang", code); } catch(e){}
+      paintOstLang();
+      ostSearch();
+    };
+    row.appendChild(b);
+  });
+}
+async function ostSearch(){
+  const box = document.getElementById("ostResults");
+  if (!box) return;
+  box.innerHTML = `<p class="text-xs text-gray-500">Searching OpenSubtitles…</p>`;
+  try {
+    const q = new URLSearchParams({
+      tmdb_id: String(watchState.id), languages: ostLang,
+      order_by: "download_count", order_direction: "desc"
+    });
+    if (watchState.type === "tv") {
+      q.set("season_number", String(watchState.s));
+      q.set("episode_number", String(watchState.e));
+    }
+    const r = await fetch(`${OST_BASE}/subtitles?${q}`, { headers: ostHeaders(false) });
+    if (!r.ok) throw new Error("search failed (" + r.status + ")");
+    const j = await r.json();
+    const items = ((j && j.data) || []).slice(0, 12);
+    if (!items.length) {
+      box.innerHTML = `<p class="text-xs text-gray-500">No ${ostLang.toUpperCase()} subtitles found — try another language, or load a file below.</p>`;
+      return;
+    }
+    box.innerHTML = "";
+    items.forEach(it => {
+      const a = it.attributes || {};
+      const f = (a.files && a.files[0]) || {};
+      const row = document.createElement("div");
+      row.className = "bg-white/5 border border-white/10 rounded-xl p-3";
+      const rel = document.createElement("p");
+      rel.className = "text-sm font-bold truncate";
+      rel.textContent = a.release || a.file_name || ("#" + it.id);
+      const meta = document.createElement("p");
+      meta.className = "text-[11px] text-gray-500";
+      meta.textContent = `${a.language || ostLang.toUpperCase()} • ★ ${a.ratings || 0} • ⬇ ${a.download_count || 0}${a.hearing_impaired ? " • CC" : ""}`;
+      const b = document.createElement("button");
+      b.textContent = "⬇ Download";
+      b.className = "mt-2 px-4 h-9 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold";
+      b.onclick = () => ostDownload(f.file_id, a);
+      row.appendChild(rel);
+      row.appendChild(meta);
+      row.appendChild(b);
+      box.appendChild(row);
+    });
+  } catch(err) {
+    box.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "text-xs text-red-400";
+    p.textContent = "Search failed — check connection and try again.";
+    box.appendChild(p);
+  }
+}
+async function ostLogin(){
+  const u = document.getElementById("ostUser").value.trim();
+  const p = document.getElementById("ostPass").value;
+  const st = document.getElementById("ostLoginState");
+  if (!u || !p) { if (st) st.textContent = "Enter username + password."; return; }
+  if (st) st.textContent = "Logging in…";
+  try {
+    const r = await fetch(`${OST_BASE}/login`, {
+      method: "POST", headers: ostHeaders(false), body: JSON.stringify({ username: u, password: p })
+    });
+    if (!r.ok) throw new Error("Login failed (" + r.status + ") — check credentials.");
+    const j = await r.json();
+    if (!j.token) throw new Error("No token returned.");
+    ostToken = j.token;
+    ostUser = (j.user && j.user.username) || u;
+    document.getElementById("ostPass").value = "";
+    paintOstLogin();
+  } catch(err) { if (st) st.textContent = err.message || "Login failed."; }
+}
+function ostLogout(){
+  ostToken = null; ostUser = "";
+  paintOstLogin();
+}
+function paintOstLogin(){
+  const st = document.getElementById("ostLoginState");
+  const wrap = document.getElementById("ostLoginForm");
+  const lo = document.getElementById("ostLogoutBtn");
+  if (ostToken) {
+    if (wrap) wrap.classList.add("hidden");
+    if (st) st.textContent = `Logged in as ${ostUser} — downloads use your free quota (5/day)`;
+    if (lo) lo.classList.remove("hidden");
+  } else {
+    if (wrap) wrap.classList.remove("hidden");
+    if (st) st.textContent = "Not logged in — downloads need your opensubtitles.org account.";
+    if (lo) lo.classList.add("hidden");
+  }
+}
+async function ostDownload(fileId, attrs){
+  if (!fileId) return;
+  if (!ostToken) {
+    subStatus("Log in below first — OpenSubtitles needs your account for downloads.");
+    return;
+  }
+  subStatus("Downloading subtitle…");
+  try {
+    const r = await fetch(`${OST_BASE}/download`, {
+      method: "POST", headers: ostHeaders(true), body: JSON.stringify({ file_id: fileId })
+    });
+    if (!r.ok) {
+      if (r.status === 401) { ostToken = null; paintOstLogin(); throw new Error("Session expired — log in again."); }
+      if (r.status === 402 || r.status === 403 || r.status === 429) throw new Error("Download quota used up (free accounts: 5/day).");
+      throw new Error("Download failed (" + r.status + ").");
+    }
+    const j = await r.json();
+    if (!j.link) throw new Error("No file link returned.");
+    const fr = await fetch(j.link);
+    if (!fr.ok) throw new Error("Couldn't fetch the subtitle file.");
+    const text = await fr.text();
+    const cues = parseSubs(text);
+    if (!cues.length) throw new Error("File downloaded but unreadable.");
+    const lang = (attrs && attrs.language) || ostLang.toUpperCase();
+    setSubs({ name: (j.file_name || "opensubtitles.srt"), lang, cues,
+      pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+    const left = (typeof j.remaining === "number") ? ` (${j.remaining} left today)` : "";
+    subStatus(`Loaded ${cues.length} lines (${lang})${left}.`);
+  } catch(err) {
+    subStatus((err && err.message) || "Download failed. You can still load a file manually below.");
+  }
 }
 /* my subtitles: external .srt/.vtt files with position + sync control */
 let subFile = null;
