@@ -156,7 +156,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 22; // bump every release alongside version.txt
+const BUILD_NUM = 23; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -433,13 +433,9 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 
     <div id="paneSubs" class="hidden">
       <p class="text-xs text-gray-400 font-bold mb-2">SUBTITLES</p>
-      <p class="text-sm text-gray-300 leading-relaxed">Subtitle tracks live inside the video player's own menu — outside apps can't switch them.</p>
-      <ol class="text-sm text-gray-300 mt-2 space-y-1 list-decimal ml-5">
-        <li>Press the button below (same as 🎯 Player).</li>
-        <li>Move to the <b>CC icon</b> or open <b>⚙ → Subtitles</b>.</li>
-        <li>Pick a language, then <b>Back</b> returns here.</li>
-      </ol>
-      <button onclick="closePanels();focusPlayer(true)" class="mt-4 w-full py-2.5 rounded-full bg-teal-500 hover:bg-teal-400 font-bold text-sm">Open player menu</button>
+      <p class="text-sm text-gray-300 leading-relaxed">Our player is subtitles-safe: captions show automatically. To change language or toggle tracks, briefly show the video's own buttons, use its <b>CC / ⚙ → Subtitles</b> menu, then hide them again — position is kept.</p>
+      <button id="pctlBtnSubs" onclick="togglePControls()" class="mt-3 w-full py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Video buttons: Hidden</button>
+      <button onclick="closePanels();focusPlayer(true)" class="mt-2 w-full py-2.5 rounded-full bg-teal-500 hover:bg-teal-400 font-bold text-sm">Open player menu</button>
       <p class="text-[11px] text-gray-500 mt-2">No languages listed? That server carries no subs — try ⇄ Source on the watch screen.</p>
     </div>
 
@@ -459,9 +455,11 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       </div>
       <div class="flex flex-col gap-2 mt-4">
         <button onclick="otherSource()" class="py-2.5 rounded-full bg-teal-500 hover:bg-teal-400 font-bold text-sm">⇄ Try another source</button>
+        <button id="pctlBtn" onclick="togglePControls()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Video buttons: Hidden</button>
         <button onclick="forgetServer()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Forget preferred server (Auto)</button>
         <button onclick="reloadPlayer()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">↻ Reload player</button>
       </div>
+      <p class="text-[11px] text-gray-500 mt-3">One player only: ours. The video's own buttons stay hidden unless you need its ⚙/CC menus.</p>
       <p class="text-[11px] text-gray-500 mt-3">The server list lives inside the player — StreamBox only remembers your last working one to start faster.</p>
     </div>
   </div>
@@ -778,27 +776,31 @@ function cardEl(x, type){
     }
     if (dir) {
       pokeHud(); // every keypress restarts the 4s idle clock
-      // native fullscreen: first press after idle (or with focus lost) only
-      // wakes the HUD — never fires blind. Once awake, arrows walk the buttons.
-      // Volume keys are gone by request: volume lives in ⚙ Settings.
-      // fallback cinema keeps our bar visible, so arrows navigate it instead.
+      // native fullscreen: Left/Right ALWAYS skip, Up/Down summon the buttons.
+      // Once focus sits on the on-screen buttons, arrows walk them instead
+      // (so ⚙/⛶ stay reachable). Volume moved to ⚙ Settings by request.
       let fsBox = null;
       try {
         if (document.fullscreenElement) {
           const hudHidden = document.getElementById("fsHud").classList.contains("hud-hidden");
           const f = document.activeElement;
           const box = document.getElementById("playerBox");
-          if (!hudHidden && f && f !== document.getElementById("player") && box.contains(f)) fsBox = box;
-          else {
+          const inHud = !hudHidden && f && f !== document.getElementById("player") && box.contains(f);
+          if (!inHud && (dir === "left" || dir === "right")) {
+            e.preventDefault();
+            if (dir === "left") ctlSeekRel(-10); else ctlSeekRel(30);
+            return;
+          }
+          if (!inHud) {
             e.preventDefault();
             safeFocus(document.getElementById("fsHudPlay"));
             return;
           }
+          fsBox = box;
         }
       } catch(err){}
       // Focus trap: popup wins, else fallback-fullscreen locks to our bar,
       // else native-fullscreen HUD, else the whole page.
-      // Focus trap: popup wins, else fallback-fullscreen locks to our bar.
       // Range/color inputs are NEVER arrow targets: on remotes they swallow
       // Left/Right (scrubbing forever) and can strand focus with no way out.
       const top = topPopup();
@@ -1209,6 +1211,25 @@ try {
   const qi = QLEVELS.findIndex(x => x.v === savedQ);
   if (qi >= 0) qIdx = qi;
 } catch(e){}
+/* single-player mode: hide the video's own button bar, ours is the player.
+   (Its ⚙/CC menus go with it — re-show below any time for subtitles.) */
+let pControls = false;
+try { pControls = localStorage.getItem("streambox_pcontrols") === "1"; } catch(e){}
+let resumeAt = -1; // reload (quality/server/buttons) resumes where you left off
+function reloadKeepPos(){ resumeAt = Math.max(0, Math.floor(pState.cur || 0)); loadPlayer(); }
+function togglePControls(){
+  pControls = !pControls;
+  try { localStorage.setItem("streambox_pcontrols", pControls ? "1" : "0"); } catch(e){}
+  paintPControls();
+  reloadKeepPos();
+}
+function paintPControls(){
+  const t = pControls ? "Video buttons: Shown" : "Video buttons: Hidden";
+  ["pctlBtn", "pctlBtnSubs"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = t;
+  });
+}
 function fsSettings(){
   // HUD shortcut: swap true fullscreen for cinema (video stays big),
   // then open settings on top of it
@@ -1227,14 +1248,16 @@ function qualityStep(dir){
   qIdx = (qIdx + dir + QLEVELS.length) % QLEVELS.length;
   paintQuality();
   try { localStorage.setItem("streambox_quality", QLEVELS[qIdx].v); } catch(e){}
-  // debounce remote repeats: reload once the user settles
+  // debounce remote repeats: reload once the user settles (keeps position)
   clearTimeout(window._qT);
-  window._qT = setTimeout(loadPlayer, 500);
+  window._qT = setTimeout(reloadKeepPos, 500);
 }
 function buildEmbedUrlClean(){
   const color = encodeURIComponent(document.getElementById("optColor").value||"#14b8a6");
   let p = `autoplay=${document.getElementById("optAutoplay").checked}&autonext=${document.getElementById("optAutonext").checked}&autoskip=${document.getElementById("optAutoskip").checked}&color=${color}`;
   if (QLEVELS[qIdx].v) p += `&quality=${QLEVELS[qIdx].v}`;
+  p += `&controls=${pControls ? "true" : "false"}`;
+  if (resumeAt >= 0) { p += `&t=${resumeAt}&continueprompt=false`; resumeAt = -1; }
   // remember the last working server so repeat watches start faster
   try {
     const ls = localStorage.getItem("streambox_lastserver");
@@ -1249,8 +1272,9 @@ function loadPlayer(){
   const spin = document.getElementById("playerSpin");
   if (spin) spin.style.display = "grid";
   const f = document.getElementById("player");
-  // cache-bust only when re-loading same URL so back-to-back episode clicks always refresh
-  f.src = buildEmbedUrlClean() + (buildEmbedUrlClean().includes("?") ? "&" : "?") + "_=" + Date.now();
+  // cache-bust so back-to-back reloads always refresh (keeps position via &t=)
+  const _u = buildEmbedUrlClean();
+  f.src = _u + (_u.includes("?") ? "&" : "?") + "_=" + Date.now();
   const { type, s, e } = watchState;
   document.getElementById("watchStatus").textContent = type==="tv" ? `Now playing S${s} E${e}` : "Now playing";
   // fallback: hide spinner after 12s even if player never fires ready (ad-blocked network etc.)
@@ -1261,19 +1285,19 @@ function loadPlayer(){
 }
 function reloadPlayer(){ loadPlayer(); }
 function otherSource(){
-  // wrong film / broken stream? forget the pinned server and re-pick
+  // wrong film / broken stream? forget the pinned server and re-pick (keeps position)
   try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
   document.getElementById("watchStatus").textContent = "Trying another source…";
-  loadPlayer();
+  reloadKeepPos();
 }
 function toggleShield(){
   const on = document.getElementById("optShield").checked;
   const f = document.getElementById("player");
   // Shield ON = sandbox without popups/top-navigation. OFF = allow popups (only if a server breaks).
   f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-modals");
-  loadPlayer();
+  reloadKeepPos();
 }
-function applyPlayerOpts(){ loadPlayer(); }
+function applyPlayerOpts(){ reloadKeepPos(); }
 
 function goHome(ev){
   if(ev) ev.preventDefault();
@@ -1669,12 +1693,12 @@ function sleepTick(){
 }
 /* servers tab */
 function paintSettings(){
-  paintSpeed(); paintVol(); paintSleep();
+  paintSpeed(); paintVol(); paintSleep(); paintPControls(); paintQuality();
   try {
     document.getElementById("srvCur").textContent = pState.server || "auto";
     document.getElementById("srvPin").textContent = localStorage.getItem("streambox_lastserver") || "none";
   } catch(e){}
-  paintQuality();
+}
 }
 function forgetServer(){
   try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
