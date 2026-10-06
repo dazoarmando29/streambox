@@ -56,8 +56,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk streambox.apk
-          gh release delete latest --cleanup-tag -y || true
-          gh release create latest --prerelease \
-            --title "StreamBox latest APK" \
-            --notes "Auto-built from main (${{ github.sha }}). Uninstall the old app on your TV first, then install this file." \
-            streambox.apk
+          # retry loop: the releases API occasionally flakes (delete-then-create
+          # must both succeed, otherwise the old tag blocks the create)
+          for i in 1 2 3 4 5; do
+            gh release delete latest --cleanup-tag -y >/dev/null 2>&1 || true
+            sleep 3
+            if gh release create latest --prerelease \
+              --title "StreamBox latest APK" \
+              --notes "Auto-built from main (${{ github.sha }}). Uninstall the old app on your TV first, then install this file." \
+              streambox.apk; then
+              break
+            fi
+            echo "release publish attempt $i failed, retrying…"
+            sleep 10
+          done
+          gh release view latest --json tagName,publishedAt,url
