@@ -171,7 +171,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 33; // bump every release alongside version.txt
+const BUILD_NUM = 34; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -219,7 +219,9 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
   <!-- SEARCH / BROWSE GRID -->
   <main id="gridView" class="hidden px-4 md:px-10 pt-24 pb-20">
     <h2 id="gridTitle" class="text-xl font-bold mb-4"></h2>
+    <div id="genreRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
+    <button id="loadMoreBtn" onclick="browseMore()" class="hidden mx-auto mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 font-bold text-sm">Load more ↓</button>
   </main>
 </div>
 
@@ -1103,6 +1105,8 @@ function showGrid(title, items){
   document.getElementById("rows").classList.add("hidden");
   document.getElementById("hero").classList.add("hidden");
   document.getElementById("continueRow").classList.add("hidden");
+  document.getElementById("genreRow").classList.add("hidden");
+  document.getElementById("loadMoreBtn").classList.add("hidden");
   const gv = document.getElementById("gridView");
   gv.classList.remove("hidden");
   document.getElementById("gridTitle").textContent = title;
@@ -1120,10 +1124,93 @@ function showRows(){
   renderContinue();
 }
 async function filterType(type, ev){
-  if(ev) ev.preventDefault();
+  openBrowse(type, ev);
+}
+/* ---------- GENRE BROWSING (Movies + TV Shows categories) ---------- */
+let browse = { type: "movie", genre: 0, page: 0, totalPages: 1, loading: false };
+let genreCache = {};
+async function getGenres(type){
+  if (genreCache[type]) return genreCache[type];
+  const d = await tmdb(`/genre/${type}/list`);
+  genreCache[type] = (d && d.genres) || [];
+  return genreCache[type];
+}
+async function openBrowse(type, ev){
+  if (ev) ev.preventDefault();
   if (!document.getElementById("watchView").classList.contains("hidden")) goHome();
-  const r = await tmdb(type==="movie" ? "/movie/popular" : "/tv/popular");
-  showGrid(type==="movie" ? "Popular Movies" : "Popular TV Shows", r.results.map(x=>({...x, media_type:type})));
+  browse = { type, genre: 0, page: 0, totalPages: 1, loading: false };
+  document.getElementById("rows").classList.add("hidden");
+  document.getElementById("hero").classList.add("hidden");
+  document.getElementById("continueRow").classList.add("hidden");
+  document.getElementById("gridView").classList.remove("hidden");
+  document.getElementById("gridTitle").textContent = type === "movie" ? "Movies" : "TV Shows";
+  document.getElementById("grid").innerHTML = "";
+  const row = document.getElementById("genreRow");
+  row.classList.remove("hidden");
+  row.innerHTML = `<p class="text-xs text-gray-500 py-2">Loading categories…</p>`;
+  document.getElementById("loadMoreBtn").classList.add("hidden");
+  window.scrollTo(0, 0);
+  try {
+    const genres = await getGenres(type);
+    row.innerHTML = "";
+    const all = document.createElement("button");
+    all.textContent = "All";
+    all.dataset.genre = "0";
+    all.onclick = () => setGenre(0);
+    row.appendChild(all);
+    genres.forEach(g => {
+      const b = document.createElement("button");
+      b.textContent = g.name;
+      b.dataset.genre = String(g.id);
+      b.onclick = () => setGenre(g.id);
+      row.appendChild(b);
+    });
+    paintChips();
+  } catch(e){
+    row.innerHTML = `<p class="text-xs text-gray-500 py-2">Categories unavailable — showing popular.</p>`;
+  }
+  browseMore(true);
+}
+function paintChips(){
+  document.querySelectorAll("#genreRow button").forEach(b => {
+    const active = Number(b.dataset.genre) === browse.genre;
+    b.className = "shrink-0 px-4 h-10 rounded-full text-sm font-bold " + (active ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
+  });
+}
+async function setGenre(id){
+  browse.genre = Number(id) || 0;
+  browse.page = 0;
+  browse.totalPages = 1;
+  document.getElementById("grid").innerHTML = "";
+  paintChips();
+  browseMore(true);
+}
+async function browseMore(focusFirst){
+  if (browse.loading || browse.page >= browse.totalPages) return;
+  browse.loading = true;
+  const btn = document.getElementById("loadMoreBtn");
+  btn.classList.add("hidden");
+  const next = browse.page + 1;
+  try {
+    const g = browse.genre ? `&with_genres=${browse.genre}` : "";
+    const d = await tmdb(`/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}&page=${next}`);
+    browse.page = next;
+    browse.totalPages = d.total_pages || 1;
+    const grid = document.getElementById("grid");
+    (d.results || []).filter(x => x.poster_path).forEach(x => {
+      grid.appendChild(cardEl({ ...x, media_type: browse.type }, browse.type));
+    });
+    if (browse.page < browse.totalPages) btn.classList.remove("hidden");
+    if (focusFirst) {
+      const first = grid.querySelector(".card");
+      if (first && document.body.classList.contains("tv-mode")) first.focus();
+    }
+  } catch(e){
+    const grid = document.getElementById("grid");
+    if (!grid.children.length) grid.innerHTML = "<p class='text-gray-500'>Couldn't load titles. Check connection.</p>";
+    else btn.classList.remove("hidden");
+  }
+  browse.loading = false;
 }
 function showContinue(ev){ if(ev) ev.preventDefault(); goHome(ev); document.getElementById("continueRow").scrollIntoView({behavior: document.body.classList.contains("tv-mode") ? "auto" : "smooth"}); }
 
