@@ -25,6 +25,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Fresh-start guarantee: once per app version, wipe WebView data
+        // (cache, DOM storage, service workers) BEFORE creating the WebView,
+        // so the first launch after every update can never serve stale pages.
+        freshStartIfNewVersion();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         FrameLayout root = new FrameLayout(this);
@@ -110,6 +114,30 @@ public class MainActivity extends Activity {
         } else {
             web.loadUrl(HOME);
         }
+    }
+
+    /** Wipes WebView profile + cache once per app version (first launch only). */
+    private void freshStartIfNewVersion() {
+        String ver;
+        try {
+            ver = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            ver = "0";
+        }
+        android.content.SharedPreferences prefs = getSharedPreferences("streambox", MODE_PRIVATE);
+        if (ver.equals(prefs.getString("fresh_cleared_for", ""))) return;
+        deleteRecursive(new java.io.File(getApplicationInfo().dataDir, "app_webview"));
+        deleteRecursive(getCacheDir());
+        prefs.edit().putString("fresh_cleared_for", ver != null ? ver : "0").apply();
+    }
+
+    private static void deleteRecursive(java.io.File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            java.io.File[] kids = f.listFiles();
+            if (kids != null) for (java.io.File k : kids) deleteRecursive(k);
+        }
+        try { f.delete(); } catch (Exception ignored) {}
     }
 
     @Override
