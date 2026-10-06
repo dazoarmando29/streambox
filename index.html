@@ -48,6 +48,14 @@
   iframe { border: 0; }
   #ctlBar { transition: opacity .3s; }
   #ctlBar.bar-hidden { opacity: 0; pointer-events: none; }
+  /* our caption overlay: readable anywhere on the picture */
+  #capOverlay { position: absolute; left: 0; right: 0; z-index: 5; display: none;
+    text-align: center; pointer-events: none; padding: 0 8%;
+    font-weight: 700; font-size: clamp(15px, 2.6vw, 24px); line-height: 1.35; color: #fff;
+    text-shadow: 0 2px 4px #000, 0 0 12px rgba(0,0,0,.9); }
+  #capOverlay.cap-bottom { bottom: 12%; }
+  #capOverlay.cap-center { top: 44%; }
+  #capOverlay.cap-top { top: 10%; }
   /* the bar floats over the video (all modes): no strips, no covered captions */
   #playerBox #ctlBar {
     position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
@@ -157,7 +165,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 29; // bump every release alongside version.txt
+const BUILD_NUM = 30; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -225,6 +233,8 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
           allowfullscreen allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
           referrerpolicy="strict-origin-when-cross-origin" loading="eager"
           sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"></iframe>
+        <!-- our own caption overlay (external subtitle files) -->
+        <div id="capOverlay" class="cap-bottom"></div>
         <!-- trailer mode chip (control bar hides; trailers need no controls) -->
         <div id="trailerBar" class="hidden absolute top-3 left-3 z-[7] flex items-center gap-2 bg-black/70 rounded-full pl-4 pr-1.5 py-1.5 text-xs">
           <span>🎬 Trailer</span>
@@ -427,7 +437,34 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     </div>
 
     <div id="paneSubs" class="hidden">
-      <p class="text-xs text-gray-400 font-bold mb-2">SUBTITLES</p>
+      <p class="text-xs text-gray-400 font-bold mb-2">MY SUBTITLES (YOUR FILE)</p>
+      <p id="subFileChip" class="text-sm text-gray-300 bg-white/5 border border-white/10 rounded-xl px-3 py-2">None loaded</p>
+      <div class="flex flex-wrap gap-2 mt-2">
+        <button onclick="document.getElementById('subFileInput').click()" class="px-4 h-10 rounded-full bg-teal-500 hover:bg-teal-400 text-sm font-bold">📁 Load .srt / .vtt</button>
+        <button onclick="toggleSubPaste()" class="px-4 h-10 rounded-full bg-white/10 hover:bg-white/20 text-sm">✏ Paste text</button>
+        <button onclick="clearSubs()" class="px-4 h-10 rounded-full bg-white/10 hover:bg-white/20 text-sm">Clear</button>
+      </div>
+      <input type="file" id="subFileInput" accept=".srt,.vtt,.txt" class="hidden" onchange="loadSubFile(this)">
+      <div id="subPasteWrap" class="hidden mt-2">
+        <textarea id="subPaste" rows="4" placeholder="Paste SRT or VTT text here…" class="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 outline-none text-sm"></textarea>
+        <button onclick="savePastedSubs()" class="mt-2 px-4 h-10 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Use pasted subtitles</button>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 mt-3 text-sm">
+        <span class="text-xs text-gray-400">Position</span>
+        <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
+          <button onclick="subPosStep(-1)" aria-label="Move captions up" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
+          <span id="subPosLabel" class="text-xs font-bold min-w-[64px] text-center">Bottom</span>
+          <button onclick="subPosStep(1)" aria-label="Move captions down" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
+        </div>
+        <span class="text-xs text-gray-400">Sync</span>
+        <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
+          <button onclick="subOffsetStep(-0.5)" aria-label="Captions earlier" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">−</button>
+          <span id="subOffLabel" class="text-xs font-bold min-w-[56px] text-center">+0.0s</span>
+          <button onclick="subOffsetStep(0.5)" aria-label="Captions later" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">+</button>
+        </div>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-2">Download any subtitle from opensubtitles.org, load it once — it sticks to that title. Fixes missing subs, wrong language, and bad timing.</p>
+      <p class="text-xs text-gray-400 font-bold mt-5 mb-2">PLAYER SUBTITLES</p>
       <p class="text-sm text-gray-300 leading-relaxed">Our player is subtitles-safe: captions show automatically. To change language or toggle tracks, briefly show the video's own buttons, use its <b>CC / ⚙ → Subtitles</b> menu, then hide them again — position is kept.</p>
       <button id="pctlBtnSubs" onclick="togglePControls()" class="mt-3 w-full py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Video buttons: Hidden</button>
       <button onclick="closePanels();focusPlayer(true)" class="mt-2 w-full py-2.5 rounded-full bg-teal-500 hover:bg-teal-400 font-bold text-sm">Open player menu</button>
@@ -1162,6 +1199,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   else { try { document.getElementById("playerBox").scrollIntoView({ block: "center", behavior: "smooth" }); } catch(e){} }
   paintQuality();
   fetchTrailer(type, id); // non-blocking: trailer button appears when found
+  loadStoredSubs(); // auto-attach this title's remembered subtitle file
   let d;
   try {
     d = await tmdb(`/${type}/${id}?append_to_response=credits`);
@@ -1474,6 +1512,7 @@ function ctlPaint(){
   document.getElementById("ctlDur").textContent = fmtT(pState.dur);
   const _rem = Math.max(0, (pState.dur || 0) - (pState.cur || 0));
   document.getElementById("ctlRemain").textContent = pState.dur > 0 ? "• ends in " + fmtT(_rem) : "";
+  paintCaps();
   if (!pState.seeking && pState.dur > 0) {
     document.getElementById("ctlSeek").value = Math.round(pState.cur / pState.dur * 1000);
   }
@@ -1778,6 +1817,177 @@ function paintMirrors(){
   };
   mk("cinesrc", "CineSrc", true);
   mk("trailer", trailerKey ? "🎬 Trailer" : "🎬 …", !!trailerKey);
+}
+/* my subtitles: external .srt/.vtt files with position + sync control */
+let subFile = null;
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function toSecs(s){
+  const m = String(s).trim().match(/(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})/);
+  if (!m) return 0;
+  return (+(m[1] || 0)) * 3600 + (+m[2]) * 60 + (+m[3]) + (+("0." + (m[4] || "0")));
+}
+function parseSubs(text){
+  const out = [];
+  text = String(text || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  const lines = text.split("\n");
+  let i = 0, cur = null;
+  if (lines[0] && /^WEBVTT/i.test(lines[0])) i = 1;
+  const push = () => { if (cur && cur.lines.length) out.push(cur); cur = null; };
+  for (; i < lines.length; i++) {
+    const ln = lines[i];
+    if (/^\s*$/.test(ln)) { push(); continue; }
+    if (/^(NOTE|STYLE|REGION)\b/i.test(ln)) {
+      while (i + 1 < lines.length && !/^\s*$/.test(lines[i + 1])) i++;
+      continue;
+    }
+    if (/(\d{1,2}:)?\d{1,2}:\d{2}[.,]\d{1,3}\s*-->\s*(\d{1,2}:)?\d{1,2}:\d{2}[.,]\d{1,3}/.test(ln)) {
+      push();
+      const parts = ln.split("-->");
+      cur = { s: toSecs(parts[0]), e: toSecs(parts[1]), lines: [] };
+      continue;
+    }
+    if (/^\d+$/.test(ln.trim()) && !cur) continue;
+    if (cur) cur.lines.push(ln.trim());
+  }
+  push();
+  return out
+    .map(c => ({ s: c.s, e: c.e, text: c.lines.join("\n").replace(/<[^>]*>/g, "").trim() }))
+    .filter(c => c.text && c.e > c.s);
+}
+function guessLang(name){
+  const n = (name || "").toLowerCase();
+  const map = [["english", "English"], [".en.", "English"], [".eng.", "English"], ["spanish", "Spanish"],
+    ["french", "French"], ["arabic", "Arabic"], ["hindi", "Hindi"], ["tagalog", "Tagalog"],
+    ["filipino", "Filipino"], ["german", "German"], ["portuguese", "Portuguese"], ["italian", "Italian"],
+    ["japanese", "Japanese"], ["korean", "Korean"], ["chinese", "Chinese"], ["urdu", "Urdu"]];
+  for (const [k, v] of map) if (n.includes(k)) return v;
+  return "Custom";
+}
+function subStorageKey(){
+  return `sb_sub_${watchState.type}_${watchState.id}_${watchState.s || 0}_${watchState.e || 0}`;
+}
+function setSubs(o, remember = true){
+  subFile = o;
+  if (remember && o) {
+    try { localStorage.setItem(subStorageKey(), JSON.stringify(o)); }
+    catch(e){ subStatus("Loaded, but too big to remember on this device."); }
+  }
+  paintSubsUI();
+  paintCaps(true);
+}
+function loadStoredSubs(){
+  subFile = null;
+  try {
+    const raw = localStorage.getItem(subStorageKey());
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && o.cues && o.cues.length) subFile = o;
+    }
+  } catch(e){}
+  paintSubsUI();
+  paintCaps(true);
+}
+function loadSubFile(input){
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const cues = parseSubs(rd.result);
+    if (!cues.length) { subStatus("Couldn't read that file — is it .srt or .vtt?"); return; }
+    setSubs({ name: f.name, lang: guessLang(f.name), cues,
+      pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+    subStatus(`Loaded ${cues.length} lines.`);
+  };
+  rd.readAsText(f);
+  input.value = "";
+}
+function toggleSubPaste(){
+  document.getElementById("subPasteWrap").classList.toggle("hidden");
+}
+function savePastedSubs(){
+  const txt = document.getElementById("subPaste").value || "";
+  const cues = parseSubs(txt);
+  if (!cues.length) { subStatus("Nothing readable pasted — need SRT/VTT text."); return; }
+  setSubs({ name: "pasted.txt", lang: "Custom", cues,
+    pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+  document.getElementById("subPasteWrap").classList.add("hidden");
+  document.getElementById("subPaste").value = "";
+  subStatus(`Loaded ${cues.length} lines.`);
+}
+function clearSubs(){
+  subFile = null;
+  try { localStorage.removeItem(subStorageKey()); } catch(e){}
+  paintSubsUI();
+  paintCaps(true);
+}
+function subStatus(msg){
+  const ws = document.getElementById("watchStatus");
+  if (ws) ws.textContent = msg;
+}
+const SUBPOS = ["top", "center", "bottom"];
+function subPosStep(d){
+  if (!subFile) { subStatus("Load a subtitle file first."); return; }
+  const order = ["bottom", "center", "top"];
+  let i = order.indexOf(subFile.pos);
+  if (i < 0) i = 0;
+  // ‹ moves up the screen, › moves down
+  subFile.pos = order[(i - d + order.length) % order.length];
+  persistSubs();
+  paintSubsUI();
+  paintCaps(true);
+}
+function subOffsetStep(d){
+  if (!subFile) { subStatus("Load a subtitle file first."); return; }
+  subFile.offset = Math.round(((subFile.offset || 0) + d) * 10) / 10;
+  if (subFile.offset > 30) subFile.offset = 30;
+  if (subFile.offset < -30) subFile.offset = -30;
+  persistSubs();
+  paintSubsUI();
+  paintCaps(true);
+}
+function persistSubs(){
+  if (!subFile) return;
+  try { localStorage.setItem(subStorageKey(), JSON.stringify(subFile)); } catch(e){}
+}
+function paintSubsUI(){
+  const chip = document.getElementById("subFileChip");
+  if (chip) {
+    chip.textContent = subFile
+      ? `${subFile.name} • ${subFile.lang} • ${subFile.cues.length} lines`
+      : "None loaded";
+  }
+  const pl = document.getElementById("subPosLabel");
+  if (pl) pl.textContent = subFile
+    ? subFile.pos[0].toUpperCase() + subFile.pos.slice(1) : "Bottom";
+  const ol = document.getElementById("subOffLabel");
+  if (ol) {
+    const o = (subFile && subFile.offset) || 0;
+    ol.textContent = (o >= 0 ? "+" : "") + o.toFixed(1) + "s";
+  }
+}
+function paintCaps(force){
+  const ov = document.getElementById("capOverlay");
+  if (!ov) return;
+  let html = "";
+  if (subFile && subFile.cues && subFile.cues.length
+      && !document.getElementById("watchView").classList.contains("hidden")
+      && mirror === "cinesrc") {
+    const t = (pState.cur || 0) + (subFile.offset || 0);
+    for (let i = 0; i < subFile.cues.length; i++) {
+      const c = subFile.cues[i];
+      if (t >= c.s && t <= c.e) { html = c.text.split("\n").map(escapeHtml).join("<br>"); break; }
+      if (c.s > t) break;
+    }
+  }
+  if (force || ov.dataset.h !== html) {
+    ov.dataset.h = html;
+    ov.innerHTML = html;
+  }
+  ov.style.display = html ? "block" : "none";
+  ov.classList.remove("cap-bottom", "cap-center", "cap-top");
+  ov.classList.add("cap-" + ((subFile && subFile.pos) || "bottom"));
 }
 /* episodes drawer */
 let drawerEps = [], drawerRevealed = new Set(), spoilerOn = false;
