@@ -156,7 +156,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 20; // bump every release alongside version.txt
+const BUILD_NUM = 21; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -545,6 +545,20 @@ function safeFocus(el){
     el.focus({ preventScroll: true });
     return document.activeElement === el;
   } catch(e){ return false; }
+}
+function restoreFocus(el){
+  // never strand focus inside the video frame: fall back to our own controls
+  try {
+    if (el && el.tagName === "IFRAME") throw "iframe";
+    if (el && el.focus) { el.focus({ preventScroll: true }); return; }
+  } catch(e){}
+  try {
+    if (!document.getElementById("watchView").classList.contains("hidden")) {
+      document.getElementById("ctlPlay").focus({ preventScroll: true });
+      return;
+    }
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  } catch(err){}
 }
 function topPopup(){
   // topmost visible popup wins (search sits above drawers, guide above all)
@@ -937,7 +951,8 @@ function closeSearch(){
       && document.getElementById("setPanel").classList.contains("hidden")
       && document.getElementById("epDrawer").classList.contains("hidden"))
     document.body.classList.remove("modal-open");
-  if (searchOpener && searchOpener.focus) { try { searchOpener.focus({ preventScroll: true }); } catch(e){} }
+  if (searchOpener && searchOpener.tagName !== "IFRAME" && searchOpener.focus) { try { searchOpener.focus({ preventScroll: true }); } catch(e){} }
+  else restoreFocus(null);
 }
 function onOverlaySearch(q){
   clearTimeout(overlayTimer);
@@ -1092,7 +1107,7 @@ function closeModal(){
   detailReq++; // invalidate any in-flight detail fetch
   document.getElementById("modal").classList.add("hidden");
   document.body.classList.remove("modal-open");
-  if (lastOpener && lastOpener.focus) { try { lastOpener.focus({ preventScroll: true }); } catch(e){} }
+  restoreFocus(lastOpener);
 }
 let guideOpener = null;
 function openTvGuide(ev){
@@ -1105,7 +1120,8 @@ function openTvGuide(ev){
 function closeTvGuide(){
   document.getElementById("tvGuide").classList.add("hidden");
   if (document.getElementById("modal").classList.contains("hidden")) document.body.classList.remove("modal-open");
-  if (guideOpener && guideOpener.focus) { try { guideOpener.focus({ preventScroll: true }); } catch(e){} }
+  if (guideOpener && guideOpener.tagName !== "IFRAME" && guideOpener.focus) { try { guideOpener.focus({ preventScroll: true }); } catch(e){} }
+  else restoreFocus(null);
 }
 
 /* ---------- WATCH ---------- */
@@ -1554,7 +1570,8 @@ function closePanels(){
       && document.getElementById("searchPanel").classList.contains("hidden")
       && document.getElementById("tvGuide").classList.contains("hidden"))
     document.body.classList.remove("modal-open");
-  if (panelOpener && panelOpener.focus) { try { panelOpener.focus({ preventScroll: true }); } catch(e){} }
+  if (panelOpener && panelOpener.tagName !== "IFRAME" && panelOpener.focus) { try { panelOpener.focus({ preventScroll: true }); } catch(e){} }
+  else restoreFocus(null);
 }
 function setTab(name){
   ["playback", "subs", "servers"].forEach(t => {
