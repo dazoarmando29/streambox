@@ -48,6 +48,12 @@
   iframe { border: 0; }
   #ctlBar { transition: opacity .3s; }
   #ctlBar.bar-hidden { opacity: 0; pointer-events: none; }
+  /* the bar floats over the video (all modes): no strips, no covered captions */
+  #playerBox #ctlBar {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
+    background: linear-gradient(to top, rgba(11,20,38,.94), rgba(11,20,38,.55) 65%, transparent);
+    border: 0; border-radius: 0; margin: 0;
+  }
   .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   /* touch targets: min 44px for fingers + remotes */
   button, select { min-height: 40px; }
@@ -118,13 +124,8 @@
   body.video-fs nav { display: none; }
   body.video-fs #playerBox {
     position: fixed; top: 0; left: 0; right: 0; z-index: 80;
-    width: 100vw; height: calc(100vh - 78px); height: calc(100dvh - 78px);
+    width: 100vw; height: 100vh; height: 100dvh;
     aspect-ratio: auto; border-radius: 0; border: 0; background: #000;
-  }
-  body.video-fs #ctlBar {
-    position: fixed; bottom: 0; left: 0; right: 0; z-index: 81;
-    min-height: 78px; border-radius: 0; background: #0b1426;
-    border-top: 1px solid rgba(255,255,255,.12);
   }
   /* cinema shows ONLY video + bar: everything else would peek through */
   body.video-fs .no-cinema { display: none !important; }
@@ -156,7 +157,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 27; // bump every release alongside version.txt
+const BUILD_NUM = 28; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -224,24 +225,24 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
           allowfullscreen allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
           referrerpolicy="strict-origin-when-cross-origin" loading="eager"
           sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"></iframe>
-      </div>
-      <!-- Netflix-style remote control bar (drives the player via its command API) -->
-      <div id="ctlBar" class="mt-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-2">
-        <button id="ctlPlay" onclick="ctlToggle()" aria-label="Play or pause" title="Play/Pause (OK)" class="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-400 text-xl font-bold grid place-items-center">▶</button>
-        <button onclick="ctlSeekRel(-10)" aria-label="Back 10 seconds" title="Back 10s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">−10s</button>
-        <button onclick="ctlSeekRel(30)" aria-label="Forward 30 seconds" title="Forward 30s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">+30s</button>
-        <span id="ctlCur" class="text-xs text-gray-300 tabular-nums ml-1">0:00</span>
-        <input id="ctlSeek" type="range" min="0" max="1000" value="0" step="1" tabindex="-1" aria-label="Seek (pointer drag; remote uses −10s/+30s)" title="Drag to seek (remote: use −10s/+30s buttons)"
-          class="flex-1 min-w-[120px] h-11 accent-teal-500 cursor-pointer">
-        <span id="ctlDur" class="text-xs text-gray-500 tabular-nums">0:00</span>
-        <span id="ctlRemain" class="text-[11px] text-gray-500 tabular-nums"></span>
-        <button id="ctlMute" onclick="ctlMuteToggle()" aria-label="Mute or unmute" title="Mute" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🔊</button>
-        <button id="ctlRate" onclick="ctlRateCycle()" aria-label="Playback speed" title="Speed" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">1×</button>
-        <button id="ctlQ" onclick="qualityStep(1)" aria-label="Video quality" title="Quality: tap to cycle Auto → 4K → 1080p → 720p → 480p" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Auto</button>
-        <button onclick="ctlFullscreen()" aria-label="Fullscreen" title="Fullscreen" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⛶</button>
-        <button onclick="openSettings()" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⚙</button>
-        <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">☰ Episodes</button>
-        <button onclick="focusPlayer()" id="focusPlayerBtn" aria-label="Control player menu" title="Focus the player itself: arrows + OK work its menu (subtitles ⚙, quality). Press Back afterwards." class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">🎯 Player</button>
+        <!-- control bar floats over the video (auto-hides when idle) -->
+        <div id="ctlBar" class="absolute left-0 right-0 bottom-0 px-3 py-2.5 flex flex-wrap items-center gap-2">
+          <button id="ctlPlay" onclick="ctlToggle()" aria-label="Play or pause" title="Play/Pause (OK)" class="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-400 text-xl font-bold grid place-items-center">▶</button>
+          <button onclick="ctlSeekRel(-10)" aria-label="Back 10 seconds" title="Back 10s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">−10s</button>
+          <button onclick="ctlSeekRel(30)" aria-label="Forward 30 seconds" title="Forward 30s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">+30s</button>
+          <span id="ctlCur" class="text-xs text-gray-300 tabular-nums ml-1">0:00</span>
+          <input id="ctlSeek" type="range" min="0" max="1000" value="0" step="1" tabindex="-1" aria-label="Seek (pointer drag; remote uses −10s/+30s)" title="Drag to seek (remote: use −10s/+30s buttons)"
+            class="flex-1 min-w-[120px] h-11 accent-teal-500 cursor-pointer">
+          <span id="ctlDur" class="text-xs text-gray-500 tabular-nums">0:00</span>
+          <span id="ctlRemain" class="text-[11px] text-gray-500 tabular-nums"></span>
+          <button id="ctlMute" onclick="ctlMuteToggle()" aria-label="Mute or unmute" title="Mute" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🔊</button>
+          <button id="ctlRate" onclick="ctlRateCycle()" aria-label="Playback speed" title="Speed" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">1×</button>
+          <button id="ctlQ" onclick="qualityStep(1)" aria-label="Video quality" title="Quality: tap to cycle Auto → 4K → 1080p → 720p → 480p" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Auto</button>
+          <button onclick="ctlFullscreen()" aria-label="Fullscreen" title="Fullscreen" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⛶</button>
+          <button onclick="openSettings()" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⚙</button>
+          <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">☰ Episodes</button>
+          <button onclick="focusPlayer()" id="focusPlayerBtn" aria-label="Control player menu" title="Focus the player itself: arrows + OK work its menu (subtitles ⚙, quality). Press Back afterwards." class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">🎯 Player</button>
+        </div>
       </div>
       <!-- One-time subtitles coach tip (arrow points at 🎯 Player) -->
       <div id="subTip" class="no-cinema hidden relative mt-3 bg-[#1a2745] border border-teal-500/40 rounded-xl p-4 pr-12 text-sm">
@@ -815,6 +816,7 @@ function cardEl(x, type){
       const items = [...scope.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
         .filter(el => el.offsetParent !== null && !el.disabled
           && !(el.tagName === "INPUT" && (el.type === "range" || el.type === "color"))
+          && !(el.closest && el.closest("#ctlBar.bar-hidden"))
           && (navZone || !el.closest("nav")));
       if (!items.length) return;
       const cur = document.activeElement;
@@ -882,6 +884,7 @@ function cardEl(x, type){
   document.addEventListener("focusin", (e) => {
     document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
     if (e.target && e.target.classList) e.target.classList.add("tv-focus");
+    try { if (e.target && e.target.closest && e.target.closest("#ctlBar")) pokeHud(); } catch(err){}
   });
   // pointer activity wakes the cinema UI (mouse/touch)
   document.addEventListener("click", (e) => {
@@ -1369,17 +1372,18 @@ function addToList(){
   alert("Added to My List ✓");
 }
 
-/* ---------- Cinema auto-hide: bar fades after 4s idle, any press wakes it ---------- */
+/* ---------- Bar auto-hide: visible on interaction, gone after 4s idle ---------- */
 function inCinema(){
   return document.body.classList.contains("video-fs");
 }
 function pokeHud(){
-  // any interaction in cinema: show the bar, hide again after 4s idle
+  // any interaction while watching: show the bar, hide again after 4s idle
   if (document.getElementById("watchView").classList.contains("hidden")) return;
-  if (!inCinema()) return;
   document.getElementById("ctlBar").classList.remove("bar-hidden");
   clearTimeout(window._idleT);
   window._idleT = setTimeout(() => {
+    // never hide while a popup needs the bar visible underneath
+    if (topPopup()) return;
     document.getElementById("ctlBar").classList.add("bar-hidden");
   }, 4000);
 }
