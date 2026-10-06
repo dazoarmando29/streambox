@@ -5,4 +5,7 @@
         <item name="android:statusBarColor">#0B1426</item>
         <item name="android:navigationBarColor">#0B1426</item>
     </style>
+    <style name="Theme.StreamBox.Splash" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@drawable/splash_bg</item>
+    </style>
 </resources>
