@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -31,3 +33,14 @@ jobs:
           name: streambox-apk
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk streambox.apk
+          gh release delete latest --cleanup-tag -y || true
+          gh release create latest --prerelease \
+            --title "StreamBox latest APK" \
+            --notes "Auto-built from main (${{ github.sha }}). Uninstall the old app on your TV first, then install this file." \
+            streambox.apk
