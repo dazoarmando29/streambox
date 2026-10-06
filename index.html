@@ -140,6 +140,12 @@
   /* popups float above cinema mode so settings/episodes/search open in place */
   body.video-fs #setPanel, body.video-fs #epDrawer, body.video-fs #searchPanel,
   body.video-fs #tvGuide, body.video-fs #modal { z-index: 90; }
+  /* mirror strip pins under cinema like the bar did */
+  body.video-fs #mirrorBar {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 81;
+    border-radius: 0; background: #0b1426;
+    border-top: 1px solid rgba(255,255,255,.12);
+  }
   @media (min-width: 1600px), (pointer: coarse) and (min-width: 1100px) {
     .card { min-width: 180px; }
   }
@@ -165,7 +171,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 31; // bump every release alongside version.txt
+const BUILD_NUM = 32; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -258,6 +264,12 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
           <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">☰ Episodes</button>
           <button onclick="focusPlayer()" id="focusPlayerBtn" aria-label="Control player menu" title="Focus the player itself: arrows + OK work its menu (subtitles ⚙, quality). Press Back afterwards." class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">🎯 Player</button>
         </div>
+      </div>
+      <!-- alternate-mirror strip (our bar only drives CineSrc) -->
+      <div id="mirrorBar" class="hidden mt-3 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 flex flex-wrap items-center gap-2 text-sm">
+        <span>Mirror: <b id="mirrorName">–</b> — use its own player controls</span>
+        <button onclick="setMirror('cinesrc')" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold">⇄ CineSrc</button>
+        <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">⚙</button>
       </div>
       <!-- One-time subtitles coach tip (arrow points at 🎯 Player) -->
       <div id="subTip" class="no-cinema hidden relative mt-3 bg-[#1a2745] border border-teal-500/40 rounded-xl p-4 pr-12 text-sm">
@@ -507,7 +519,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button onclick="reloadPlayer()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">↻ Reload player</button>
       </div>
       <p class="text-[11px] text-gray-500 mt-3">One player only: ours. The video's own buttons stay hidden unless you need its ⚙/CC menus.</p>
-      <p class="text-[11px] text-gray-500 mt-3">The server list lives inside the player — StreamBox only remembers your last working one to start faster.</p>
+      <p class="text-[11px] text-gray-500 mt-3">Mirrors are independent players with their own controls — only CineSrc answers our remote bar. Stuck? Switch mirrors.</p>
     </div>
   </div>
 </div>
@@ -859,7 +871,9 @@ function cardEl(x, type){
       // Range/color inputs are NEVER arrow targets: on remotes they swallow
       // Left/Right (scrubbing forever) and can strand focus with no way out.
       const top = topPopup();
-      const bar = document.body.classList.contains("video-fs") ? document.getElementById("ctlBar") : null;
+      const bar = document.body.classList.contains("video-fs")
+        ? (["ctlBar", "mirrorBar"].map(id => document.getElementById(id)).find(el => el && el.offsetParent) || null)
+        : null;
       if (!top && bar && bar.classList.contains("bar-hidden")) {
         // first press after idle just wakes the UI (Netflix-style)
         e.preventDefault(); pokeHud(); safeFocus(document.getElementById("ctlPlay")); return;
@@ -1201,8 +1215,12 @@ function closeTvGuide(){
 /* ---------- WATCH ---------- */
 async function openWatch(type, id, s=1, e=1, t=0){
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)) };
-  mirror = "cinesrc"; trailerKey = null; // trailer is a per-viewing fallback, never default
-  updateTrailerUI();
+  try {
+    const pm = localStorage.getItem("streambox_mirror") || "cinesrc";
+    mirror = (pm === "trailer" || !MIRRORS.some(x => x.id === pm)) ? "cinesrc" : pm;
+  } catch(e){ mirror = "cinesrc"; }
+  trailerKey = null; // trailer is a per-viewing fallback, never default
+  updateMirrorUI();
   document.getElementById("homeView").classList.add("hidden");
   document.getElementById("watchView").classList.remove("hidden");
   window.scrollTo(0,0);
@@ -1333,6 +1351,13 @@ function buildEmbedUrlClean(){
   // trailer mirror: official YouTube trailer, no player params apply
   if (mirror === "trailer" && trailerKey) {
     return `https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&rel=0`;
+  }
+  // alternate mirrors: bare URLs, their own players/controls (no command API)
+  if (mirror !== "cinesrc") {
+    const u = mirrorUrl(mirror);
+    if (u) return u;
+    mirror = "cinesrc";
+    updateMirrorUI();
   }
   const color = encodeURIComponent(document.getElementById("optColor").value||"#14b8a6");
   let p = `autoplay=${document.getElementById("optAutoplay").checked}&autonext=${document.getElementById("optAutonext").checked}&autoskip=${document.getElementById("optAutoskip").checked}&color=${color}`;
@@ -1572,7 +1597,11 @@ function enterVideoFs(){
   document.body.classList.add("video-fs");
   pokeHud();
   const b = document.getElementById("ctlPlay");
-  if (b) { try { b.focus({ preventScroll: true }); } catch(e){} }
+  if (b && b.offsetParent) { try { b.focus({ preventScroll: true }); } catch(e){} return; }
+  try {
+    const mb = document.querySelector("#mirrorBar:not(.hidden) button");
+    if (mb) mb.focus({ preventScroll: true });
+  } catch(e){}
 }
 function exitVideoFs(){
   document.body.classList.remove("video-fs");
@@ -1784,7 +1813,45 @@ function forgetServer(){
   document.getElementById("watchStatus").textContent = "Server preference cleared — Auto mode";
 }
 /* source mirrors: CineSrc feature stream + official trailer fallback */
+/* source mirrors: CineSrc default + alternates. Only CineSrc speaks our
+   command API — other mirrors use their own player controls. */
+const MIRRORS = [
+  { id: "cinesrc", name: "CineSrc" },
+  { id: "smashy", name: "Smashy" },
+  { id: "autoembed", name: "AutoEmbed" },
+  { id: "multiembed", name: "MultiEmbed" },
+  { id: "twoembed", name: "2Embed" }
+];
 let mirror = "cinesrc", trailerKey = null;
+try {
+  const pm = localStorage.getItem("streambox_mirror") || "cinesrc";
+  if (MIRRORS.some(x => x.id === pm)) mirror = pm;
+} catch(e){}
+function mirrorUrl(id){
+  const tmdb = watchState.id, s = watchState.s, e = watchState.e, tv = watchState.type === "tv";
+  switch (id) {
+    case "smashy":
+      return tv
+        ? `https://embed.smashystream.com/playere.php?tmdb=${tmdb}&season=${s}&episode=${e}`
+        : `https://embed.smashystream.com/playere.php?tmdb=${tmdb}`;
+    case "autoembed":
+      return tv
+        ? `https://autoembed.co/tv/tmdb/${tmdb}-${s}-${e}`
+        : `https://autoembed.co/movie/tmdb/${tmdb}`;
+    case "multiembed":
+      return tv
+        ? `https://multiembed.mov/?video_id=${tmdb}&tmdb=1&s=${s}&e=${e}`
+        : `https://multiembed.mov/?video_id=${tmdb}&tmdb=1`;
+    case "twoembed":
+      return tv
+        ? `https://www.2embed.cc/embedtv/${tmdb}&s=${s}&e=${e}`
+        : `https://www.2embed.cc/embed/${tmdb}`;
+    case "trailer":
+      return trailerKey ? `https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&rel=0` : null;
+    default:
+      return null;
+  }
+}
 async function fetchTrailer(type, id){
   try {
     const d = await tmdb(`/${type}/${id}/videos`);
@@ -1802,16 +1869,23 @@ function setMirror(m){
     return;
   }
   mirror = m;
-  updateTrailerUI();
+  if (m !== "trailer") { try { localStorage.setItem("streambox_mirror", m); } catch(e){} }
+  updateMirrorUI();
   paintMirrors();
-  if (m === "trailer") loadPlayer();
-  else reloadKeepPos();
+  if (m === "cinesrc") reloadKeepPos();
+  else loadPlayer();
 }
-function updateTrailerUI(){
+function updateMirrorUI(){
   const isTrailer = mirror === "trailer";
+  const isCS = mirror === "cinesrc";
   document.getElementById("trailerBar").classList.toggle("hidden", !isTrailer);
-  document.getElementById("ctlBar").classList.toggle("hidden", isTrailer);
-  if (isTrailer) {
+  document.getElementById("ctlBar").classList.toggle("hidden", !isCS);
+  document.getElementById("mirrorBar").classList.toggle("hidden", isCS || isTrailer);
+  if (!isCS && !isTrailer) {
+    const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
+    document.getElementById("mirrorName").textContent = label;
+    document.getElementById("watchStatus").textContent = `Mirror: ${label} — use its own player controls`;
+  } else if (isTrailer) {
     document.getElementById("watchStatus").textContent = "🎬 Playing official trailer";
   }
 }
@@ -1830,6 +1904,7 @@ function paintMirrors(){
     row.appendChild(b);
   };
   mk("cinesrc", "CineSrc", true);
+  MIRRORS.slice(1).forEach(m => mk(m.id, m.name, true));
   mk("trailer", trailerKey ? "🎬 Trailer" : "🎬 …", !!trailerKey);
 }
 /* opensubtitles.org direct search + download (app key baked in; login is session-only) */
