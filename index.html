@@ -158,7 +158,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 24; // bump every release alongside version.txt
+const BUILD_NUM = 25; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -633,6 +633,10 @@ function tmdb(path){
 }
 const titleOf = x => x.title || x.name || "Untitled";
 const yearOf = x => (x.release_date || x.first_air_date || "").slice(0,4);
+function markReady(){ window.__sbReady = true; }
+function withTimeout(p, ms, label){
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout:" + (label || "request"))), ms))]);
+}
 function hideSplash(){
   const s = document.getElementById("splash");
   if (!s || s.classList.contains("gone")) return;
@@ -658,13 +662,13 @@ async function init(){
   renderContinue();
   const rows = document.getElementById("rows");
   try {
-    const [trend, popM, popT, topM, topT] = await Promise.all([
+    const [trend, popM, popT, topM, topT] = await withTimeout(Promise.all([
       tmdb("/trending/all/week"),
       tmdb("/movie/popular"),
       tmdb("/tv/popular"),
       tmdb("/movie/top_rated"),
       tmdb("/tv/top_rated")
-    ]);
+    ]), 25000, "catalog");
     if (!trend || !trend.results) throw new Error("empty catalog");
     buildHero(trend.results.slice(0,5));
     rows.innerHTML = "";
@@ -681,6 +685,7 @@ async function init(){
       <button onclick="init()" class="mt-4 bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">↻ Retry</button>
     </div>`;
     hideSplash();
+    markReady();
     return;
   }
   // TV: start with focus on content so the remote works immediately
@@ -691,6 +696,7 @@ async function init(){
     }, 400);
   }
   hideSplash();
+  markReady();
 }
 
 function makeRow(title, items, forceType){
@@ -1168,6 +1174,7 @@ async function openWatch(type, id, s=1, e=1){
   loadPlayer();
   saveContinue();
   hideSplash();
+  markReady();
   // subtitles coach tip (once — never again after "don't show again"; skipped in cinema view)
   clearTimeout(window._tipT);
   window._tipT = setTimeout(() => { if (!document.body.classList.contains("video-fs")) showSubTip(false); }, 2500);
@@ -1701,7 +1708,6 @@ function paintSettings(){
     document.getElementById("srvPin").textContent = localStorage.getItem("streambox_lastserver") || "none";
   } catch(e){}
 }
-}
 function forgetServer(){
   try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
   pState.server = null;
@@ -1867,6 +1873,24 @@ window.addEventListener("message", (event)=>{
     openWatch(t, q.get("id"), Number(q.get("s")||1), Number(q.get("e")||1));
   } else init();
 })();
+</script>
+<script>
+/* watchdog (separate block on purpose): if the main script ever dies before
+   signaling ready, clear the splash and say so instead of hanging forever */
+setTimeout(function(){
+  if (window.__sbReady) return;
+  try {
+    var s = document.getElementById("splash");
+    if (s) { s.classList.add("gone"); setTimeout(function(){ try { s.remove(); } catch(e){} }, 500); }
+    if (!document.getElementById("sbFatal")) {
+      var d = document.createElement("div");
+      d.id = "sbFatal";
+      d.style.cssText = "position:fixed;inset:0;z-index:99;display:flex;align-items:center;justify-content:center;background:#0b1426;padding:24px;text-align:center;";
+      d.innerHTML = '<div><p style="font-weight:800;font-size:1.1rem;color:#fff">StreamBox failed to start</p><p style="color:#8b98b8;font-size:.85rem;margin:6px 0 14px">The app hit an error. Reload to try again.</p><button onclick="location.reload()" style="background:#14b8a6;border:0;border-radius:99px;padding:10px 26px;font-weight:800;color:#0b1426">Reload</button></div>';
+      document.body.appendChild(d);
+    }
+  } catch(e){}
+}, 20000);
 </script>
 </body>
 </html>
