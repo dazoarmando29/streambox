@@ -157,7 +157,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 28; // bump every release alongside version.txt
+const BUILD_NUM = 29; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -225,6 +225,11 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
           allowfullscreen allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
           referrerpolicy="strict-origin-when-cross-origin" loading="eager"
           sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"></iframe>
+        <!-- trailer mode chip (control bar hides; trailers need no controls) -->
+        <div id="trailerBar" class="hidden absolute top-3 left-3 z-[7] flex items-center gap-2 bg-black/70 rounded-full pl-4 pr-1.5 py-1.5 text-xs">
+          <span>🎬 Trailer</span>
+          <button onclick="setMirror('cinesrc')" class="bg-teal-500 hover:bg-teal-400 font-bold px-3 py-1.5 rounded-full">▶ Watch feature</button>
+        </div>
         <!-- control bar floats over the video (auto-hides when idle) -->
         <div id="ctlBar" class="absolute left-0 right-0 bottom-0 px-3 py-2.5 flex flex-wrap items-center gap-2">
           <button id="ctlPlay" onclick="ctlToggle()" aria-label="Play or pause" title="Play/Pause (OK)" class="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-400 text-xl font-bold grid place-items-center">▶</button>
@@ -430,6 +435,8 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     </div>
 
     <div id="paneServers" class="hidden">
+      <p class="text-xs text-gray-400 font-bold mb-2">SOURCE</p>
+      <div id="mirrorRow" class="flex flex-wrap gap-2 mb-4"></div>
       <p class="text-xs text-gray-400 font-bold mb-2">STREAM SERVER</p>
       <div class="bg-white/5 border border-white/10 rounded-xl p-4 text-sm space-y-1.5">
         <p>Current: <b id="srvCur">auto</b></p>
@@ -746,6 +753,7 @@ function cardEl(x, type){
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
   }
   // D-pad / arrow-key spatial navigation (Android TV remotes, keyboards)
+  // + desktop shortcuts: Space = play/pause, F = cinema, M = mute
   document.addEventListener("keydown", (e) => {
     const dir = dirOf(e);
     const tag = (document.activeElement && document.activeElement.tagName) || "";
@@ -757,6 +765,19 @@ function cardEl(x, type){
         if (first) { e.preventDefault(); first.focus(); }
       }
       return;
+    }
+    // desktop shortcuts (ignored on anything interactive; native keys win there)
+    if (e.code === "Space" || e.code === "KeyF" || e.code === "KeyM") {
+      const ae2 = document.activeElement;
+      const inter = ae2 && (ae2.tagName === "BUTTON" || ae2.tagName === "INPUT" || ae2.tagName === "SELECT" || ae2.tagName === "A" || ae2.tagName === "IFRAME" || ae2.getAttribute("role") === "button");
+      const onWatch = !document.getElementById("watchView").classList.contains("hidden");
+      if (!inter && onWatch && !topPopup()) {
+        e.preventDefault();
+        if (e.code === "Space") ctlToggle();
+        else if (e.code === "KeyF") ctlFullscreen();
+        else ctlMuteToggle();
+        return;
+      }
     }
     // CINEMA scheme (video-fs, no popup): Left/Right ALWAYS skip,
     // Up/Down walk along the bar, OK toggles when focus is off the buttons.
@@ -1128,8 +1149,10 @@ function closeTvGuide(){
 }
 
 /* ---------- WATCH ---------- */
-async function openWatch(type, id, s=1, e=1){
-  watchState = { type, id, s, e };
+async function openWatch(type, id, s=1, e=1, t=0){
+  watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)) };
+  mirror = "cinesrc"; trailerKey = null; // trailer is a per-viewing fallback, never default
+  updateTrailerUI();
   document.getElementById("homeView").classList.add("hidden");
   document.getElementById("watchView").classList.remove("hidden");
   window.scrollTo(0,0);
@@ -1138,6 +1161,7 @@ async function openWatch(type, id, s=1, e=1){
   if (document.body.classList.contains("tv-mode")) enterVideoFs();
   else { try { document.getElementById("playerBox").scrollIntoView({ block: "center", behavior: "smooth" }); } catch(e){} }
   paintQuality();
+  fetchTrailer(type, id); // non-blocking: trailer button appears when found
   let d;
   try {
     d = await tmdb(`/${type}/${id}?append_to_response=credits`);
@@ -1255,11 +1279,20 @@ function qualityStep(dir){
   window._qT = setTimeout(reloadKeepPos, 500);
 }
 function buildEmbedUrlClean(){
+  // trailer mirror: official YouTube trailer, no player params apply
+  if (mirror === "trailer" && trailerKey) {
+    return `https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&rel=0`;
+  }
   const color = encodeURIComponent(document.getElementById("optColor").value||"#14b8a6");
   let p = `autoplay=${document.getElementById("optAutoplay").checked}&autonext=${document.getElementById("optAutonext").checked}&autoskip=${document.getElementById("optAutoskip").checked}&color=${color}`;
   if (QLEVELS[qIdx].v) p += `&quality=${QLEVELS[qIdx].v}`;
   p += `&controls=${pControls ? "true" : "false"}`;
   if (resumeAt >= 0) { p += `&t=${resumeAt}&continueprompt=false`; resumeAt = -1; }
+  else if ((watchState.t || 0) > 0) {
+    // continue-watching resume: let the player's own Continue/Restart prompt ask
+    p += `&t=${Math.floor(watchState.t)}`;
+    watchState.t = 0;
+  }
   // remember the last working server so repeat watches start faster
   try {
     const ls = localStorage.getItem("streambox_lastserver");
@@ -1328,11 +1361,41 @@ function saveContinue(){
   try{
     const k = "streambox_continue";
     let arr = JSON.parse(localStorage.getItem(k)||"[]");
+    const prev = arr.find(x=>x.type===watchState.type&&x.id===watchState.id&&(x.s||1)===watchState.s&&(x.e||1)===watchState.e);
     const item = { type: watchState.type, id: watchState.id, s: watchState.s, e: watchState.e,
-      title: titleOf(currentItem||{}), poster: (currentItem||{}).poster_path, t: Date.now() };
+      title: titleOf(currentItem||{}), poster: (currentItem||{}).poster_path,
+      pos: prev ? (prev.pos || 0) : 0, dur: prev ? (prev.dur || 0) : 0, at: Date.now() };
     arr = [item, ...arr.filter(x=>!(x.type===item.type&&x.id===item.id))].slice(0,20);
     localStorage.setItem(k, JSON.stringify(arr));
     renderContinue();
+  }catch(e){}
+}
+let lastProgSave = 0;
+function saveProgress(cur, dur){
+  // throttled resume-point saver (trailer mirror never writes playback position)
+  if (typeof mirror !== "undefined" && mirror !== "cinesrc") return;
+  if (!(dur > 60) || !(cur > 5)) return;
+  const now = Date.now();
+  if (now - lastProgSave < 15000) return;
+  lastProgSave = now;
+  try{
+    const k = "streambox_continue";
+    let arr = JSON.parse(localStorage.getItem(k)||"[]");
+    const it = arr.find(x=>x.type===watchState.type&&x.id===watchState.id&&(x.s||1)===watchState.s&&(x.e||1)===watchState.e);
+    if (it) {
+      it.pos = Math.floor(cur); it.dur = Math.floor(dur);
+      localStorage.setItem(k, JSON.stringify(arr));
+      if (document.getElementById("homeView").classList.contains("hidden") === false) renderContinue();
+    }
+  }catch(e){}
+}
+function markWatched(){
+  // playback fully ended: clear the resume point so replay starts fresh
+  try{
+    const k = "streambox_continue";
+    let arr = JSON.parse(localStorage.getItem(k)||"[]");
+    const it = arr.find(x=>x.type===watchState.type&&x.id===watchState.id&&(x.s||1)===watchState.s&&(x.e||1)===watchState.e);
+    if (it) { it.pos = 0; localStorage.setItem(k, JSON.stringify(arr)); renderContinue(); }
   }catch(e){}
 }
 function renderContinue(){
@@ -1348,9 +1411,11 @@ function renderContinue(){
       d.setAttribute("role", "button");
       d.setAttribute("data-focusable", "1");
       d.setAttribute("aria-label", `${x.title||""} (${x.type})`);
-      d.innerHTML = `<img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" class="rounded-lg w-full aspect-[2/3] object-cover"><p class="text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p><button class="absolute top-1 right-1 bg-black/70 w-6 h-6 rounded-full text-xs" aria-label="Remove">✕</button>`;
-      d.onclick = activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1));
-      d.onkeydown = (ev)=>{ if(okPressed(ev)){ ev.preventDefault(); activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1))(); } };
+      const pct = (x.dur > 60 && x.pos > 5) ? Math.min(99, Math.round(x.pos / x.dur * 100)) : 0;
+      d.innerHTML = `<img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" class="rounded-lg w-full aspect-[2/3] object-cover"><p class="text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}${pct ? ` • ${pct}%` : ""}</p>${pct ? `<div class="h-1 rounded bg-white/15 mt-1 overflow-hidden"><div class="h-1 rounded bg-teal-400" style="width:${pct}%"></div></div>` : ""}<button class="absolute top-1 right-1 bg-black/70 w-6 h-6 rounded-full text-xs" aria-label="Remove">✕</button>`;
+      const resumeAt = (x.dur > 60 && x.pos > 10) ? x.pos : 0;
+      d.onclick = activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt));
+      d.onkeydown = (ev)=>{ if(okPressed(ev)){ ev.preventDefault(); activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt))(); } };
       d.querySelector("button").onclick = (ev)=>{ ev.stopPropagation(); removeContinue(x.type,x.id); };
       grid.appendChild(d);
     });
@@ -1366,7 +1431,7 @@ function addToList(){
   if(!currentDetail) return;
   let arr = JSON.parse(localStorage.getItem("streambox_continue")||"[]");
   const d = currentDetail.data;
-  const item = { type: currentDetail.type, id: currentDetail.id, s:1, e:1, title: titleOf(d), poster: d.poster_path, t: Date.now() };
+  const item = { type: currentDetail.type, id: currentDetail.id, s:1, e:1, title: titleOf(d), poster: d.poster_path, pos: 0, dur: 0, at: Date.now() };
   arr = [item, ...arr.filter(x=>!(x.type===item.type&&x.id===item.id))].slice(0,20);
   localStorage.setItem("streambox_continue", JSON.stringify(arr));
   alert("Added to My List ✓");
@@ -1504,6 +1569,7 @@ function ctlPollStart(){
     sendCmd("getCurrentTime");
     sendCmd("getDuration");
     sleepTick();
+    saveProgress(pState.cur, pState.dur);
   }, 1000);
 }
 function ctlPollStop(){ clearInterval(window._ctlPoll); }
@@ -1652,7 +1718,7 @@ function sleepTick(){
 }
 /* servers tab */
 function paintSettings(){
-  paintSpeed(); paintVol(); paintSleep(); paintPControls(); paintQuality();
+  paintSpeed(); paintVol(); paintSleep(); paintPControls(); paintQuality(); paintMirrors();
   try {
     document.getElementById("srvCur").textContent = pState.server || "auto";
     document.getElementById("srvPin").textContent = localStorage.getItem("streambox_lastserver") || "none";
@@ -1663,6 +1729,55 @@ function forgetServer(){
   pState.server = null;
   paintSettings();
   document.getElementById("watchStatus").textContent = "Server preference cleared — Auto mode";
+}
+/* source mirrors: CineSrc feature stream + official trailer fallback */
+let mirror = "cinesrc", trailerKey = null;
+async function fetchTrailer(type, id){
+  try {
+    const d = await tmdb(`/${type}/${id}/videos`);
+    const vids = ((d && d.results) || []).filter(v => v.site === "YouTube" && v.key);
+    const t = vids.find(v => v.type === "Trailer") || vids.find(v => v.type === "Teaser") || vids[0];
+    if (t && watchState.id === id) {
+      trailerKey = t.key;
+      if (!document.getElementById("setPanel").classList.contains("hidden")) paintMirrors();
+    }
+  } catch(e){}
+}
+function setMirror(m){
+  if (m === "trailer" && !trailerKey) {
+    document.getElementById("watchStatus").textContent = "No trailer found for this title.";
+    return;
+  }
+  mirror = m;
+  updateTrailerUI();
+  paintMirrors();
+  if (m === "trailer") loadPlayer();
+  else reloadKeepPos();
+}
+function updateTrailerUI(){
+  const isTrailer = mirror === "trailer";
+  document.getElementById("trailerBar").classList.toggle("hidden", !isTrailer);
+  document.getElementById("ctlBar").classList.toggle("hidden", isTrailer);
+  if (isTrailer) {
+    document.getElementById("watchStatus").textContent = "🎬 Playing official trailer";
+  }
+}
+function paintMirrors(){
+  const row = document.getElementById("mirrorRow");
+  if (!row) return;
+  row.innerHTML = "";
+  const mk = (id, label, enabled) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.disabled = !enabled;
+    b.className = "px-4 h-10 rounded-full text-sm font-bold " + (!enabled
+      ? "bg-white/5 text-gray-600"
+      : (mirror === id ? "bg-teal-500" : "bg-white/10 hover:bg-white/20"));
+    if (enabled) b.onclick = () => setMirror(id);
+    row.appendChild(b);
+  };
+  mk("cinesrc", "CineSrc", true);
+  mk("trailer", trailerKey ? "🎬 Trailer" : "🎬 …", !!trailerKey);
 }
 /* episodes drawer */
 let drawerEps = [], drawerRevealed = new Set(), spoilerOn = false;
@@ -1795,6 +1910,7 @@ window.addEventListener("message", (event)=>{
     if (!document.getElementById("setPanel").classList.contains("hidden")) paintSettings();
   }
   if(type === "cinesrc:ended"){
+    markWatched();
     if (sleepOnEnd) {
       sendCmd("pause");
       pState.paused = true; ctlPaint();
