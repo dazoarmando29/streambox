@@ -31,7 +31,7 @@ jobs:
           PYEOF
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -42,7 +42,7 @@ jobs:
           gradle-version: "8.7"
 
       - name: Build debug APK
-        run: gradle :app:assembleDebug --project-dir android
+        run: gradle :app:assembleDebug --project-dir android --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

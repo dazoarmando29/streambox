@@ -171,7 +171,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 34; // bump every release alongside version.txt
+const BUILD_NUM = 35; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -722,21 +722,36 @@ async function init(){
   renderContinue();
   const rows = document.getElementById("rows");
   try {
-    const [trend, popM, popT, topM, topT] = await withTimeout(Promise.all([
-      tmdb("/trending/all/week"),
-      tmdb("/movie/popular"),
-      tmdb("/tv/popular"),
-      tmdb("/movie/top_rated"),
-      tmdb("/tv/top_rated")
-    ]), 25000, "catalog");
+    // Progressive catalog: hero + first row ASAP (TVs on slow Wi-Fi feel
+    // instant), remaining rows stream in behind. One code path for web/phone/TV.
+    const trend = await withTimeout(tmdb("/trending/all/week"), 15000, "catalog");
     if (!trend || !trend.results) throw new Error("empty catalog");
     buildHero(trend.results.slice(0,5));
     rows.innerHTML = "";
     rows.appendChild(makeRow("Trending Now", trend.results));
-    rows.appendChild(makeRow("Popular Movies", popM.results, "movie"));
-    rows.appendChild(makeRow("Popular TV Shows", popT.results, "tv"));
-    rows.appendChild(makeRow("Top Rated Movies", topM.results, "movie"));
-    rows.appendChild(makeRow("Top Rated TV", topT.results, "tv"));
+    hideSplash();
+    markReady();
+    // TV: focus content immediately instead of waiting for the rest
+    if (document.body.classList.contains("tv-mode")) {
+      setTimeout(() => {
+        const first = document.querySelector("#hero button") || document.querySelector("#rows .card");
+        if (first) first.focus();
+      }, 400);
+    }
+    // Below-the-fold rows load after first paint (fail soft, row by row)
+    const rest = [
+      ["/movie/popular", "Popular Movies", "movie"],
+      ["/tv/popular", "Popular TV Shows", "tv"],
+      ["/movie/top_rated", "Top Rated Movies", "movie"],
+      ["/tv/top_rated", "Top Rated TV", "tv"]
+    ];
+    for (const [path, title, forceType] of rest) {
+      try {
+        const d = await withTimeout(tmdb(path), 15000, "catalog-row");
+        if (d && d.results) rows.appendChild(makeRow(title, d.results, forceType));
+      } catch(rowErr) { /* one row failing never kills the page */ }
+    }
+    return;
   } catch(err) {
     // never leave a dead empty page (offline / API down): offer retry
     rows.innerHTML = `<div class="bg-white/5 border border-white/10 rounded-xl p-8 text-center max-w-lg mx-auto">
@@ -748,15 +763,6 @@ async function init(){
     markReady();
     return;
   }
-  // TV: start with focus on content so the remote works immediately
-  if (document.body.classList.contains("tv-mode")) {
-    setTimeout(() => {
-      const first = document.querySelector("#hero button") || document.querySelector("#rows .card");
-      if (first) first.focus();
-    }, 400);
-  }
-  hideSplash();
-  markReady();
 }
 
 function makeRow(title, items, forceType){
@@ -1468,6 +1474,7 @@ function buildEmbedUrlClean(){
 function loadPlayer(){
   preconnectCinesrc();
   ctlReset();
+  applyMirrorSandbox();
   const spin = document.getElementById("playerSpin");
   if (spin) spin.style.display = "grid";
   const f = document.getElementById("player");
@@ -1475,21 +1482,43 @@ function loadPlayer(){
   const _u = buildEmbedUrlClean();
   f.src = _u + (_u.includes("?") ? "&" : "?") + "_=" + Date.now();
   const { type, s, e } = watchState;
-  document.getElementById("watchStatus").textContent = type==="tv" ? `Now playing S${s} E${e}` : "Now playing";
-  // fallback: hide spinner after 12s even if player never fires ready (ad-blocked network etc.)
+  if (mirror === "cinesrc")
+    document.getElementById("watchStatus").textContent = type==="tv" ? `Now playing S${s} E${e}` : "Now playing";
+  // fallback: hide spinner after 8s even if player never fires ready (ad-blocked network etc.)
   clearTimeout(window._spinT);
-  window._spinT = setTimeout(()=>{ if (spin) spin.style.display = "none"; }, 12000);
-  ctlPollStart();
+  window._spinT = setTimeout(()=>{
+    if (spin) spin.style.display = "none";
+    const ws = document.getElementById("watchStatus");
+    if (ws && mirror === "cinesrc" && /Now playing|Loading/.test(ws.textContent || ""))
+      ws.textContent = "Still loading? Press ↻ Reload, or ⇄ Source to try another server.";
+  }, 8000);
+  if (mirror === "cinesrc") ctlPollStart();
+  else ctlPollStop();
   pokeHud(); // reveal HUD + bar briefly on every (re)load
 }
 function reloadPlayer(){ loadPlayer(); }
 function otherSource(){
+  // Context-aware ⇄ Source (one button, all 3 targets):
+  // on CineSrc → drop the pinned server and re-pick (keeps position);
+  // on any other mirror → cycle to the next mirror (starts at 0 there).
+  if (mirror !== "cinesrc") {
+    const ids = MIRRORS.map(x => x.id);
+    const next = ids[(ids.indexOf(mirror) + 1) % ids.length];
+    document.getElementById("watchStatus").textContent = "Trying next mirror…";
+    setMirror(next === "cinesrc" ? "cinesrc" : next);
+    if (next === "cinesrc") { try { localStorage.removeItem("streambox_lastserver"); } catch(e){} }
+    return;
+  }
   // wrong film / broken stream? forget the pinned server and re-pick (keeps position)
   try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
   document.getElementById("watchStatus").textContent = "Trying another source…";
   reloadKeepPos();
 }
 function toggleShield(){
+  if (NO_SANDBOX.has(mirror)) {
+    document.getElementById("watchStatus").textContent = "Ad Shield unavailable on this mirror — it refuses sandboxed players.";
+    return;
+  }
   const on = document.getElementById("optShield").checked;
   const f = document.getElementById("player");
   // Shield ON = sandbox without popups/top-navigation. OFF = allow popups (only if a server breaks).
@@ -1620,6 +1649,7 @@ function pokeHud(){
 /* ---------- CineSrc remote controls (per https://cinesrc.st/docs player methods) ---------- */
 const pState = { paused: true, muted: false, rate: 1, cur: 0, dur: 0, seeking: false };
 function sendCmd(command, args = []) {
+  if (mirror !== "cinesrc") return; // YouTube/alternate players have no command API
   try {
     document.getElementById("player").contentWindow.postMessage(
       { type: "cinesrc:command", command, args }, "https://cinesrc.st");
@@ -1654,6 +1684,8 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
   ctlPaint();
 }
 function ctlSeekRel(d){
+  if (mirror !== "cinesrc") return; // alternate mirrors use their own controls
+  if (!(pState.dur > 0)) { sendCmd("getDuration"); return; }
   const t = Math.min(Math.max(0, (pState.cur || 0) + d), pState.dur || Infinity);
   sendCmd("seek", [Math.floor(t)]);
 }
@@ -1740,6 +1772,7 @@ function hideSubTip(forever){
 }
 function ctlPollStart(){
   ctlPollStop();
+  if (mirror !== "cinesrc") return; // our command API only answers on CineSrc
   window._ctlPoll = setInterval(() => {
     if (document.getElementById("watchView").classList.contains("hidden")) return;
     if (!document.getElementById("player").src) return;
@@ -1908,16 +1941,23 @@ function forgetServer(){
   paintSettings();
   document.getElementById("watchStatus").textContent = "Server preference cleared — Auto mode";
 }
-/* source mirrors: CineSrc feature stream + official trailer fallback */
 /* source mirrors: CineSrc default + alternates. Only CineSrc speaks our
-   command API — other mirrors use their own player controls. */
+   command API — other mirrors use their own player controls.
+   VidFast/VidLink refuse sandboxed iframes, so those two load UNSANDBOXED
+   (see NO_SANDBOX + applyMirrorSandbox): Ad Shield is off there by necessity,
+   use Brave/uBlock for in-stream ads. All other mirrors stay sandboxed. */
 const MIRRORS = [
   { id: "cinesrc", name: "CineSrc" },
+  { id: "vidlink", name: "VidLink" },
+  { id: "vidfast", name: "VidFast" },
+  { id: "vidsrccc", name: "VidSrc" },
+  { id: "vidsrcpm", name: "VidSrc PM" },
   { id: "smashy", name: "Smashy" },
   { id: "autoembed", name: "AutoEmbed" },
-  { id: "multiembed", name: "MultiEmbed" },
   { id: "twoembed", name: "2Embed" }
 ];
+/* mirrors that break inside ANY sandboxed iframe: load without sandbox */
+const NO_SANDBOX = new Set(["vidlink", "vidfast"]);
 let mirror = "cinesrc", trailerKey = null;
 try {
   const pm = localStorage.getItem("streambox_mirror") || "cinesrc";
@@ -1926,18 +1966,31 @@ try {
 function mirrorUrl(id){
   const tmdb = watchState.id, s = watchState.s, e = watchState.e, tv = watchState.type === "tv";
   switch (id) {
-    case "smashy":
+    case "vidlink":
       return tv
-        ? `https://embed.smashystream.com/playere.php?tmdb=${tmdb}&season=${s}&episode=${e}`
-        : `https://embed.smashystream.com/playere.php?tmdb=${tmdb}`;
+        ? `https://vidlink.pro/tv/${tmdb}/${s}/${e}`
+        : `https://vidlink.pro/movie/${tmdb}`;
+    case "vidfast":
+      return tv
+        ? `https://vidfast.pro/tv/${tmdb}/${s}/${e}?autoPlay=true`
+        : `https://vidfast.pro/movie/${tmdb}?autoPlay=true`;
+    case "vidsrccc":
+      return tv
+        ? `https://vidsrc.cc/v2/embed/tv/${tmdb}/${s}/${e}`
+        : `https://vidsrc.cc/v2/embed/movie/${tmdb}`;
+    case "vidsrcpm":
+      return tv
+        ? `https://vidsrc.pm/embed/tv/${tmdb}/${s}/${e}`
+        : `https://vidsrc.pm/embed/movie/${tmdb}`;
+    case "smashy":
+      // NOTE: embed.smashystream.com is retired; player.smashystream.com is current
+      return tv
+        ? `https://player.smashystream.com/playere.php?tmdb=${tmdb}&season=${s}&episode=${e}`
+        : `https://player.smashystream.com/playere.php?tmdb=${tmdb}`;
     case "autoembed":
       return tv
         ? `https://autoembed.co/tv/tmdb/${tmdb}-${s}-${e}`
         : `https://autoembed.co/movie/tmdb/${tmdb}`;
-    case "multiembed":
-      return tv
-        ? `https://multiembed.mov/?video_id=${tmdb}&tmdb=1&s=${s}&e=${e}`
-        : `https://multiembed.mov/?video_id=${tmdb}&tmdb=1`;
     case "twoembed":
       return tv
         ? `https://www.2embed.cc/embedtv/${tmdb}&s=${s}&e=${e}`
@@ -1964,11 +2017,14 @@ function setMirror(m){
     document.getElementById("watchStatus").textContent = "No trailer found for this title.";
     return;
   }
+  const wasTrailer = mirror === "trailer";
   mirror = m;
   if (m !== "trailer") { try { localStorage.setItem("streambox_mirror", m); } catch(e){} }
   updateMirrorUI();
   paintMirrors();
-  if (m === "cinesrc") reloadKeepPos();
+  applyMirrorSandbox();
+  if (wasTrailer) resumeAt = -1; // YouTube time is meaningless for the feature
+  if (m === "cinesrc" && !wasTrailer) reloadKeepPos();
   else loadPlayer();
 }
 function updateMirrorUI(){
@@ -1980,10 +2036,28 @@ function updateMirrorUI(){
   if (!isCS && !isTrailer) {
     const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
     document.getElementById("mirrorName").textContent = label;
-    document.getElementById("watchStatus").textContent = `Mirror: ${label} — use its own player controls`;
+    document.getElementById("watchStatus").textContent = NO_SANDBOX.has(mirror)
+      ? `Mirror: ${label} — no Ad Shield here (it blocks sandboxed players). Use Brave/uBlock.`
+      : `Mirror: ${label} — use its own player controls`;
   } else if (isTrailer) {
     document.getElementById("watchStatus").textContent = "🎬 Playing official trailer";
   }
+}
+/* Per-mirror sandbox: VidFast/VidLink refuse ANY sandboxed iframe, so drop
+   the sandbox attr entirely for those two. Everything else keeps Ad Shield. */
+function applyMirrorSandbox(){
+  const f = document.getElementById("player");
+  if (!f) return;
+  if (NO_SANDBOX.has(mirror)) {
+    f.removeAttribute("sandbox");
+    const sh = document.getElementById("optShield");
+    if (sh) { sh.checked = false; sh.disabled = true; sh.title = "Ad Shield unavailable on this mirror"; }
+    return;
+  }
+  const sh = document.getElementById("optShield");
+  const on = sh ? sh.checked : true;
+  if (sh) { sh.disabled = false; sh.title = ""; }
+  f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-modals");
 }
 function paintMirrors(){
   const row = document.getElementById("mirrorRow");
@@ -2406,7 +2480,7 @@ document.getElementById("player").addEventListener("load", ()=>{ setTimeout(hide
 window.addEventListener("message", (event)=>{
   if(event.origin !== "https://cinesrc.st") return;
   const { type, ...data } = event.data || {};
-  if(type === "cinesrc:ready" || type === "cinesrc:play" || type === "cinesrc:loadedmetadata") hideSpin();
+  if(type === "cinesrc:ready" || type === "cinesrc:play" || type === "cinesrc:loadedmetadata" || type === "cinesrc:timeupdate" || type === "cinesrc:seeked") hideSpin();
   if(type === "cinesrc:ready") {
     // pull initial state for the control bar
     sendCmd("getPaused"); sendCmd("getDuration"); sendCmd("getMuted"); sendCmd("getPlaybackRate"); sendCmd("getVolume");
@@ -2467,6 +2541,7 @@ window.addEventListener("message", (event)=>{
     }
   }
   if(type === "cinesrc:error"){
+    hideSpin();
     // drop the pinned server so a bad source is never reused
     try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
     document.getElementById("watchStatus").textContent = "Stream error — bad source dropped. Press ↻ Reload or ⇄ Source.";

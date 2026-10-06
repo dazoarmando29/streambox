@@ -61,14 +61,25 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
-                // Keep the app + player inside the WebView; open anything else externally is unnecessary
-                if (url.startsWith("https://dazoarmando29.github.io/")
-                        || url.contains("cinesrc.st")
-                        || url.contains("themoviedb.org")
-                        || url.contains("image.tmdb.org")) {
-                    return false;
-                }
-                return false;
+                String host = "";
+                try { host = request.getUrl().getHost(); if (host == null) host = ""; }
+                catch (Exception ignored) { host = ""; }
+                host = host.toLowerCase();
+                // Allowlist: our site + TMDB + CineSrc + all mirror players + trailer.
+                // Everything else (ad popups, hijacks, non-http schemes) is cancelled
+                // so a bad mirror can never navigate the app away.
+                boolean allowed =
+                        url.startsWith("https://dazoarmando29.github.io/")
+                        || host.equals("cinesrc.st") || host.endsWith(".cinesrc.st")
+                        || host.endsWith("themoviedb.org") || host.endsWith("image.tmdb.org")
+                        || host.endsWith("vidlink.pro") || host.endsWith("vidfast.pro")
+                        || host.endsWith("vidsrc.cc") || host.endsWith("vidsrc.pm")
+                        || host.endsWith("vidsrc.to") || host.endsWith("smashystream.com")
+                        || host.endsWith("autoembed.co") || host.endsWith("2embed.cc")
+                        || host.endsWith("youtube-nocookie.com") || host.endsWith("youtube.com")
+                        || host.endsWith("youtu.be");
+                if (allowed) return false;
+                return true;
             }
         });
 
