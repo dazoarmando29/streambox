@@ -156,7 +156,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 26; // bump every release alongside version.txt
+const BUILD_NUM = 27; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -258,7 +258,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         </div>
         <div class="tip-arrow"></div>
       </div>
-      <p class="no-cinema text-[11px] text-gray-600 mt-2">Remote tips: <b>OK</b> = play/pause • <b>◀ ▶ on the bar</b> = seek • <b>🎯 Player</b> focuses the video itself so you can open its ⚙ menu for <b>subtitles & quality</b>, then Back returns here. <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
+      <p class="no-cinema text-[11px] text-gray-600 mt-2">Cinema remote: <b>◀ ▶</b> = skip • <b>▲ ▼</b> = move in player • <b>OK</b> = play/pause. 🎯 Player focuses the video itself so you can open its ⚙ menu for <b>subtitles</b>, then Back returns here. <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
       <!-- player options -->
       <div class="no-cinema flex flex-wrap items-center gap-3 mt-3 text-xs text-gray-300">
         <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="accent-teal-500" onchange="toggleShield()"> Ad Shield</label>
@@ -757,10 +757,18 @@ function cardEl(x, type){
       }
       return;
     }
-    // our bar is the ONLY player UI: Left/Right always skip, Up/Down wake it.
-    // (No native element-fullscreen anywhere: it hides our controls.)
+    // CINEMA scheme (video-fs, no popup): Left/Right ALWAYS skip,
+    // Up/Down walk along the bar, OK toggles when focus is off the buttons.
     if (okPressed(e)) {
       pokeHud();
+      const top0 = topPopup();
+      const bar0 = !top0 && document.body.classList.contains("video-fs") ? document.getElementById("ctlBar") : null;
+      if (bar0 && !bar0.classList.contains("bar-hidden")) {
+        const f0 = document.activeElement;
+        if (!f0 || f0 === document.body || f0 === document.documentElement || !(f0.closest && f0.closest("#ctlBar"))) {
+          e.preventDefault(); ctlToggle(); return;
+        }
+      }
     }
     if (dir) {
       pokeHud(); // every keypress restarts the 4s idle clock
@@ -775,7 +783,6 @@ function cardEl(x, type){
         }
       } catch(err){}
       // Focus trap: popup wins, else fallback-fullscreen locks to our bar,
-      // Focus trap: popup wins, else fallback-fullscreen locks to our bar,
       // else native-fullscreen HUD, else the whole page.
       // Range/color inputs are NEVER arrow targets: on remotes they swallow
       // Left/Right (scrubbing forever) and can strand focus with no way out.
@@ -784,6 +791,21 @@ function cardEl(x, type){
       if (!top && bar && bar.classList.contains("bar-hidden")) {
         // first press after idle just wakes the UI (Netflix-style)
         e.preventDefault(); pokeHud(); safeFocus(document.getElementById("ctlPlay")); return;
+      }
+      if (!top && bar && !bar.classList.contains("bar-hidden")) {
+        if (dir === "left" || dir === "right") {
+          // bar awake: Left/Right skip without moving focus
+          e.preventDefault();
+          if (dir === "left") ctlSeekRel(-10); else ctlSeekRel(30);
+          return;
+        }
+        // bar awake: Up/Down walk along its buttons (slider skipped by design)
+        e.preventDefault(); pokeHud();
+        const btns = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
+        if (!btns.length) return;
+        const bi = btns.indexOf(document.activeElement);
+        const bn = dir === "down" ? (bi + 1) % btns.length : (bi - 1 + btns.length) % btns.length;
+        safeFocus(btns[bn]); return;
       }
       // TV content lock: the top nav is only reachable from nav/hero/back —
       // arrows from rows or the player never overshoot into logo/search/links
