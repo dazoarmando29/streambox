@@ -128,6 +128,8 @@
     min-height: 78px; border-radius: 0; background: #0b1426;
     border-top: 1px solid rgba(255,255,255,.12);
   }
+  /* cinema shows ONLY video + bar: everything else would peek through */
+  body.video-fs .no-cinema { display: none !important; }
   /* popups float above cinema mode so settings/episodes/search open in place */
   body.video-fs #setPanel, body.video-fs #epDrawer, body.video-fs #searchPanel,
   body.video-fs #tvGuide, body.video-fs #modal { z-index: 90; }
@@ -156,7 +158,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 23; // bump every release alongside version.txt
+const BUILD_NUM = 24; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -210,7 +212,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 
 <!-- WATCH VIEW -->
 <div id="watchView" class="hidden min-h-screen pt-20 px-4 md:px-10 pb-16">
-  <button id="backBtn" onclick="goHome(event)" class="mb-4 text-sm bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full">← Back to Browse</button>
+  <button id="backBtn" onclick="goHome(event)" class="no-cinema mb-4 text-sm bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full">← Back to Browse</button>
   <div class="grid lg:grid-cols-3 gap-6">
     <div class="lg:col-span-2">
       <div id="playerBox" class="player-wrap relative w-full rounded-xl overflow-hidden border border-white/10">
@@ -255,7 +257,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button onclick="focusPlayer()" id="focusPlayerBtn" aria-label="Control player menu" title="Focus the player itself: arrows + OK work its menu (subtitles ⚙, quality). Press Back afterwards." class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">🎯 Player</button>
       </div>
       <!-- One-time subtitles coach tip (arrow points at 🎯 Player) -->
-      <div id="subTip" class="hidden relative mt-3 bg-[#1a2745] border border-teal-500/40 rounded-xl p-4 pr-12 text-sm">
+      <div id="subTip" class="no-cinema hidden relative mt-3 bg-[#1a2745] border border-teal-500/40 rounded-xl p-4 pr-12 text-sm">
         <button onclick="hideSubTip(false)" aria-label="Dismiss tip" class="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/80">✕</button>
         <p class="font-bold">💬 Want subtitles?</p>
         <ol class="text-gray-300 mt-1 space-y-1 list-decimal ml-5 text-[13px]">
@@ -269,9 +271,9 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         </div>
         <div class="tip-arrow"></div>
       </div>
-      <p class="text-[11px] text-gray-600 mt-2">Remote tips: <b>OK</b> = play/pause • <b>◀ ▶ on the bar</b> = seek • <b>🎯 Player</b> focuses the video itself so you can open its ⚙ menu for <b>subtitles & quality</b>, then Back returns here. <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
+      <p class="no-cinema text-[11px] text-gray-600 mt-2">Remote tips: <b>OK</b> = play/pause • <b>◀ ▶ on the bar</b> = seek • <b>🎯 Player</b> focuses the video itself so you can open its ⚙ menu for <b>subtitles & quality</b>, then Back returns here. <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
       <!-- player options -->
-      <div class="flex flex-wrap items-center gap-3 mt-3 text-xs text-gray-300">
+      <div class="no-cinema flex flex-wrap items-center gap-3 mt-3 text-xs text-gray-300">
         <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="accent-teal-500" onchange="toggleShield()"> Ad Shield</label>
         <label class="flex items-center gap-1"><input type="checkbox" id="optAutoplay" checked class="accent-teal-500"> Autoplay</label>
         <label class="flex items-center gap-1"><input type="checkbox" id="optAutonext" checked class="accent-teal-500"> Auto-next</label>
@@ -287,8 +289,8 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button onclick="otherSource()" title="Wrong film or broken stream? Drop this server and try another source." class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">⇄ Source</button>
         <span id="watchStatus" class="ml-auto text-gray-500"></span>
       </div>
-      <p class="text-[11px] text-gray-600 mt-2">Ad Shield uses a sandboxed player (no popups / no tab-hijacks). For full in-stream ad removal also use Brave or uBlock Origin — browsers block sites from stripping ads <em>inside</em> a third-party iframe.</p>
-      <div id="epNav" class="mt-4 hidden">
+      <p class="no-cinema text-[11px] text-gray-600 mt-2">Ad Shield uses a sandboxed player (no popups / no tab-hijacks). For full in-stream ad removal also use Brave or uBlock Origin — browsers block sites from stripping ads <em>inside</em> a third-party iframe.</p>
+      <div id="epNav" class="no-cinema mt-4 hidden">
         <div class="flex items-center gap-3 mb-2">
           <h3 class="font-bold">Episodes</h3>
           <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
@@ -301,7 +303,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <div id="epGrid" class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 max-h-56 overflow-y-auto"></div>
       </div>
     </div>
-    <div class="bg-white/5 border border-white/10 rounded-xl p-5 h-fit">
+    <div class="no-cinema bg-white/5 border border-white/10 rounded-xl p-5 h-fit">
       <div class="flex gap-4">
         <img id="wPoster" class="w-24 rounded-lg" src="" onerror="this.style.display='none'">
         <div>
