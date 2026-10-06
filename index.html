@@ -171,7 +171,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 32; // bump every release alongside version.txt
+const BUILD_NUM = 33; // bump every release alongside version.txt
 const TMDB_API_KEY = "f163dace572064a7998ba4b340ddc79f";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
@@ -268,6 +268,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       <!-- alternate-mirror strip (our bar only drives CineSrc) -->
       <div id="mirrorBar" class="hidden mt-3 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 flex flex-wrap items-center gap-2 text-sm">
         <span>Mirror: <b id="mirrorName">–</b> — use its own player controls</span>
+        <button onclick="focusMirror()" title="Send remote keys to this mirror's own player (some answer OK/arrows, some need a pointer)" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🎯 Control</button>
         <button onclick="setMirror('cinesrc')" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold">⇄ CineSrc</button>
         <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">⚙</button>
       </div>
@@ -1624,6 +1625,14 @@ function focusPlayer(fromFs){
   if (!fromFs) { try { f.scrollIntoView({ block: "center", behavior: "auto" }); } catch(e){} }
   try { f.focus({ preventScroll: true }); } catch(e){}
   document.getElementById("watchStatus").textContent = "Player focused — its menu takes all keys. TV app: Back returns here • Browser: click our bar below to return";
+}
+function focusMirror(){
+  // alternate mirrors don't speak our command API — hand the remote to their
+  // own player instead. Some answer OK/arrows, some only answer a pointer.
+  const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
+  const f = document.getElementById("player");
+  try { f.focus({ preventScroll: true }); } catch(e){}
+  document.getElementById("watchStatus").textContent = `Remote sent to ${label} — try OK/arrows. TV app: Back returns here`;
 }
 /* Subtitles coach tip: shows until permanently dismissed */
 function showSubTip(force){
