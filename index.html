@@ -103,6 +103,9 @@
     min-height: 78px; border-radius: 0; background: #0b1426;
     border-top: 1px solid rgba(255,255,255,.12);
   }
+  /* popups float above cinema mode so settings/episodes/search open in place */
+  body.video-fs #setPanel, body.video-fs #epDrawer, body.video-fs #searchPanel,
+  body.video-fs #tvGuide, body.video-fs #modal { z-index: 90; }
   @media (min-width: 1600px), (pointer: coarse) and (min-width: 1100px) {
     .card { min-width: 180px; }
   }
@@ -134,9 +137,8 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     <button onclick="showContinue(event)" class="hover:text-white">My List</button>
     <button onclick="openTvGuide(event)" class="hover:text-white" title="How to install & use on TV">📺 TV Setup</button>
   </div>
-  <div class="ml-auto flex gap-2 w-full md:w-auto">
-    <button onclick="openSearch(event)" aria-label="Open search" title="Search (TV-friendly)" class="shrink-0 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 border border-white/20">🔍</button>
-    <input id="search" enterkeyhint="search" inputmode="search" autocomplete="off" placeholder="Search movies & shows..." class="w-full md:w-72 px-4 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm focus:border-teal-500" oninput="onSearch(this.value)">
+  <div class="ml-auto flex gap-2 w-full md:w-auto justify-end">
+    <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-4 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm">🔍 Search</button>
   </div>
 </nav>
 
@@ -204,6 +206,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <span id="ctlDur" class="text-xs text-gray-500 tabular-nums">0:00</span>
         <button id="ctlMute" onclick="ctlMuteToggle()" aria-label="Mute or unmute" title="Mute" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🔊</button>
         <button id="ctlRate" onclick="ctlRateCycle()" aria-label="Playback speed" title="Speed" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">1×</button>
+        <button id="ctlQ" onclick="qualityStep(1)" aria-label="Video quality" title="Quality: tap to cycle Auto → 4K → 1080p → 720p → 480p" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Auto</button>
         <button onclick="ctlFullscreen()" aria-label="Fullscreen" title="Fullscreen" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⛶</button>
         <button onclick="openSettings()" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⚙</button>
         <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">☰ Episodes</button>
@@ -346,6 +349,8 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 
     <h3 class="font-bold mt-6 mb-2">Troubleshooting</h3>
     <ul class="text-sm text-gray-300 space-y-1.5 ml-1">
+      <li><b>Site looks old after an update?</b> — hard-refresh once (browser) or clear the app's data (TV app). Updates then arrive automatically.</li>
+      <li><b>New APK looks identical?</b> — <b>uninstall the old app first</b>, then install the new APK. Updates can keep the old icon and cached pages otherwise.</li>
       <li><b>App not in launcher?</b> — check Settings → Apps → StreamBox, or reboot the TV.</li>
       <li><b>Can't press Install?</b> — enable “Install unknown apps” for your file manager first.</li>
       <li><b>Black player?</b> — press Reload; if it persists the stream server is down, try later.</li>
@@ -550,7 +555,6 @@ try {
 } catch(e){}
 let currentType = "all", currentItem = null, currentDetail = null;
 let watchState = { type:"movie", id:null, s:1, e:1 };
-let searchTimer = null, searchCtrl = null;
 
 /* ---------- TMDB helpers (cached: memory + sessionStorage, 10-min TTL) ---------- */
 const _mem = new Map();
@@ -676,9 +680,9 @@ function cardEl(x, type){
     const tag = (document.activeElement && document.activeElement.tagName) || "";
     if (/INPUT|SELECT|TEXTAREA/.test(tag)) {
       if (e.key === "Escape" || e.keyCode === 27) { document.activeElement.blur(); return; }
-      // TV: arrows leave search boxes into results instead of being trapped
-      if ((dir === "down" || dir === "up") && (document.activeElement.id === "search" || document.activeElement.id === "searchBox")) {
-        const first = document.querySelector("#searchPanel:not(.hidden) #searchResults .card, #grid .card, #rows .card");
+      // TV: arrows leave the overlay search box into results instead of being trapped
+      if ((dir === "down" || dir === "up") && document.activeElement.id === "searchBox") {
+        const first = document.querySelector("#searchPanel:not(.hidden) #searchResults .card");
         if (first) { e.preventDefault(); first.focus(); }
       }
       return;
@@ -697,22 +701,20 @@ function cardEl(x, type){
     }
     if (dir) {
       pokeHud(); // every keypress restarts the 4s idle clock
-      // native fullscreen: if focus is already on the on-screen HUD buttons,
-      // navigate them; otherwise arrows are quick commands (seek/volume).
-      // (never hand focus to the frame — its menu ignores TV remotes).
+      // native fullscreen: first press after idle (or with focus lost) only
+      // wakes the HUD — never fires blind. Once awake, arrows walk the buttons.
+      // Volume keys are gone by request: volume lives in ⚙ Settings.
       // fallback cinema keeps our bar visible, so arrows navigate it instead.
       let fsBox = null;
       try {
         if (document.fullscreenElement) {
+          const hudHidden = document.getElementById("fsHud").classList.contains("hud-hidden");
           const f = document.activeElement;
           const box = document.getElementById("playerBox");
-          if (f && f !== document.getElementById("player") && box.contains(f)) fsBox = box;
+          if (!hudHidden && f && f !== document.getElementById("player") && box.contains(f)) fsBox = box;
           else {
             e.preventDefault();
-            if (dir === "left") ctlSeekRel(-10);
-            else if (dir === "right") ctlSeekRel(30);
-            else if (dir === "up") volStep(0.1);
-            else if (dir === "down") volStep(-0.1);
+            safeFocus(document.getElementById("fsHudPlay"));
             return;
           }
         }
@@ -728,14 +730,19 @@ function cardEl(x, type){
         // first press after idle just wakes the UI (Netflix-style)
         e.preventDefault(); pokeHud(); safeFocus(document.getElementById("ctlPlay")); return;
       }
+      // TV content lock: the top nav is only reachable from nav/hero/back —
+      // arrows from rows or the player never overshoot into logo/search/links
+      const ae0 = document.activeElement;
+      const navZone = !!(ae0 && ae0.closest && (ae0.closest("nav") || ae0.closest("#hero") || ae0.id === "backBtn"));
       const scope = top || bar || fsBox || document;
       const items = [...scope.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
         .filter(el => el.offsetParent !== null && !el.disabled
-          && !(el.tagName === "INPUT" && (el.type === "range" || el.type === "color")));
+          && !(el.tagName === "INPUT" && (el.type === "range" || el.type === "color"))
+          && (navZone || !el.closest("nav")));
       if (!items.length) return;
       const cur = document.activeElement;
       let cx, cy;
-      if (cur && cur.getBoundingClientRect) {
+      if (cur && cur !== document.body && cur !== document.documentElement && cur.getBoundingClientRect) {
         // origin = wherever focus actually is, even if that element isn't
         // itself navigable (tapped slider, focused player, etc.)
         const r1 = cur.getBoundingClientRect();
@@ -924,25 +931,7 @@ function renderRecent(){
   });
 }
 
-/* ---------- SEARCH / FILTER (inline nav) ---------- */
-function onSearch(q){
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(async ()=>{
-    // searching from the watch screen: stop the video first, results live on home
-    if (!document.getElementById("watchView").classList.contains("hidden")) goHome();
-    q = q.trim();
-    if(!q){ showRows(); return; }
-    try { if (searchCtrl) searchCtrl.abort(); } catch(e){}
-    searchCtrl = new AbortController();
-    try {
-      const sep = "/search/multi?".includes("?") ? "&" : "?";
-      const url = `${TMDB_BASE}/search/multi?query=${encodeURIComponent(q)}&include_adult=false&api_key=${TMDB_API_KEY}&language=en-US`;
-      const r = await fetch(url, { signal: searchCtrl.signal });
-      const data = await r.json();
-      showGrid(`Results for "${q}"`, (data.results||[]).filter(x=>(x.media_type==="movie"||x.media_type==="tv") && x.poster_path));
-    } catch(e){ /* aborted or offline — ignore */ }
-  }, 400);
-}
+/* ---------- BROWSE GRID ---------- */
 function showGrid(title, items){
   document.getElementById("rows").classList.add("hidden");
   document.getElementById("hero").classList.add("hidden");
@@ -966,7 +955,6 @@ function showRows(){
 async function filterType(type, ev){
   if(ev) ev.preventDefault();
   if (!document.getElementById("watchView").classList.contains("hidden")) goHome();
-  document.getElementById("search").value = "";
   const r = await tmdb(type==="movie" ? "/movie/popular" : "/tv/popular");
   showGrid(type==="movie" ? "Popular Movies" : "Popular TV Shows", r.results.map(x=>({...x, media_type:type})));
 }
@@ -1142,19 +1130,18 @@ try {
   if (qi >= 0) qIdx = qi;
 } catch(e){}
 function fsSettings(){
-  // HUD shortcut: leave fullscreen (panels render outside the frame), then open settings
+  // HUD shortcut: swap true fullscreen for cinema (video stays big),
+  // then open settings on top of it
   try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
-  if (document.body.classList.contains("video-fs")) exitVideoFs();
-  setTimeout(openSettings, 60);
+  if (!document.body.classList.contains("video-fs")) enterVideoFs();
+  setTimeout(openSettings, 120);
 }
 function paintQuality(){
   const t = QLEVELS[qIdx].l;
-  ["qualityLabel", "srvQLabel"].forEach(id => {
+  ["qualityLabel", "srvQLabel", "ctlQ"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = t;
   });
-  const s = document.getElementById("srvQ");
-  if (s) s.textContent = t;
 }
 function qualityStep(dir){
   qIdx = (qIdx + dir + QLEVELS.length) % QLEVELS.length;
@@ -1400,6 +1387,7 @@ function enterVideoFs(){
 }
 function exitVideoFs(){
   document.body.classList.remove("video-fs");
+  clearTimeout(window._idleT);
   document.getElementById("ctlBar").classList.remove("bar-hidden");
   document.getElementById("fsHud").classList.add("hud-hidden");
 }
@@ -1413,7 +1401,12 @@ function nudgePlayerSize(){
   } catch(e){}
 }
 document.addEventListener("fullscreenchange", () => {
-  try { if (!document.fullscreenElement) nudgePlayerSize(); } catch(e){}
+  try {
+    if (!document.fullscreenElement) {
+      document.getElementById("ctlBar").classList.remove("bar-hidden");
+      nudgePlayerSize();
+    }
+  } catch(e){}
 });
 function focusPlayer(fromFs){
   // give the remote to the player itself: its own buttons/menu (subs ⚙, quality)
@@ -1465,9 +1458,11 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
 /* ---------- Settings panel + Episodes drawer ---------- */
 let panelOpener = null;
 function openSettings(){
-  // panels live outside the fullscreen frame: step out first so they're visible
+  // native fullscreen can't show page panels: cinema keeps video big instead
   try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
-  if (document.body.classList.contains("video-fs")) exitVideoFs();
+  if (!document.body.classList.contains("video-fs")
+      && !document.getElementById("watchView").classList.contains("hidden")
+      && document.body.classList.contains("tv-mode")) enterVideoFs();
   panelOpener = document.activeElement;
   paintSettings();
   setTab("playback");
@@ -1478,7 +1473,9 @@ function openSettings(){
 async function openEpisodes(){
   if (watchState.type !== "tv") return;
   try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
-  if (document.body.classList.contains("video-fs")) exitVideoFs();
+  if (!document.body.classList.contains("video-fs")
+      && !document.getElementById("watchView").classList.contains("hidden")
+      && document.body.classList.contains("tv-mode")) enterVideoFs();
   panelOpener = document.activeElement;
   document.getElementById("epDrawer").classList.remove("hidden");
   document.body.classList.add("modal-open");
@@ -1734,11 +1731,19 @@ window.addEventListener("message", (event)=>{
     try { localStorage.setItem("streambox_lastserver", pState.server); } catch(e){}
     if (!document.getElementById("setPanel").classList.contains("hidden")) paintSettings();
   }
-  if(type === "cinesrc:ended" && sleepOnEnd){
-    sendCmd("pause");
-    pState.paused = true; ctlPaint();
-    const ws = document.getElementById("watchStatus");
-    if (ws) ws.textContent = "😴 Sleep when video ends — playback paused";
+  if(type === "cinesrc:ended"){
+    if (sleepOnEnd) {
+      sendCmd("pause");
+      pState.paused = true; ctlPaint();
+      const ws = document.getElementById("watchStatus");
+      if (ws) ws.textContent = "😴 Sleep when video ends — playback paused";
+    } else if (watchState.type === "movie") {
+      // film over: drop out of fullscreen back to the page (episodes keep flowing)
+      try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+      if (document.body.classList.contains("video-fs")) exitVideoFs();
+      const ws = document.getElementById("watchStatus");
+      if (ws) ws.textContent = "Playback ended — press ▶ to replay";
+    }
   }
   if(type === "cinesrc:error"){
     // drop the pinned server so a bad source is never reused
