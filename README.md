@@ -18,7 +18,8 @@ Built and maintained by **dazzo** ([@dazoarmando29](https://github.com/dazoarman
 - CineSrc player with custom control bar: play/pause, ±skip, seek, speed, volume,
   quality, sleep timer, continue-watching with resume points
 - 8 stream mirrors with one-tap fallback (CineSrc, VidLink, VidFast, VidSrc,
-  VsEmbed, AutoEmbed, 2Embed, YapGrid) + official-trailer fallback
+  VsEmbed, AutoEmbed, 2Embed, YapGrid) + official-trailer fallback (genuine
+  Android TV boxes auto-limit to the remote-drivable CineSrc + YapGrid)
 - Ad Shield sandbox on supporting mirrors; unsandboxed mirrors are labeled
 - External subtitles: Wyzie search with built-in shared key (personal key
   override for your own 1,000/day quota) + BetaSeries backup for TV shows when

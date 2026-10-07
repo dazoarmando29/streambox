@@ -248,7 +248,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 58; // bump every release alongside version.txt
+const BUILD_NUM = 59; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -257,6 +257,11 @@ const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
 const CINESRC_MOVIE = id => `https://cinesrc.st/embed/movie/${id}`;
 const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`;
+/* TV-safe lineup (early: boot code below reads these at parse time):
+   only players a TV remote can actually drive. Genuine TV boxes get this
+   automatically; anyone can flip it by hand in Playback Settings. */
+const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid"]);
+const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVIA|Fire TV|AFT/i.test(navigator.userAgent || "");
 </script>
 
 <!-- NAVBAR -->
@@ -389,6 +394,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <p class="text-[11px] text-gray-500 mb-3">Fine-tune playback without cluttering the player.</p>
         <div class="flex flex-wrap items-center gap-x-5 gap-y-3 text-xs text-gray-300">
         <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="switch" onchange="toggleShield()"> Ad Shield</label>
+        <label class="flex items-center gap-2" title="TV remotes can only drive CineSrc + YapGrid — hide the other servers from Source lists."><input type="checkbox" id="optTvSafe" class="switch" onchange="tvSafeToggle()"> TV-safe servers</label>
         <label class="flex items-center gap-2"><input type="checkbox" id="optAutoplay" checked class="switch"> Autoplay</label>
         <label class="flex items-center gap-2"><input type="checkbox" id="optAutonext" checked class="switch"> Auto-next</label>
         <label class="flex items-center gap-2"><input type="checkbox" id="optAutoskip" class="switch"> Auto-skip intro</label>
@@ -956,6 +962,8 @@ function skeletonRow(title){
   try {
     const fv = document.getElementById("footVer");
     if (fv) fv.textContent = "· build " + BUILD_NUM;
+    const ts = document.getElementById("optTvSafe");
+    if (ts) ts.checked = tvSafeOnly();
     const nav = document.querySelector("nav");
     window.addEventListener("scroll", () => {
       if (nav) nav.classList.toggle("nav-solid", window.scrollY > 30);
@@ -1486,7 +1494,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)) };
   try {
     const pm = localStorage.getItem("streambox_mirror") || "cinesrc";
-    mirror = (pm === "trailer" || !MIRRORS.some(x => x.id === pm)) ? "cinesrc" : pm;
+    mirror = (pm === "trailer" || !MIRRORS.some(x => x.id === pm) || !mirrorAllowed(pm)) ? "cinesrc" : pm;
   } catch(e){ mirror = "cinesrc"; }
   trailerKey = null; // trailer is a per-viewing fallback, never default
   updateMirrorUI();
@@ -1662,6 +1670,9 @@ function buildEmbedUrlClean(){
 }
 function loadPlayer(){
   preconnectCinesrc();
+  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
+  // never strand playback on a hidden server.
+  if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
   ctlReset();
   applyMirrorSandbox();
   const spin = document.getElementById("playerSpin");
@@ -1700,7 +1711,7 @@ function otherSource(){
   // on CineSrc → drop the pinned server and re-pick (keeps position);
   // on any other mirror → cycle to the next mirror (starts at 0 there).
   if (mirror !== "cinesrc") {
-    const ids = MIRRORS.map(x => x.id);
+    const ids = tvSafeList().map(x => x.id);
     const next = ids[(ids.indexOf(mirror) + 1) % ids.length];
     document.getElementById("watchStatus").textContent = "Trying next mirror…";
     setMirror(next === "cinesrc" ? "cinesrc" : next);
@@ -1719,7 +1730,7 @@ function wrongVersion(){
   try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
   pState.server = null;
   if (mirror === "trailer") { setMirror("cinesrc"); return; }
-  const ids = MIRRORS.map(x => x.id);
+  const ids = tvSafeList().map(x => x.id);
   const next = ids[(ids.indexOf(mirror) + 1) % ids.length];
   document.getElementById("watchStatus").textContent = "Trying next mirror for the right version…";
   setMirror(next);
@@ -2201,6 +2212,21 @@ const MIRRORS = [
 ];
 /* mirrors that break inside ANY sandboxed iframe: load without sandbox */
 const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid"]);
+/* TV-safe lineup helpers (TV_REMOTE_OK / IS_TV_DEVICE live in CONFIG above):
+   only players a TV remote can actually drive. Genuine TV boxes get this
+   automatically; anyone can flip it by hand in Playback Settings. */
+function tvSafeOnly(){
+  try { const v = localStorage.getItem("streambox_tv_safe"); if (v !== null) return v === "1"; } catch(e){}
+  return IS_TV_DEVICE;
+}
+function mirrorAllowed(id){ return id === "trailer" || !tvSafeOnly() || TV_REMOTE_OK.has(id); }
+function tvSafeList(){ return MIRRORS.filter(m => mirrorAllowed(m.id)); }
+function tvSafeToggle(){
+  try { localStorage.setItem("streambox_tv_safe", document.getElementById("optTvSafe").checked ? "1" : "0"); } catch(e){}
+  paintMirrors();
+  if (!mirrorAllowed(mirror)) setMirror("cinesrc");
+  else updateMirrorUI();
+}
 /* Mislabel guard: famous remake/original pairs free servers routinely swap.
    Verified TMDB IDs — each side names its twin so the watch screen can warn
    BEFORE you waste 20 minutes on the wrong cut. */
@@ -2226,7 +2252,7 @@ const TWINS = {
 let mirror = "cinesrc", trailerKey = null;
 try {
   const pm = localStorage.getItem("streambox_mirror") || "cinesrc";
-  if (MIRRORS.some(x => x.id === pm)) mirror = pm;
+  if (MIRRORS.some(x => x.id === pm) && mirrorAllowed(pm)) mirror = pm;
 } catch(e){}
 function mirrorUrl(id){
   const tmdb = watchState.id, s = watchState.s, e = watchState.e, tv = watchState.type === "tv";
@@ -2342,7 +2368,7 @@ function paintMirrors(){
     row.appendChild(b);
   };
   mk("cinesrc", "CineSrc", true);
-  MIRRORS.slice(1).forEach(m => mk(m.id, m.name, true));
+  tvSafeList().slice(1).forEach(m => mk(m.id, m.name, true));
   mk("trailer", trailerKey ? "🎬 Trailer" : "🎬 …", !!trailerKey);
 }
 /* Wyzie subtitles: search + download with built-in shared key (personal
