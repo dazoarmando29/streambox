@@ -30,6 +30,7 @@
   body.modal-open { overflow: hidden; }
   body {
     background: #0b1426; color: #eee; font-family: Inter, Segoe UI, Arial, sans-serif;
+    background-image: radial-gradient(1200px 600px at 80% -10%, #16294d 0%, rgba(11,20,38,0) 60%); background-attachment: fixed;
     overflow-x: hidden;
     padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -156,6 +157,9 @@
   /* soft popup entrance (cards above own their ring; this is only motion) */
   @keyframes pop { from { transform: scale(.96) translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
   #modal > div, #tvGuide > div, #setPanel > div, #epDrawer > div, #searchPanel > div { animation: pop .18s ease-out; }
+  /* every popup shares one modern surface: deep shadow + top highlight */
+  #modal > div, #tvGuide > div, #setPanel > div, #epDrawer > div, #searchPanel > div {
+    box-shadow: 0 24px 80px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08); }
   .tv-mode .card { transition: transform .15s ease-out !important; transform: none; }
   .tv-mode .card.tv-focus, .tv-mode .card:hover { transform: scale(1.07); }
   .tv-mode .splash-bar > div { animation: splashslide 1.1s ease-in-out infinite !important; }
@@ -187,6 +191,26 @@
   @media (min-width: 1600px), (pointer: coarse) and (min-width: 1100px) {
     .card { min-width: 180px; }
   }
+  /* MODERN skin: glass cards, pill nav tabs, switch toggles */
+  .glass { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); border-radius: 20px; }
+  .card:hover .glass, .card:focus-visible .glass, .card.tv-focus .glass {
+    box-shadow: 0 0 0 2px #14b8a6, 0 10px 30px rgba(0,0,0,.5); }
+  .navlink { position: relative; padding: 8px 14px; border-radius: 12px; color: #9fb0cc;
+    border: 1px solid transparent; background: transparent; }
+  .navlink:hover { color: #fff; }
+  .nav-active { color: #fff !important; font-weight: 800;
+    border-color: rgba(45,212,191,.6) !important; background: rgba(45,212,191,.08); }
+  .nav-active::after { content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: -9px; width: 34px; height: 4px; border-radius: 99px;
+    background: linear-gradient(90deg, #7dd3fc, #2dd4bf); }
+  .switch { position: relative; width: 40px; height: 22px; appearance: none; -webkit-appearance: none;
+    border-radius: 99px; background: rgba(255,255,255,.15); cursor: pointer; flex-shrink: 0;
+    transition: background .18s ease-out; }
+  .switch:checked { background: #14b8a6; }
+  .switch:disabled { opacity: .4; cursor: default; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+    border-radius: 99px; background: #fff; transition: left .18s ease-out; }
+  .switch:checked::after { left: 21px; }
 </style>
 </head>
 <body>
@@ -209,7 +233,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 46; // bump every release alongside version.txt
+const BUILD_NUM = 47; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -228,15 +252,15 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     </span>
     <span class="text-2xl font-black tracking-tight text-white">Stream<span class="text-teal-400">Box</span></span>
   </a>
-  <div class="hidden md:flex gap-5 text-sm text-gray-300">
-    <button onclick="goHome(event)" class="hover:text-white">Home</button>
-    <button onclick="filterType('movie',event)" class="hover:text-white">Movies</button>
-    <button onclick="filterType('tv',event)" class="hover:text-white">TV Shows</button>
-    <button onclick="showContinue(event)" class="hover:text-white">My List</button>
-    <button onclick="openTvGuide(event)" class="hover:text-white" title="How to install & use on TV">📺 TV Setup</button>
+  <div class="hidden md:flex gap-2 text-sm">
+    <button id="navHome" onclick="goHome(event)" class="navlink nav-active">Home</button>
+    <button id="navMovies" onclick="filterType('movie',event)" class="navlink">Movies</button>
+    <button id="navTv" onclick="filterType('tv',event)" class="navlink">TV Shows</button>
+    <button id="navList" onclick="showContinue(event)" class="navlink">My List</button>
+    <button onclick="openTvGuide(event)" class="navlink" title="How to install & use on TV">📺 TV Setup</button>
   </div>
   <div class="ml-auto flex gap-2 w-full md:w-auto justify-end">
-    <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-4 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm">🔍 Search</button>
+    <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-4 md:min-w-[190px] md:justify-start rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm text-gray-300">🔍 Search</button>
   </div>
 </nav>
 
@@ -251,7 +275,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 
   <!-- CONTINUE WATCHING -->
   <div id="continueRow" class="px-4 md:px-10 mt-4 hidden">
-    <h2 class="text-lg font-bold mb-2">Continue Watching</h2>
+    <h2 class="row-title text-lg font-bold mb-2">Continue Watching</h2>
     <div id="continueGrid" class="flex gap-3 overflow-x-auto row-scroll pb-2"></div>
   </div>
 
@@ -259,7 +283,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 
   <!-- SEARCH / BROWSE GRID -->
   <main id="gridView" class="hidden px-4 md:px-10 pt-24 pb-20">
-    <h2 id="gridTitle" class="text-xl font-bold mb-4"></h2>
+    <h2 id="gridTitle" class="row-title text-xl font-bold mb-4"></h2>
     <div id="genreRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
     <button id="loadMoreBtn" onclick="browseMore()" class="hidden mx-auto mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 font-bold text-sm">Load more ↓</button>
@@ -277,7 +301,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button onclick="wrongVersion()" class="bg-teal-500 hover:bg-teal-400 font-bold px-4 py-2 rounded-full text-[13px]">🎬 Wrong version?</button>
         <button onclick="hideTwinTip()" aria-label="Dismiss" class="w-8 h-8 rounded-full bg-black/50 hover:bg-black/80 shrink-0">✕</button>
       </div>
-      <div id="playerBox" class="player-wrap relative w-full rounded-xl overflow-hidden border border-white/10">
+      <div id="playerBox" class="player-wrap relative w-full rounded-2xl overflow-hidden border border-white/10">
         <div id="playerSpin" class="absolute inset-0 grid place-items-center bg-black">
           <div class="flex flex-col items-center gap-2 text-gray-400 text-sm">
             <div class="w-10 h-10 rounded-full border-2 border-white/20 border-t-teal-500 animate-spin"></div>
@@ -340,11 +364,14 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       </div>
       <p class="no-cinema text-[11px] text-gray-600 mt-2">Cinema remote (TV): <b>◀ ▶</b> = pick buttons • <b>▲ ▼</b> = volume • <b>OK</b> = press picked (skip with −10s/+30s). Desktop: ◀ ▶ still skips. <b>CC</b> toggles our subtitles on/off (opens Subs settings when empty). <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
       <!-- player options -->
-      <div class="no-cinema flex flex-wrap items-center gap-3 mt-3 text-xs text-gray-300">
-        <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="accent-teal-500" onchange="toggleShield()"> Ad Shield</label>
-        <label class="flex items-center gap-1"><input type="checkbox" id="optAutoplay" checked class="accent-teal-500"> Autoplay</label>
-        <label class="flex items-center gap-1"><input type="checkbox" id="optAutonext" checked class="accent-teal-500"> Auto-next</label>
-        <label class="flex items-center gap-1"><input type="checkbox" id="optAutoskip" class="accent-teal-500"> Auto-skip intro</label>
+      <div class="no-cinema glass mt-3 p-4">
+        <p class="font-bold text-sm">Playback Settings</p>
+        <p class="text-[11px] text-gray-500 mb-3">Fine-tune playback without cluttering the player.</p>
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-3 text-xs text-gray-300">
+        <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="switch" onchange="toggleShield()"> Ad Shield</label>
+        <label class="flex items-center gap-2"><input type="checkbox" id="optAutoplay" checked class="switch"> Autoplay</label>
+        <label class="flex items-center gap-2"><input type="checkbox" id="optAutonext" checked class="switch"> Auto-next</label>
+        <label class="flex items-center gap-2"><input type="checkbox" id="optAutoskip" class="switch"> Auto-skip intro</label>
         <label class="flex items-center gap-1">Accent <input type="color" id="optColor" value="#14b8a6" class="w-8 h-6 bg-transparent"></label>
         <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5" title="Preferred video quality — 4K only plays if the source carries it, otherwise best available">
           <button onclick="qualityStep(-1)" aria-label="Lower quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
@@ -356,6 +383,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button onclick="otherSource()" title="Wrong film or broken stream? Drop this server and try another source." class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">⇄ Source</button>
         <button onclick="wrongVersion()" title="Right title, wrong cut (remake plays the original or vice versa)? Jump to the next mirror." class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">🎬 Wrong version?</button>
         <span id="watchStatus" class="ml-auto text-gray-500"></span>
+        </div>
       </div>
       <p class="no-cinema text-[11px] text-gray-600 mt-2">Ad Shield uses a sandboxed player (no popups / no tab-hijacks). For full in-stream ad removal also use Brave or uBlock Origin — browsers block sites from stripping ads <em>inside</em> a third-party iframe.</p>
       <div id="epNav" class="no-cinema mt-4 hidden">
@@ -382,6 +410,12 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       </div>
       <p id="wOverview" class="text-sm text-gray-300 mt-4 leading-relaxed"></p>
       <div id="wCast" class="text-xs text-gray-500 mt-3"></div>
+    </div>
+    <div id="upNext" class="no-cinema hidden bg-white/5 border border-white/10 rounded-xl p-5 mt-4">
+      <p class="text-[11px] font-black tracking-[.2em] text-teal-300">UP NEXT</p>
+      <p id="upNextTitle" class="font-bold mt-1"></p>
+      <p id="upNextMeta" class="text-[11px] text-gray-500 mt-0.5"></p>
+      <button onclick="nextEpisode(1)" class="mt-3 bg-teal-500 hover:bg-teal-400 font-bold px-5 py-2 rounded-full text-sm">Play Now</button>
     </div>
   </div>
 </div>
@@ -1216,6 +1250,12 @@ function showRows(){
   document.getElementById("hero").classList.remove("hidden");
   renderContinue();
 }
+function paintNav(which){
+  ["navHome", "navMovies", "navTv", "navList"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle("nav-active", id === which);
+  });
+}
 async function filterType(type, ev){
   openBrowse(type, ev);
 }
@@ -1237,6 +1277,7 @@ async function openBrowse(type, ev){
   document.getElementById("continueRow").classList.add("hidden");
   document.getElementById("gridView").classList.remove("hidden");
   document.getElementById("gridTitle").textContent = type === "movie" ? "Movies" : "TV Shows";
+  paintNav(type === "movie" ? "navMovies" : "navTv");
   document.getElementById("grid").innerHTML = "";
   const row = document.getElementById("genreRow");
   row.classList.remove("hidden");
@@ -1305,7 +1346,7 @@ async function browseMore(focusFirst){
   }
   browse.loading = false;
 }
-function showContinue(ev){ if(ev) ev.preventDefault(); goHome(ev); document.getElementById("continueRow").scrollIntoView({behavior: document.body.classList.contains("tv-mode") ? "auto" : "smooth"}); }
+function showContinue(ev){ if(ev) ev.preventDefault(); goHome(ev); paintNav("navList"); document.getElementById("continueRow").scrollIntoView({behavior: document.body.classList.contains("tv-mode") ? "auto" : "smooth"}); }
 
 /* ---------- DETAIL MODAL ---------- */
 let modalSeasons = [], modalSeasonIdx = 0, modalEpisodes = [], modalEpIdx = 0, lastOpener = null;
@@ -1409,6 +1450,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   // desktop/phone just zoom-scrolls to the video, ⛶ gives true fullscreen
   if (document.body.classList.contains("tv-mode")) enterVideoFs();
   else { try { document.getElementById("playerBox").scrollIntoView({ block: "center", behavior: "smooth" }); } catch(e){} }
+  paintNav(null); // watching: no browse tab is active
   paintQuality();
   fetchTrailer(type, id); // non-blocking: trailer button appears when found
   loadStoredSubs(); // auto-attach this title's remembered subtitle file
@@ -1461,6 +1503,17 @@ async function loadEpisodes(){
     b.onclick = ()=>{ watchState.e = ep.episode_number; loadPlayer(); loadEpisodes(); saveContinue(); };
     grid.appendChild(b);
   });
+  paintUpNext(d.episodes || []);
+}
+function paintUpNext(eps){
+  const box = document.getElementById("upNext");
+  if (!box) return;
+  if (watchState.type !== "tv") { box.classList.add("hidden"); return; }
+  const nxt = (eps || []).find(x => x.episode_number === watchState.e + 1);
+  if (!nxt) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  document.getElementById("upNextTitle").textContent = `S${watchState.s} E${nxt.episode_number} • ${nxt.name || ""}`;
+  document.getElementById("upNextMeta").textContent = nxt.runtime ? `${nxt.runtime}m` : "";
 }
 let watchSeasons = [];
 function updateSeasonLabel(){
@@ -1649,6 +1702,7 @@ function applyPlayerOpts(){ reloadKeepPos(); }
 
 function goHome(ev){
   if(ev) ev.preventDefault();
+  paintNav("navHome");
   ctlPollStop();
   clearTimeout(window._tipT);
   exitVideoFs();
@@ -1719,13 +1773,13 @@ function renderContinue(){
     row.classList.remove("hidden"); grid.innerHTML = "";
     arr.forEach(x=>{
       const d = document.createElement("div");
-      d.className = "card min-w-[130px] max-w-[130px] relative focusable";
+      d.className = "card min-w-[270px] max-w-[270px] focusable";
       d.tabIndex = 0;
       d.setAttribute("role", "button");
       d.setAttribute("data-focusable", "1");
       d.setAttribute("aria-label", `${x.title||""} (${x.type})`);
       const pct = (x.dur > 60 && x.pos > 5) ? Math.min(99, Math.round(x.pos / x.dur * 100)) : 0;
-      d.innerHTML = `<div class="relative poster-frame"><img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" onerror="this.onerror=null;this.style.display='none'" class="rounded-lg w-full aspect-[2/3] object-cover"></div><p class="card-title text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}${pct ? ` • ${pct}%` : ""}</p>${pct ? `<div class="h-1 rounded bg-white/15 mt-1 overflow-hidden"><div class="h-1 rounded bg-teal-400" style="width:${pct}%"></div></div>` : ""}<button class="absolute top-1 right-1 bg-black/70 w-9 h-9 rounded-full text-sm" aria-label="Remove">✕</button>`;
+      d.innerHTML = `<div class="glass flex items-center gap-3 p-3"><img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" onerror="this.onerror=null;this.style.display='none'" class="w-14 aspect-[2/3] object-cover rounded-lg shrink-0"><div class="flex-1 min-w-0"><p class="card-title text-sm font-bold truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p>${pct ? `<div class="h-1.5 rounded bg-white/15 mt-2 overflow-hidden"><div class="h-1.5 rounded bg-teal-400" style="width:${pct}%"></div></div><p class="text-[11px] text-teal-300 font-bold mt-1">${pct}% watched</p>` : `<p class="text-[11px] text-gray-600 mt-2">Not started</p>`}</div><button class="w-9 h-9 shrink-0 rounded-full bg-black/50 hover:bg-black/80 text-sm" aria-label="Remove">✕</button></div>`;
       const resumeAt = (x.dur > 60 && x.pos > 10) ? x.pos : 0;
       d.onclick = activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt));
       // remote/keyboard: OK plays ONLY when the card itself has focus — the inner
