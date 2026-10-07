@@ -248,7 +248,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 60; // bump every release alongside version.txt
+const BUILD_NUM = 61; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2280,7 +2280,17 @@ function mirrorUrl(id){
       // movies keep captions here even when Wyzie is capped.
       // lang = its UI + preferred subs follow your Subs language;
       // autoplay saves one OK press (blocked-with-sound just shows ▶).
+      // Bonus: a Wyzie-loaded track rides along as its default subtitles
+      // (their file host is CORS-open, so the player can fetch it) — pick
+      // the language in OUR Subs UI, no in-player menu needed on TV.
       const yp = new URLSearchParams({ autoplay: "1", lang: (typeof wyzLang === "string" && wyzLang) || "en" });
+      try {
+        if (typeof subFile !== "undefined" && subFile && subFile.src === "wyzie" && subFile.url) {
+          yp.set("sub_url", subFile.url);
+          if (subFile.code) yp.set("sub_lang", subFile.code);
+          yp.set("sub_label", subFile.name || "StreamBox subs");
+        }
+      } catch(e){}
       const yq = yp.toString();
       return tv
         ? `https://yapgrid.com/embed/tv/${tmdb}/${s}/${e}?${yq}`
@@ -2335,6 +2345,10 @@ function updateMirrorUI(){
   if (!isCS && !isTrailer) {
     const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
     document.getElementById("mirrorName").textContent = label;
+    if (mirror === "yapgrid" && typeof subFile !== "undefined" && subFile && subFile.src === "wyzie" && subFile.url) {
+      document.getElementById("watchStatus").textContent = `YapGrid: showing your ${subFile.lang || "loaded"} subs ✓ — change language in ⚙ → Subs · no Ad Shield here, use Brave/uBlock`;
+      return;
+    }
     document.getElementById("watchStatus").textContent = NO_SANDBOX.has(mirror)
       ? `Mirror: ${label} — no Ad Shield here (it blocks sandboxed players). Use Brave/uBlock.`
       : `Mirror: ${label} — use its own player controls` + ((typeof subFile !== "undefined" && subFile && subFile.cues && subFile.cues.length) ? " · your Wyzie subs return on CineSrc" : "");
@@ -2522,7 +2536,7 @@ async function wyzDownload(url, it){
     const cues = parseSubs(text);
     if (!cues.length) throw new Error("File downloaded but unreadable.");
     const lang = (it && (it.display || it.language)) || wyzLang.toUpperCase();
-    setSubs({ name: ((it && it.fileName) || "wyzie.srt"), lang, cues,
+    setSubs({ name: ((it && it.fileName) || "wyzie.srt"), lang, cues, url: url, src: "wyzie", code: wyzLang,
       pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
     wyzQuotaClear();
     subStatus(`Loaded ${cues.length} lines (${lang}).`);
@@ -2573,7 +2587,7 @@ async function wyzAutoSubs(){
     if (!fr.ok) return;
     const cues = parseSubs(await fr.text());
     if (!cues.length) return;
-    setSubs({ name: (pick.fileName || "wyzie.srt"), lang: (pick.display || wyzLang.toUpperCase()), cues,
+    setSubs({ name: (pick.fileName || "wyzie.srt"), lang: (pick.display || wyzLang.toUpperCase()), cues, url: pick.url, src: "wyzie", code: wyzLang,
       pos: "bottom", offset: 0 });
     wyzQuotaClear();
     const ws = document.getElementById("watchStatus");
@@ -2679,7 +2693,7 @@ async function bsDownload(sub){
     const cues = parseSubs(await fr.text());
     if (!cues.length) throw new Error("Backup file unreadable.");
     const gl = guessLang(sub.file);
-    setSubs({ name: (sub.file || "betaseries.srt"), lang: gl !== "Custom" ? gl : (sub.language || wyzLang.toUpperCase()), cues,
+    setSubs({ name: (sub.file || "betaseries.srt"), lang: gl !== "Custom" ? gl : (sub.language || wyzLang.toUpperCase()), cues, src: "betaseries",
       pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
     subStatus(`Loaded ${cues.length} lines (backup ✓).`);
   } catch(err) {
@@ -2703,7 +2717,7 @@ async function bsAuto(){
     const cues = parseSubs(await fr.text());
     if (!cues.length) return;
     const gl = guessLang(pick.file);
-    setSubs({ name: (pick.file || "betaseries.srt"), lang: gl !== "Custom" ? gl : (pick.language || wyzLang.toUpperCase()), cues, pos: "bottom", offset: 0 });
+    setSubs({ name: (pick.file || "betaseries.srt"), lang: gl !== "Custom" ? gl : (pick.language || wyzLang.toUpperCase()), cues, src: "betaseries", pos: "bottom", offset: 0 });
     const ws = document.getElementById("watchStatus");
     if (ws && mirror === "cinesrc") ws.textContent = `Backup subtitles auto-loaded (${cues.length} lines) ✓ — Wyzie quota resets later`;
   } catch(e){}
