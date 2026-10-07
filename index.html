@@ -248,7 +248,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 54; // bump every release alongside version.txt
+const BUILD_NUM = 55; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2414,6 +2414,8 @@ function paintWyzLang(){
 async function wyzSearch(){
   const box = document.getElementById("wyzResults");
   if (!box) return;
+  // capped? spare the shared key entirely — straight to the backup source
+  if (wyzQuota && Date.now() - wyzQuota.at < 3600000) return bsSearch();
   box.innerHTML = `<p class="text-xs text-gray-500">Searching Wyzie…</p>`;
   try {
     const q = new URLSearchParams({
@@ -2425,7 +2427,7 @@ async function wyzSearch(){
     }
     const r = await fetch(`${WYZ_BASE}/search?${q}`);
     if (r.status === 401 || r.status === 403) throw new Error("Key rejected — check it and save again.");
-    if (r.status === 429) throw new Error(await wyzQuotaMsg(r));
+    if (r.status === 429) { await wyzQuotaMsg(r); return bsSearch(); }
     if (!r.ok) throw new Error("Search failed (" + r.status + ").");
     const items = await r.json();
     wyzQuotaClear();
@@ -2492,7 +2494,8 @@ async function wyzAutoSubs(){
     if (wyzQuota && Date.now() - wyzQuota.at < 3600000) {
       const wq = document.getElementById("watchStatus");
       if (wq) wq.textContent = `⚠ Subtitles off — free key's 1,000/day used up${wyzQuota.reset ? " (resets " + wyzQuota.reset + ")" : ""}. Manual .srt load still works.`;
-      return; // capped: warn without burning more requests
+      if (watchState.type === "tv") bsAuto(); // capped: silent backup attempt, once per title
+      return; // capped: warn without burning more Wyzie requests
     }
     const q = new URLSearchParams({
       id: String(watchState.id), language: wyzLang, format: "srt", limit: "5", key: wyzKeyEffective()
@@ -2528,6 +2531,134 @@ async function wyzAutoSubs(){
     wyzQuotaClear();
     const ws = document.getElementById("watchStatus");
     if (ws && mirror === "cinesrc") ws.textContent = `Subtitles auto-loaded (${cues.length} lines) ✓ — nudge sync anytime in ⚙ → Subs`;
+  } catch(e){}
+}
+/* Backup subtitles (BetaSeries): used ONLY when the Wyzie free key is capped.
+   TV shows only (BetaSeries lists no movie subs). Chain: TMDB tvdb id →
+   BetaSeries show → season episodes → subtitles → file text via a CORS
+   relay (their file host sends no CORS headers, so browsers can't fetch it
+   directly; if the relay dies the message tells you the manual copy-paste).
+   Key sharded like the others; the OAuth secret is never needed for reads. */
+const BS_BASE = "https://api.betaseries.com";
+const _bsk = ["jZlhDOmNWN", "0YDO5E"];
+const BS_KEY = atob(_bsk.map(s => s.split("").reverse().join("")).join(""));
+const BS_PROXY = "https://api.allorigins.win/raw?url=";
+let bsTriedKey = "";
+async function bsGet(path, params){
+  const q = new URLSearchParams(Object.assign({ v: "3.0", key: BS_KEY }, params));
+  const r = await fetch(`${BS_BASE}${path}?${q}`);
+  if (!r.ok) throw new Error("BetaSeries error (" + r.status + ").");
+  const j = await r.json();
+  if (j && j.errors && j.errors.length) {
+    const e0 = j.errors[0] || {};
+    throw new Error("BetaSeries: " + (e0.text || e0.code || "lookup failed."));
+  }
+  return j;
+}
+function bsScore(sub, code){
+  // filename tokens beat the coarse VO/VF tag (VO = original: right for EN
+  // shows, wrong for the rest — trusted only alongside filename proof)
+  const f = ((sub && sub.file) || "").toLowerCase();
+  const tok = { en: ["english", ".en.", "eng"], es: ["spanish", "espanol", ".es."], fr: ["french", "francais", ".fr.", "vostfr"], de: ["german", "deutsch", ".de."], ar: ["arabic", ".ar."], hi: ["hindi", ".hi."], tl: ["tagalog", ".tl."], pt: ["portuguese", ".pt."], it: ["italian", ".it."], nl: ["dutch", ".nl."], ru: ["russian", ".ru."], tr: ["turkish", ".tr."], id: ["indonesian", ".id."] }[code] || [];
+  let s = (sub && sub.quality) ? Number(sub.quality) || 0 : 0;
+  if (tok.some(t => f.includes(t))) s += 10;
+  return s;
+}
+async function bsFindSubs(){
+  // throws friendly Errors; returns ranked subtitle objects or []
+  if (watchState.type !== "tv") throw new Error("Backup covers TV shows only — movies need Wyzie quota or a manual .srt below.");
+  const ext = await tmdb(`/tv/${watchState.id}/external_ids`);
+  const tvdb = ext && (ext.tvdb_id || ext.tvdbId);
+  if (!tvdb) throw new Error("No TVDB link for this title — backup can't find it.");
+  const sh = await bsGet("/shows/display", { thetvdb_id: String(tvdb) });
+  const show = sh && sh.show;
+  if (!show || !show.id) throw new Error("Not listed on BetaSeries — try another language or a manual file.");
+  const se = await bsGet("/shows/episodes", { id: String(show.id), season: String(watchState.s) });
+  const ep = ((se && se.episodes) || []).find(e => Number(e.episode) === Number(watchState.e));
+  if (!ep || !ep.id) throw new Error("Episode not listed — try another language or a manual file.");
+  const su = await bsGet("/subtitles/episode", { id: String(ep.id) });
+  const list = (su && su.subtitles) || [];
+  return list
+    .filter(s => s && s.id)
+    .map(s => ({ s, score: bsScore(s, wyzLang) }))
+    .sort((a, b) => b.score - a.score || ((b.s.quality || 0) - (a.s.quality || 0)))
+    .map(x => x.s);
+}
+function bsRow(sub, tag){
+  // normalized backup row: name + origin + quality + one-tap load
+  const wrap = document.createElement("div");
+  wrap.className = "bg-white/5 border border-white/10 rounded-xl p-3";
+  const rel = document.createElement("p");
+  rel.className = "text-sm font-bold truncate";
+  rel.textContent = (sub.file || ("Backup #" + sub.id));
+  const meta = document.createElement("p");
+  meta.className = "text-[11px] text-gray-500";
+  meta.textContent = `${tag}${sub.language ? " • " + sub.language : ""}${sub.source ? " • " + sub.source : ""}${sub.quality ? " • Q" + sub.quality + "/5" : ""}`;
+  const b = document.createElement("button");
+  b.textContent = "⬇ Download";
+  b.className = "mt-2 px-4 h-9 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold";
+  b.onclick = () => bsDownload(sub);
+  wrap.appendChild(rel); wrap.appendChild(meta); wrap.appendChild(b);
+  return wrap;
+}
+async function bsSearch(){
+  // manual backup search, rendered into the same results list
+  const box = document.getElementById("wyzResults");
+  if (!box) return;
+  box.innerHTML = `<p class="text-xs text-gray-500">Wyzie quota capped — trying backup source (BetaSeries, TV only)…</p>`;
+  try {
+    const list = (await bsFindSubs()).slice(0, 25);
+    if (!list.length) throw new Error("No backup subtitles — try another language or a manual file below.");
+    box.innerHTML = "";
+    const h = document.createElement("p");
+    h.className = "text-[11px] text-amber-300/90";
+    h.textContent = "⚠ Wyzie 1,000/day used up — backup results (BetaSeries).";
+    box.appendChild(h);
+    list.forEach(s => box.appendChild(bsRow(s, "Backup")));
+  } catch(err) {
+    box.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "text-xs text-red-400";
+    p.textContent = (err && err.message) || "Backup failed.";
+    box.appendChild(p);
+  }
+}
+async function bsDownload(sub){
+  if (!sub || !sub.id) return;
+  subStatus("Downloading backup subtitle…");
+  try {
+    const fr = await fetch(BS_PROXY + encodeURIComponent(`https://www.betaseries.com/srt/${sub.id}`));
+    if (!fr.ok) throw new Error("Backup fetch failed (" + fr.status + ").");
+    const cues = parseSubs(await fr.text());
+    if (!cues.length) throw new Error("Backup file unreadable.");
+    const gl = guessLang(sub.file);
+    setSubs({ name: (sub.file || "betaseries.srt"), lang: gl !== "Custom" ? gl : (sub.language || wyzLang.toUpperCase()), cues,
+      pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+    subStatus(`Loaded ${cues.length} lines (backup ✓).`);
+  } catch(err) {
+    // last resort: their file opens as plain text — copy it into ✏ Paste text
+    subStatus(`Auto-load failed — open betaseries.com/srt/${sub.id} in your browser, copy the text, paste it under ✏ Paste text.`);
+  }
+}
+async function bsAuto(){
+  // silent one-shot backup for auto-subs: same title won't retry this session
+  try {
+    const k = subStorageKey() + "|bs";
+    if (bsTriedKey === k) return;
+    bsTriedKey = k;
+    if (subFile && subFile.cues && subFile.cues.length) return;
+    if (mirror !== "cinesrc") return;
+    const list = await bsFindSubs();
+    if (!list.length) return;
+    const pick = list[0];
+    const fr = await fetch(BS_PROXY + encodeURIComponent(`https://www.betaseries.com/srt/${pick.id}`));
+    if (!fr.ok) return;
+    const cues = parseSubs(await fr.text());
+    if (!cues.length) return;
+    const gl = guessLang(pick.file);
+    setSubs({ name: (pick.file || "betaseries.srt"), lang: gl !== "Custom" ? gl : (pick.language || wyzLang.toUpperCase()), cues, pos: "bottom", offset: 0 });
+    const ws = document.getElementById("watchStatus");
+    if (ws && mirror === "cinesrc") ws.textContent = `Backup subtitles auto-loaded (${cues.length} lines) ✓ — Wyzie quota resets later`;
   } catch(e){}
 }
 /* my subtitles: external .srt/.vtt files with position + sync control */
