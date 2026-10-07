@@ -233,7 +233,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 48; // bump every release alongside version.txt
+const BUILD_NUM = 49; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2137,9 +2137,8 @@ const MIRRORS = [
   { id: "cinesrc", name: "CineSrc" },
   { id: "vidlink", name: "VidLink" },
   { id: "vidfast", name: "VidFast" },
-  { id: "vidsrccc", name: "VidSrc" },
-  { id: "vidsrcpm", name: "VidSrc PM" },
-  { id: "smashy", name: "Smashy" },
+  { id: "vidsrcto", name: "VidSrc" },
+  { id: "vsembed", name: "VsEmbed" },
   { id: "autoembed", name: "AutoEmbed" },
   { id: "twoembed", name: "2Embed" }
 ];
@@ -2183,19 +2182,16 @@ function mirrorUrl(id){
       return tv
         ? `https://vidfast.pro/tv/${tmdb}/${s}/${e}?autoPlay=true`
         : `https://vidfast.pro/movie/${tmdb}?autoPlay=true`;
-    case "vidsrccc":
+    case "vidsrcto":
+      // vidsrc.to docs: /embed/movie/{tmdb} and /embed/tv/{id}/{s}/{e}
       return tv
-        ? `https://vidsrc.cc/v2/embed/tv/${tmdb}/${s}/${e}`
-        : `https://vidsrc.cc/v2/embed/movie/${tmdb}`;
-    case "vidsrcpm":
+        ? `https://vidsrc.to/embed/tv/${tmdb}/${s}/${e}`
+        : `https://vidsrc.to/embed/movie/${tmdb}`;
+    case "vsembed":
+      // VidSrc's successor embed host (same player family as vidsrc.to)
       return tv
-        ? `https://vidsrc.pm/embed/tv/${tmdb}/${s}/${e}`
-        : `https://vidsrc.pm/embed/movie/${tmdb}`;
-    case "smashy":
-      // NOTE: embed.smashystream.com is retired; player.smashystream.com is current
-      return tv
-        ? `https://player.smashystream.com/playere.php?tmdb=${tmdb}&season=${s}&episode=${e}`
-        : `https://player.smashystream.com/playere.php?tmdb=${tmdb}`;
+        ? `https://vsembed.su/embed/tv/${tmdb}/${s}/${e}`
+        : `https://vsembed.su/embed/movie/${tmdb}`;
     case "autoembed":
       return tv
         ? `https://autoembed.co/tv/tmdb/${tmdb}-${s}-${e}`

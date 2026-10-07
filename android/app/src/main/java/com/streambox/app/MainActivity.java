@@ -73,8 +73,7 @@ public class MainActivity extends Activity {
                         || host.equals("cinesrc.st") || host.endsWith(".cinesrc.st")
                         || host.endsWith("themoviedb.org") || host.endsWith("image.tmdb.org")
                         || host.endsWith("vidlink.pro") || host.endsWith("vidfast.pro")
-                        || host.endsWith("vidsrc.cc") || host.endsWith("vidsrc.pm")
-                        || host.endsWith("vidsrc.to") || host.endsWith("smashystream.com")
+                        || host.endsWith("vidsrc.to") || host.endsWith("vsembed.su")
                         || host.endsWith("autoembed.co") || host.endsWith("2embed.cc")
                         || host.endsWith("youtube-nocookie.com") || host.endsWith("youtube.com")
                         || host.endsWith("youtu.be");
