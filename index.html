@@ -196,7 +196,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 41; // bump every release alongside version.txt
+const BUILD_NUM = 42; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2205,6 +2205,19 @@ try {
   wyzKey = localStorage.getItem("streambox_wyz_key") || "";
 } catch(e){}
 function wyzKeyEffective(){ return wyzKey || WYZ_BUILTIN; }
+let wyzQuota = null; // set when the free key hits its 1,000/day cap (memory-only: self-heals)
+async function wyzQuotaMsg(res){
+  let reset = "";
+  try {
+    const j = await res.clone().json();
+    if (j && j.reset_at) reset = String(j.reset_at);
+  } catch(e){}
+  wyzQuota = { reset, at: Date.now() };
+  paintWyzKey();
+  return reset
+    ? `Daily limit reached (1,000 free/day) — resets ${reset}.`
+    : "Daily limit reached (1,000 free/day) — try again later.";
+}
 function wyzSaveKey(){
   const v = (document.getElementById("wyzKey").value || "").trim();
   wyzKey = v;
@@ -2230,6 +2243,7 @@ function paintWyzKey(){
   if (st) st.textContent = has
     ? "Personal key saved ✓ (your own 1,000/day quota)"
     : "Using shared built-in key — paste your own below for guaranteed quota.";
+  if (st && wyzQuota) st.textContent += ` ⚠ Daily limit hit${wyzQuota.reset ? " (resets " + wyzQuota.reset + ")" : ""} — file uploads still work.`;
 }
 function paintWyzLang(){
   const row = document.getElementById("wyzLangRow");
@@ -2262,9 +2276,10 @@ async function wyzSearch(){
     }
     const r = await fetch(`${WYZ_BASE}/search?${q}`);
     if (r.status === 401 || r.status === 403) throw new Error("Key rejected — check it and save again.");
-    if (r.status === 429) throw new Error("Daily limit reached (1,000/day) — try tomorrow.");
+    if (r.status === 429) throw new Error(await wyzQuotaMsg(r));
     if (!r.ok) throw new Error("Search failed (" + r.status + ").");
     const items = await r.json();
+    wyzQuota = null;
     const list = (Array.isArray(items) ? items : []).slice(0, 25);
     if (!list.length) {
       box.innerHTML = `<p class="text-xs text-gray-500">No ${wyzLang.toUpperCase()} subtitles found — try another language, or load a file below.</p>`;
@@ -2302,7 +2317,7 @@ async function wyzDownload(url, it){
   subStatus("Downloading subtitle…");
   try {
     const fr = await fetch(url);
-    if (fr.status === 429) throw new Error("Daily limit reached (1,000/day) — try tomorrow.");
+    if (fr.status === 429) throw new Error(await wyzQuotaMsg(fr));
     if (fr.status === 401) throw new Error("Link expired — search again and retry.");
     if (!fr.ok) throw new Error("Download failed (" + fr.status + ").");
     const text = await fr.text();
@@ -2311,6 +2326,7 @@ async function wyzDownload(url, it){
     const lang = (it && (it.display || it.language)) || wyzLang.toUpperCase();
     setSubs({ name: ((it && it.fileName) || "wyzie.srt"), lang, cues,
       pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+    wyzQuota = null;
     subStatus(`Loaded ${cues.length} lines (${lang}).`);
   } catch(err) {
     subStatus((err && err.message) || "Download failed. You can still load a file manually below.");
@@ -2324,6 +2340,11 @@ async function wyzAutoSubs(){
   try {
     if (subFile && subFile.cues && subFile.cues.length) return;
     if (mirror !== "cinesrc") return;
+    if (wyzQuota && Date.now() - wyzQuota.at < 3600000) {
+      const wq = document.getElementById("watchStatus");
+      if (wq) wq.textContent = `⚠ Subtitles off — free key's 1,000/day used up${wyzQuota.reset ? " (resets " + wyzQuota.reset + ")" : ""}. Manual .srt load still works.`;
+      return; // capped: warn without burning more requests
+    }
     const q = new URLSearchParams({
       id: String(watchState.id), language: wyzLang, format: "srt", limit: "5", key: wyzKeyEffective()
     });
@@ -2332,16 +2353,28 @@ async function wyzAutoSubs(){
       q.set("episode", String(watchState.e));
     }
     const r = await fetch(`${WYZ_BASE}/search?${q}`);
+    if (r.status === 429) {
+      const wq = document.getElementById("watchStatus");
+      if (wq) wq.textContent = "⚠ " + await wyzQuotaMsg(r) + " Manual .srt load still works.";
+      return;
+    }
     if (!r.ok) return;
     const items = await r.json();
+    wyzQuota = null;
     if (!Array.isArray(items) || !items.length) return;
     const pick = items.find(x => !x.isHearingImpaired) || items[0];
     const fr = await fetch(pick.url);
+    if (fr.status === 429) {
+      const wq = document.getElementById("watchStatus");
+      if (wq) wq.textContent = "⚠ " + await wyzQuotaMsg(fr) + " Manual .srt load still works.";
+      return;
+    }
     if (!fr.ok) return;
     const cues = parseSubs(await fr.text());
     if (!cues.length) return;
     setSubs({ name: (pick.fileName || "wyzie.srt"), lang: (pick.display || wyzLang.toUpperCase()), cues,
       pos: "bottom", offset: 0 });
+    wyzQuota = null;
     const ws = document.getElementById("watchStatus");
     if (ws && mirror === "cinesrc") ws.textContent = `Subtitles auto-loaded (${cues.length} lines) ✓ — nudge sync anytime in ⚙ → Subs`;
   } catch(e){}
