@@ -36,6 +36,9 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   nav { padding-top: calc(1rem + env(safe-area-inset-top, 0px)); }
+  /* Netflix cue: transparent over the billboard, solid once you scroll */
+  nav.nav-solid { background-color: rgba(11,20,38,.96); background-image: none;
+    box-shadow: 0 8px 30px rgba(0,0,0,.45); }
   .row-scroll::-webkit-scrollbar { height: 8px; }
   .row-scroll::-webkit-scrollbar-thumb { background: #333; border-radius: 8px; }
   /* picking zoom needs breathing room: edge cards used to clip their titles
@@ -85,6 +88,8 @@
     background-size: 200% 100%; animation: skelshine 1.2s linear infinite; }
   @keyframes skelshine { from { background-position: 180% 0; } to { background-position: -80% 0; } }
   .hero-gradient { background: linear-gradient(to top, #0b1426 5%, transparent 60%), linear-gradient(to right, rgba(0,0,0,.85) 20%, transparent 70%); }
+  /* billboard title: tight, heavy, readable over any backdrop */
+  #hero h1 { text-shadow: 0 2px 14px rgba(0,0,0,.85); letter-spacing: -.5px; }
   .player-wrap { aspect-ratio: 16/9; background: #000; }
   iframe { border: 0; }
   #ctlBar { transition: opacity .3s; }
@@ -104,8 +109,9 @@
     border: 0; border-radius: 0; margin: 0;
   }
   .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  /* touch targets: min 44px for fingers + remotes */
-  button, select { min-height: 40px; }
+  /* touch targets: no button under 44px (fingers + TV remotes).
+     Lifts the small steppers/chips/✕ to full size without touching markup. */
+  button { min-height: 44px; min-width: 44px; }
   #epGrid button { min-height: 44px; }
   /* phones: tighter hero, full-width player controls */
   @media (max-width: 640px) {
@@ -130,7 +136,6 @@
   .tv-mode .card:hover { transform: none; }
   /* ...except one cheap(UI-thread-free) highlight so browsing feels alive */
   .tv-mode .card { transform: none; }
-  .tv-mode .card.tv-focus { outline: 3px solid #14b8a6; outline-offset: 2px; }
   #modal .tv-focus { outline-width: 4px; }
   /* subtitles coach-tip arrow + highlight on the 🎯 button */
   .tip-arrow {
@@ -233,7 +238,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 49; // bump every release alongside version.txt
+const BUILD_NUM = 50; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -288,6 +293,11 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
     <button id="loadMoreBtn" onclick="browseMore()" class="hidden mx-auto mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 font-bold text-sm">Load more ↓</button>
   </main>
+  <!-- FOOTER: brand + credits (text-only, never enters remote tab order) -->
+  <footer class="px-4 md:px-10 pb-10 pt-2 text-[11px] text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-1">
+    <span class="font-black text-sm text-gray-400">Stream<span class="text-teal-500">Box</span> <span id="footVer"></span></span>
+    <span>•</span><span>Catalog: TMDB</span><span>•</span><span>Playback: CineSrc + mirrors</span><span>•</span><span>Subs: Wyzie</span><span>•</span><span>Made by dazzo</span>
+  </footer>
 </div>
 
 <!-- WATCH VIEW -->
@@ -927,17 +937,30 @@ function skeletonRow(title){
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
   }
+  // footer stamp + Netflix-style nav: transparent over the hero, solid on scroll
+  try {
+    const fv = document.getElementById("footVer");
+    if (fv) fv.textContent = "· build " + BUILD_NUM;
+    const nav = document.querySelector("nav");
+    window.addEventListener("scroll", () => {
+      if (nav) nav.classList.toggle("nav-solid", window.scrollY > 30);
+    }, { passive: true });
+  } catch(e){}
   // D-pad / arrow-key spatial navigation (Android TV remotes, keyboards)
   // + desktop shortcuts: Space = play/pause, F = cinema, M = mute
   document.addEventListener("keydown", (e) => {
     const dir = dirOf(e);
     const tag = (document.activeElement && document.activeElement.tagName) || "";
+    // keyboard-focus mode: arrows/Tab/OK earn the glow ring; any pointer
+    // press below resigns it (taps focus buttons too — a stuck glow after
+    // every touch looks broken on phone/desktop).
+    if (dir || e.key === "Tab") window._kbNav = true;
     if (/INPUT|SELECT|TEXTAREA/.test(tag)) {
       if (e.key === "Escape" || e.keyCode === 27) { document.activeElement.blur(); return; }
       // TV: arrows leave the overlay search box into results instead of being trapped
       if ((dir === "down" || dir === "up") && document.activeElement.id === "searchBox") {
         const first = document.querySelector("#searchPanel:not(.hidden) #searchResults .card");
-        if (first) { e.preventDefault(); first.focus(); }
+        if (first) { e.preventDefault(); window._kbNav = true; first.focus(); }
       }
       return;
     }
@@ -1095,11 +1118,20 @@ function skeletonRow(title){
       if (watch && !watch.classList.contains("hidden")) { goHome(e); e.preventDefault(); }
     }
   }, true);
+  // Glow ring follows REMOTE/KEYBOARD focus only (TV always qualifies):
+  // taps and clicks focus buttons too, and a stuck glow after every touch
+  // looks broken on phone/desktop.
   document.addEventListener("focusin", (e) => {
+    const kb = document.body.classList.contains("tv-mode") || window._kbNav;
     document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
-    if (e.target && e.target.classList) e.target.classList.add("tv-focus");
+    if (kb && e.target && e.target.classList) e.target.classList.add("tv-focus");
     try { if (e.target && e.target.closest && e.target.closest("#ctlBar")) pokeHud(); } catch(err){}
   });
+  // any pointer press ends keyboard-focus mode (next glow needs arrows/Tab again)
+  ["mousedown", "touchstart"].forEach(t => document.addEventListener(t, () => {
+    window._kbNav = false;
+    document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
+  }, { capture: true, passive: true }));
   // pointer activity wakes the cinema UI (mouse/touch)
   document.addEventListener("click", (e) => {
     try { if (e.target && e.target.closest && e.target.closest("#ctlBar,#playerBox")) pokeHud(); } catch(err){}
@@ -1132,9 +1164,9 @@ function setHero(i){
       <h1 class="text-3xl md:text-5xl font-black mt-3">${titleOf(x)}</h1>
       <p class="text-xs text-teal-300/90 font-bold mt-2 tracking-wide">★ ${Number(x.vote_average || 0).toFixed(1)} • ${(x.release_date || x.first_air_date || "").slice(0, 4)} • ${type.toUpperCase()}</p>
       <p class="text-sm text-gray-300 mt-2 line-clamp-3">${x.overview||""}</p>
-      <div class="flex gap-3 mt-4">
-        <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">▶ Watch</button>
-        <button onclick='openDetail("${type}",${x.id})' class="bg-white/20 hover:bg-white/30 px-6 py-2.5 rounded-full">Details</button>
+      <div class="flex gap-3 mt-5">
+        <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="bg-teal-500 hover:bg-teal-400 font-bold px-7 h-12 text-base rounded-full">▶ Watch</button>
+        <button onclick='openDetail("${type}",${x.id})' class="bg-white/20 hover:bg-white/30 font-bold px-7 h-12 text-base rounded-full">ⓘ Details</button>
       </div>
     </div>`;
   // preload next hero backdrop so rotation is instant
