@@ -37,6 +37,9 @@
   nav { padding-top: calc(1rem + env(safe-area-inset-top, 0px)); }
   .row-scroll::-webkit-scrollbar { height: 8px; }
   .row-scroll::-webkit-scrollbar-thumb { background: #333; border-radius: 8px; }
+  /* picking zoom needs breathing room: edge cards used to clip their titles
+     against the row edge when scaled */
+  .row-scroll { padding: 12px 6px 14px; scroll-padding-left: 12px; }
   /* PICKING RING: lives on the POSTER only (like tab pills hug their button —
      wrapping the title text too is what looked clunky). Ring is a box-shadow
      (GPU-cheap, never shifts layout the way borders do). */
@@ -206,7 +209,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 45; // bump every release alongside version.txt
+const BUILD_NUM = 46; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -310,7 +313,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
           <button onclick="ctlFullscreen()" aria-label="Fullscreen" title="Fullscreen" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⛶</button>
           <button onclick="openSettings()" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⚙</button>
           <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">☰ Episodes</button>
-          <button onclick="focusPlayer()" id="focusPlayerBtn" aria-label="Control player menu" title="Focus the player itself: arrows + OK work its menu (subtitles ⚙, quality). Press Back afterwards." class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">🎯 Player</button>
+          <button onclick="ctlSubsToggle()" id="ctlSubs" aria-label="Subtitles on or off" title="Subtitles on/off — opens Subs settings when nothing is loaded yet" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">CC</button>
         </div>
       </div>
       <!-- alternate-mirror strip (our bar only drives CineSrc) -->
@@ -320,14 +323,14 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button onclick="setMirror('cinesrc')" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold">⇄ CineSrc</button>
         <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">⚙</button>
       </div>
-      <!-- One-time subtitles coach tip (arrow points at 🎯 Player) -->
+      <!-- One-time subtitles coach tip (arrow points at the CC button) -->
       <div id="subTip" class="no-cinema hidden relative mt-3 bg-[#1a2745] border border-teal-500/40 rounded-xl p-4 pr-12 text-sm">
         <button onclick="hideSubTip(false)" aria-label="Dismiss tip" class="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/80">✕</button>
         <p class="font-bold">💬 Want subtitles?</p>
         <ol class="text-gray-300 mt-1 space-y-1 list-decimal ml-5 text-[13px]">
-          <li>Press <b>🎯 Player</b> below — your remote now drives the video itself.</li>
-          <li>Move to the <b>CC icon</b> to toggle subs, or open <b>⚙ → Subtitles</b> to pick a language.</li>
-          <li>Press <b>Back</b> to return to these controls.</li>
+          <li>Press <b>CC</b> on the player bar — captions turn on instantly.</li>
+          <li>Nothing loaded yet? The <b>Subs settings</b> open so you can search &amp; download.</li>
+          <li>Wrong timing? Fix it in <b>⚙ → Subs</b> with Position + Sync.</li>
         </ol>
         <div class="flex flex-wrap gap-2 mt-3">
           <button onclick="hideSubTip(true)" class="bg-teal-500 hover:bg-teal-400 font-bold px-4 py-2 rounded-full text-[13px]">Got it — don't show again</button>
@@ -335,7 +338,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         </div>
         <div class="tip-arrow"></div>
       </div>
-      <p class="no-cinema text-[11px] text-gray-600 mt-2">Cinema remote (TV): <b>◀ ▶</b> = pick buttons • <b>▲ ▼</b> = volume • <b>OK</b> = press picked (skip with −10s/+30s). Desktop: ◀ ▶ still skips. 🎯 Player focuses the video itself so you can open its ⚙ menu for <b>subtitles</b>, then Back returns here. <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
+      <p class="no-cinema text-[11px] text-gray-600 mt-2">Cinema remote (TV): <b>◀ ▶</b> = pick buttons • <b>▲ ▼</b> = volume • <b>OK</b> = press picked (skip with −10s/+30s). Desktop: ◀ ▶ still skips. <b>CC</b> toggles our subtitles on/off (opens Subs settings when empty). <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
       <!-- player options -->
       <div class="no-cinema flex flex-wrap items-center gap-3 mt-3 text-xs text-gray-300">
         <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="accent-teal-500" onchange="toggleShield()"> Ad Shield</label>
@@ -1788,6 +1791,7 @@ function ctlPaint(){
   const _rem = Math.max(0, (pState.dur || 0) - (pState.cur || 0));
   document.getElementById("ctlRemain").textContent = pState.dur > 0 ? "• ends in " + fmtT(_rem) : "";
   paintCaps();
+  paintSubsBtn();
   if (!pState.seeking && pState.dur > 0) {
     document.getElementById("ctlSeek").value = Math.round(pState.cur / pState.dur * 1000);
   }
@@ -1880,12 +1884,12 @@ function showSubTip(force){
   const t = document.getElementById("subTip");
   if (!t) return;
   t.classList.remove("hidden");
-  const b = document.getElementById("focusPlayerBtn");
+  const b = document.getElementById("ctlSubs");
   if (b) b.classList.add("tip-glow");
 }
 function hideSubTip(forever){
   document.getElementById("subTip").classList.add("hidden");
-  const b = document.getElementById("focusPlayerBtn");
+  const b = document.getElementById("ctlSubs");
   if (b) b.classList.remove("tip-glow");
   if (forever) { try { localStorage.setItem("streambox_subtip_off", "1"); } catch(e){} }
 }
@@ -2421,6 +2425,26 @@ async function wyzAutoSubs(){
 }
 /* my subtitles: external .srt/.vtt files with position + sync control */
 let subFile = null;
+let subsOn = true;
+try { subsOn = localStorage.getItem("streambox_subs_on") !== "0"; } catch(e){}
+function ctlSubsToggle(){
+  // bar CC button: captions on/off. Nothing loaded yet? Open Subs settings instead.
+  if (!subFile || !subFile.cues || !subFile.cues.length) { openSettings(); setTab("subs"); return; }
+  subsOn = !subsOn;
+  try { localStorage.setItem("streambox_subs_on", subsOn ? "1" : "0"); } catch(e){}
+  paintSubsBtn();
+  paintCaps(true);
+}
+function paintSubsBtn(){
+  const b = document.getElementById("ctlSubs");
+  if (!b) return;
+  const on = subsOn && subFile && subFile.cues && subFile.cues.length;
+  const key = on ? "1" : "0";
+  if (b.dataset.s === key) return;
+  b.dataset.s = key;
+  b.textContent = on ? "CC ✓" : "CC";
+  b.className = "h-11 px-3 rounded-full text-sm font-bold " + (on ? "bg-teal-500 hover:bg-teal-400" : "bg-white/10 hover:bg-white/20");
+}
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
@@ -2471,6 +2495,7 @@ function subStorageKey(){
 }
 function setSubs(o, remember = true){
   subFile = o;
+  subsOn = true;
   if (remember && o) {
     try { localStorage.setItem(subStorageKey(), JSON.stringify(o)); }
     catch(e){ subStatus("Loaded, but too big to remember on this device."); }
@@ -2572,7 +2597,7 @@ function paintCaps(force){
   const ov = document.getElementById("capOverlay");
   if (!ov) return;
   let html = "";
-  if (subFile && subFile.cues && subFile.cues.length
+  if (subsOn && subFile && subFile.cues && subFile.cues.length
       && !document.getElementById("watchView").classList.contains("hidden")
       && mirror === "cinesrc") {
     const t = (pState.cur || 0) + (subFile.offset || 0);
