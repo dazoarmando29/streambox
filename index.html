@@ -206,7 +206,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 43; // bump every release alongside version.txt
+const BUILD_NUM = 44; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1704,10 +1704,12 @@ function renderContinue(){
       d.setAttribute("data-focusable", "1");
       d.setAttribute("aria-label", `${x.title||""} (${x.type})`);
       const pct = (x.dur > 60 && x.pos > 5) ? Math.min(99, Math.round(x.pos / x.dur * 100)) : 0;
-      d.innerHTML = `<div class="relative poster-frame"><img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" onerror="this.onerror=null;this.style.display='none'" class="rounded-lg w-full aspect-[2/3] object-cover"></div><p class="card-title text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}${pct ? ` • ${pct}%` : ""}</p>${pct ? `<div class="h-1 rounded bg-white/15 mt-1 overflow-hidden"><div class="h-1 rounded bg-teal-400" style="width:${pct}%"></div></div>` : ""}<button class="absolute top-1 right-1 bg-black/70 w-6 h-6 rounded-full text-xs" aria-label="Remove">✕</button>`;
+      d.innerHTML = `<div class="relative poster-frame"><img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" onerror="this.onerror=null;this.style.display='none'" class="rounded-lg w-full aspect-[2/3] object-cover"></div><p class="card-title text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}${pct ? ` • ${pct}%` : ""}</p>${pct ? `<div class="h-1 rounded bg-white/15 mt-1 overflow-hidden"><div class="h-1 rounded bg-teal-400" style="width:${pct}%"></div></div>` : ""}<button class="absolute top-1 right-1 bg-black/70 w-9 h-9 rounded-full text-sm" aria-label="Remove">✕</button>`;
       const resumeAt = (x.dur > 60 && x.pos > 10) ? x.pos : 0;
       d.onclick = activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt));
-      d.onkeydown = (ev)=>{ if(okPressed(ev)){ ev.preventDefault(); activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt))(); } };
+      // remote/keyboard: OK plays ONLY when the card itself has focus — the inner
+      // ✕ button handles its own keypress, otherwise Back/OK on ✕ replays the title
+      d.onkeydown = (ev)=>{ if (ev.target !== d) return; if(okPressed(ev)){ ev.preventDefault(); activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt))(); } };
       d.querySelector("button").onclick = (ev)=>{ ev.stopPropagation(); removeContinue(x.type,x.id); };
       grid.appendChild(d);
     });
