@@ -41,30 +41,31 @@ jobs:
         with:
           gradle-version: "8.7"
 
-      - name: Build debug APK
+      - name: Build debug APKs (full + lite flavors)
         run: gradle :app:assembleDebug --project-dir android --stacktrace
 
-      - name: Upload APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: streambox-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: error
 
       - name: Publish rolling release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk streambox.apk
+          cp android/app/build/outputs/apk/full/debug/app-full-debug.apk streambox.apk
+          cp android/app/build/outputs/apk/lite/debug/app-lite-debug.apk streambox-lite.apk
           # retry loop: the releases API occasionally flakes (delete-then-create
           # must both succeed, otherwise the old tag blocks the create)
           for i in 1 2 3 4 5; do
             gh release delete latest --cleanup-tag -y >/dev/null 2>&1 || true
             sleep 3
             if gh release create latest --prerelease \
-              --title "StreamBox latest APK" \
-              --notes "Auto-built from main (${{ github.sha }}). Uninstall the old app on your TV first, then install this file." \
-              streambox.apk; then
+              --title "StreamBox latest APKs" \
+              --notes "Auto-built from main (${{ github.sha }}). Two flavors, install one or both side-by-side: streambox.apk = full motion, streambox-lite.apk = calm (max smoothness + battery). Uninstall the old app on your TV first, then install." \
+              streambox.apk streambox-lite.apk; then
               break
             fi
             echo "release publish attempt $i failed, retrying…"

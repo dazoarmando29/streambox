@@ -72,13 +72,21 @@ python -m http.server
 - Ad Shield: sandboxed iframe blocks popups / tab-hijacks. For full in-stream ad
   removal use Brave or uBlock Origin.
 
-## Android APK (phone + Android TV)
+## Android APKs (phone + Android TV) — Full vs Lite
 
-Every push to `main` auto-builds via GitHub Actions:
+Every push to `main` auto-builds **two** APKs via GitHub Actions. Same site,
+same pixels — pick your motion:
 
-1. Repo → **Actions** → **Build StreamBox APK** → latest green run → **Artifacts** → `streambox-apk`,
-   or grab the rolling build at **Releases → `latest` → `streambox.apk`**
-2. Install:
+| Edition | File | Package | Feel |
+| ------- | ---- | ------- | ---- |
+| Full | `streambox.apk` | `com.streambox.app` | All animations + transitions |
+| Lite | `streambox-lite.apk` | `com.streambox.lite` | Calm mode: motion off, max smoothness + battery |
+
+Different package names, so both install **side-by-side**. Get them at
+**Releases → `latest`**, or via Repo → **Actions** → **Build StreamBox APK** →
+latest green run → **Artifacts** → `streambox-apk`.
+
+1. Install:
    - Phone: open the APK, allow "Install unknown apps" if asked
    - Android TV: send the APK via the "Send Files to TV" app or USB, open with a
      file manager, allow unknown sources. **Uninstall the old version first** —
@@ -86,6 +94,12 @@ Every push to `main` auto-builds via GitHub Actions:
 
 The app is a fullscreen wrapper around the live site, with TV remote (D-pad) +
 back-button support and a Leanback launcher entry.
+
+## Branches
+
+- `main` — the full experience (this site + both APK flavors).
+- `lite` — frozen GPU-cheap anchor (build 51, pre-animation). Check it out any
+  time to go back: `git checkout lite`.
 
 ## Versioning
 

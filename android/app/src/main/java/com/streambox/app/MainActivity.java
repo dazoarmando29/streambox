@@ -17,7 +17,7 @@ import android.widget.FrameLayout;
 
 /** StreamBox: fullscreen WebView wrapper for phone + Android TV. */
 public class MainActivity extends Activity {
-    private static final String HOME = "https://dazoarmando29.github.io/streambox/?tv=1";
+    private static final String HOME = BuildConfig.HOME_URL;
     private WebView web;
     private View fullscreenView;
     private WebChromeClient.CustomViewCallback fullscreenCallback;

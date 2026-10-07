@@ -10,8 +10,27 @@ android {
         applicationId 'com.streambox.app'
         minSdk 24
         targetSdk 34
-        versionCode 5
-        versionName '1.4'
+        versionCode 6
+        versionName '1.5'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+    flavorDimensions "edition"
+    productFlavors {
+        // Full motion site (?tv=1 keeps TV layout + D-pad on every box)
+        full {
+            dimension "edition"
+            applicationId "com.streambox.app"
+            buildConfigField "String", "HOME_URL", "\"https://dazoarmando29.github.io/streambox/?tv=1\""
+        }
+        // Calm site (?calm=1 kills motion; same pixels, max smoothness)
+        lite {
+            dimension "edition"
+            applicationId "com.streambox.lite"
+            buildConfigField "String", "HOME_URL", "\"https://dazoarmando29.github.io/streambox/?tv=1&calm=1\""
+        }
     }
 
     buildTypes {
