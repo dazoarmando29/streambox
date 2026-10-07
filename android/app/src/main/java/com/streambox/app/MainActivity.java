@@ -75,6 +75,7 @@ public class MainActivity extends Activity {
                         || host.endsWith("vidlink.pro") || host.endsWith("vidfast.pro")
                         || host.endsWith("vidsrc.to") || host.endsWith("vsembed.su")
                         || host.endsWith("autoembed.co") || host.endsWith("2embed.cc")
+                        || host.endsWith("yapgrid.com")
                         || host.endsWith("youtube-nocookie.com") || host.endsWith("youtube.com")
                         || host.endsWith("youtu.be");
                 if (allowed) return false;

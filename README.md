@@ -17,8 +17,8 @@ Built and maintained by **dazzo** ([@dazoarmando29](https://github.com/dazoarman
 - Detail modal with season/episode steppers (remote-friendly, no dropdowns)
 - CineSrc player with custom control bar: play/pause, ±skip, seek, speed, volume,
   quality, sleep timer, continue-watching with resume points
-- 7 stream mirrors with one-tap fallback (CineSrc, VidLink, VidFast, VidSrc,
-  VsEmbed, AutoEmbed, 2Embed) + official-trailer fallback
+- 8 stream mirrors with one-tap fallback (CineSrc, VidLink, VidFast, VidSrc,
+  VsEmbed, AutoEmbed, 2Embed, YapGrid) + official-trailer fallback
 - Ad Shield sandbox on supporting mirrors; unsandboxed mirrors are labeled
 - External subtitles: Wyzie search with built-in shared key (personal key
   override for your own 1,000/day quota) + BetaSeries backup for TV shows when

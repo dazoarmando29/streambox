@@ -248,7 +248,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 55; // bump every release alongside version.txt
+const BUILD_NUM = 56; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2187,7 +2187,8 @@ const MIRRORS = [
   { id: "vidsrcto", name: "VidSrc" },
   { id: "vsembed", name: "VsEmbed" },
   { id: "autoembed", name: "AutoEmbed" },
-  { id: "twoembed", name: "2Embed" }
+  { id: "twoembed", name: "2Embed" },
+  { id: "yapgrid", name: "YapGrid" }
 ];
 /* mirrors that break inside ANY sandboxed iframe: load without sandbox */
 const NO_SANDBOX = new Set(["vidlink", "vidfast"]);
@@ -2239,6 +2240,12 @@ function mirrorUrl(id){
       return tv
         ? `https://vsembed.su/embed/tv/${tmdb}/${s}/${e}`
         : `https://vsembed.su/embed/movie/${tmdb}`;
+    case "yapgrid":
+      // ad-free player with its OWN auto subs + in-player translation:
+      // movies keep captions here even when Wyzie is capped
+      return tv
+        ? `https://yapgrid.com/embed/tv/${tmdb}/${s}/${e}`
+        : `https://yapgrid.com/embed/movie/${tmdb}`;
     case "autoembed":
       return tv
         ? `https://autoembed.co/tv/tmdb/${tmdb}-${s}-${e}`
