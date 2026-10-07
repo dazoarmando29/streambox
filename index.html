@@ -196,7 +196,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 39; // bump every release alongside version.txt
+const BUILD_NUM = 40; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -487,18 +487,17 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
     </div>
 
     <div id="paneSubs" class="hidden">
-      <p class="text-xs text-gray-400 font-bold mb-2">SEARCH OPENSUBTITLES</p>
-      <div id="ostLangRow" class="flex flex-wrap gap-2 mb-2"></div>
-      <div id="ostResults" class="space-y-2 max-h-64 overflow-y-auto pr-1"></div>
+      <p class="text-xs text-gray-400 font-bold mb-2">SEARCH WYZIE SUBTITLES</p>
+      <div id="wyzLangRow" class="flex flex-wrap gap-2 mb-2"></div>
+      <div id="wyzResults" class="space-y-2 max-h-64 overflow-y-auto pr-1"></div>
       <div class="bg-white/5 border border-white/10 rounded-xl p-3 mt-2">
-        <p class="text-xs font-bold mb-1">Downloads need login <span class="text-gray-500 font-normal">(this session only — never saved)</span></p>
-        <p id="ostLoginState" class="text-[11px] text-gray-500 mb-2">Not logged in.</p>
-        <div id="ostLoginForm" class="flex flex-col gap-2">
-          <input id="ostUser" placeholder="opensubtitles.org username" autocomplete="username" class="px-3 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm">
-          <input id="ostPass" type="password" placeholder="password" autocomplete="current-password" class="px-3 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm">
-          <button onclick="ostLogin()" class="h-10 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Log in</button>
+        <p class="text-xs font-bold mb-1">Your Wyzie key <span class="text-gray-500 font-normal">(free at store.wyzie.io/redeem — saved on this device only, never in the code)</span></p>
+        <p id="wyzKeyState" class="text-[11px] text-gray-500 mb-2">Paste your free Wyzie key to enable search + download.</p>
+        <div id="wyzKeyForm" class="flex flex-col gap-2">
+          <input id="wyzKey" type="password" placeholder="Wyzie API key" autocomplete="off" class="px-3 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm">
+          <button onclick="wyzSaveKey()" class="h-10 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Save key</button>
         </div>
-        <button id="ostLogoutBtn" onclick="ostLogout()" class="hidden h-10 px-4 rounded-full bg-white/10 hover:bg-white/20 text-sm">Log out</button>
+        <button id="wyzForgetBtn" onclick="wyzForgetKey()" class="hidden h-10 px-4 rounded-full bg-white/10 hover:bg-white/20 text-sm">Forget key</button>
       </div>
       <p class="text-xs text-gray-400 font-bold mt-5 mb-2">MY SUBTITLES (YOUR FILE)</p>
       <p id="subFileChip" class="text-sm text-gray-300 bg-white/5 border border-white/10 rounded-xl px-3 py-2">None loaded</p>
@@ -526,7 +525,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
           <button onclick="subOffsetStep(0.5)" aria-label="Captions later" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">+</button>
         </div>
       </div>
-      <p class="text-[11px] text-gray-500 mt-2">Download any subtitle from opensubtitles.org, load it once — it sticks to that title. Fixes missing subs, wrong language, and bad timing.</p>
+      <p class="text-[11px] text-gray-500 mt-2">Search Wyzie above (your free key, once per device), load it once — it sticks to that title. Fixes missing subs, wrong language, and bad timing.</p>
       <p class="text-xs text-gray-400 font-bold mt-5 mb-2">PLAYER SUBTITLES</p>
       <p class="text-sm text-gray-300 leading-relaxed">Our player is subtitles-safe: captions show automatically. To change language or toggle tracks, briefly show the video's own buttons, use its <b>CC / ⚙ → Subtitles</b> menu, then hide them again — position is kept.</p>
       <button id="pctlBtnSubs" onclick="togglePControls()" class="mt-3 w-full py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Video buttons: Hidden</button>
@@ -1927,7 +1926,7 @@ function setTab(name){
     const b = document.getElementById("tab" + t[0].toUpperCase() + t.slice(1));
     b.className = "flex-1 py-2 rounded-full " + (t === name ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
   });
-  if (name === "subs") { paintOstLang(); paintOstLogin(); ostSearch(); }
+  if (name === "subs") { paintWyzLang(); paintWyzKey(); wyzSearch(); }
 }
 /* speed presets */
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -2188,71 +2187,100 @@ function paintMirrors(){
   MIRRORS.slice(1).forEach(m => mk(m.id, m.name, true));
   mk("trailer", trailerKey ? "🎬 Trailer" : "🎬 …", !!trailerKey);
 }
-/* opensubtitles.org direct search + download (app key baked in; login is session-only) */
-const OST_KEY = "C26GvtZYlyCRF8b2iOLXAPQYWNcrhJW";
-const OST_BASE = "https://api.opensubtitles.com/api/v1";
-const OST_LANGS = [["en", "EN"], ["es", "ES"], ["fr", "FR"], ["de", "DE"], ["ar", "AR"], ["hi", "HI"], ["pt", "PT"]];
-let ostLang = "en", ostToken = null, ostUser = "";
-try { ostLang = localStorage.getItem("streambox_ost_lang") || "en"; } catch(e){}
-function ostHeaders(auth){
-  const h = { "Api-Key": OST_KEY, "Content-Type": "application/json" };
-  if (auth && ostToken) h.Authorization = "Bearer " + ostToken;
-  return h;
+/* Wyzie subtitles: search + download with YOUR OWN free key
+   (store.wyzie.io/redeem — 1,000 req/day). The key lives only in this device's
+   localStorage, never in the repo: Wyzie forbids shipping keys in frontend
+   code (they get scraped and drained). Search costs 1 req, each download 1. */
+const WYZ_BASE = "https://sub.wyzie.io";
+const WYZ_LANGS = [["en", "EN"], ["es", "ES"], ["fr", "FR"], ["de", "DE"], ["ar", "AR"], ["hi", "HI"], ["tl", "TL"], ["pt", "PT"]];
+let wyzLang = "en", wyzKey = "";
+try {
+  wyzLang = localStorage.getItem("streambox_wyz_lang") || "en";
+  wyzKey = localStorage.getItem("streambox_wyz_key") || "";
+} catch(e){}
+function wyzSaveKey(){
+  const v = (document.getElementById("wyzKey").value || "").trim();
+  wyzKey = v;
+  try {
+    if (v) localStorage.setItem("streambox_wyz_key", v);
+    else localStorage.removeItem("streambox_wyz_key");
+  } catch(e){}
+  document.getElementById("wyzKey").value = "";
+  paintWyzKey();
+  wyzSearch();
 }
-function paintOstLang(){
-  const row = document.getElementById("ostLangRow");
+function wyzForgetKey(){
+  wyzKey = "";
+  try { localStorage.removeItem("streambox_wyz_key"); } catch(e){}
+  paintWyzKey();
+  wyzSearch();
+}
+function paintWyzKey(){
+  const st = document.getElementById("wyzKeyState");
+  const has = !!wyzKey;
+  document.getElementById("wyzKeyForm").classList.toggle("hidden", has);
+  document.getElementById("wyzForgetBtn").classList.toggle("hidden", !has);
+  if (st) st.textContent = has
+    ? "Key saved on this device ✓ (1,000 free searches + downloads/day)"
+    : "Paste your free Wyzie key to enable search + download.";
+}
+function paintWyzLang(){
+  const row = document.getElementById("wyzLangRow");
   if (!row) return;
   row.innerHTML = "";
-  OST_LANGS.forEach(([code, label]) => {
+  WYZ_LANGS.forEach(([code, label]) => {
     const b = document.createElement("button");
     b.textContent = label;
-    b.className = "px-3 h-9 rounded-full text-xs font-bold " + (ostLang === code ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
+    b.className = "px-3 h-9 rounded-full text-xs font-bold " + (wyzLang === code ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
     b.onclick = () => {
-      ostLang = code;
-      try { localStorage.setItem("streambox_ost_lang", code); } catch(e){}
-      paintOstLang();
-      ostSearch();
+      wyzLang = code;
+      try { localStorage.setItem("streambox_wyz_lang", code); } catch(e){}
+      paintWyzLang();
+      wyzSearch();
     };
     row.appendChild(b);
   });
 }
-async function ostSearch(){
-  const box = document.getElementById("ostResults");
+async function wyzSearch(){
+  const box = document.getElementById("wyzResults");
   if (!box) return;
-  box.innerHTML = `<p class="text-xs text-gray-500">Searching OpenSubtitles…</p>`;
+  if (!wyzKey) {
+    box.innerHTML = `<p class="text-xs text-gray-500">Add your Wyzie key below to search subtitles.</p>`;
+    return;
+  }
+  box.innerHTML = `<p class="text-xs text-gray-500">Searching Wyzie…</p>`;
   try {
     const q = new URLSearchParams({
-      tmdb_id: String(watchState.id), languages: ostLang,
-      order_by: "download_count", order_direction: "desc"
+      id: String(watchState.id), language: wyzLang, format: "srt", limit: "25", key: wyzKey
     });
     if (watchState.type === "tv") {
-      q.set("season_number", String(watchState.s));
-      q.set("episode_number", String(watchState.e));
+      q.set("season", String(watchState.s));
+      q.set("episode", String(watchState.e));
     }
-    const r = await fetch(`${OST_BASE}/subtitles?${q}`, { headers: ostHeaders(false) });
-    if (!r.ok) throw new Error("search failed (" + r.status + ")");
-    const j = await r.json();
-    const items = ((j && j.data) || []).slice(0, 12);
-    if (!items.length) {
-      box.innerHTML = `<p class="text-xs text-gray-500">No ${ostLang.toUpperCase()} subtitles found — try another language, or load a file below.</p>`;
+    const r = await fetch(`${WYZ_BASE}/search?${q}`);
+    if (r.status === 401 || r.status === 403) throw new Error("Key rejected — check it and save again.");
+    if (r.status === 429) throw new Error("Daily limit reached (1,000/day) — try tomorrow.");
+    if (!r.ok) throw new Error("Search failed (" + r.status + ").");
+    const items = await r.json();
+    const list = (Array.isArray(items) ? items : []).slice(0, 25);
+    if (!list.length) {
+      box.innerHTML = `<p class="text-xs text-gray-500">No ${wyzLang.toUpperCase()} subtitles found — try another language, or load a file below.</p>`;
       return;
     }
     box.innerHTML = "";
-    items.forEach(it => {
-      const a = it.attributes || {};
-      const f = (a.files && a.files[0]) || {};
+    list.forEach(it => {
       const row = document.createElement("div");
       row.className = "bg-white/5 border border-white/10 rounded-xl p-3";
       const rel = document.createElement("p");
       rel.className = "text-sm font-bold truncate";
-      rel.textContent = a.release || a.file_name || ("#" + it.id);
+      rel.textContent = it.release || it.fileName || ("#" + it.id);
       const meta = document.createElement("p");
       meta.className = "text-[11px] text-gray-500";
-      meta.textContent = `${a.language || ostLang.toUpperCase()} • ★ ${a.ratings || 0} • ⬇ ${a.download_count || 0}${a.hearing_impaired ? " • CC" : ""}`;
+      meta.textContent = `${it.display || wyzLang.toUpperCase()}${it.origin ? " • " + it.origin : ""}${it.downloadCount ? " • ⬇ " + it.downloadCount : ""}${it.isHearingImpaired ? " • CC" : ""}`;
       const b = document.createElement("button");
       b.textContent = "⬇ Download";
       b.className = "mt-2 px-4 h-9 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold";
-      b.onclick = () => ostDownload(f.file_id, a);
+      b.onclick = () => wyzDownload(it.url, it);
       row.appendChild(rel);
       row.appendChild(meta);
       row.appendChild(b);
@@ -2262,75 +2290,25 @@ async function ostSearch(){
     box.innerHTML = "";
     const p = document.createElement("p");
     p.className = "text-xs text-red-400";
-    p.textContent = "Search failed — check connection and try again.";
+    p.textContent = (err && err.message) || "Search failed — check connection and try again.";
     box.appendChild(p);
   }
 }
-async function ostLogin(){
-  const u = document.getElementById("ostUser").value.trim();
-  const p = document.getElementById("ostPass").value;
-  const st = document.getElementById("ostLoginState");
-  if (!u || !p) { if (st) st.textContent = "Enter username + password."; return; }
-  if (st) st.textContent = "Logging in…";
-  try {
-    const r = await fetch(`${OST_BASE}/login`, {
-      method: "POST", headers: ostHeaders(false), body: JSON.stringify({ username: u, password: p })
-    });
-    if (!r.ok) throw new Error("Login failed (" + r.status + ") — check credentials.");
-    const j = await r.json();
-    if (!j.token) throw new Error("No token returned.");
-    ostToken = j.token;
-    ostUser = (j.user && j.user.username) || u;
-    document.getElementById("ostPass").value = "";
-    paintOstLogin();
-  } catch(err) { if (st) st.textContent = err.message || "Login failed."; }
-}
-function ostLogout(){
-  ostToken = null; ostUser = "";
-  paintOstLogin();
-}
-function paintOstLogin(){
-  const st = document.getElementById("ostLoginState");
-  const wrap = document.getElementById("ostLoginForm");
-  const lo = document.getElementById("ostLogoutBtn");
-  if (ostToken) {
-    if (wrap) wrap.classList.add("hidden");
-    if (st) st.textContent = `Logged in as ${ostUser} — downloads use your free quota (5/day)`;
-    if (lo) lo.classList.remove("hidden");
-  } else {
-    if (wrap) wrap.classList.remove("hidden");
-    if (st) st.textContent = "Not logged in — downloads need your opensubtitles.org account.";
-    if (lo) lo.classList.add("hidden");
-  }
-}
-async function ostDownload(fileId, attrs){
-  if (!fileId) return;
-  if (!ostToken) {
-    subStatus("Log in below first — OpenSubtitles needs your account for downloads.");
-    return;
-  }
+async function wyzDownload(url, it){
+  if (!url) return;
   subStatus("Downloading subtitle…");
   try {
-    const r = await fetch(`${OST_BASE}/download`, {
-      method: "POST", headers: ostHeaders(true), body: JSON.stringify({ file_id: fileId })
-    });
-    if (!r.ok) {
-      if (r.status === 401) { ostToken = null; paintOstLogin(); throw new Error("Session expired — log in again."); }
-      if (r.status === 402 || r.status === 403 || r.status === 429) throw new Error("Download quota used up (free accounts: 5/day).");
-      throw new Error("Download failed (" + r.status + ").");
-    }
-    const j = await r.json();
-    if (!j.link) throw new Error("No file link returned.");
-    const fr = await fetch(j.link);
-    if (!fr.ok) throw new Error("Couldn't fetch the subtitle file.");
+    const fr = await fetch(url);
+    if (fr.status === 429) throw new Error("Daily limit reached (1,000/day) — try tomorrow.");
+    if (fr.status === 401) throw new Error("Link expired — search again and retry.");
+    if (!fr.ok) throw new Error("Download failed (" + fr.status + ").");
     const text = await fr.text();
     const cues = parseSubs(text);
     if (!cues.length) throw new Error("File downloaded but unreadable.");
-    const lang = (attrs && attrs.language) || ostLang.toUpperCase();
-    setSubs({ name: (j.file_name || "opensubtitles.srt"), lang, cues,
+    const lang = (it && (it.display || it.language)) || wyzLang.toUpperCase();
+    setSubs({ name: ((it && it.fileName) || "wyzie.srt"), lang, cues,
       pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
-    const left = (typeof j.remaining === "number") ? ` (${j.remaining} left today)` : "";
-    subStatus(`Loaded ${cues.length} lines (${lang})${left}.`);
+    subStatus(`Loaded ${cues.length} lines (${lang}).`);
   } catch(err) {
     subStatus((err && err.message) || "Download failed. You can still load a file manually below.");
   }

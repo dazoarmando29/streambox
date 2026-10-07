@@ -20,7 +20,7 @@ Built and maintained by **dazzo** ([@dazoarmando29](https://github.com/dazoarman
 - 8 stream mirrors with one-tap fallback (CineSrc, VidLink, VidFast, VidSrc,
   VidSrc PM, Smashy, AutoEmbed, 2Embed) + official-trailer fallback
 - Ad Shield sandbox on supporting mirrors; unsandboxed mirrors are labeled
-- External subtitles: OpenSubtitles search + `.srt`/`.vtt` file/paste with
+- External subtitles: Wyzie search (your own free key) + `.srt`/`.vtt` file/paste with
   position and sync controls
 - Android TV first-class: D-pad spatial navigation, cinema mode, smart Back
   handling, Leanback launcher entry, per-version fresh-start wipe
