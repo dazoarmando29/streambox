@@ -196,7 +196,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 37; // bump every release alongside version.txt
+const BUILD_NUM = 38; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -333,6 +333,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
         <button onclick="applyPlayerOpts()" class="ml-2 bg-teal-500 px-3 py-1.5 rounded-full font-semibold hover:bg-teal-400">Apply</button>
         <button onclick="reloadPlayer()" class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">↻ Reload</button>
         <button onclick="otherSource()" title="Wrong film or broken stream? Drop this server and try another source." class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">⇄ Source</button>
+        <button onclick="wrongVersion()" title="Right title, wrong cut (remake plays the original or vice versa)? Jump to the next mirror." class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">🎬 Wrong version?</button>
         <span id="watchStatus" class="ml-auto text-gray-500"></span>
       </div>
       <p class="no-cinema text-[11px] text-gray-600 mt-2">Ad Shield uses a sandboxed player (no popups / no tab-hijacks). For full in-stream ad removal also use Brave or uBlock Origin — browsers block sites from stripping ads <em>inside</em> a third-party iframe.</p>
@@ -429,7 +430,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       <li>📶 Use <b>5 GHz Wi-Fi or Ethernet</b> — 2.4 GHz stutters on HD streams.</li>
       <li>🛡️ Keep <b>Ad Shield ON</b> (blocks popup ads and tab hijacks).</li>
       <li>↻ If a video stalls, press <b>Reload</b> under the player, or try another episode/server.</li>
-      <li>⇄ <b>Wrong film playing?</b> Some free servers mislabel titles — press <b>⇄ Source</b> under the player to switch to another source.</li>
+      <li>⇄ <b>Wrong film playing?</b> Some free servers mislabel titles — press <b>⇄ Source</b> under the player to switch to another source. <b>Right title, wrong cut (remake plays the original)?</b> Press <b>🎬 Wrong version?</b> to jump to the next mirror.</li>
       <li>🖥️ <b>Edges cut off in fullscreen?</b> Set your TV Picture mode to <b>Just Scan / Screen Fit / 16:9</b> (not Zoom) — TVs crop the picture by default (overscan).</li>
       <li>🔌 Close other apps on cheap TV sticks to free RAM.</li>
     </ul>
@@ -1563,6 +1564,18 @@ function otherSource(){
   try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
   document.getElementById("watchStatus").textContent = "Trying another source…";
   reloadKeepPos();
+}
+function wrongVersion(){
+  // Wrong cut playing (remake serves the original, cartoon serves live-action)?
+  // Different upstreams carry different files — hop to the NEXT mirror and drop
+  // any pinned server, so you land on a genuinely different copy.
+  try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
+  pState.server = null;
+  if (mirror === "trailer") { setMirror("cinesrc"); return; }
+  const ids = MIRRORS.map(x => x.id);
+  const next = ids[(ids.indexOf(mirror) + 1) % ids.length];
+  document.getElementById("watchStatus").textContent = "Trying next mirror for the right version…";
+  setMirror(next);
 }
 function toggleShield(){
   if (NO_SANDBOX.has(mirror)) {
