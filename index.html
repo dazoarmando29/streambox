@@ -43,8 +43,11 @@
   .row-scroll::-webkit-scrollbar { height: 8px; }
   .row-scroll::-webkit-scrollbar-thumb { background: #333; border-radius: 8px; }
   /* picking zoom needs breathing room: edge cards used to clip their titles
-     against the row edge when scaled */
-  .row-scroll { padding: 12px 6px 14px; scroll-padding-left: 12px; }
+     against the row edge when scaled. Padding now clears the full focus
+     ring + glow too, so the first/last card's border never hits the wall. */
+  /* doubled selector outranks Tailwind's pb-* utilities, so every row
+     (markup or JS-built, now and later) keeps the full breathing room. */
+  .row-scroll.row-scroll { padding: 20px 20px 24px; scroll-padding-left: 20px; }
   /* PICKING RING: lives on the POSTER only (like tab pills hug their button —
      wrapping the title text too is what looked clunky). Ring is a box-shadow
      (GPU-cheap, never shifts layout the way borders do). */
@@ -245,7 +248,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 53; // bump every release alongside version.txt
+const BUILD_NUM = 54; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
