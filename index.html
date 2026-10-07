@@ -248,7 +248,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 59; // bump every release alongside version.txt
+const BUILD_NUM = 60; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2275,12 +2275,17 @@ function mirrorUrl(id){
       return tv
         ? `https://vsembed.su/embed/tv/${tmdb}/${s}/${e}`
         : `https://vsembed.su/embed/movie/${tmdb}`;
-    case "yapgrid":
+    case "yapgrid": {
       // ad-free player with its OWN auto subs + in-player translation:
-      // movies keep captions here even when Wyzie is capped
+      // movies keep captions here even when Wyzie is capped.
+      // lang = its UI + preferred subs follow your Subs language;
+      // autoplay saves one OK press (blocked-with-sound just shows ▶).
+      const yp = new URLSearchParams({ autoplay: "1", lang: (typeof wyzLang === "string" && wyzLang) || "en" });
+      const yq = yp.toString();
       return tv
-        ? `https://yapgrid.com/embed/tv/${tmdb}/${s}/${e}`
-        : `https://yapgrid.com/embed/movie/${tmdb}`;
+        ? `https://yapgrid.com/embed/tv/${tmdb}/${s}/${e}?${yq}`
+        : `https://yapgrid.com/embed/movie/${tmdb}?${yq}`;
+    }
     case "autoembed":
       return tv
         ? `https://autoembed.co/tv/tmdb/${tmdb}-${s}-${e}`
