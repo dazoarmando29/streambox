@@ -196,7 +196,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 38; // bump every release alongside version.txt
+const BUILD_NUM = 39; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -258,6 +258,12 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
   <button id="backBtn" onclick="goHome(event)" class="no-cinema mb-4 text-sm bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full">← Back to Browse</button>
   <div class="grid lg:grid-cols-3 gap-6">
     <div class="lg:col-span-2">
+      <!-- twin-cut warning: shown only for known remake/original pairs -->
+      <div id="twinTip" class="no-cinema hidden mb-3 bg-[#2a1a10] border border-amber-500/40 rounded-xl px-4 py-3 text-sm flex flex-wrap items-center gap-2">
+        <span id="twinText" class="flex-1 min-w-[200px]"></span>
+        <button onclick="wrongVersion()" class="bg-teal-500 hover:bg-teal-400 font-bold px-4 py-2 rounded-full text-[13px]">🎬 Wrong version?</button>
+        <button onclick="hideTwinTip()" aria-label="Dismiss" class="w-8 h-8 rounded-full bg-black/50 hover:bg-black/80 shrink-0">✕</button>
+      </div>
       <div id="playerBox" class="player-wrap relative w-full rounded-xl overflow-hidden border border-white/10">
         <div id="playerSpin" class="absolute inset-0 grid place-items-center bg-black">
           <div class="flex flex-col items-center gap-2 text-gray-400 text-sm">
@@ -1404,6 +1410,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   }
   loadPlayer();
   saveContinue();
+  paintTwinTip();
   hideSplash();
   markReady();
   // subtitles coach tip (once — never again after "don't show again"; skipped in cinema view)
@@ -1576,6 +1583,25 @@ function wrongVersion(){
   const next = ids[(ids.indexOf(mirror) + 1) % ids.length];
   document.getElementById("watchStatus").textContent = "Trying next mirror for the right version…";
   setMirror(next);
+}
+function twinKey(){ return `sb_twin_off_${watchState.type}_${watchState.id}`; }
+function paintTwinTip(){
+  const bar = document.getElementById("twinTip");
+  if (!bar) return;
+  let twin = null;
+  try {
+    if (watchState.type === "movie") twin = TWINS[Number(watchState.id)] || null;
+    if (twin && sessionStorage.getItem(twinKey())) twin = null; // dismissed: stay quiet this session
+  } catch(e){ twin = null; }
+  if (!twin) { bar.classList.add("hidden"); return; }
+  const yr = (currentItem && (currentItem.release_date || "").slice(0, 4)) || "";
+  document.getElementById("twinText").textContent =
+    `⚠ Two cuts exist — servers often shelve the ${twin} under this ${yr ? yr + " " : ""}title. Wrong one playing?`;
+  bar.classList.remove("hidden");
+}
+function hideTwinTip(){
+  document.getElementById("twinTip").classList.add("hidden");
+  try { sessionStorage.setItem(twinKey(), "1"); } catch(e){}
 }
 function toggleShield(){
   if (NO_SANDBOX.has(mirror)) {
@@ -2021,6 +2047,28 @@ const MIRRORS = [
 ];
 /* mirrors that break inside ANY sandboxed iframe: load without sandbox */
 const NO_SANDBOX = new Set(["vidlink", "vidfast"]);
+/* Mislabel guard: famous remake/original pairs free servers routinely swap.
+   Verified TMDB IDs — each side names its twin so the watch screen can warn
+   BEFORE you waste 20 minutes on the wrong cut. */
+const TWINS = {
+  1087192: "2010 animated original", 10191: "2025 live-action remake",
+  552524: "2002 animated original", 11544: "2025 live-action remake",
+  447273: "1937 animated classic", 408: "2025 live-action remake",
+  150689: "1950 animated classic", 11224: "2015 live-action remake",
+  321612: "1991 animated classic", 10020: "2017 live-action remake",
+  278927: "1967 animated classic", 9325: "2016 live-action remake",
+  420817: "1992 animated classic", 812: "2019 live-action remake",
+  420818: "1994 animated classic", 8587: "2019 remake",
+  329996: "1941 animated classic", 11360: "2019 live-action remake",
+  512895: "1955 animated classic", 10340: "2019 live-action remake",
+  337401: "1998 animated classic", 10674: "2020 live-action remake",
+  438631: "1984 original", 841: "2021 remake",
+  332562: "1976, 1954 or 1937 original", 19610: "2018 remake (or 1954/1937 original)",
+  3111: "2018 remake (or 1976/1937 original)", 22692: "2018 remake (or 1976/1954 original)",
+  282035: "1999 adventure original", 564: "2017 reboot",
+  43074: "1984 original", 620: "2016 reboot",
+  44264: "1969 original", 17529: "2010 remake"
+};
 let mirror = "cinesrc", trailerKey = null;
 try {
   const pm = localStorage.getItem("streambox_mirror") || "cinesrc";
