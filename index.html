@@ -37,12 +37,39 @@
   nav { padding-top: calc(1rem + env(safe-area-inset-top, 0px)); }
   .row-scroll::-webkit-scrollbar { height: 8px; }
   .row-scroll::-webkit-scrollbar-thumb { background: #333; border-radius: 8px; }
-  .card { transition: transform .2s; cursor: pointer; border-radius: 12px; }
-  .card:hover { transform: scale(1.06); z-index: 10; }
-  .card:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible {
+  /* PICKING RING: faint hairline at rest, teal glow when picked. Ring is a
+     box-shadow (GPU-cheap, never shifts layout the way borders do). */
+  .card { position: relative; border-radius: 14px; cursor: pointer;
+    transition: transform .18s ease-out, box-shadow .18s ease-out;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.09); }
+  .card:hover { transform: scale(1.06); z-index: 10;
+    box-shadow: 0 0 0 2px #14b8a6, 0 10px 30px rgba(0,0,0,.55), 0 0 22px rgba(20,184,166,.35); }
+  .card:focus-visible { outline: none;
+    box-shadow: 0 0 0 3px #14b8a6, 0 10px 30px rgba(0,0,0,.55), 0 0 26px rgba(20,184,166,.5); }
+  button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible {
     outline: 3px solid #14b8a6; outline-offset: 2px;
   }
-  .tv-focus { outline: 4px solid #14b8a6 !important; outline-offset: 3px; transform: scale(1.08); z-index: 20; }
+  /* remote/keyboard marker: glow ring on everything, zoom on cards ONLY
+     (buttons must never jump under your finger) */
+  .tv-focus { outline: none !important;
+    box-shadow: 0 0 0 3px #14b8a6, 0 0 18px rgba(20,184,166,.5) !important; }
+  .card.tv-focus { transform: scale(1.07); z-index: 20; }
+  /* row titles: teal accent bar */
+  .row-title { display: flex; align-items: center; gap: 8px; }
+  .row-title::before { content: ""; width: 4px; height: 18px; border-radius: 99px;
+    background: linear-gradient(180deg, #7dd3fc, #2dd4bf); flex-shrink: 0; }
+  /* rating badge floating on posters (solid bg: blur would cost GPU per card) */
+  .rate-badge { position: absolute; top: 6px; left: 6px; z-index: 2;
+    background: rgba(0,0,0,.68); color: #ffd75e; font-size: 11px; font-weight: 800;
+    padding: 2px 8px; border-radius: 99px; pointer-events: none; }
+  /* skeleton shimmer while rows load */
+  .skel-poster { aspect-ratio: 2/3; border-radius: 10px;
+    background: linear-gradient(100deg, #1a2745 40%, #22345c 50%, #1a2745 60%);
+    background-size: 200% 100%; animation: skelshine 1.2s linear infinite; }
+  .skel-line { height: 10px; border-radius: 99px; margin-top: 8px;
+    background: linear-gradient(100deg, #1a2745 40%, #22345c 50%, #1a2745 60%);
+    background-size: 200% 100%; animation: skelshine 1.2s linear infinite; }
+  @keyframes skelshine { from { background-position: 180% 0; } to { background-position: -80% 0; } }
   .hero-gradient { background: linear-gradient(to top, #0b1426 5%, transparent 60%), linear-gradient(to right, rgba(0,0,0,.85) 20%, transparent 70%); }
   .player-wrap { aspect-ratio: 16/9; background: #000; }
   iframe { border: 0; }
@@ -113,13 +140,11 @@
     background: linear-gradient(90deg, #7dd3fc, #2dd4bf); animation: splashslide 1.1s ease-in-out infinite; }
   @keyframes splashslide { 0% { transform: translateX(-110%); } 100% { transform: translateX(280%); } }
   .splash-sub { font-size: .8rem; color: #8b98b8; margin: 0; }
-  /* smooth picking: GPU-only zoom on hover/focus + soft popup entrance */
-  .card { transition: transform .18s ease-out, box-shadow .18s ease-out; }
-  .card:hover { transform: scale(1.06); box-shadow: 0 8px 28px rgba(0,0,0,.5); }
+  /* soft popup entrance (cards above own their ring; this is only motion) */
   @keyframes pop { from { transform: scale(.96) translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
   #modal > div, #tvGuide > div, #setPanel > div, #epDrawer > div, #searchPanel > div { animation: pop .18s ease-out; }
   .tv-mode .card { transition: transform .15s ease-out !important; transform: none; }
-  .tv-mode .card.tv-focus, .tv-mode .card:hover { transform: scale(1.07); outline: 3px solid #14b8a6; outline-offset: 2px; }
+  .tv-mode .card.tv-focus, .tv-mode .card:hover { transform: scale(1.07); }
   .tv-mode .splash-bar > div { animation: splashslide 1.1s ease-in-out infinite !important; }
   .tv-mode #modal > div, .tv-mode #tvGuide > div, .tv-mode #setPanel > div,
   .tv-mode #epDrawer > div, .tv-mode #searchPanel > div { animation: pop .18s ease-out !important; }
@@ -171,7 +196,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 36; // bump every release alongside version.txt
+const BUILD_NUM = 37; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -724,6 +749,8 @@ setInterval(checkUpdate, 30 * 60 * 1000);
 async function init(){
   renderContinue();
   const rows = document.getElementById("rows");
+  // beauty: shimmer placeholders so the page never looks broken while loading
+  rows.innerHTML = skeletonRow("Trending Now") + skeletonRow("Popular Movies");
   try {
     // Progressive catalog: hero + first row ASAP (TVs on slow Wi-Fi feel
     // instant), remaining rows stream in behind. One code path for web/phone/TV.
@@ -770,7 +797,7 @@ async function init(){
 
 function makeRow(title, items, forceType){
   const div = document.createElement("div");
-  div.innerHTML = `<h2 class="text-lg font-bold mb-2">${title}</h2>`;
+  div.innerHTML = `<h2 class="row-title text-lg font-bold mb-2">${title}</h2>`;
   const sc = document.createElement("div");
   sc.className = "flex gap-3 overflow-x-auto row-scroll pb-2";
   items.filter(x=>x.poster_path).forEach(x=>{
@@ -789,14 +816,33 @@ function cardEl(x, type){
   d.setAttribute("aria-label", `${titleOf(x)} (${type})`);
   d.setAttribute("data-focusable", "1");
   d.innerHTML = `
-    <img loading="lazy" decoding="async" src="${IMG(x.poster_path,"w342")}" class="rounded-lg w-full aspect-[2/3] object-cover bg-white/5">
+    <div class="relative">
+      <span class="rate-badge">★ ${Number(x.vote_average || 0).toFixed(1)}</span>
+      <img loading="lazy" decoding="async" src="${IMG(x.poster_path,"w342")}" onerror="this.onerror=null;this.style.display='none'" class="rounded-lg w-full aspect-[2/3] object-cover bg-white/5">
+    </div>
     <p class="text-xs mt-1.5 font-semibold truncate">${titleOf(x)}</p>
-    <p class="text-[11px] text-gray-500">★ ${Number(x.vote_average||0).toFixed(1)} • ${yearOf(x)} • ${type.toUpperCase()}</p>`;
+    <p class="text-[11px] text-gray-500">${yearOf(x)} • ${type.toUpperCase()}</p>`;
   d.onclick = activatable(() => openDetail(type, x.id));
-  d.onmouseenter = preconnectCinesrc;
-  d.onfocus = preconnectCinesrc;
+  // picking speed: hovering/dwelling warms the detail cache so the popup opens
+  // instantly; the player host is preconnected at the same time
+  let preT = 0;
+  const warm = () => {
+    preconnectCinesrc();
+    clearTimeout(preT);
+    preT = setTimeout(() => { try { tmdb(`/${type}/${x.id}?append_to_response=credits`); } catch(e){} }, 300);
+  };
+  const cool = () => clearTimeout(preT);
+  d.onmouseenter = warm;
+  d.onmouseleave = cool;
+  d.addEventListener("focus", warm);
+  d.addEventListener("blur", cool);
   d.onkeydown = (ev) => { if (okPressed(ev)) { ev.preventDefault(); activatable(() => openDetail(type, x.id))(); } };
   return d;
+}
+function skeletonRow(title){
+  let cards = "";
+  for (let i = 0; i < 6; i++) cards += `<div class="min-w-[130px] md:min-w-[160px] max-w-[130px] md:max-w-[160px]"><div class="skel-poster"></div><div class="skel-line" style="width:80%"></div><div class="skel-line" style="width:55%"></div></div>`;
+  return `<div><h2 class="row-title text-lg font-bold mb-2">${title}</h2><div class="flex gap-3 overflow-x-auto row-scroll pb-2">${cards}</div></div>`;
 }
 
 /* ---------- Devices: PWA + Android TV / tablets / iOS ---------- */
@@ -1013,6 +1059,7 @@ function setHero(i){
     <div class="relative px-4 md:px-10 pb-16 max-w-2xl">
       <span class="text-xs bg-teal-500 px-3 py-1 rounded-full font-bold">#${i+1} TRENDING • ${type.toUpperCase()}</span>
       <h1 class="text-3xl md:text-5xl font-black mt-3">${titleOf(x)}</h1>
+      <p class="text-xs text-teal-300/90 font-bold mt-2 tracking-wide">★ ${Number(x.vote_average || 0).toFixed(1)} • ${(x.release_date || x.first_air_date || "").slice(0, 4)} • ${type.toUpperCase()}</p>
       <p class="text-sm text-gray-300 mt-2 line-clamp-3">${x.overview||""}</p>
       <div class="flex gap-3 mt-4">
         <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">▶ Watch</button>
@@ -1608,7 +1655,7 @@ function renderContinue(){
       d.setAttribute("data-focusable", "1");
       d.setAttribute("aria-label", `${x.title||""} (${x.type})`);
       const pct = (x.dur > 60 && x.pos > 5) ? Math.min(99, Math.round(x.pos / x.dur * 100)) : 0;
-      d.innerHTML = `<img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" class="rounded-lg w-full aspect-[2/3] object-cover"><p class="text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}${pct ? ` • ${pct}%` : ""}</p>${pct ? `<div class="h-1 rounded bg-white/15 mt-1 overflow-hidden"><div class="h-1 rounded bg-teal-400" style="width:${pct}%"></div></div>` : ""}<button class="absolute top-1 right-1 bg-black/70 w-6 h-6 rounded-full text-xs" aria-label="Remove">✕</button>`;
+      d.innerHTML = `<img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" onerror="this.onerror=null;this.style.display='none'" class="rounded-lg w-full aspect-[2/3] object-cover"><p class="text-xs mt-1 truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}${pct ? ` • ${pct}%` : ""}</p>${pct ? `<div class="h-1 rounded bg-white/15 mt-1 overflow-hidden"><div class="h-1 rounded bg-teal-400" style="width:${pct}%"></div></div>` : ""}<button class="absolute top-1 right-1 bg-black/70 w-6 h-6 rounded-full text-xs" aria-label="Remove">✕</button>`;
       const resumeAt = (x.dur > 60 && x.pos > 10) ? x.pos : 0;
       d.onclick = activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt));
       d.onkeydown = (ev)=>{ if(okPressed(ev)){ ev.preventDefault(); activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt))(); } };
