@@ -248,7 +248,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 57; // bump every release alongside version.txt
+const BUILD_NUM = 58; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1683,6 +1683,15 @@ function loadPlayer(){
   }, 8000);
   if (mirror === "cinesrc") ctlPollStart();
   else ctlPollStop();
+  // TV app only (WebView UA carries a "wv" marker): hand the D-pad straight
+  // to the mirror's own player — its menu (incl. subtitles) answers arrows/OK
+  // there, and native Back always returns. TV *browsers* keep manual 🎯 so
+  // their own Back key can't get trapped inside the frame.
+  try {
+    if (mirror !== "cinesrc" && mirror !== "trailer"
+        && document.body.classList.contains("tv-mode") && /\bwv\b/.test(navigator.userAgent || ""))
+      focusMirror();
+  } catch(e){}
   pokeHud(); // reveal HUD + bar briefly on every (re)load
 }
 function reloadPlayer(){ loadPlayer(); }
@@ -1975,7 +1984,7 @@ function focusMirror(){
   const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
   const f = document.getElementById("player");
   try { f.focus({ preventScroll: true }); } catch(e){}
-  document.getElementById("watchStatus").textContent = `Remote sent to ${label} — try OK/arrows. TV app: Back returns here`;
+  document.getElementById("watchStatus").textContent = `Remote sent to ${label} — its own menu takes arrows + OK (subtitles live in there). TV app: Back returns here`;
 }
 /* Subtitles coach tip: shows until permanently dismissed */
 function showSubTip(force){
