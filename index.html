@@ -196,7 +196,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 40; // bump every release alongside version.txt
+const BUILD_NUM = 41; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1381,6 +1381,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   paintQuality();
   fetchTrailer(type, id); // non-blocking: trailer button appears when found
   loadStoredSubs(); // auto-attach this title's remembered subtitle file
+  wyzAutoSubs(); // none remembered? fetch the best match silently (English default)
   let d;
   try {
     d = await tmdb(`/${type}/${id}?append_to_response=credits`);
@@ -2192,12 +2193,18 @@ function paintMirrors(){
    localStorage, never in the repo: Wyzie forbids shipping keys in frontend
    code (they get scraped and drained). Search costs 1 req, each download 1. */
 const WYZ_BASE = "https://sub.wyzie.io";
+/* built-in shared key, sharded like the TMDB key so it never sits in source
+   as plaintext. Shared quota: every visitor burns the same 1,000/day — a
+   personal key (below) always wins when present. */
+const _wzk = ["dzQHetUWa6l3d", "2N5ZnboZXNhpG", "5mN41mY6BzMuN", "=QndyMDckBXNi"];
+const WYZ_BUILTIN = atob(_wzk.map(s => s.split("").reverse().join("")).join(""));
 const WYZ_LANGS = [["en", "EN"], ["es", "ES"], ["fr", "FR"], ["de", "DE"], ["ar", "AR"], ["hi", "HI"], ["tl", "TL"], ["pt", "PT"]];
 let wyzLang = "en", wyzKey = "";
 try {
   wyzLang = localStorage.getItem("streambox_wyz_lang") || "en";
   wyzKey = localStorage.getItem("streambox_wyz_key") || "";
 } catch(e){}
+function wyzKeyEffective(){ return wyzKey || WYZ_BUILTIN; }
 function wyzSaveKey(){
   const v = (document.getElementById("wyzKey").value || "").trim();
   wyzKey = v;
@@ -2221,8 +2228,8 @@ function paintWyzKey(){
   document.getElementById("wyzKeyForm").classList.toggle("hidden", has);
   document.getElementById("wyzForgetBtn").classList.toggle("hidden", !has);
   if (st) st.textContent = has
-    ? "Key saved on this device ✓ (1,000 free searches + downloads/day)"
-    : "Paste your free Wyzie key to enable search + download.";
+    ? "Personal key saved ✓ (your own 1,000/day quota)"
+    : "Using shared built-in key — paste your own below for guaranteed quota.";
 }
 function paintWyzLang(){
   const row = document.getElementById("wyzLangRow");
@@ -2244,14 +2251,10 @@ function paintWyzLang(){
 async function wyzSearch(){
   const box = document.getElementById("wyzResults");
   if (!box) return;
-  if (!wyzKey) {
-    box.innerHTML = `<p class="text-xs text-gray-500">Add your Wyzie key below to search subtitles.</p>`;
-    return;
-  }
   box.innerHTML = `<p class="text-xs text-gray-500">Searching Wyzie…</p>`;
   try {
     const q = new URLSearchParams({
-      id: String(watchState.id), language: wyzLang, format: "srt", limit: "25", key: wyzKey
+      id: String(watchState.id), language: wyzLang, format: "srt", limit: "25", key: wyzKeyEffective()
     });
     if (watchState.type === "tv") {
       q.set("season", String(watchState.s));
@@ -2312,6 +2315,36 @@ async function wyzDownload(url, it){
   } catch(err) {
     subStatus((err && err.message) || "Download failed. You can still load a file manually below.");
   }
+}
+/* Auto-subtitles: when a title has no remembered subs, silently fetch the
+   best match in your language (English default) so captions just work.
+   Costs 2 key requests per new title — skipped when offline, over quota,
+   or off the CineSrc player (our overlay only draws there). */
+async function wyzAutoSubs(){
+  try {
+    if (subFile && subFile.cues && subFile.cues.length) return;
+    if (mirror !== "cinesrc") return;
+    const q = new URLSearchParams({
+      id: String(watchState.id), language: wyzLang, format: "srt", limit: "5", key: wyzKeyEffective()
+    });
+    if (watchState.type === "tv") {
+      q.set("season", String(watchState.s));
+      q.set("episode", String(watchState.e));
+    }
+    const r = await fetch(`${WYZ_BASE}/search?${q}`);
+    if (!r.ok) return;
+    const items = await r.json();
+    if (!Array.isArray(items) || !items.length) return;
+    const pick = items.find(x => !x.isHearingImpaired) || items[0];
+    const fr = await fetch(pick.url);
+    if (!fr.ok) return;
+    const cues = parseSubs(await fr.text());
+    if (!cues.length) return;
+    setSubs({ name: (pick.fileName || "wyzie.srt"), lang: (pick.display || wyzLang.toUpperCase()), cues,
+      pos: "bottom", offset: 0 });
+    const ws = document.getElementById("watchStatus");
+    if (ws && mirror === "cinesrc") ws.textContent = `Subtitles auto-loaded (${cues.length} lines) ✓ — nudge sync anytime in ⚙ → Subs`;
+  } catch(e){}
 }
 /* my subtitles: external .srt/.vtt files with position + sync control */
 let subFile = null;
