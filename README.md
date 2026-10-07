@@ -20,8 +20,9 @@ Built and maintained by **dazzo** ([@dazoarmando29](https://github.com/dazoarman
 - 8 stream mirrors with one-tap fallback (CineSrc, VidLink, VidFast, VidSrc,
   VidSrc PM, Smashy, AutoEmbed, 2Embed) + official-trailer fallback
 - Ad Shield sandbox on supporting mirrors; unsandboxed mirrors are labeled
-- External subtitles: Wyzie search (your own free key) + `.srt`/`.vtt` file/paste with
-  position and sync controls
+- External subtitles: Wyzie search with built-in shared key (personal key
+  override for your own 1,000/day quota) + auto-subtitles in your language +
+  quota warnings + `.srt`/`.vtt` file/paste with position and sync controls
 - Android TV first-class: D-pad spatial navigation, cinema mode, smart Back
   handling, Leanback launcher entry, per-version fresh-start wipe
 - PWA: installable, offline app shell, update banner when a new build ships

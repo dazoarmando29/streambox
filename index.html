@@ -233,7 +233,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 47; // bump every release alongside version.txt
+const BUILD_NUM = 48; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -540,8 +540,8 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
       <div id="wyzLangRow" class="flex flex-wrap gap-2 mb-2"></div>
       <div id="wyzResults" class="space-y-2 max-h-64 overflow-y-auto pr-1"></div>
       <div class="bg-white/5 border border-white/10 rounded-xl p-3 mt-2">
-        <p class="text-xs font-bold mb-1">Your Wyzie key <span class="text-gray-500 font-normal">(free at store.wyzie.io/redeem — saved on this device only, never in the code)</span></p>
-        <p id="wyzKeyState" class="text-[11px] text-gray-500 mb-2">Paste your free Wyzie key to enable search + download.</p>
+        <p class="text-xs font-bold mb-1">Your Wyzie key <span class="text-gray-500 font-normal">(optional — built-in key works; personal key at store.wyzie.io/redeem for your own quota, saved on this device only)</span></p>
+        <p id="wyzKeyState" class="text-[11px] text-gray-500 mb-2">Using shared built-in key — search works now; paste your own below for guaranteed quota.</p>
         <div id="wyzKeyForm" class="flex flex-col gap-2">
           <input id="wyzKey" type="password" placeholder="Wyzie API key" autocomplete="off" class="px-3 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm">
           <button onclick="wyzSaveKey()" class="h-10 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Save key</button>
@@ -574,7 +574,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
           <button onclick="subOffsetStep(0.5)" aria-label="Captions later" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">+</button>
         </div>
       </div>
-      <p class="text-[11px] text-gray-500 mt-2">Search Wyzie above (your free key, once per device), load it once — it sticks to that title. Fixes missing subs, wrong language, and bad timing.</p>
+      <p class="text-[11px] text-gray-500 mt-2">Search Wyzie above (built-in key works instantly; your own key = guaranteed quota), load it once — it sticks to that title. Fixes missing subs, wrong language, and bad timing.</p>
       <p class="text-xs text-gray-400 font-bold mt-5 mb-2">PLAYER SUBTITLES</p>
       <p class="text-sm text-gray-300 leading-relaxed">Our player is subtitles-safe: captions show automatically. To change language or toggle tracks, briefly show the video's own buttons, use its <b>CC / ⚙ → Subtitles</b> menu, then hide them again — position is kept.</p>
       <button id="pctlBtnSubs" onclick="togglePControls()" class="mt-3 w-full py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Video buttons: Hidden</button>
@@ -2286,10 +2286,9 @@ function paintMirrors(){
   MIRRORS.slice(1).forEach(m => mk(m.id, m.name, true));
   mk("trailer", trailerKey ? "🎬 Trailer" : "🎬 …", !!trailerKey);
 }
-/* Wyzie subtitles: search + download with YOUR OWN free key
-   (store.wyzie.io/redeem — 1,000 req/day). The key lives only in this device's
-   localStorage, never in the repo: Wyzie forbids shipping keys in frontend
-   code (they get scraped and drained). Search costs 1 req, each download 1. */
+/* Wyzie subtitles: search + download with built-in shared key (personal
+   override at store.wyzie.io/redeem — 1,000 req/day — wins when saved).
+   Search costs 1 req, each download 1. */
 const WYZ_BASE = "https://sub.wyzie.io";
 /* built-in shared key, sharded like the TMDB key so it never sits in source
    as plaintext. Shared quota: every visitor burns the same 1,000/day — a
