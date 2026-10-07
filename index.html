@@ -91,7 +91,9 @@
   .hero-gradient { background: linear-gradient(to top, #0b1426 5%, transparent 60%), linear-gradient(to right, rgba(0,0,0,.85) 20%, transparent 70%); }
   /* billboard title: tight, heavy, readable over any backdrop */
   #hero h1 { text-shadow: 0 2px 14px rgba(0,0,0,.85); letter-spacing: -.5px; }
-  /* billboard life: soft entrance + slow push-in (transform/opacity only) */
+  /* billboard life: soft entrance + slow push-in (transform/opacity only).
+     Header clips the zoom so no un-faded strip can spill onto the rows. */
+  #hero { overflow: hidden; }
   #hero img { animation: herofade 1.1s ease-out, herozoom 14s ease-out; }
   @keyframes herofade { from { opacity: 0; } to { opacity: 1; } }
   @keyframes herozoom { from { transform: scale(1); } to { transform: scale(1.07); } }
@@ -243,7 +245,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 52; // bump every release alongside version.txt
+const BUILD_NUM = 53; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
