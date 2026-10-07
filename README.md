@@ -22,9 +22,9 @@ Built and maintained by **dazzo** ([@dazoarmando29](https://github.com/dazoarman
   Android TV boxes auto-limit to the remote-drivable CineSrc + YapGrid)
 - Ad Shield sandbox on supporting mirrors; unsandboxed mirrors are labeled
 - External subtitles: Wyzie search with built-in shared key (personal key
-  override for your own 1,000/day quota) + BetaSeries backup for TV shows when
-  Wyzie caps + auto-subtitles in your language + quota warnings +
-  `.srt`/`.vtt` file/paste with position and sync controls
+  override for your own 1,000/day quota) + TSDB backup for movies + TV and
+  BetaSeries backup for TV when Wyzie caps + auto-subtitles in your language +
+  quota warnings + `.srt`/`.vtt` file/paste with position and sync controls
 - Android TV first-class: D-pad spatial navigation, cinema mode, smart Back
   handling, Leanback launcher entry, per-version fresh-start wipe
 - PWA: installable, offline app shell, update banner when a new build ships
