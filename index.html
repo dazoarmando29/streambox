@@ -238,7 +238,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 50; // bump every release alongside version.txt
+const BUILD_NUM = 51; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2275,7 +2275,7 @@ function updateMirrorUI(){
     document.getElementById("mirrorName").textContent = label;
     document.getElementById("watchStatus").textContent = NO_SANDBOX.has(mirror)
       ? `Mirror: ${label} — no Ad Shield here (it blocks sandboxed players). Use Brave/uBlock.`
-      : `Mirror: ${label} — use its own player controls`;
+      : `Mirror: ${label} — use its own player controls` + ((typeof subFile !== "undefined" && subFile && subFile.cues && subFile.cues.length) ? " · your Wyzie subs return on CineSrc" : "");
   } else if (isTrailer) {
     document.getElementById("watchStatus").textContent = "🎬 Playing official trailer";
   }
@@ -2323,14 +2323,22 @@ const WYZ_BASE = "https://sub.wyzie.io";
    personal key (below) always wins when present. */
 const _wzk = ["dzQHetUWa6l3d", "2N5ZnboZXNhpG", "5mN41mY6BzMuN", "=QndyMDckBXNi"];
 const WYZ_BUILTIN = atob(_wzk.map(s => s.split("").reverse().join("")).join(""));
-const WYZ_LANGS = [["en", "EN"], ["es", "ES"], ["fr", "FR"], ["de", "DE"], ["ar", "AR"], ["hi", "HI"], ["tl", "TL"], ["pt", "PT"]];
+const WYZ_LANGS = [["en", "EN"], ["es", "ES"], ["fr", "FR"], ["de", "DE"], ["ar", "AR"], ["hi", "HI"], ["tl", "TL"], ["pt", "PT"], ["it", "IT"], ["nl", "NL"], ["ru", "RU"], ["tr", "TR"], ["id", "ID"]];
 let wyzLang = "en", wyzKey = "";
 try {
   wyzLang = localStorage.getItem("streambox_wyz_lang") || "en";
   wyzKey = localStorage.getItem("streambox_wyz_key") || "";
 } catch(e){}
 function wyzKeyEffective(){ return wyzKey || WYZ_BUILTIN; }
-let wyzQuota = null; // set when the free key hits its 1,000/day cap (memory-only: self-heals)
+let wyzQuota = null; // set when the free key hits its 1,000/day cap (persists 1h so a reload can't burn more quota; self-heals)
+try {
+  const wq0 = JSON.parse(localStorage.getItem("streambox_wyz_quota") || "null");
+  if (wq0 && wq0.at && Date.now() - wq0.at < 3600000) wyzQuota = wq0;
+} catch(e){}
+function wyzQuotaClear(){
+  wyzQuota = null;
+  try { localStorage.removeItem("streambox_wyz_quota"); } catch(e){}
+}
 async function wyzQuotaMsg(res){
   let reset = "";
   try {
@@ -2338,6 +2346,7 @@ async function wyzQuotaMsg(res){
     if (j && j.reset_at) reset = String(j.reset_at);
   } catch(e){}
   wyzQuota = { reset, at: Date.now() };
+  try { localStorage.setItem("streambox_wyz_quota", JSON.stringify(wyzQuota)); } catch(e){}
   paintWyzKey();
   return reset
     ? `Daily limit reached (1,000 free/day) — resets ${reset}.`
@@ -2404,7 +2413,7 @@ async function wyzSearch(){
     if (r.status === 429) throw new Error(await wyzQuotaMsg(r));
     if (!r.ok) throw new Error("Search failed (" + r.status + ").");
     const items = await r.json();
-    wyzQuota = null;
+    wyzQuotaClear();
     const list = (Array.isArray(items) ? items : []).slice(0, 25);
     if (!list.length) {
       box.innerHTML = `<p class="text-xs text-gray-500">No ${wyzLang.toUpperCase()} subtitles found — try another language, or load a file below.</p>`;
@@ -2451,7 +2460,7 @@ async function wyzDownload(url, it){
     const lang = (it && (it.display || it.language)) || wyzLang.toUpperCase();
     setSubs({ name: ((it && it.fileName) || "wyzie.srt"), lang, cues,
       pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
-    wyzQuota = null;
+    wyzQuotaClear();
     subStatus(`Loaded ${cues.length} lines (${lang}).`);
   } catch(err) {
     subStatus((err && err.message) || "Download failed. You can still load a file manually below.");
@@ -2485,9 +2494,11 @@ async function wyzAutoSubs(){
     }
     if (!r.ok) return;
     const items = await r.json();
-    wyzQuota = null;
+    wyzQuotaClear();
     if (!Array.isArray(items) || !items.length) return;
-    const pick = items.find(x => !x.isHearingImpaired) || items[0];
+    // best first: most-downloaded non-CC track (crowd-vetted sync), else top hit
+    const ranked = [...items].sort((a, b) => (b.downloadCount || 0) - (a.downloadCount || 0));
+    const pick = ranked.find(x => !x.isHearingImpaired) || ranked[0];
     const fr = await fetch(pick.url);
     if (fr.status === 429) {
       const wq = document.getElementById("watchStatus");
@@ -2499,7 +2510,7 @@ async function wyzAutoSubs(){
     if (!cues.length) return;
     setSubs({ name: (pick.fileName || "wyzie.srt"), lang: (pick.display || wyzLang.toUpperCase()), cues,
       pos: "bottom", offset: 0 });
-    wyzQuota = null;
+    wyzQuotaClear();
     const ws = document.getElementById("watchStatus");
     if (ws && mirror === "cinesrc") ws.textContent = `Subtitles auto-loaded (${cues.length} lines) ✓ — nudge sync anytime in ⚙ → Subs`;
   } catch(e){}
@@ -2567,6 +2578,8 @@ function guessLang(name){
   const map = [["english", "English"], [".en.", "English"], [".eng.", "English"], ["spanish", "Spanish"],
     ["french", "French"], ["arabic", "Arabic"], ["hindi", "Hindi"], ["tagalog", "Tagalog"],
     ["filipino", "Filipino"], ["german", "German"], ["portuguese", "Portuguese"], ["italian", "Italian"],
+    ["dutch", "Dutch"], ["russian", "Russian"], ["turkish", "Turkish"], ["indonesian", "Indonesian"],
+    ["vietnamese", "Vietnamese"], ["polish", "Polish"],
     ["japanese", "Japanese"], ["korean", "Korean"], ["chinese", "Chinese"], ["urdu", "Urdu"]];
   for (const [k, v] of map) if (n.includes(k)) return v;
   return "Custom";
