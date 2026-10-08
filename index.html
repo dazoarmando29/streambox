@@ -256,7 +256,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 71; // bump every release alongside version.txt
+const BUILD_NUM = 72; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -704,8 +704,9 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   <div class="bg-[#131e35] border border-white/10 rounded-2xl p-5 w-full max-w-[300px]">
     <p id="pinTitle" class="font-black text-lg">Enter PIN</p>
     <p id="pinMsg" class="text-xs text-gray-400 mt-1">4 digits • Back cancels</p>
-    <p id="pinDots" class="text-3xl font-black tracking-[.35em] text-center my-4 text-teal-300">○○○○</p>
+    <p id="pinDots" class="text-3xl font-black tracking-[.35em] text-center my-4 text-teal-300">○○○○○○○○</p>
     <div id="pinKeys" class="grid grid-cols-3 gap-2"></div>
+    <button onclick="pinSubmit()" class="mt-2 w-full py-3 rounded-xl bg-teal-500 hover:bg-teal-400 text-lg font-black">✓ Done</button>
   </div>
 </div>
 
@@ -1442,10 +1443,15 @@ async function pinHash(pin){
   return "djb2-" + h.toString(16);
 }
 let pinMode = "", pinEntry = "", pinFirst = "";
+/* Owner PIN ships as a HASH ONLY (SHA-256, same recipe as pinHash) — the
+   digits never appear in source, history, or page text. Seeded once; a
+   stored PIN of your own always wins over this default. */
+const DEFAULT_PIN_HASH = "83d91cc9aca3a66b17135509b9b8147c1a60b30db5e03e829f0dc88d9b14d956";
+try { if (!localStorage.getItem("streambox_pin")) localStorage.setItem("streambox_pin", DEFAULT_PIN_HASH); } catch(e){}
 function openPin(mode, keepFirst){
   pinMode = mode; pinEntry = ""; if (!keepFirst) pinFirst = "";
-  document.getElementById("pinTitle").textContent = mode === "set" ? "Set a 4-digit PIN" : mode === "confirm" ? "Repeat the PIN" : "Enter PIN";
-  document.getElementById("pinMsg").textContent = mode === "set" ? "Adults only — kids stay locked out." : "4 digits • Back cancels";
+  document.getElementById("pinTitle").textContent = mode === "set" ? "Set a 4–8 digit PIN" : mode === "confirm" ? "Repeat the PIN" : "Enter PIN";
+  document.getElementById("pinMsg").textContent = mode === "set" ? "Adults only — kids stay locked out." : "4–8 digits • ✓ Done • Back cancels";
   const keys = document.getElementById("pinKeys");
   keys.innerHTML = "";
   ["1","2","3","4","5","6","7","8","9","C","0","⌫"].forEach(k => {
@@ -1462,16 +1468,16 @@ function openPin(mode, keepFirst){
   setTimeout(() => { const f = keys.querySelector("button"); if (f) safeFocus(f); }, 60);
 }
 function paintPinDots(){
-  document.getElementById("pinDots").textContent = "●".repeat(pinEntry.length) + "○".repeat(4 - pinEntry.length);
+  document.getElementById("pinDots").textContent = "●".repeat(pinEntry.length) + "○".repeat(Math.max(0, 8 - pinEntry.length));
 }
 function pinPress(k){
   if (k === "C") { pinEntry = ""; paintPinDots(); return; }
   if (k === "⌫") { pinEntry = pinEntry.slice(0, -1); paintPinDots(); return; }
-  if (pinEntry.length >= 4) return;
+  if (pinEntry.length >= 8) return;
   pinEntry += k; paintPinDots();
-  if (pinEntry.length === 4) setTimeout(pinSubmit, 150);
 }
 async function pinSubmit(){
+  if (pinEntry.length < 4) { document.getElementById("pinMsg").textContent = "At least 4 digits — keep going."; return; }
   const entry = pinEntry; pinEntry = ""; paintPinDots();
   if (pinMode === "set") { pinFirst = entry; openPin("confirm", true); return; }
   if (pinMode === "confirm") {
