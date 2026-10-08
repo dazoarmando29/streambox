@@ -248,7 +248,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 62; // bump every release alongside version.txt
+const BUILD_NUM = 63; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -391,7 +391,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <!-- player options -->
       <div class="no-cinema glass mt-3 p-4">
         <p class="font-bold text-sm">Playback Settings</p>
-        <p class="text-[11px] text-gray-500 mb-3">Fine-tune playback without cluttering the player.</p>
+        <p class="text-[11px] text-gray-500 mb-3">Fine-tune playback without cluttering the player. TV boxes start at 720p for smoothness — step up anytime. <span id="healthLine"></span></p>
         <div class="flex flex-wrap items-center gap-x-5 gap-y-3 text-xs text-gray-300">
         <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="switch" onchange="toggleShield()"> Ad Shield</label>
         <label class="flex items-center gap-2" title="TV remotes can only drive CineSrc + YapGrid — hide the other servers from Source lists."><input type="checkbox" id="optTvSafe" class="switch" onchange="tvSafeToggle()"> TV-safe servers</label>
@@ -959,6 +959,17 @@ function skeletonRow(title){
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
   }
   // footer stamp + Netflix-style nav: transparent over the hero, solid on scroll
+  // + playback-engine health (old WebViews are the #1 cause of TV stutter)
+  try {
+    const hl = document.getElementById("healthLine");
+    if (hl) {
+      const m = (navigator.userAgent || "").match(/Chrome\/(\d+)/);
+      const v = m ? Number(m[1]) : 0;
+      hl.textContent = v >= 100 ? `Playback engine: Chrome ${v} ✓ modern.`
+        : v > 0 ? `Playback engine: Chrome ${v} — update Android System WebView (Play Store) for smoother video.`
+        : "Playback engine: unknown — update Android System WebView (Play Store) if video stutters.";
+    }
+  } catch(e){}
   try {
     const fv = document.getElementById("footVer");
     if (fv) fv.textContent = "· build " + BUILD_NUM;
@@ -1596,6 +1607,12 @@ try {
   const savedQ = localStorage.getItem("streambox_quality") || "";
   const qi = QLEVELS.findIndex(x => x.v === savedQ);
   if (qi >= 0) qIdx = qi;
+  // genuine TV boxes decode 1080p+ slowly: start fresh installs at 720p
+  // (smooth beats sharp on weak SoCs). Saved choice always wins; step up anytime.
+  else if ((typeof IS_TV_DEVICE !== "undefined" && IS_TV_DEVICE)) {
+    qIdx = QLEVELS.findIndex(x => x.v === "720");
+    try { localStorage.setItem("streambox_quality", "720"); } catch(e){}
+  }
 } catch(e){}
 /* single-player mode: hide the video's own button bar, ours is the player.
    (Its ⚙/CC menus go with it — re-show below any time for subtitles.) */

@@ -53,6 +53,8 @@ public class MainActivity extends Activity {
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
         web.requestFocus();
+        // explicit hardware layer: video + page composite on the GPU, not the CPU
+        web.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
@@ -195,13 +197,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        if (web != null) web.onPause();
+        // freeze page timers in background so a paused app burns no CPU
+        if (web != null) { web.onPause(); web.pauseTimers(); }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if (web != null) web.onResume();
+        if (web != null) { web.onResume(); web.resumeTimers(); }
     }
 
     @Override
