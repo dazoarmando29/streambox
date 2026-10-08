@@ -1,115 +1,78 @@
-# StreamBox — Watch Movies & TV Shows Free
+<div align="center">
 
-![Build StreamBox APK](https://github.com/dazoarmando29/streambox/actions/workflows/android-apk.yml/badge.svg)
+# StreamBox
 
-Fast, free streaming front-end powered by TMDB + CineSrc. Single static page for the
-web, wrapped as a native-feeling app on Android phones and Android TV — one codebase,
-three targets.
+**Fast, free movies & TV shows — one codebase, three screens.**
+
+[![Build](https://github.com/dazoarmando29/streambox/actions/workflows/android-apk.yml/badge.svg)](https://github.com/dazoarmando29/streambox/actions/workflows/android-apk.yml)
+[![Latest release](https://img.shields.io/github/v/release/dazoarmando29/streambox?include_prereleases&label=apk&color=14b8a6)](https://github.com/dazoarmando29/streambox/releases/tag/latest)
 
 **Live site:** https://dazoarmando29.github.io/streambox/
 
-Built and maintained by **dazzo** ([@dazoarmando29](https://github.com/dazoarmando29).
+*By **dazzo** — [@dazoarmando29](https://github.com/dazoarmando29)*
 
-## Features
+</div>
 
-- Trending / popular / top-rated catalog with hero rotation (TMDB)
-- Search overlay with recent searches, genre browsing with load-more
-- Detail modal with season/episode steppers (remote-friendly, no dropdowns)
-- CineSrc player with custom control bar: play/pause, ±skip, seek, speed, volume,
-  quality, sleep timer, continue-watching with resume points
-- 8 stream mirrors with one-tap fallback (CineSrc, VidLink, VidFast, VidSrc,
-  VsEmbed, AutoEmbed, 2Embed, YapGrid) + official-trailer fallback (genuine
-  Android TV boxes auto-limit to the remote-drivable CineSrc + YapGrid)
-- Ad Shield sandbox on supporting mirrors; unsandboxed mirrors are labeled
-- External subtitles: Wyzie search with built-in shared key (personal key
-  override for your own 1,000/day quota) + TSDB backup for movies + TV and
-  BetaSeries backup for TV when Wyzie caps + auto-subtitles in your language +
-  quota warnings + `.srt`/`.vtt` file/paste with position and sync controls
-- Android TV first-class: D-pad spatial navigation, cinema mode, smart Back
-  handling, Leanback launcher entry, per-version fresh-start wipe
-- PWA: installable, offline app shell, update banner when a new build ships
+---
 
-## Tech stack
+## Catalog
 
-| Layer   | Details                                                        |
-| ------- | -------------------------------------------------------------- |
-| Web     | Single `index.html` (Tailwind CDN), `sw.js`, `manifest.webmanifest` |
-| Catalog | TMDB REST API (cached 10 min, memory + sessionStorage)         |
-| Player  | CineSrc embed + `postMessage` command API                      |
-| Android | `android/` — fullscreen WebView wrapper (`MainActivity`), splash (`SplashActivity`) |
-| CI      | `.github/workflows/android-apk.yml` — JS syntax gate → Gradle `assembleDebug` → artifact + rolling `latest` release |
+- Trending, popular & top-rated rows powered by TMDB, with a rotating billboard hero (`#1 Trending` badge, rating, overview, one-tap Watch)
+- Search overlay with recent searches and instant results
+- Genre browsing for movies & TV with load-more
+- Detail modal with remote-friendly season / episode steppers — no dropdowns anywhere
+- Continue Watching with resume points, progress bars and one-tap remove, plus My List
+- Mislabel guard: warns before you waste 20 minutes on the wrong cut of 16 famous remake/original pairs, with a Wrong-version jump
+- Official-trailer fallback for every title
 
-## Repo layout
+## Player
 
-```
-index.html                  # the whole web app (BUILD_NUM lives here)
-version.txt                 # build number — keep in sync with BUILD_NUM
-sw.js / manifest.webmanifest / icon-*.png
-android/                    # WebView wrapper (phone + Android TV)
-.github/workflows/         # CI: validate → build APK → publish release
-```
+- CineSrc primary with a custom control bar: play/pause, −10s/+30s skip, seek, speed, volume, quality cycling, mute, sleep timer, continue-watching resume
+- **8 stream mirrors + trailer**, one-tap fallback: CineSrc, VidLink, VidFast, VidSrc, VsEmbed, AutoEmbed, 2Embed, YapGrid
+- Ad Shield sandbox on supporting mirrors — unsandboxed ones are clearly labeled
+- Smart Source button: re-picks the server on CineSrc, cycles mirrors everywhere else
+- YapGrid inherits your subtitle language, autoplays, and plays your loaded Wyzie/TSDB track as its default
+- Auto-next episodes, cinema mode with auto-hiding HUD, volume toast for remotes
 
-## Run locally
+## Subtitles
 
-Just open `index.html` in a browser, or serve it (recommended — service worker
-needs `http(s)`):
+- Wyzie search with built-in shared key, personal-key override (your own 1,000/day), auto-subtitles in your language and quota warnings that spare the shared key when capped
+- **TSDB backup** for movies + TV when Wyzie caps — keyless, strict episode matching so packs can't mistime you
+- **BetaSeries backup** for TV episodes when both are dry
+- 13 subtitle languages, `.srt` / `.vtt` file + paste loading, position + sync controls, per-title memory
+- One-tap CC toggle on the player bar (opens Subs settings when nothing is loaded yet)
 
-```
-python -m http.server
-```
+## TV & Remote
 
-## Deploy (GitHub Pages)
+- Android TV first-class: spatial D-pad navigation that never strands focus, glowing focus rings, 44px targets, no hover-only anything
+- Cinema remote scheme: ◀ ▶ pick buttons, ▲ ▼ volume, OK presses — never accidental seeks
+- Genuine TV boxes auto-limit to the remote-drivable CineSrc + YapGrid (overridable in Playback Settings)
+- TV app hands the D-pad straight to mirror players; native Back always returns
+- Leanback launcher entry, per-version fresh-start wipe — updates can never serve stale pages
 
-1. Push this folder as the repo root to GitHub
-2. Repo → Settings → Pages → Deploy from branch → `main` / `(root)`
-3. Open `https://dazoarmando29.github.io/streambox/`
+## Apps
 
-## How watching works
+| Edition | File | Feel |
+|---|---|---|
+| **StreamBox** | `streambox.apk` | Full motion: hero zoom, sliding bar, springy buttons |
+| **StreamBox Lite** | `streambox-lite.apk` | Calm mode: same pixels, zero motion, max smoothness + battery |
 
-- Catalog, search, trending: TMDB API
-- Playback: CineSrc embed
-  - Movie: `https://cinesrc.st/embed/movie/{tmdb_id}`
-  - TV: `https://cinesrc.st/embed/tv/{tmdb_id}?s={season}&e={episode}`
-- Alternate mirrors use their own players (only CineSrc answers the remote bar)
-- Ad Shield: sandboxed iframe blocks popups / tab-hijacks. For full in-stream ad
-  removal use Brave or uBlock Origin.
+Both install side-by-side. Every push to `main` rebuilds both and republishes the rolling `latest` release.
 
-## Android APKs (phone + Android TV) — Full vs Lite
+## Under the hood
 
-Every push to `main` auto-builds **two** APKs via GitHub Actions. Same site,
-same pixels — pick your motion:
+| Layer | Details |
+|---|---|
+| Web | Single `index.html`, `sw.js` (offline shell, network-first pages), `manifest.webmanifest` |
+| Catalog | TMDB REST (10-min memory + session cache) |
+| Playback | CineSrc embed + `postMessage` command API, 7 alternate players |
+| Subtitles | Wyzie → TSDB → BetaSeries cascade, overlay renderer on CineSrc |
+| Android | Fullscreen WebView wrapper (phone + TV), splash, guarded URL allowlist |
+| Secrets | API keys sharded in code — no plaintext, revokable, personal overrides supported |
 
-| Edition | File | Package | Feel |
-| ------- | ---- | ------- | ---- |
-| Full | `streambox.apk` | `com.streambox.app` | All animations + transitions |
-| Lite | `streambox-lite.apk` | `com.streambox.lite` | Calm mode: motion off, max smoothness + battery |
+## Polish
 
-Different package names, so both install **side-by-side**. Get them at
-**Releases → `latest`**, or via Repo → **Actions** → **Build StreamBox APK** →
-latest green run → **Artifacts** → `streambox-apk`.
-
-1. Install:
-   - Phone: open the APK, allow "Install unknown apps" if asked
-   - Android TV: send the APK via the "Send Files to TV" app or USB, open with a
-     file manager, allow unknown sources. **Uninstall the old version first** —
-     v1.3+ wipes its WebView data on first launch so updates can never serve stale pages.
-
-The app is a fullscreen wrapper around the live site, with TV remote (D-pad) +
-back-button support and a Leanback launcher entry.
-
-## Branches
-
-- `main` — the full experience (this site + both APK flavors).
-- `lite` — frozen GPU-cheap anchor (build 51, pre-animation). Check it out any
-  time to go back: `git checkout lite`.
-
-## Versioning
-
-- Web: bump `BUILD_NUM` in `index.html` **and** `version.txt` together — the
-  in-app update banner and the service worker depend on them matching.
-- Android: bump `versionCode` / `versionName` in `android/app/build.gradle`
-  (triggers the once-per-version WebView wipe).
-
-## Author
-
-**dazzo** — https://github.com/dazoarmando29
+- Modern skin: glass cards, pill nav with active glow, switch toggles, skeleton shimmer, rating badges
+- Netflix-style nav that solidifies on scroll, billboard hero with slow push-in
+- Focus glow follows remote/keyboard only — taps never leave a stuck ring
+- PWA: installable, offline app shell, update banner stamped with the live build number
