@@ -172,7 +172,7 @@ public class MainActivity extends Activity {
             "(function(){"
             + "var ae=document.activeElement;"
             + "if(ae&&ae.tagName==='IFRAME'){ae.blur();var mb=document.querySelector('#mirrorBar:not(.hidden) button');if(mb){mb.focus();return 'refocus';}var b=document.getElementById('ctlPlay');if(b)b.focus();return 'refocus';}"
-            + "if(document.body.classList.contains('video-fs')){exitVideoFs();return 'fs';}"
+            + "if(document.body.classList.contains('video-fs')){exitVideoFs();goHome();return 'home';}"
             + "var q=document.getElementById('searchPanel');"
             + "if(q&&!q.classList.contains('hidden')){closeSearch();return 'panel';}"
             + "var p=document.getElementById('epDrawer');"

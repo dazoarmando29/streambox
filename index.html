@@ -256,7 +256,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 68; // bump every release alongside version.txt
+const BUILD_NUM = 69; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -516,7 +516,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <ul class="text-sm text-gray-300 space-y-1.5 ml-1">
       <li>⬅️ ➡️ ⬆️ ⬇️ — move between posters, buttons and episodes</li>
       <li>✅ <b>OK</b> — open details / press ▶ Watch Now / start an episode</li>
-      <li>🔙 <b>Back</b> — close popup → back to browsing → exit app</li>
+      <li>🔙 <b>Back</b> — close popup → straight home → exit app</li>
       <li>On a movie popup, focus starts on <b>▶ Watch Now</b> — one OK press plays.</li>
       <li>Change season/episode with the <b>‹ ›</b> steppers, never a dropdown.</li>
     </ul>
@@ -1197,7 +1197,7 @@ function skeletonRow(title){
       try {
         if (document.fullscreenElement) { document.exitFullscreen(); e.preventDefault(); return; }
       } catch(err){}
-      if (document.body.classList.contains("video-fs")) { exitVideoFs(); e.preventDefault(); return; }
+      if (document.body.classList.contains("video-fs")) { exitVideoFs(); goHome(e); e.preventDefault(); return; }
       const watch = document.getElementById("watchView");
       if (watch && !watch.classList.contains("hidden")) { goHome(e); e.preventDefault(); }
     }
