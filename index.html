@@ -254,6 +254,10 @@
   <button onclick="document.getElementById('updateBar').classList.add('hidden')" aria-label="Dismiss" class="shrink-0 w-8 h-8 rounded-full bg-black/20 font-black">✕</button>
 </div>
 
+<!-- REMOTE CURSOR: TV-box fallback pointer for players that ignore arrows -->
+<button id="cursorBtn" onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows move a pointer, OK clicks — tap again to exit"
+  class="fixed bottom-4 right-4 z-[96] w-11 h-11 rounded-full bg-white/10 border border-white/25 text-lg backdrop-blur hover:bg-white/25">🖱</button>
+
 <!-- HEALTH BANNER: shown when CineSrc can't be reached from this network -->
 <div id="healthBar" class="hidden fixed left-0 right-0 z-[94] bg-amber-500 text-[#0b1426] text-sm font-bold px-4 py-2.5 flex items-center gap-3">
   <span class="flex-1">⚠ CineSrc isn't reachable (down or blocked on this network) — mirrors still play. Try mobile data, VPN, or DNS 1.1.1.1.</span>
@@ -262,7 +266,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 79; // bump every release alongside version.txt
+  const BUILD_NUM = 80; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -778,6 +782,56 @@ function dirOf(e){
   if (k === "ArrowDown" || k === "Down" || e.keyCode === 40) return "down";
   return null;
 }
+/* Virtual cursor for TV boxes: drives a real pointer when a mirror's player
+   won't answer arrows. Arrows nudge it, OK clicks whatever is under it —
+   our own buttons (⛶, ▶, CC, Episodes, mirror pills) always work. NOTE: it
+   cannot click INSIDE a cross-origin player (browser rule) — for actually
+   driving the player use the 🎯 handoff instead. Pointer-events:none, so it
+   never blocks a real tap on phone/desktop. */
+window._cursor = { on: false, x: 0, y: 0, el: null };
+function cursorToggle(){
+  const c = window._cursor;
+  c.on = !c.on;
+  const btn = document.getElementById("cursorBtn");
+  if (c.on) {
+    if (!c.el) {
+      c.el = document.createElement("div");
+      c.el.setAttribute("aria-hidden", "true");
+      c.el.style.cssText = "position:fixed;z-index:999;width:22px;height:22px;border-radius:50%;pointer-events:none;"
+        + "background:#14b8a6;border:3px solid #fff;box-shadow:0 0 0 3px rgba(20,184,166,.5),0 2px 10px rgba(0,0,0,.6);"
+        + "transform:translate(-50%,-50%);left:50%;top:50%;";
+      document.body.appendChild(c.el);
+      c.x = window.innerWidth / 2; c.y = window.innerHeight / 2;
+    }
+    c.el.style.display = "block";
+    c.el.style.left = c.x + "px"; c.el.style.top = c.y + "px";
+    if (btn) btn.classList.add("!bg-teal-500");
+    const ws = document.getElementById("watchStatus");
+    if (ws) ws.textContent = "🖱 Cursor ON — arrows move it, OK clicks. 🖱 again (or Back) to exit.";
+  } else {
+    if (c.el) c.el.style.display = "none";
+    if (btn) btn.classList.remove("!bg-teal-500");
+    const ws = document.getElementById("watchStatus");
+    if (ws && /Cursor ON/.test(ws.textContent || "")) ws.textContent = "";
+  }
+}
+function cursorStep(dir){
+  const c = window._cursor;
+  const step = 28;
+  if (dir === "left") c.x -= step; else if (dir === "right") c.x += step;
+  else if (dir === "up") c.y -= step; else if (dir === "down") c.y += step;
+  c.x = Math.max(6, Math.min(window.innerWidth - 6, c.x));
+  c.y = Math.max(6, Math.min(window.innerHeight - 6, c.y));
+  if (c.el) { c.el.style.left = c.x + "px"; c.el.style.top = c.y + "px"; }
+}
+function cursorClick(){
+  const c = window._cursor;
+  const el = document.elementFromPoint(c.x, c.y);
+  if (el) {
+    try { el.click(); } catch(e){}
+    try { if (el.focus) el.focus({ preventScroll: true }); } catch(e){}
+  }
+}
 function okPressed(e){
   const k = e.key || "";
   return k === "Enter" || k === " " || e.keyCode === 13 || e.keyCode === 32;
@@ -1068,6 +1122,12 @@ function skeletonRow(title){
   document.addEventListener("keydown", (e) => {
     const dir = dirOf(e);
     const tag = (document.activeElement && document.activeElement.tagName) || "";
+    // remote cursor owns the keys while on — arrows move it, OK clicks, Esc exits
+    if (window._cursor && window._cursor.on) {
+      if (dir) { e.preventDefault(); cursorStep(dir); return; }
+      if (okPressed(e)) { e.preventDefault(); cursorClick(); return; }
+      if (e.key === "Escape" || e.keyCode === 27) { cursorToggle(); return; }
+    }
     // keyboard-focus mode: arrows/Tab/OK earn the glow ring; any pointer
     // press below resigns it (taps focus buttons too — a stuck glow after
     // every touch looks broken on phone/desktop).
