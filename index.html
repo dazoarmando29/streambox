@@ -254,9 +254,15 @@
   <button onclick="document.getElementById('updateBar').classList.add('hidden')" aria-label="Dismiss" class="shrink-0 w-8 h-8 rounded-full bg-black/20 font-black">✕</button>
 </div>
 
+<!-- HEALTH BANNER: shown when CineSrc can't be reached from this network -->
+<div id="healthBar" class="hidden fixed left-0 right-0 z-[94] bg-amber-500 text-[#0b1426] text-sm font-bold px-4 py-2.5 flex items-center gap-3">
+  <span class="flex-1">⚠ CineSrc isn't reachable (down or blocked on this network) — mirrors still play. Try mobile data, VPN, or DNS 1.1.1.1.</span>
+  <button onclick="document.getElementById('healthBar').classList.add('hidden')" class="shrink-0 h-11 px-5 rounded-full bg-black/20 font-black">Got it</button>
+</div>
+
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 76; // bump every release alongside version.txt
+const BUILD_NUM = 77; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -854,6 +860,23 @@ async function checkUpdate(){
 }
 checkUpdate();
 setInterval(checkUpdate, 30 * 60 * 1000);
+/* CineSrc health: one cheap no-cors probe shortly after boot. Resolves =
+   reachable (or a block page pretending — indistinguishable); rejects =
+   dead/DNS-blocked here. Warns once, never blocks, both APK flavors included. */
+async function checkCinesrc(){
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 8000);
+    await fetch("https://cinesrc.st/embed/movie/550?_=" + Date.now(), { mode: "no-cors", cache: "no-store", signal: ctl.signal });
+    clearTimeout(t);
+  } catch(e) {
+    const bar = document.getElementById("healthBar");
+    if (!bar) return;
+    bar.style.top = document.getElementById("updateBar").classList.contains("hidden") ? "0px" : "52px";
+    bar.classList.remove("hidden");
+  }
+}
+setTimeout(checkCinesrc, 2500);
 
 /* ---------- HOME ---------- */
 async function init(){
