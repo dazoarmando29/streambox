@@ -256,7 +256,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 73; // bump every release alongside version.txt
+const BUILD_NUM = 74; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1426,6 +1426,22 @@ function isAdult(x){
 function adultLocked(){
   try { return localStorage.getItem("streambox_adult") !== "open"; } catch(e){ return true; }
 }
+let adultKwIds = null;
+async function getAdultKwIds(){
+  // TMDB keyword ids for the adult tags (looked up live once, then cached)
+  if (adultKwIds) return adultKwIds;
+  adultKwIds = [];
+  try {
+    for (const q of ["hentai", "ecchi"]) {
+      const d = await tmdb(`/search/keyword?query=${encodeURIComponent(q)}&page=1`);
+      ((d && d.results) || []).forEach(r => {
+        const n = (r.name || "").toLowerCase();
+        if ((n === q || n === "hentai adaptation") && r.id && !adultKwIds.includes(r.id)) adultKwIds.push(r.id);
+      });
+    }
+  } catch(e){}
+  return adultKwIds;
+}
 function pinSet(){
   try { return !!localStorage.getItem("streambox_pin"); } catch(e){ return false; }
 }
@@ -1591,11 +1607,20 @@ async function browseMore(focusFirst){
   btn.classList.add("hidden");
   const next = browse.page + 1;
   try {
-    // anime = TV animation from Japan; genre chips stack as sub-filters
+    // anime = TV animation from Japan; genre chips stack as sub-filters.
+    // Locked: TMDB itself drops keyword-tagged adult titles server-side
+    // (titles here are never flagged `adult`, so include_adult=false is blind).
     const g = browse.genre ? `&with_genres=${browse.genre}` : "";
-    const path = browse.type === "anime"
-      ? `/discover/tv?sort_by=popularity.desc&include_adult=false&with_genres=16${browse.genre ? "," + browse.genre : ""}&with_original_language=ja&page=${next}`
-      : `/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}&page=${next}`;
+    let path;
+    if (browse.type === "anime") {
+      path = `/discover/tv?sort_by=popularity.desc&include_adult=false&with_genres=16${browse.genre ? "," + browse.genre : ""}&with_original_language=ja&page=${next}`;
+      if (adultLocked()) {
+        const kw = await getAdultKwIds();
+        if (kw.length) path += `&without_keywords=${kw.join("|")}`;
+      }
+    } else {
+      path = `/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}&page=${next}`;
+    }
     const d = await tmdb(path);
     browse.page = next;
     browse.totalPages = d.total_pages || 1;
