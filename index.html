@@ -44,6 +44,10 @@
     box-shadow: 0 8px 30px rgba(0,0,0,.45); }
   .row-scroll::-webkit-scrollbar { height: 8px; }
   .row-scroll::-webkit-scrollbar-thumb { background: #333; border-radius: 8px; }
+  /* rows scroll bar-free like Netflix (remote/touch/wheel all still work):
+     the styled bar only ever looked broken next to zooming cards */
+  .row-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+  .row-scroll::-webkit-scrollbar { display: none; }
   /* picking zoom needs breathing room: edge cards used to clip their titles
      against the row edge when scaled. Padding now clears the full focus
      ring + glow too, so the first/last card's border never hits the wall. */
@@ -58,7 +62,9 @@
   .card .poster-frame { position: relative; border-radius: 12px;
     transition: box-shadow .18s ease-out;
     box-shadow: 0 0 0 1px rgba(255,255,255,.09); }
-  .card:hover { transform: scale(1.06); z-index: 10; }
+  /* zoom lives in ROWS only (Netflix-style): grid cards keep the ring but
+     never scale, so neighbors in Movies/TV/Search never collide */
+  .row-scroll .card:hover { transform: scale(1.06); z-index: 10; }
   .card:hover .poster-frame {
     box-shadow: 0 0 0 2px #14b8a6, 0 10px 30px rgba(0,0,0,.55), 0 0 22px rgba(20,184,166,.35); }
   .card:focus-visible { outline: none; }
@@ -74,7 +80,7 @@
      (buttons must never jump under your finger) */
   .tv-focus { outline: none !important;
     box-shadow: 0 0 0 3px #14b8a6, 0 0 18px rgba(20,184,166,.5) !important; }
-  .card.tv-focus { transform: scale(1.07); z-index: 20; box-shadow: none !important; }
+  .row-scroll .card.tv-focus { transform: scale(1.07); z-index: 20; box-shadow: none !important; }
   .card.tv-focus .poster-frame {
     box-shadow: 0 0 0 3px #14b8a6, 0 0 20px rgba(20,184,166,.5) !important; }
   /* row titles: teal accent bar */
@@ -250,7 +256,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 65; // bump every release alongside version.txt
+const BUILD_NUM = 66; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
