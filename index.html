@@ -256,7 +256,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 70; // bump every release alongside version.txt
+const BUILD_NUM = 71; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -319,7 +319,10 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 
   <!-- SEARCH / BROWSE GRID -->
   <main id="gridView" class="hidden px-4 md:px-10 pt-24 pb-20">
-    <h2 id="gridTitle" class="row-title text-xl font-bold mb-4"></h2>
+    <div class="flex items-center gap-3 mb-4">
+      <h2 id="gridTitle" class="row-title text-xl font-bold flex-1"></h2>
+      <button id="adultLockBtn" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" class="shrink-0 px-4 h-11 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-sm font-bold">🔒 18+ Hidden</button>
+    </div>
     <div id="genreRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
     <button id="loadMoreBtn" onclick="browseMore()" class="hidden mx-auto mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 font-bold text-sm">Load more ↓</button>
@@ -696,6 +699,16 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   </div>
 </div>
 
+<!-- PIN PAD: adults-only gate for 18+ titles (remote-friendly digits, Back cancels) -->
+<div id="pinPad" class="hidden fixed inset-0 z-[96] bg-black/85 grid place-items-center p-4">
+  <div class="bg-[#131e35] border border-white/10 rounded-2xl p-5 w-full max-w-[300px]">
+    <p id="pinTitle" class="font-black text-lg">Enter PIN</p>
+    <p id="pinMsg" class="text-xs text-gray-400 mt-1">4 digits • Back cancels</p>
+    <p id="pinDots" class="text-3xl font-black tracking-[.35em] text-center my-4 text-teal-300">○○○○</p>
+    <div id="pinKeys" class="grid grid-cols-3 gap-2"></div>
+  </div>
+</div>
+
 <script>
 /* Popup-ads safety net for our own page (iframe popups are blocked by sandbox above) */
 (function(){
@@ -747,7 +760,7 @@ function restoreFocus(el){
 }
 function topPopup(){
   // topmost visible popup wins (search sits above drawers, guide above all)
-  const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal")].filter(p => !p.classList.contains("hidden"));
+  const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal,#pinPad")].filter(p => !p.classList.contains("hidden"));
   return ps.length ? ps[ps.length - 1] : null;
 }
 function dirOf(e){
@@ -925,7 +938,7 @@ function makeRow(title, items, forceType){
   div.innerHTML = `<div class="flex items-center gap-2 mb-2"><h2 class="row-title text-lg font-bold flex-1">${title}</h2>${rowArrows()}</div>`;
   const sc = document.createElement("div");
   sc.className = "flex gap-3 overflow-x-auto row-scroll pb-2";
-  items.filter(x=>x.poster_path).forEach(x=>{
+  items.filter(x=>x.poster_path && (!adultLocked() || !isAdult(x))).forEach(x=>{
     const type = forceType || (x.media_type === "tv" ? "tv" : "movie");
     sc.appendChild(cardEl(x, type));
   });
@@ -1192,6 +1205,7 @@ function skeletonRow(title){
         if (top.id === "tvGuide") closeTvGuide();
         else if (top.id === "modal") closeModal();
         else if (top.id === "searchPanel") closeSearch();
+        else if (top.id === "pinPad") pinCancel();
         else closePanels();
         e.preventDefault(); return;
       }
@@ -1246,7 +1260,8 @@ function skeletonRow(title){
 
 let heroIdx = 0, heroItems = [];
 function buildHero(items){
-  heroItems = items;
+  heroItems = adultLocked() ? items.filter(x => !isAdult(x)) : items;
+  if (!heroItems.length) heroItems = items; // never leave a blank billboard
   setHero(0);
   setInterval(()=>{
     if(!document.getElementById("homeView").classList.contains("hidden"))
@@ -1323,7 +1338,8 @@ async function runOverlaySearch(q){
   try {
     const r = await fetch(`${TMDB_BASE}/search/multi?query=${encodeURIComponent(q)}&include_adult=false&api_key=${TMDB_API_KEY}&language=en-US`, { signal: overlayCtrl.signal });
     const data = await r.json();
-    const items = (data.results || []).filter(x => (x.media_type === "movie" || x.media_type === "tv") && x.poster_path);
+    const lockedSr = adultLocked();
+    const items = (data.results || []).filter(x => (x.media_type === "movie" || x.media_type === "tv") && x.poster_path && (!lockedSr || !isAdult(x)));
     grid.innerHTML = "";
     hint.textContent = items.length ? `${items.length} result${items.length > 1 ? "s" : ""} — ↓ to browse, OK to open` : "No results found.";
     items.slice(0, 30).forEach(x => {
@@ -1396,6 +1412,111 @@ function paintNav(which){
 async function filterType(type, ev){
   openBrowse(type, ev);
 }
+/* ---------- ADULT GATE (PIN-locked 18+ filter) ----------
+   Locked by default: adult titles are REMOVED from rails, search, hero
+   and continue lists (never rendered — no poster, no title, nothing to
+   peek at). Adults unlock with a 4-digit PIN (SHA-256, local only). */
+const ADULT_TOKENS = ["hentai","ecchi","porn","porno","xxx","erotic","erotica","sexual","nsfw","tentacle","futanari","shota","loli","incest","rape","bdsm","bondage","gravure"];
+const ADULT_RE = new RegExp("\\b(" + ADULT_TOKENS.join("|") + ")\\b", "i");
+function isAdult(x){
+  if (!x) return false;
+  if (x.adult) return true;
+  return ADULT_RE.test(((x.title || x.name || "") + " " + (x.overview || "")).toLowerCase());
+}
+function adultLocked(){
+  try { return localStorage.getItem("streambox_adult") !== "open"; } catch(e){ return true; }
+}
+function pinSet(){
+  try { return !!localStorage.getItem("streambox_pin"); } catch(e){ return false; }
+}
+async function pinHash(pin){
+  const s = "sb18:" + pin;
+  try {
+    if (window.crypto && crypto.subtle) {
+      const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+      return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+  } catch(e){}
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return "djb2-" + h.toString(16);
+}
+let pinMode = "", pinEntry = "", pinFirst = "";
+function openPin(mode, keepFirst){
+  pinMode = mode; pinEntry = ""; if (!keepFirst) pinFirst = "";
+  document.getElementById("pinTitle").textContent = mode === "set" ? "Set a 4-digit PIN" : mode === "confirm" ? "Repeat the PIN" : "Enter PIN";
+  document.getElementById("pinMsg").textContent = mode === "set" ? "Adults only — kids stay locked out." : "4 digits • Back cancels";
+  const keys = document.getElementById("pinKeys");
+  keys.innerHTML = "";
+  ["1","2","3","4","5","6","7","8","9","C","0","⌫"].forEach(k => {
+    const b = document.createElement("button");
+    b.textContent = k;
+    b.className = "py-3 rounded-xl bg-white/10 hover:bg-teal-500 text-xl font-black";
+    b.setAttribute("aria-label", k === "⌫" ? "Delete digit" : k === "C" ? "Clear" : "Digit " + k);
+    b.onclick = () => pinPress(k);
+    keys.appendChild(b);
+  });
+  paintPinDots();
+  document.getElementById("pinPad").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  setTimeout(() => { const f = keys.querySelector("button"); if (f) safeFocus(f); }, 60);
+}
+function paintPinDots(){
+  document.getElementById("pinDots").textContent = "●".repeat(pinEntry.length) + "○".repeat(4 - pinEntry.length);
+}
+function pinPress(k){
+  if (k === "C") { pinEntry = ""; paintPinDots(); return; }
+  if (k === "⌫") { pinEntry = pinEntry.slice(0, -1); paintPinDots(); return; }
+  if (pinEntry.length >= 4) return;
+  pinEntry += k; paintPinDots();
+  if (pinEntry.length === 4) setTimeout(pinSubmit, 150);
+}
+async function pinSubmit(){
+  const entry = pinEntry; pinEntry = ""; paintPinDots();
+  if (pinMode === "set") { pinFirst = entry; openPin("confirm", true); return; }
+  if (pinMode === "confirm") {
+    if ((await pinHash(entry)) === (await pinHash(pinFirst))) {
+      try { localStorage.setItem("streambox_pin", await pinHash(entry)); localStorage.setItem("streambox_adult", "open"); } catch(e){}
+      pinClose(); refreshAfterLock();
+    } else {
+      document.getElementById("pinMsg").textContent = "Didn't match — try again.";
+      openPin("set");
+    }
+    return;
+  }
+  let saved = "";
+  try { saved = localStorage.getItem("streambox_pin") || ""; } catch(e){}
+  if (saved && (await pinHash(entry)) === saved) {
+    try { localStorage.setItem("streambox_adult", "open"); } catch(e){}
+    pinClose(); refreshAfterLock();
+  } else {
+    document.getElementById("pinMsg").textContent = "Wrong PIN — try again.";
+  }
+}
+function pinCancel(){ pinClose(); }
+function pinClose(){
+  document.getElementById("pinPad").classList.add("hidden");
+  if (!topPopup()) document.body.classList.remove("modal-open");
+}
+function paintAdultLock(){
+  const b = document.getElementById("adultLockBtn");
+  if (!b) return;
+  b.textContent = adultLocked() ? "🔒 18+ Hidden" : "🔓 18+ Shown";
+}
+function adultLockTap(){
+  if (!adultLocked()) {
+    try { localStorage.removeItem("streambox_adult"); } catch(e){}
+    refreshAfterLock();
+    return;
+  }
+  openPin(pinSet() ? "unlock" : "set");
+}
+function refreshAfterLock(){
+  paintAdultLock();
+  // re-render from the source so locked titles truly vanish / return
+  if (!document.getElementById("gridView").classList.contains("hidden") && typeof browse !== "undefined" && browse && browse.type) openBrowse(browse.type);
+  else { try { init(); } catch(e){} }
+}
 /* ---------- GENRE BROWSING (Movies + TV Shows categories) ---------- */
 let browse = { type: "movie", genre: 0, page: 0, totalPages: 1, loading: false };
 let genreCache = {};
@@ -1440,6 +1561,7 @@ async function openBrowse(type, ev){
   } catch(e){
     row.innerHTML = `<p class="text-xs text-gray-500 py-2">Categories unavailable — showing popular.</p>`;
   }
+  paintAdultLock();
   browseMore(true);
 }
 function paintChips(){
@@ -1473,7 +1595,8 @@ async function browseMore(focusFirst){
     browse.totalPages = d.total_pages || 1;
     const grid = document.getElementById("grid");
     const bt = browse.type === "anime" ? "tv" : browse.type;
-    (d.results || []).filter(x => x.poster_path).forEach(x => {
+    const lockedBr = adultLocked();
+    (d.results || []).filter(x => x.poster_path && (!lockedBr || !isAdult(x))).forEach(x => {
       grid.appendChild(cardEl({ ...x, media_type: bt }, bt));
     });
     if (browse.page < browse.totalPages) btn.classList.remove("hidden");
@@ -1927,7 +2050,8 @@ function markWatched(){
 }
 function renderContinue(){
   try{
-    const arr = JSON.parse(localStorage.getItem("streambox_continue")||"[]");
+    let arr = JSON.parse(localStorage.getItem("streambox_continue")||"[]");
+    if (adultLocked()) arr = arr.filter(x => !isAdult({ title: x.title }));
     const row = document.getElementById("continueRow"), grid = document.getElementById("continueGrid");
     if(!arr.length){ row.classList.add("hidden"); return; }
     row.classList.remove("hidden"); grid.innerHTML = "";

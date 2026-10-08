@@ -20,6 +20,7 @@
 - Trending, popular & top-rated rows powered by TMDB, with a rotating billboard hero (`#1 Trending` badge, rating, overview, one-tap Watch)
 - Search overlay with recent searches and instant results
 - Genre browsing for movies, TV & anime with load-more
+- PIN-locked 18+ filter: adult titles vanish from every list until an adult unlocks them
 - Detail modal with remote-friendly season / episode steppers — no dropdowns anywhere
 - Continue Watching with resume points, progress bars and one-tap remove, plus My List
 - Mislabel guard: warns before you waste 20 minutes on the wrong cut of 16 famous remake/original pairs, with a Wrong-version jump
