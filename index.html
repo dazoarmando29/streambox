@@ -285,7 +285,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 84; // bump every release alongside version.txt
+  const BUILD_NUM = 85; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1232,6 +1232,10 @@ function skeletonRow(title){
       pokeHud();
       const top0 = topPopup();
       const bar0 = !top0 && document.body.classList.contains("video-fs") ? document.getElementById("ctlBar") : null;
+      if (bar0 && bar0.classList.contains("bar-hidden")) {
+        // asleep bar + OK from TV = the play/pause Netflix muscle memory
+        e.preventDefault(); ctlToggle(); return;
+      }
       if (bar0 && !bar0.classList.contains("bar-hidden")) {
         const f0 = document.activeElement;
         if (!f0 || f0 === document.body || f0 === document.documentElement || !(f0.closest && f0.closest("#ctlBar"))) {
@@ -1260,8 +1264,17 @@ function skeletonRow(title){
         ? (["ctlBar", "mirrorBar"].map(id => document.getElementById(id)).find(el => el && el.offsetParent) || null)
         : null;
       if (!top && bar && bar.classList.contains("bar-hidden")) {
-        // first press after idle just wakes the UI (Netflix-style)
-        e.preventDefault(); pokeHud(); safeFocus(document.getElementById("ctlPlay")); return;
+        // bar asleep: quick-control mode (Netflix/YouTube-style):
+        // L/R skim the timeline, U/D volume, and chained L/R keeps skipping
+        // for ~2.5s before the bar's button row takes over (_lrT window).
+        e.preventDefault(); pokeHud();
+        if (mirror !== "cinesrc" || !document.body.classList.contains("tv-mode")) {
+          if (mirror === "cinesrc" && (dir === "left" || dir === "right")) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
+          return;
+        }
+        if (dir === "left" || dir === "right") { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
+        else { volStep(dir === "up" ? 0.1 : -0.1); volFlash(); }
+        return;
       }
       if (!top && bar && !bar.classList.contains("bar-hidden")) {
         const btns = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
@@ -1279,21 +1292,21 @@ function skeletonRow(title){
           const bn2 = dir === "down" ? (bi2 + 1) % btns.length : (bi2 - 1 + btns.length) % btns.length;
           safeFocus(btns[bn2]); return;
         }
-        // TV remote scheme (YouTube-style): Left = −10s, Right = +30s,
-        // Up/Down = volume, OK presses the picked button (or play/pauses).
-        // Only the mirror strip walks its buttons — it has no skip of its own.
+        // TV remote scheme, bar VISIBLE: 2.5s after a L/R skim you're in
+        // "bar mode" — arrows walk the buttons (⚙/⌨/CC/... reachable), U/D
+        // volume, OK = press focused / play-pause when none is. Keep mashing
+        // L/R inside the skim window to chain more skips instead of walking.
         e.preventDefault(); pokeHud();
+        const cineSrc = mirror === "cinesrc" && !onMirrorBar;
+        const skimming = cineSrc && window._lrT && (Date.now() - window._lrT < 2500);
         if (dir === "left" || dir === "right") {
-          if (!onMirrorBar && mirror === "cinesrc") {
-            if (dir === "left") ctlSeekRel(-10); else ctlSeekRel(30);
-            return;
-          }
+          if (skimming) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); return; }
           if (!btns.length) return;
           const bi = btns.indexOf(document.activeElement);
           const bn = dir === "right" ? (bi + 1) % btns.length : (bi - 1 + btns.length) % btns.length;
           safeFocus(btns[bn]); return;
         }
-        if (onMirrorBar || mirror !== "cinesrc") return; // mirrors: their own controls
+        if (!cineSrc) return; // mirrors: their own controls
         volStep(dir === "up" ? 0.1 : -0.1);
         volFlash();
         return;
