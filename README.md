@@ -45,7 +45,7 @@
 ## TV & Remote
 
 - Android TV first-class: spatial D-pad navigation that never strands focus, glowing focus rings, 44px targets, no hover-only anything
-- Cinema remote scheme: ◀ ▶ pick buttons, ▲ ▼ volume, OK presses — never accidental seeks
+- Cinema remote scheme: ◀ −10s, ▶ +30s, ▲ ▼ volume, OK play/pause
 - Genuine TV boxes auto-limit to the remote-drivable CineSrc + YapGrid (overridable in Playback Settings)
 - TV app hands the D-pad straight to mirror players; native Back always returns
 - Leanback launcher entry, per-version fresh-start wipe — updates can never serve stale pages

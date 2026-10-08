@@ -256,7 +256,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 67; // bump every release alongside version.txt
+const BUILD_NUM = 68; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -402,7 +402,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         </div>
         <div class="tip-arrow"></div>
       </div>
-      <p class="no-cinema text-[11px] text-gray-600 mt-2">Cinema remote (TV): <b>◀ ▶</b> = pick buttons • <b>▲ ▼</b> = volume • <b>OK</b> = press picked (skip with −10s/+30s). Desktop: ◀ ▶ still skips. <b>CC</b> toggles our subtitles on/off (opens Subs settings when empty). <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
+      <p class="no-cinema text-[11px] text-gray-600 mt-2">Cinema remote (TV): <b>◀</b> = −10s • <b>▶</b> = +30s • <b>▲ ▼</b> = volume • <b>OK</b> = play/pause. Desktop: same. <b>CC</b> toggles our subtitles on/off (opens Subs settings when empty). <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
       <!-- player options -->
       <div class="no-cinema glass mt-3 p-4">
         <p class="font-bold text-sm">Playback Settings</p>
@@ -1110,11 +1110,15 @@ function skeletonRow(title){
           const bn2 = dir === "down" ? (bi2 + 1) % btns.length : (bi2 - 1 + btns.length) % btns.length;
           safeFocus(btns[bn2]); return;
         }
-        // TV remote scheme: NO arrow ever skips by itself (no more accidental
-        // fast-forwards). Left/Right pick buttons along the bar, Up/Down is
-        // volume, OK presses the picked button, −10s/+30s skip on demand.
+        // TV remote scheme (YouTube-style): Left = −10s, Right = +30s,
+        // Up/Down = volume, OK presses the picked button (or play/pauses).
+        // Only the mirror strip walks its buttons — it has no skip of its own.
         e.preventDefault(); pokeHud();
         if (dir === "left" || dir === "right") {
+          if (!onMirrorBar && mirror === "cinesrc") {
+            if (dir === "left") ctlSeekRel(-10); else ctlSeekRel(30);
+            return;
+          }
           if (!btns.length) return;
           const bi = btns.indexOf(document.activeElement);
           const bn = dir === "right" ? (bi + 1) % btns.length : (bi - 1 + btns.length) % btns.length;
@@ -2116,7 +2120,7 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
   if (!bar) return;
   bar.addEventListener("pointerdown", () => { pState.seeking = true; });
   bar.addEventListener("focus", () => { pState.seeking = false; });
-  bar.addEventListener("change", () => { // committed value (remote ◀ ▶ + OK, or mouse release)
+  bar.addEventListener("change", () => { // committed value (drag release, or −10s/+30s buttons)
     pState.seeking = false;
     if (pState.dur > 0) sendCmd("seek", [Math.floor(bar.value / 1000 * pState.dur)]);
   });
