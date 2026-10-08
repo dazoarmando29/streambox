@@ -226,6 +226,12 @@
   .nav-active::after { content: ""; position: absolute; left: 50%; transform: translateX(-50%);
     bottom: -9px; width: 34px; height: 4px; border-radius: 99px;
     background: linear-gradient(90deg, #7dd3fc, #2dd4bf); }
+  /* mobile tab bar: thumb-sized, active tab glows teal like the desktop pill */
+  .mnav-btn { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; min-height: 52px; font-size: 10px; font-weight: 700; color: #8b98b3; border-radius: 14px; }
+  .mnav-btn:active { background: rgba(255,255,255,.08); }
+  .mnav-active { color: #5eead4 !important; }
+  .mnav-active span:first-child { filter: drop-shadow(0 0 6px rgba(45,212,191,.8)); }
   .switch { position: relative; width: 40px; height: 22px; appearance: none; -webkit-appearance: none;
     border-radius: 99px; background: rgba(255,255,255,.15); cursor: pointer; flex-shrink: 0;
     transition: background .18s ease-out; }
@@ -256,7 +262,7 @@
 
 <!-- REMOTE CURSOR: TV-box fallback pointer for players that ignore arrows -->
 <button id="cursorBtn" onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows move a pointer, OK clicks — tap again to exit"
-  class="fixed bottom-4 right-4 z-[96] w-11 h-11 rounded-full bg-white/10 border border-white/25 text-lg backdrop-blur hover:bg-white/25">🖱</button>
+  class="fixed bottom-40 right-4 md:bottom-4 md:right-4 z-[96] w-11 h-11 rounded-full bg-white/10 border border-white/25 text-lg backdrop-blur hover:bg-white/25">🖱</button>
 
 <!-- HEALTH BANNER: shown when CineSrc can't be reached from this network -->
 <div id="healthBar" class="hidden fixed left-0 right-0 z-[94] bg-amber-500 text-[#0b1426] text-sm font-bold px-4 py-2.5 flex items-center gap-3">
@@ -266,7 +272,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 80; // bump every release alongside version.txt
+  const BUILD_NUM = 81; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -303,9 +309,20 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   </div>
 </nav>
 
+<!-- MOBILE TAB BAR: the desktop links hide below md — phones get this instead -->
+<nav id="mobileNav" aria-label="Sections" class="md:hidden fixed bottom-0 left-0 right-0 z-50">
+  <div class="flex bg-[#0b1426]/92 backdrop-blur-md border-t border-white/10 px-1 pt-1.5" style="padding-bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px))">
+    <button id="mnavHome" onclick="goHome(event)" class="mnav-btn mnav-active"><span class="text-xl leading-none">🏠</span><span>Home</span></button>
+    <button id="mnavMovies" onclick="filterType('movie',event)" class="mnav-btn"><span class="text-xl leading-none">🎬</span><span>Movies</span></button>
+    <button id="mnavTv" onclick="filterType('tv',event)" class="mnav-btn"><span class="text-xl leading-none">📺</span><span>TV</span></button>
+    <button id="mnavAnime" onclick="filterType('anime',event)" class="mnav-btn"><span class="text-xl leading-none">✨</span><span>Anime</span></button>
+    <button id="mnavList" onclick="showContinue(event)" class="mnav-btn"><span class="text-xl leading-none">📌</span><span>My List</span></button>
+  </div>
+</nav>
+
 <!-- Floating TV-help button (phones / small screens where the nav link is hidden) -->
 <button onclick="openTvGuide(event)" aria-label="TV setup guide" title="TV setup guide"
-  class="md:hidden fixed bottom-5 right-5 z-50 w-12 h-12 rounded-full bg-teal-500 text-xl shadow-lg shadow-teal-900/50">📺</button>
+  class="md:hidden fixed bottom-24 right-4 z-50 w-12 h-12 rounded-full bg-teal-500 text-xl shadow-lg shadow-teal-900/50">📺</button>
 
 <!-- HOME VIEW -->
 <div id="homeView">
@@ -1074,6 +1091,7 @@ function skeletonRow(title){
     document.body.classList.add("calm");
     try { document.documentElement.style.scrollBehavior = "auto"; } catch(e){}
   }
+  try { syncMobileNav(); } catch(e){}
   // mark static buttons focusable for D-pad
   document.querySelectorAll("button, select, input, a").forEach(el => el.setAttribute("data-focusable", "1"));
   // install prompt (Android Chrome): show Install button when available
@@ -1491,6 +1509,19 @@ function paintNav(which){
     const el = document.getElementById(id);
     if (el) el.classList.toggle("nav-active", id === which);
   });
+  // phone tab bar mirrors the desktop pill
+  const mMap = { navHome: "mnavHome", navMovies: "mnavMovies", navTv: "mnavTv", navAnime: "mnavAnime", navList: "mnavList" };
+  Object.entries(mMap).forEach(([d, m]) => {
+    const el = document.getElementById(m);
+    if (el) el.classList.toggle("mnav-active", d === which);
+  });
+}
+/* phone tab bar never covers the player: hidden on the watch screen */
+function syncMobileNav(){
+  const bar = document.getElementById("mobileNav");
+  if (!bar) return;
+  const onWatch = !document.getElementById("watchView").classList.contains("hidden");
+  bar.classList.toggle("hidden", onWatch);
 }
 async function filterType(type, ev){
   openBrowse(type, ev);
@@ -1827,6 +1858,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   updateMirrorUI();
   document.getElementById("homeView").classList.add("hidden");
   document.getElementById("watchView").classList.remove("hidden");
+  syncMobileNav();
   window.scrollTo(0,0);
   // viewing modes: TV goes straight into cinema view (video first, no ⛶ needed);
   // desktop/phone just zoom-scrolls to the video, ⛶ gives true fullscreen
@@ -2132,6 +2164,7 @@ function goHome(ev){
   document.getElementById("watchView").classList.add("hidden");
   document.getElementById("homeView").classList.remove("hidden");
   document.getElementById("player").src = "";
+  syncMobileNav();
   showRows();
 }
 

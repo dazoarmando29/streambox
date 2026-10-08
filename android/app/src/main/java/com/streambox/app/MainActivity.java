@@ -22,6 +22,35 @@ public class MainActivity extends Activity {
     private View fullscreenView;
     private WebChromeClient.CustomViewCallback fullscreenCallback;
 
+    /** TV boxes (Leanback / television UI mode) get the ?tv=1 remote layout;
+        phones and tablets get the touch-first UI (?tv=1 would force giant
+        TV chrome and break touch navigation). */
+    private boolean isTvDevice() {
+        try {
+            if (getPackageManager().hasSystemFeature(
+                    android.content.pm.PackageManager.FEATURE_LEANBACK)) return true;
+            android.app.UiModeManager um = (android.app.UiModeManager)
+                    getSystemService(android.content.Context.UI_MODE_SERVICE);
+            if (um != null && um.getCurrentModeType()
+                    == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION) return true;
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    /** HOME_URL carries the flavor params (?tv=1 / ?tv=1&calm=1); rebuild them
+        per-device so phones never inherit the TV layout. */
+    private String startUrl() {
+        String base = HOME;
+        try {
+            int q = base.indexOf('?');
+            if (q >= 0) base = base.substring(0, q);
+        } catch (Exception ignored) {}
+        boolean calm = false;
+        try { calm = HOME.contains("calm=1"); } catch (Exception ignored) {}
+        if (isTvDevice()) return base + (calm ? "?tv=1&calm=1" : "?tv=1");
+        return base + (calm ? "?calm=1" : "");
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -159,7 +188,7 @@ public class MainActivity extends Activity {
         if (savedInstanceState != null) {
             web.restoreState(savedInstanceState);
         } else {
-            web.loadUrl(HOME);
+            web.loadUrl(startUrl());
         }
     }
 
