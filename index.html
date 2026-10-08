@@ -256,7 +256,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 69; // bump every release alongside version.txt
+const BUILD_NUM = 70; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -284,6 +284,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <button id="navHome" onclick="goHome(event)" class="navlink nav-active">Home</button>
     <button id="navMovies" onclick="filterType('movie',event)" class="navlink">Movies</button>
     <button id="navTv" onclick="filterType('tv',event)" class="navlink">TV Shows</button>
+    <button id="navAnime" onclick="filterType('anime',event)" class="navlink">Anime</button>
     <button id="navList" onclick="showContinue(event)" class="navlink">My List</button>
     <button onclick="openTvGuide(event)" class="navlink" title="How to install & use on TV">📺 TV Setup</button>
   </div>
@@ -1387,7 +1388,7 @@ function showRows(){
   renderContinue();
 }
 function paintNav(which){
-  ["navHome", "navMovies", "navTv", "navList"].forEach(id => {
+  ["navHome", "navMovies", "navTv", "navAnime", "navList"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.toggle("nav-active", id === which);
   });
@@ -1400,7 +1401,7 @@ let browse = { type: "movie", genre: 0, page: 0, totalPages: 1, loading: false }
 let genreCache = {};
 async function getGenres(type){
   if (genreCache[type]) return genreCache[type];
-  const d = await tmdb(`/genre/${type}/list`);
+  const d = await tmdb(`/genre/${type === "anime" ? "tv" : type}/list`);
   genreCache[type] = (d && d.genres) || [];
   return genreCache[type];
 }
@@ -1412,8 +1413,8 @@ async function openBrowse(type, ev){
   document.getElementById("hero").classList.add("hidden");
   document.getElementById("continueRow").classList.add("hidden");
   document.getElementById("gridView").classList.remove("hidden");
-  document.getElementById("gridTitle").textContent = type === "movie" ? "Movies" : "TV Shows";
-  paintNav(type === "movie" ? "navMovies" : "navTv");
+  document.getElementById("gridTitle").textContent = type === "movie" ? "Movies" : type === "anime" ? "Anime" : "TV Shows";
+  paintNav(type === "movie" ? "navMovies" : type === "anime" ? "navAnime" : "navTv");
   document.getElementById("grid").innerHTML = "";
   const row = document.getElementById("genreRow");
   row.classList.remove("hidden");
@@ -1462,13 +1463,18 @@ async function browseMore(focusFirst){
   btn.classList.add("hidden");
   const next = browse.page + 1;
   try {
+    // anime = TV animation from Japan; genre chips stack as sub-filters
     const g = browse.genre ? `&with_genres=${browse.genre}` : "";
-    const d = await tmdb(`/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}&page=${next}`);
+    const path = browse.type === "anime"
+      ? `/discover/tv?sort_by=popularity.desc&include_adult=false&with_genres=16${browse.genre ? "," + browse.genre : ""}&with_original_language=ja&page=${next}`
+      : `/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}&page=${next}`;
+    const d = await tmdb(path);
     browse.page = next;
     browse.totalPages = d.total_pages || 1;
     const grid = document.getElementById("grid");
+    const bt = browse.type === "anime" ? "tv" : browse.type;
     (d.results || []).filter(x => x.poster_path).forEach(x => {
-      grid.appendChild(cardEl({ ...x, media_type: browse.type }, browse.type));
+      grid.appendChild(cardEl({ ...x, media_type: bt }, bt));
     });
     if (browse.page < browse.totalPages) btn.classList.remove("hidden");
     if (focusFirst) {
