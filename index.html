@@ -285,7 +285,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 85; // bump every release alongside version.txt
+  const BUILD_NUM = 86; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2117,6 +2117,14 @@ function buildEmbedUrlClean(){
     const ls = localStorage.getItem("streambox_lastserver");
     if (ls) p += `&prioritize=true&lastserver=${encodeURIComponent(ls)}`;
   } catch(e){}
+  // desktop browsers gate UNMUTED autoplay behind a real click, so an
+  // unmuted start just sits dead at 0:00 there (phones use our WebView's
+  // no-gesture flag, TVs let it through — untouched). Plain browsers get a
+  // muted-first start; the first touch of our bar unmutes (see ctlToggle).
+  const _ua = navigator.userAgent || "";
+  const _plainBrowser = !document.body.classList.contains("tv-mode") && !/\bwv\b|Android TV|Tizen|WebOS|Smart TV|AFT/i.test(_ua);
+  window._startMuted = _plainBrowser && document.getElementById("optAutoplay").checked;
+  if (window._startMuted) p += "&muted=true";
   if(watchState.type==="movie") return `https://cinesrc.st/embed/movie/${watchState.id}?${p}`;
   return `https://cinesrc.st/embed/tv/${watchState.id}?s=${watchState.s}&e=${watchState.e}&${p}`;
 }
@@ -2396,6 +2404,8 @@ function ctlReset(){
   ctlPaint();
 }
 function ctlToggle(){ // optimistic flip; corrected by play/pause events
+  // un-gate muted-first desktop starts: our first real touch carries sound
+  if (window._startMuted) { window._startMuted = false; sendCmd("setMuted", [false]); }
   pState.paused = !pState.paused;
   sendCmd(pState.paused ? "pause" : "play");
   ctlPaint();
