@@ -37,6 +37,8 @@
   }
   nav { padding-top: calc(1rem + env(safe-area-inset-top, 0px));
     transition: background-color .3s ease, box-shadow .3s ease; }
+  /* fixed backgrounds repaint every scroll frame (TV jank): calm + TV scroll */
+  body.calm, body.tv-mode { background-attachment: scroll; }
   /* Netflix cue: transparent over the billboard, solid once you scroll */
   nav.nav-solid { background-color: rgba(11,20,38,.96); background-image: none;
     box-shadow: 0 8px 30px rgba(0,0,0,.45); }
@@ -248,7 +250,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 63; // bump every release alongside version.txt
+const BUILD_NUM = 64; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -904,18 +906,21 @@ function cardEl(x, type){
     <p class="card-title text-xs mt-1.5 font-semibold truncate">${titleOf(x)}</p>
     <p class="text-[11px] text-gray-500">${yearOf(x)} • ${type.toUpperCase()}</p>`;
   d.onclick = activatable(() => openDetail(type, x.id));
-  // picking speed: hovering/dwelling warms the detail cache so the popup opens
-  // instantly; the player host is preconnected at the same time
+  // picking speed: hovering warms the detail cache so the popup opens
+  // instantly; the player host is preconnected at the same time.
+  // TV remotes park focus on EVERY card they pass, so focus-prefetch is
+  // mouse-only there (otherwise each D-pad step fires network + JSON parse).
   let preT = 0;
-  const warm = () => {
+  const warm = (isFocus) => {
+    if (isFocus && document.body.classList.contains("tv-mode")) return;
     preconnectCinesrc();
     clearTimeout(preT);
     preT = setTimeout(() => { try { tmdb(`/${type}/${x.id}?append_to_response=credits`); } catch(e){} }, 300);
   };
   const cool = () => clearTimeout(preT);
-  d.onmouseenter = warm;
+  d.onmouseenter = () => warm(false);
   d.onmouseleave = cool;
-  d.addEventListener("focus", warm);
+  d.addEventListener("focus", () => warm(true));
   d.addEventListener("blur", cool);
   d.onkeydown = (ev) => { if (okPressed(ev)) { ev.preventDefault(); activatable(() => openDetail(type, x.id))(); } };
   return d;
@@ -1189,7 +1194,9 @@ function setHero(i){
   const x = heroItems[i]; if(!x) return;
   const type = x.media_type === "tv" ? "tv" : "movie";
   // backdrop may be missing/broken on some items: fall back to poster, else hide art (text stays)
-  const bg = x.backdrop_path ? IMG(x.backdrop_path,"w1280") : (x.poster_path ? IMG(x.poster_path,"w780") : "");
+  // TV decodes w1280 slowly: w780 there (gradient + text cover the difference)
+  const tvPic = document.body.classList.contains("tv-mode");
+  const bg = x.backdrop_path ? IMG(x.backdrop_path, tvPic ? "w780" : "w1280") : (x.poster_path ? IMG(x.poster_path,"w780") : "");
   document.getElementById("hero").innerHTML = `
     ${bg ? `<img src="${bg}" fetchpriority="high" decoding="async" onerror="this.style.display='none'" class="absolute inset-0 w-full h-full object-cover">` : ""}
     <div class="absolute inset-0 hero-gradient"></div>
@@ -1206,7 +1213,7 @@ function setHero(i){
   // preload next hero backdrop so rotation is instant
   try {
     const nxt = heroItems[(i+1)%heroItems.length];
-    if (nxt && nxt.backdrop_path) { const im = new Image(); im.decoding = "async"; im.src = IMG(nxt.backdrop_path, "w1280"); }
+    if (nxt && nxt.backdrop_path) { const im = new Image(); im.decoding = "async"; im.src = IMG(nxt.backdrop_path, tvPic ? "w780" : "w1280"); }
   } catch(e){}
 }
 
