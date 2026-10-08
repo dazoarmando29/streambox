@@ -256,7 +256,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 66; // bump every release alongside version.txt
+const BUILD_NUM = 67; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -303,8 +303,15 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 
   <!-- CONTINUE WATCHING -->
   <div id="continueRow" class="px-4 md:px-10 mt-4 hidden">
-    <h2 class="row-title text-lg font-bold mb-2">Continue Watching</h2>
+    <div class="sb-row">
+    <div class="flex items-center gap-2 mb-2"><h2 class="row-title text-lg font-bold flex-1">Continue Watching</h2>
+      <div class="flex gap-2 shrink-0">
+        <button data-ra="-1" onclick="rowScroll(this,-1)" aria-label="Scroll row left" class="w-11 h-11 rounded-full bg-white/10 hover:bg-teal-500 border border-white/15 text-xl font-black leading-none">‹</button>
+        <button data-ra="1" onclick="rowScroll(this,1)" aria-label="Scroll row right" class="w-11 h-11 rounded-full bg-white/10 hover:bg-teal-500 border border-white/15 text-xl font-black leading-none">›</button>
+      </div>
+    </div>
     <div id="continueGrid" class="flex gap-3 overflow-x-auto row-scroll pb-2"></div>
+    </div>
   </div>
 
   <main id="rows" class="px-4 md:px-10 pb-20 space-y-8 mt-6"></main>
@@ -870,6 +877,7 @@ async function init(){
         if (d && d.results) rows.appendChild(makeRow(title, d.results, forceType));
       } catch(rowErr) { /* one row failing never kills the page */ }
     }
+    paintAllRowArrows();
     return;
   } catch(err) {
     // never leave a dead empty page (offline / API down): offer retry
@@ -884,9 +892,36 @@ async function init(){
   }
 }
 
+function rowArrows(){
+  // modern glass chevrons: 44px, remote + mouse friendly, dim at the ends
+  return `<div class="flex gap-2 shrink-0">
+    <button data-ra="-1" onclick="rowScroll(this,-1)" aria-label="Scroll row left" class="w-11 h-11 rounded-full bg-white/10 hover:bg-teal-500 border border-white/15 text-xl font-black leading-none">‹</button>
+    <button data-ra="1" onclick="rowScroll(this,1)" aria-label="Scroll row right" class="w-11 h-11 rounded-full bg-white/10 hover:bg-teal-500 border border-white/15 text-xl font-black leading-none">›</button>
+  </div>`;
+}
+function rowScroll(btn, dir){
+  const wrap = btn.closest ? btn.closest(".sb-row") : null;
+  const sc = wrap ? (wrap.querySelector(":scope > .row-scroll") || wrap.querySelector(".row-scroll")) : null;
+  if (!sc) return;
+  const instant = document.body.classList.contains("tv-mode") || document.body.classList.contains("calm");
+  sc.scrollBy({ left: Math.max(320, Math.floor(sc.clientWidth * 0.8)) * dir, behavior: instant ? "auto" : "smooth" });
+  setTimeout(() => paintRowArrows(sc), instant ? 80 : 450);
+}
+function paintRowArrows(sc){
+  try {
+    const wrap = sc.closest ? sc.closest(".sb-row") : null;
+    if (!wrap) return;
+    const prev = wrap.querySelector("[data-ra='-1']"), next = wrap.querySelector("[data-ra='1']");
+    const max = sc.scrollWidth - sc.clientWidth - 2;
+    if (prev) { const d = sc.scrollLeft <= 1; prev.disabled = d; prev.classList.toggle("opacity-30", d); }
+    if (next) { const d = sc.scrollLeft >= max; next.disabled = d; next.classList.toggle("opacity-30", d); }
+  } catch(e){}
+}
+function paintAllRowArrows(){ try { document.querySelectorAll(".sb-row .row-scroll").forEach(paintRowArrows); } catch(e){} }
 function makeRow(title, items, forceType){
   const div = document.createElement("div");
-  div.innerHTML = `<h2 class="row-title text-lg font-bold mb-2">${title}</h2>`;
+  div.className = "sb-row";
+  div.innerHTML = `<div class="flex items-center gap-2 mb-2"><h2 class="row-title text-lg font-bold flex-1">${title}</h2>${rowArrows()}</div>`;
   const sc = document.createElement("div");
   sc.className = "flex gap-3 overflow-x-auto row-scroll pb-2";
   items.filter(x=>x.poster_path).forEach(x=>{
@@ -1184,6 +1219,24 @@ function skeletonRow(title){
   try {
     document.getElementById("playerBox").addEventListener("mousemove", () => pokeHud());
   } catch(e){}
+  // bar-free rows stay drivable: end-aware chevrons + wheel hops rows sideways
+  document.addEventListener("scroll", (e) => {
+    try { const t = e.target; if (t && t.classList && t.classList.contains("row-scroll")) paintRowArrows(t); } catch(err){}
+  }, true);
+  window.addEventListener("resize", () => paintAllRowArrows());
+  document.addEventListener("wheel", (e) => {
+    try {
+      if (e.ctrlKey || e.metaKey) return; // pinch-zoom untouched
+      const sc = e.target && e.target.closest ? e.target.closest(".row-scroll") : null;
+      if (!sc || sc.offsetParent === null) return;
+      if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return; // trackpad sideways: native
+      const max = sc.scrollWidth - sc.clientWidth - 2;
+      if (e.deltaY > 0 ? sc.scrollLeft >= max : sc.scrollLeft <= 0) return; // let the page scroll
+      e.preventDefault();
+      sc.scrollBy({ left: e.deltaY * 2, behavior: "auto" });
+    } catch(err){}
+  }, { passive: false });
+  setTimeout(() => paintAllRowArrows(), 2500);
 })();
 
 let heroIdx = 0, heroItems = [];
@@ -1885,6 +1938,7 @@ function renderContinue(){
       d.querySelector("button").onclick = (ev)=>{ ev.stopPropagation(); removeContinue(x.type,x.id); };
       grid.appendChild(d);
     });
+    paintRowArrows(grid);
   }catch(e){}
 }
 function removeContinue(type,id){
