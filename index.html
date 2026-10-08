@@ -285,7 +285,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 86; // bump every release alongside version.txt
+  const BUILD_NUM = 87; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2144,23 +2144,33 @@ function loadPlayer(){
   const { type, s, e } = watchState;
   window._cinePlaying = false;
   // watchdog: CineSrc loads and "finds a server" but never starts playback
-  // (blocked source, dead CDN on this network) → the video just sits at 0:00.
-  // After 18s of no progress, surface the home-screen warning banner and push
-  // the user to a working mirror instead of waiting forever.
+  // (blocked source, dead CDN — or a desktop ad-blocker killing the player's
+  // own heartbeat calls, which wedges its start logic while bytes still flow).
+  // Stage 1 (18s): banner + status naming the likely cause. Stage 2 (35s):
+  // self-heal onto a working mirror instead of waiting forever.
   clearTimeout(window._watchdog);
+  clearTimeout(window._watchdog2);
   if (mirror === "cinesrc") {
     fetchIntroRanges();
     document.getElementById("watchStatus").textContent = type==="tv" ? `Now playing S${s} E${e}` : "Now playing";
     window._watchdog = setTimeout(() => {
       if (window._cinePlaying || mirror !== "cinesrc") return;
       const ws = document.getElementById("watchStatus");
-      if (ws) ws.textContent = "CineSrc found the title but playback is stuck — switch Source, or retry on mobile data / DNS 1.1.1.1";
+      if (ws) ws.textContent = "CineSrc found the title but playback is stuck — desktop ad-blocker? Allow this site + cinesrc.st (Brave: Shields down), or switch Source";
       const hb = document.getElementById("healthBar");
       if (hb) {
-        hb.querySelector("span").textContent = "⚠ CineSrc is down or blocked on this network (video found but won't start). Mirrors still play — try ⇄ Source, mobile data, VPN, or DNS 1.1.1.1.";
+        hb.querySelector("span").textContent = "⚠ CineSrc won't start here — desktop ad-blockers (Brave Shields etc.) break its player even while video loads. Allow this site + cinesrc.st, or use ⇄ Source. Mirrors still play.";
         hb.classList.remove("hidden");
       }
     }, 18000);
+    window._watchdog2 = setTimeout(() => {
+      if (window._cinePlaying || mirror !== "cinesrc") return;
+      const fb = document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi";
+      const nm = (MIRRORS.find(x => x.id === fb) || {}).name || fb;
+      setMirror(fb);
+      const ws2 = document.getElementById("watchStatus");
+      if (ws2) ws2.textContent = `CineSrc stayed stuck — moved you to ${nm}. ⇄ Source anytime to go back.`;
+    }, 35000);
   }
   // fallback: hide spinner after 8s even if player never fires ready (ad-blocked network etc.)
   clearTimeout(window._spinT);
