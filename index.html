@@ -262,7 +262,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 78; // bump every release alongside version.txt
+  const BUILD_NUM = 79; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1955,8 +1955,26 @@ function loadPlayer(){
   const _u = buildEmbedUrlClean();
   f.src = _u + (_u.includes("?") ? "&" : "?") + "_=" + Date.now();
   const { type, s, e } = watchState;
-  if (mirror === "cinesrc")
+  window._cinePlaying = false;
+  // watchdog: CineSrc loads and "finds a server" but never starts playback
+  // (blocked source, dead CDN on this network) → the video just sits at 0:00.
+  // After 18s of no progress, surface the home-screen warning banner and push
+  // the user to a working mirror instead of waiting forever.
+  clearTimeout(window._watchdog);
+  if (mirror === "cinesrc") {
+    fetchIntroRanges();
     document.getElementById("watchStatus").textContent = type==="tv" ? `Now playing S${s} E${e}` : "Now playing";
+    window._watchdog = setTimeout(() => {
+      if (window._cinePlaying || mirror !== "cinesrc") return;
+      const ws = document.getElementById("watchStatus");
+      if (ws) ws.textContent = "CineSrc found the title but playback is stuck — switch Source, or retry on mobile data / DNS 1.1.1.1";
+      const hb = document.getElementById("healthBar");
+      if (hb) {
+        hb.querySelector("span").textContent = "⚠ CineSrc is down or blocked on this network (video found but won't start). Mirrors still play — try ⇄ Source, mobile data, VPN, or DNS 1.1.1.1.";
+        hb.classList.remove("hidden");
+      }
+    }, 18000);
+  }
   // fallback: hide spinner after 8s even if player never fires ready (ad-blocked network etc.)
   clearTimeout(window._spinT);
   window._spinT = setTimeout(()=>{
@@ -3333,6 +3351,37 @@ async function renderEpDrawer(){
 }
 
 /* ---------- CineSrc player events (per docs) ---------- */
+/* Our own intro-skip: CineSrc's autoskip param never fires on TV episodes,
+   so we fetch the intro range from TheIntroDB (free, TMDB-keyed, keyless API)
+   and seek past it ourselves when Auto-skip is on. */
+let _introRanges = [], _introKey = "", _skipT = 0;
+async function fetchIntroRanges(){
+  const key = `${watchState.type}/${watchState.id}/${watchState.s||""}/${watchState.e||""}`;
+  if (key === _introKey) return; // already fetched for this title
+  _introKey = key; _introRanges = [];
+  try {
+    let url = `https://api.theintrodb.org/v3/media?tmdb_id=${watchState.id}`;
+    if (watchState.type === "tv") url += `&season=${watchState.s}&episode=${watchState.e}`;
+    const r = await fetch(url);
+    if (!r.ok) return;
+    const d = await r.json();
+    _introRanges = (d.intro || []).map(x => ({ start: (x.start_ms || 0) / 1000, end: (x.end_ms || 0) / 1000 }))
+      .filter(x => x.end > x.start && x.end - x.start > 3);
+  } catch(e){}
+}
+function autoSkipIntro(){
+  if (mirror !== "cinesrc") return;
+  try { if (!document.getElementById("optAutoskip").checked) return; } catch(e){ return; }
+  const cur = pState.cur || 0;
+  const hit = _introRanges.find(r => cur >= r.start && cur < r.end - 1);
+  if (!hit) return;
+  const now = Date.now();
+  if (now - _skipT < 5000) return; // don't seek-spam while the last skip lands
+  _skipT = now;
+  sendCmd("seek", [Math.floor(hit.end)]);
+  const ws = document.getElementById("watchStatus");
+  if (ws) ws.textContent = "Intro skipped ✓";
+}
 function hideSpin(){ const s = document.getElementById("playerSpin"); if (s) s.style.display = "none"; }
 document.getElementById("player").addEventListener("load", ()=>{ setTimeout(hideSpin, 800); });
 window.addEventListener("message", (event)=>{
@@ -3343,12 +3392,14 @@ window.addEventListener("message", (event)=>{
     // pull initial state for the control bar
     sendCmd("getPaused"); sendCmd("getDuration"); sendCmd("getMuted"); sendCmd("getPlaybackRate"); sendCmd("getVolume");
   }
-  if(type === "cinesrc:play") { pState.paused = false; ctlPaint(); }
+  if(type === "cinesrc:play") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
   if(type === "cinesrc:pause") { pState.paused = true; ctlPaint(); }
   if(type === "cinesrc:timeupdate" || type === "cinesrc:seeked" || type === "cinesrc:seeking") {
     if (typeof data.currentTime === "number") pState.cur = data.currentTime;
     if (typeof data.duration === "number" && data.duration > 0) pState.dur = data.duration;
+    if (typeof data.currentTime === "number" && data.currentTime > 0.5) window._cinePlaying = true;
     ctlPaint();
+    autoSkipIntro();
   }
   if(type === "cinesrc:loadedmetadata" && typeof data.duration === "number") { pState.dur = data.duration; ctlPaint(); }
   if(type === "cinesrc:volumechange") {
