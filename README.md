@@ -29,7 +29,7 @@
 ## Player
 
 - CineSrc primary with a custom control bar: play/pause, −10s/+30s skip, seek, speed, volume, quality cycling, mute, sleep timer, continue-watching resume
-- **9 stream mirrors + trailer**, one-tap fallback: CineSrc, VidLink, VidFast, VidSrc, VsEmbed, AutoEmbed, 2Embed, YapGrid, VidAPI
+- **10 stream mirrors + trailer**, one-tap fallback: CineSrc, VidLink, VidFast, VidSrc, VsEmbed, AutoEmbed, 2Embed, YapGrid, VidAPI, VidCore
 - Ad Shield sandbox on supporting mirrors — unsandboxed ones are clearly labeled
 - Smart Source button: re-picks the server on CineSrc, cycles mirrors everywhere else
 - YapGrid inherits your subtitle language, autoplays, and plays your loaded Wyzie/TSDB track as its default

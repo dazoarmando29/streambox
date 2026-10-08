@@ -262,7 +262,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 77; // bump every release alongside version.txt
+  const BUILD_NUM = 78; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2484,7 +2484,8 @@ const MIRRORS = [
   { id: "autoembed", name: "AutoEmbed" },
   { id: "twoembed", name: "2Embed" },
   { id: "yapgrid", name: "YapGrid" },
-  { id: "vidapi", name: "VidAPI" }
+  { id: "vidapi", name: "VidAPI" },
+  { id: "vidcore", name: "VidCore" }
 ];
 /* mirrors that break inside ANY sandboxed iframe: load without sandbox */
 const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid"]);
@@ -2589,22 +2590,15 @@ function mirrorUrl(id){
         ? `https://vaplayer.ru/embed/tv/${tmdb}/${s}/${e}?${vq}`
         : `https://vaplayer.ru/embed/movie/${tmdb}?${vq}`;
     }
-    case "vidapi": {
-      // best-in-class mirror: resume position, auto subs in your language,
-      // server-side sub fetch (any URL works), rich player events. No command
-      // API, so like all mirrors it uses its own controls + TV handoff.
-      const vp = new URLSearchParams({ autoplay: "1", ds_lang: (typeof wyzLang === "string" && wyzLang) || "en" });
-      try {
-        if (typeof subFile !== "undefined" && subFile && subFile.corsUrl) {
-          vp.set("sub_url", subFile.corsUrl);
-          vp.set("sub_label", subFile.name || "StreamBox subs");
-          vp.set("sub_default", "true");
-        }
-      } catch(e){}
-      const vq = vp.toString();
+    case "vidcore": {
+      // no command API, no sub_url attach — last-resort mirror that still
+      // routes by TMDB ID and speaks vidcore:play/pause/ended events.
+      // Autoplay saves one OK press; lang follows your Subs language.
+      const cp = new URLSearchParams({ autoplay: "1", lang: (typeof wyzLang === "string" && wyzLang) || "en" });
+      const cq = cp.toString();
       return tv
-        ? `https://vaplayer.ru/embed/tv/${tmdb}/${s}/${e}?${vq}`
-        : `https://vaplayer.ru/embed/movie/${tmdb}?${vq}`;
+        ? `https://vidcore.org/embed/tv/${tmdb}/${s}/${e}?${cq}`
+        : `https://vidcore.org/embed/movie/${tmdb}?${cq}`;
     }
     case "autoembed":
       return tv
