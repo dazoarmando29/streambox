@@ -39,6 +39,13 @@
     transition: background-color .3s ease, box-shadow .3s ease; }
   /* fixed backgrounds repaint every scroll frame (TV jank): calm + TV scroll */
   body.calm, body.tv-mode { background-attachment: scroll; }
+  /* Motion Clarity + Judder Reduction (Settings): tunes how much our own UI
+     eases between states. Cannot touch the film's frames (those live inside
+     a cross-origin player — your TV's own Motion setting handles those). */
+  :root { --mot: 1; }
+  *, *::before, *::after {
+    transition-duration: calc(.05s + var(--mot) * .25s) !important;
+    animation-duration: calc(.08s + var(--mot) * .32s) !important; }
   /* Netflix cue: transparent over the billboard, solid once you scroll */
   nav.nav-solid { background-color: rgba(11,20,38,.96); background-image: none;
     box-shadow: 0 8px 30px rgba(0,0,0,.45); }
@@ -272,7 +279,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 82; // bump every release alongside version.txt
+  const BUILD_NUM = 83; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -445,6 +452,10 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <label class="flex items-center gap-2"><input type="checkbox" id="optAutonext" checked class="switch"> Auto-next</label>
         <label class="flex items-center gap-2"><input type="checkbox" id="optAutoskip" class="switch"> Auto-skip intro</label>
         <label class="flex items-center gap-1">Accent <input type="color" id="optColor" value="#14b8a6" class="w-8 h-6 bg-transparent"></label>
+        <label class="flex items-center gap-1" title="Smoothness of StreamBox's own UI motion (your TV's Motion setting handles the film itself)">🎞 Motion
+          <input type="checkbox" id="optMotion" checked class="switch" onchange="motionOpts()"></label>
+        <label class="flex items-center gap-1" title="How fluid UI transitions feel on your box (0 = sharp, 10 = silky)">Judder
+          <input type="range" id="optJudder" min="0" max="10" value="10" step="1" class="w-24 h-6 accent-teal-400" aria-label="Judder reduction" oninput="motionOpts()"></label>
         <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5" title="Preferred video quality — 4K only plays if the source carries it, otherwise best available">
           <button onclick="qualityStep(-1)" aria-label="Lower quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
           <span id="qualityLabel" class="text-xs font-bold min-w-[52px] text-center">Auto</span>
@@ -1175,6 +1186,17 @@ function skeletonRow(title){
     // press below resigns it (taps focus buttons too — a stuck glow after
     // every touch looks broken on phone/desktop).
     if (dir || e.key === "Tab") window._kbNav = true;
+    // TV: letting a focused slider (Judder etc.) answer Left/Right — they are
+    // deliberately NOT walkable-to in the focus ring, so this is how you tune
+    // them. (The player's own seek bar keeps its bigger YouTube scheme.)
+    const foc = document.activeElement;
+    if (dir && foc && foc.tagName === "INPUT" && foc.type === "range" && foc.id !== "seek") {
+      e.preventDefault();
+      const step = (dir === "right" || dir === "up") ? 1 : -1;
+      foc.value = Math.max(parseInt(foc.min, 10) || 0, Math.min(parseInt(foc.max, 10) || 100, (parseInt(foc.value, 10) || 0) + step));
+      foc.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
     if (/INPUT|SELECT|TEXTAREA/.test(tag)) {
       if (e.key === "Escape" || e.keyCode === 27) { document.activeElement.blur(); return; }
       // TV: arrows leave the overlay search box into results instead of being trapped
@@ -2013,6 +2035,25 @@ function fsSettings(){
   if (!document.body.classList.contains("video-fs")) enterVideoFs();
   setTimeout(openSettings, 120);
 }
+/* Settings motion controls: judder slider eases our UI; off = snappy/sharp.
+   Persisted like the other playback prefs. */
+function motionOpts(){
+  const on = document.getElementById("optMotion").checked;
+  const v = parseInt(document.getElementById("optJudder").value, 10) || 0;
+  document.documentElement.style.setProperty("--mot", on ? String(0.1 + (v / 10) * 0.9) : "0");
+  try { localStorage.setItem("streambox_motion", (on ? "1" : "0") + ":" + v); } catch(e){}
+}
+(function restoreMotion(){
+  try {
+    const raw = localStorage.getItem("streambox_motion");
+    if (!raw) return;
+    const parts = raw.split(":");
+    const on = parts[0] !== "0", v = Math.max(0, Math.min(10, parseInt(parts[1], 10) || 0));
+    const m = document.getElementById("optMotion"); if (m) m.checked = on;
+    const j = document.getElementById("optJudder"); if (j) j.value = v;
+    document.documentElement.style.setProperty("--mot", on ? String(0.1 + (v / 10) * 0.9) : "0");
+  } catch(e){}
+})();
 function paintQuality(){
   const t = QLEVELS[qIdx].l;
   ["qualityLabel", "srvQLabel", "ctlQ"].forEach(id => {
