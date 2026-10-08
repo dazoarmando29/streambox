@@ -156,6 +156,12 @@
   .tv-mode { font-size: 18px; }
   .tv-mode .card { min-width: 200px !important; max-width: 200px !important; }
   .tv-mode h1 { font-size: 3rem !important; }
+  /* TV nav: keep every link on ONE line — wrapped two-line buttons made the
+     row two-storey tall, which is what hid the 🔒/title row and crowded the
+     hero badge on Google TV. */
+  .tv-mode nav { gap: 0.5rem !important; padding-left: 12px; padding-right: 12px; }
+  .tv-mode .navlink { font-size: 15px; padding: 6px 10px; }
+  .tv-mode nav .shrink-0.h-10 { min-width: 0; }
   /* Lite APK (?calm=1): the full calm-down — no motion anywhere.
      TV keeps its layout/D-pad comfort AND full motion; only the endless
      skeleton shimmer stays off (paint-heavy on weak SoCs, loads are brief). */
@@ -226,7 +232,7 @@
   .card:hover .glass, .card:focus-visible .glass, .card.tv-focus .glass {
     box-shadow: 0 0 0 2px #14b8a6, 0 10px 30px rgba(0,0,0,.5); }
   .navlink { position: relative; padding: 8px 14px; border-radius: 12px; color: #9fb0cc;
-    border: 1px solid transparent; background: transparent; }
+    border: 1px solid transparent; background: transparent; white-space: nowrap; }
   .navlink:hover { color: #fff; }
   .nav-active { color: #fff !important; font-weight: 800;
     border-color: rgba(45,212,191,.6) !important; background: rgba(45,212,191,.08); }
@@ -279,7 +285,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 83; // bump every release alongside version.txt
+  const BUILD_NUM = 84; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -313,6 +319,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   </div>
   <div class="ml-auto flex gap-2 w-full md:w-auto justify-end">
     <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-4 md:min-w-[190px] md:justify-start rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm text-gray-300">🔍 Search</button>
+    <button id="adultLockNav" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" aria-label="Adults-only gate" class="shrink-0 h-10 px-4 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-bold">🔒</button>
   </div>
 </nav>
 
@@ -352,7 +359,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   <main id="rows" class="px-4 md:px-10 pb-20 space-y-8 mt-6"></main>
 
   <!-- SEARCH / BROWSE GRID -->
-  <main id="gridView" class="hidden px-4 md:px-10 pt-24 pb-20">
+  <main id="gridView" class="hidden px-4 md:px-10 pt-28 md:pt-32 pb-20">
     <div class="flex items-center gap-3 mb-4">
       <h2 id="gridTitle" class="row-title text-xl font-bold flex-1"></h2>
       <button id="adultLockBtn" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" class="shrink-0 px-4 h-11 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-sm font-bold">🔒 18+ Hidden</button>
@@ -1686,8 +1693,9 @@ function pinClose(){
 }
 function paintAdultLock(){
   const b = document.getElementById("adultLockBtn");
-  if (!b) return;
-  b.textContent = adultLocked() ? "🔒 18+ Hidden" : "🔓 18+ Shown";
+  if (b) b.textContent = adultLocked() ? "🔒 18+ Hidden" : "🔓 18+ Shown";
+  const nb = document.getElementById("adultLockNav");
+  if (nb) nb.textContent = adultLocked() ? "🔒" : "🔓";
 }
 function adultLockTap(){
   if (!adultLocked()) {
