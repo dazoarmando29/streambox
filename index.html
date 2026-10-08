@@ -272,7 +272,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 81; // bump every release alongside version.txt
+  const BUILD_NUM = 82; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -805,7 +805,7 @@ function dirOf(e){
    cannot click INSIDE a cross-origin player (browser rule) — for actually
    driving the player use the 🎯 handoff instead. Pointer-events:none, so it
    never blocks a real tap on phone/desktop. */
-window._cursor = { on: false, x: 0, y: 0, el: null };
+window._cursor = { on: false, x: 0, y: 0, el: null, dirs: new Set(), speed: 0, raf: 0, last: 0 };
 function cursorToggle(){
   const c = window._cursor;
   c.on = !c.on;
@@ -814,33 +814,58 @@ function cursorToggle(){
     if (!c.el) {
       c.el = document.createElement("div");
       c.el.setAttribute("aria-hidden", "true");
-      c.el.style.cssText = "position:fixed;z-index:999;width:22px;height:22px;border-radius:50%;pointer-events:none;"
+      // transform-only movement (GPU-composited): no layout/reflow per step
+      c.el.style.cssText = "position:fixed;z-index:999;left:0;top:0;width:22px;height:22px;border-radius:50%;pointer-events:none;"
         + "background:#14b8a6;border:3px solid #fff;box-shadow:0 0 0 3px rgba(20,184,166,.5),0 2px 10px rgba(0,0,0,.6);"
-        + "transform:translate(-50%,-50%);left:50%;top:50%;";
+        + "margin:-11px 0 0 -11px;will-change:transform;";
       document.body.appendChild(c.el);
       c.x = window.innerWidth / 2; c.y = window.innerHeight / 2;
     }
     c.el.style.display = "block";
-    c.el.style.left = c.x + "px"; c.el.style.top = c.y + "px";
+    cursorPaint();
+    c.speed = 0; c.last = performance.now();
+    if (!c.raf) c.raf = requestAnimationFrame(cursorLoop);
     if (btn) btn.classList.add("!bg-teal-500");
     const ws = document.getElementById("watchStatus");
-    if (ws) ws.textContent = "🖱 Cursor ON — arrows move it, OK clicks. 🖱 again (or Back) to exit.";
+    if (ws) ws.textContent = "🖱 Cursor ON — hold arrows to glide, OK clicks. 🖱 again (or Esc) to exit.";
   } else {
     if (c.el) c.el.style.display = "none";
+    c.dirs.clear(); c.speed = 0;
+    if (c.raf) { cancelAnimationFrame(c.raf); c.raf = 0; }
     if (btn) btn.classList.remove("!bg-teal-500");
     const ws = document.getElementById("watchStatus");
     if (ws && /Cursor ON/.test(ws.textContent || "")) ws.textContent = "";
   }
 }
-function cursorStep(dir){
+function cursorPaint(){
   const c = window._cursor;
-  const step = 28;
-  if (dir === "left") c.x -= step; else if (dir === "right") c.x += step;
-  else if (dir === "up") c.y -= step; else if (dir === "down") c.y += step;
-  c.x = Math.max(6, Math.min(window.innerWidth - 6, c.x));
-  c.y = Math.max(6, Math.min(window.innerHeight - 6, c.y));
-  if (c.el) { c.el.style.left = c.x + "px"; c.el.style.top = c.y + "px"; }
+  if (c.el) c.el.style.transform = `translate3d(${c.x}px,${c.y}px,0)`;
 }
+/* smooth glide: time-based velocity with acceleration while held, instant
+   ease-out on release — feels like a real pointer, not stair-stepped keys */
+function cursorLoop(now){
+  const c = window._cursor;
+  if (!c.on) { c.raf = 0; return; }
+  const dt = Math.min(0.05, (now - c.last) / 1000); c.last = now;
+  let dx = 0, dy = 0;
+  if (c.dirs.has("left")) dx -= 1; if (c.dirs.has("right")) dx += 1;
+  if (c.dirs.has("up")) dy -= 1; if (c.dirs.has("down")) dy += 1;
+  if (dx || dy) {
+    c.speed = Math.min(1500, c.speed + 6000 * dt); // 0 → 1500 px/s in ~0.25s
+    const len = Math.hypot(dx, dy); c.x += dx / len * c.speed * dt; c.y += dy / len * c.speed * dt;
+    c.x = Math.max(6, Math.min(window.innerWidth - 6, c.x));
+    c.y = Math.max(6, Math.min(window.innerHeight - 6, c.y));
+    cursorPaint();
+  } else if (c.speed > 0) {
+    c.speed = Math.max(0, c.speed - 9000 * dt); // quick glide-stop on release
+  }
+  c.raf = requestAnimationFrame(cursorLoop);
+}
+/* keyup book-keeping lives outside the keydown guard so releases always land */
+window.addEventListener("keyup", (e) => {
+  const c = window._cursor; if (!c || !c.on) return;
+  const d = dirOf(e); if (d) c.dirs.delete(d);
+});
 function cursorClick(){
   const c = window._cursor;
   const el = document.elementFromPoint(c.x, c.y);
@@ -1142,7 +1167,7 @@ function skeletonRow(title){
     const tag = (document.activeElement && document.activeElement.tagName) || "";
     // remote cursor owns the keys while on — arrows move it, OK clicks, Esc exits
     if (window._cursor && window._cursor.on) {
-      if (dir) { e.preventDefault(); cursorStep(dir); return; }
+      if (dir) { e.preventDefault(); window._cursor.dirs.add(dir); return; }
       if (okPressed(e)) { e.preventDefault(); cursorClick(); return; }
       if (e.key === "Escape" || e.keyCode === 27) { cursorToggle(); return; }
     }
