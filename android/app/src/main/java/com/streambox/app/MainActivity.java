@@ -78,10 +78,44 @@ public class MainActivity extends Activity {
                         || host.endsWith("vidsrc.to") || host.endsWith("vsembed.su")
                         || host.endsWith("autoembed.co") || host.endsWith("2embed.cc")
                         || host.endsWith("yapgrid.com") || host.endsWith("vaplayer.ru")
+                        || host.endsWith("vidcore.org")
                         || host.endsWith("youtube-nocookie.com") || host.endsWith("youtube.com")
                         || host.endsWith("youtu.be");
                 if (allowed) return false;
                 return true;
+            }
+
+            // Ad-network blocklist: applied to every frame, so ad scripts and
+            // popunder/tracker domains inside mirror players (VidCore etc.)
+            // die before they ever load. Video/source hosts are untouched.
+            private static final java.util.Set<String> AD_HOSTS = new java.util.HashSet<>(java.util.Arrays.asList(
+                    "doubleclick.net", "googlesyndication.com", "googleadservices.com", "google-analytics.com",
+                    "googletagmanager.com", "adservice.google.com", "adnxs.com", "adsrvr.org", "adroll.com",
+                    "popads.net", "popcash.net", "propellerads.com", "propellerads.net", "popundertotal.com",
+                    "tapadu.com", "exoclick.com", "juicyads.com", "hilltopads.com", "highcpm.com",
+                    "adsterra.com", "adsterra.net", "histats.com", "hotjar.com", "facebook.net",
+                    "amazon-adsystem.com", "scorecardresearch.com", "outbrain.com", "taboola.com",
+                    "trafficjunky.net", "trafficjunky.com", "a-ads.com", "ads-mrg.com", "onclickmax.com",
+                    "adblokkster.com", "bc.vc", "bc-ads.com", "tsyndicate.com", "syndicat-france.com"));
+
+            private static boolean isAdHost(String host) {
+                if (host == null || host.isEmpty()) return false;
+                for (String ad : AD_HOSTS) {
+                    if (host.equals(ad) || host.endsWith("." + ad)) return true;
+                }
+                return false;
+            }
+
+            @Override
+            public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                try {
+                    String host = request.getUrl().getHost();
+                    if (isAdHost(host == null ? "" : host.toLowerCase(java.util.Locale.US))) {
+                        return new android.webkit.WebResourceResponse("text/plain", "utf-8",
+                                new java.io.ByteArrayInputStream(new byte[0]));
+                    }
+                } catch (Exception ignored) {}
+                return super.shouldInterceptRequest(view, request);
             }
         });
 
