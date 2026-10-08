@@ -256,7 +256,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-const BUILD_NUM = 74; // bump every release alongside version.txt
+const BUILD_NUM = 75; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1428,11 +1428,14 @@ function adultLocked(){
 }
 let adultKwIds = null;
 async function getAdultKwIds(){
-  // TMDB keyword ids for the adult tags (looked up live once, then cached)
+  // TMDB keyword ids for the adult tags, verified against the live rail:
+  // every offender sampled carries at least one of these (flag `adult`
+  // is never set on them, and titles/overviews are sanitized — only the
+  // keyword tags tell the truth). Looked up live once, then cached.
   if (adultKwIds) return adultKwIds;
   adultKwIds = [];
   try {
-    for (const q of ["hentai", "ecchi"]) {
+    for (const q of ["hentai", "ecchi", "erotic", "softcore", "adult animation", "erotica", "animated porn"]) {
       const d = await tmdb(`/search/keyword?query=${encodeURIComponent(q)}&page=1`);
       ((d && d.results) || []).forEach(r => {
         const n = (r.name || "").toLowerCase();
