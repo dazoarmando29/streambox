@@ -285,7 +285,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 87; // bump every release alongside version.txt
+  const BUILD_NUM = 88; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -423,6 +423,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <button onclick="openSettings()" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⚙</button>
           <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">☰ Episodes</button>
           <button onclick="ctlSubsToggle()" id="ctlSubs" aria-label="Subtitles on or off" title="Subtitles on/off — opens Subs settings when nothing is loaded yet" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">CC</button>
+          <button onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows glide a pointer, OK clicks — TV fallback for stubborn players" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🖱</button>
         </div>
       </div>
       <!-- alternate-mirror strip (our bar only drives CineSrc) -->
@@ -431,6 +432,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <button onclick="focusMirror()" title="Send remote keys to this mirror's own player (some answer OK/arrows, some need a pointer)" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🎯 Control</button>
         <button onclick="setMirror('cinesrc')" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold">⇄ CineSrc</button>
         <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">⚙</button>
+        <button onclick="cursorToggle()" title="Remote cursor: arrows glide a pointer, OK clicks" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🖱</button>
       </div>
       <!-- One-time subtitles coach tip (arrow points at the CC button) -->
       <div id="subTip" class="no-cinema hidden relative mt-3 bg-[#1a2745] border border-teal-500/40 rounded-xl p-4 pr-12 text-sm">
@@ -1185,7 +1187,21 @@ function skeletonRow(title){
     const tag = (document.activeElement && document.activeElement.tagName) || "";
     // remote cursor owns the keys while on — arrows move it, OK clicks, Esc exits
     if (window._cursor && window._cursor.on) {
-      if (dir) { e.preventDefault(); window._cursor.dirs.add(dir); return; }
+      if (dir) {
+        e.preventDefault();
+        const c = window._cursor;
+        c.dirs.add(dir);
+        // belt-and-suspenders: an instant 24px nudge per press (so a dead or
+        // throttled rAF on weak TV WebViews still moves it) plus a loop restart
+        if (dir === "left") c.x -= 24; else if (dir === "right") c.x += 24;
+        else if (dir === "up") c.y -= 24; else if (dir === "down") c.y += 24;
+        c.x = Math.max(6, Math.min(window.innerWidth - 6, c.x));
+        c.y = Math.max(6, Math.min(window.innerHeight - 6, c.y));
+        cursorPaint();
+        c.last = performance.now();
+        if (!c.raf) c.raf = requestAnimationFrame(cursorLoop);
+        return;
+      }
       if (okPressed(e)) { e.preventDefault(); cursorClick(); return; }
       if (e.key === "Escape" || e.keyCode === 27) { cursorToggle(); return; }
     }
@@ -1266,7 +1282,7 @@ function skeletonRow(title){
       if (!top && bar && bar.classList.contains("bar-hidden")) {
         // bar asleep: quick-control mode (Netflix/YouTube-style):
         // L/R skim the timeline, U/D volume, and chained L/R keeps skipping
-        // for ~2.5s before the bar's button row takes over (_lrT window).
+        // for ~4s before the bar's button row takes over (_lrT window).
         e.preventDefault(); pokeHud();
         if (mirror !== "cinesrc" || !document.body.classList.contains("tv-mode")) {
           if (mirror === "cinesrc" && (dir === "left" || dir === "right")) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
@@ -1292,13 +1308,13 @@ function skeletonRow(title){
           const bn2 = dir === "down" ? (bi2 + 1) % btns.length : (bi2 - 1 + btns.length) % btns.length;
           safeFocus(btns[bn2]); return;
         }
-        // TV remote scheme, bar VISIBLE: 2.5s after a L/R skim you're in
-        // "bar mode" — arrows walk the buttons (⚙/⌨/CC/... reachable), U/D
-        // volume, OK = press focused / play-pause when none is. Keep mashing
-        // L/R inside the skim window to chain more skips instead of walking.
+        // TV remote scheme, bar VISIBLE: 4s after a L/R skim you're in
+        // "bar mode" — arrows walk the buttons (⚙/CC/Episodes/🖱 reachable),
+        // U/D volume, OK = press focused / play-pause when none is. Keep
+        // mashing L/R inside the skim window to chain more skips instead.
         e.preventDefault(); pokeHud();
         const cineSrc = mirror === "cinesrc" && !onMirrorBar;
-        const skimming = cineSrc && window._lrT && (Date.now() - window._lrT < 2500);
+        const skimming = cineSrc && window._lrT && (Date.now() - window._lrT < 4000);
         if (dir === "left" || dir === "right") {
           if (skimming) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); return; }
           if (!btns.length) return;
@@ -2422,9 +2438,22 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
 }
 function ctlSeekRel(d){
   if (mirror !== "cinesrc") return; // alternate mirrors use their own controls
-  if (!(pState.dur > 0)) { sendCmd("getDuration"); return; }
-  const t = Math.min(Math.max(0, (pState.cur || 0) + d), pState.dur || Infinity);
-  sendCmd("seek", [Math.floor(t)]);
+  // always fire: the player clamps out-of-range seeks itself. (The old
+  // dur-guard swallowed every skip until metadata arrived — remotes mashed
+  // L/R and saw nothing happen.)
+  if (!(pState.dur > 0)) sendCmd("getDuration");
+  const t = Math.max(0, (pState.cur || 0) + d);
+  sendCmd("seek", [Math.floor(pState.dur > 0 ? Math.min(t, pState.dur) : t)]);
+  skipFlash(d);
+}
+function skipFlash(d){
+  // visible proof the skim landed (watchStatus sits below, hidden in cinema)
+  const t = document.getElementById("volToast");
+  if (!t) return;
+  t.textContent = d < 0 ? "⏪ −10s" : "⏩ +30s";
+  t.classList.remove("hidden");
+  clearTimeout(window._volT);
+  window._volT = setTimeout(() => t.classList.add("hidden"), 900);
 }
 function ctlMuteToggle(){
   pState.muted = !pState.muted;
