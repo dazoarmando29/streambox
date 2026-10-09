@@ -297,7 +297,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 109; // bump every release alongside version.txt
+  const BUILD_NUM = 110; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1963,9 +1963,9 @@ async function loadModalEpisodes(){
   const ms = document.getElementById("mSeasonSub");
   if (ms) {
     const arcM = seasonArc(titleOf((currentDetail || {}).data || {}), d.overview || "", s);
-    window._seasonArc = arcM;
+    window._seasonArc = seasonDisplayName(d, arcM);
     const base = seasonSub(d, (modalSeasons[modalSeasonIdx]||{}).episode_count);
-    ms.textContent = arcM ? arcM + " · " + base : base;
+    ms.textContent = window._seasonArc ? window._seasonArc + " · " + base : base;
   }
 }
 function modalSeasonStep(dir){
@@ -2080,7 +2080,7 @@ async function loadEpisodes(s){
   const e = watchState.e;
   const d = await tmdb(`/tv/${id}/season/${sv}`);
   const grid = document.getElementById("epGrid"); grid.innerHTML = "";
-  window._seasonArc = seasonArc(titleOf(currentItem || {}), d.overview || "", sv);
+  window._seasonArc = seasonDisplayName(d, seasonArc(titleOf(currentItem || {}), d.overview || "", sv));
   updateSeasonLabel();
     (d.episodes||[]).forEach(ep=>{
     const b = document.createElement("button");
@@ -3823,7 +3823,17 @@ function seasonSub(seasonDetail, fallbackCount){
   if (ov) return ov.length > 150 ? ov.slice(0, 150) + "…" : ov;
   return tail;
 }
-function updateDrawerSeasonLabel(arc){
+/* Season display name: TMDB's own season title when it's real
+   ("The Final Season"), else the saga (pins → sniffing), else nothing.
+   Never a guessed name — generic "Season N"/"Specials" titles are skipped. */
+function seasonDisplayName(seasonDetail, arc){
+  try {
+    const n = (seasonDetail && seasonDetail.name || "").trim();
+    if (n && !/^season\s+\d+$/i.test(n) && !/^specials$/i.test(n)) return n;
+  } catch(e){}
+  return arc || "";
+}
+function updateDrawerSeasonLabel(arc, seasonName){
   const watching = drawerS === watchState.s;
   document.getElementById("drawerSeasonLabel").textContent = `Season ${drawerS}${arc ? " · " + arc : ""}${watching ? " ✓" : ""}`;
   paintSpoilerBtn();
@@ -3863,8 +3873,8 @@ async function renderEpDrawer(){
   }
   drawerEps = d.episodes || [];
   const arcD = seasonArc(titleOf(currentItem || {}), d.overview || "", drawerS);
-  window._seasonArc = arcD;
-  updateDrawerSeasonLabel(arcD);
+  window._seasonArc = seasonDisplayName(d, arcD);
+  updateDrawerSeasonLabel(window._seasonArc);
   const sub = document.getElementById("drawerSeasonSub");
   if (sub) sub.textContent = drawerS === watchState.s ? `You're watching here · ${seasonSub(d)}` : seasonSub(d);
   list.innerHTML = "";
