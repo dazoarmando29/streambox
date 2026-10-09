@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 98; // bump every release alongside version.txt
+  const BUILD_NUM = 99; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -3977,6 +3977,18 @@ async function anipmIds(tmdbId, title){
   } catch(e){}
   return {};
 }
+/* Per-title A/V house rules (fan requests, pinned forever):
+   Dragon Ball = English dub with the Bruce Faulconer score, always. */
+const ANIME_AV_RULES = [
+  { match: /dragon\s*ball/i, lang: "dub" },
+];
+function animeLangDefault(title){
+  try {
+    const hit = ANIME_AV_RULES.find(r => r.match.test(title || ""));
+    if (hit) return hit.lang;
+  } catch(e){}
+  return "sub";
+}
 async function loadAnipmPlayer(){
   const id = watchState.id;
   const f = document.getElementById("player");
@@ -3994,6 +4006,9 @@ async function loadAnipmPlayer(){
     return;
   }
   const ep = Math.max(1, watchState.e || 1);
+  // house-rule dub (Dragon Ball → Faulconer English) or sub default
+  const lang0 = animeLangDefault(titleOf(currentItem || {}));
+  window._anipmTracks.lang = lang0;
   // first-class embed options (per their SDK): our accent, auto-next/episode
   // skip follow Settings, and resume rides ?start= (no seek race on load)
   const aq = new URLSearchParams({ color: "14b8a6" });
@@ -4003,11 +4018,11 @@ async function loadAnipmPlayer(){
   } catch(e){}
   if ((watchState.t || 0) > 0) { aq.set("start", String(Math.floor(watchState.t))); watchState.t = 0; }
   const as = aq.toString();
-  const base = ids.mal ? `https://ani.pm/embed/mal/${ids.mal}/${ep}/sub`
-    : `https://ani.pm/embed/ani/${ids.ani}/${ep}/sub`;
+  const base = ids.mal ? `https://ani.pm/embed/mal/${ids.mal}/${ep}/${lang0}`
+    : `https://ani.pm/embed/ani/${ids.ani}/${ep}/${lang0}`;
   f.src = as ? `${base}?${as}` : base;
   _anipmLive = false; _anipmHelloT = 0; _anipmQueue.length = 0;
-  window._anipmTracks.lang = "sub";
+  if (!window._anipmTracks.lang) window._anipmTracks.lang = "sub";
   setTimeout(anipmHello, 800);
   if (ws) ws.textContent = `Now playing E${ep} — first ▶ tap goes inside, then our bar drives`;
   if ((watchState.t || 0) > 0) { window._anipmResume = Math.floor(watchState.t); watchState.t = 0; }
