@@ -341,7 +341,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 111; // bump every release alongside version.txt
+  const BUILD_NUM = 112; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -475,6 +475,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <button id="ctlPlay" onclick="ctlToggle()" aria-label="Play or pause" title="Play/Pause (OK)" class="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-400 text-xl font-bold grid place-items-center">▶</button>
           <button onclick="ctlSeekRel(-10)" aria-label="Back 10 seconds" title="Back 10s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">−10s</button>
           <button onclick="ctlSeekRel(30)" aria-label="Forward 30 seconds" title="Forward 30s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">+30s</button>
+          <button id="ctlSkipIntro" onclick="skipIntroNow()" aria-label="Skip intro" title="Skip intro" class="hidden h-11 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-sm font-bold">⏭ Skip</button>
           <span id="ctlCur" class="text-xs text-gray-300 tabular-nums ml-1">0:00</span>
           <input id="ctlSeek" type="range" min="0" max="1000" value="0" step="1" tabindex="-1" aria-label="Seek (pointer drag; remote uses −10s/+30s)" title="Drag to seek (remote: use −10s/+30s buttons)"
             class="flex-1 min-w-[120px] h-11 accent-teal-500 cursor-pointer">
@@ -2630,6 +2631,7 @@ function ctlPaint(){
     document.getElementById("ctlSeek").value = Math.round(pState.cur / pState.dur * 1000);
     try { document.getElementById("ctlSeek").style.setProperty("--fill", (pState.cur / pState.dur * 100) + "%"); } catch(e){}
   }
+  try { paintSkipPill(); } catch(e){}
 }
 function ctlReset(){
   pState.paused = true; pState.muted = false; pState.rate = 1;
@@ -3979,6 +3981,30 @@ async function fetchIntroRanges(){
     _introRanges = (d.intro || []).map(x => ({ start: (x.start_ms || 0) / 1000, end: (x.end_ms || 0) / 1000 }))
       .filter(x => x.end > x.start && x.end - x.start > 3);
   } catch(e){}
+}
+/* manual skip: the bar's own ⏭ Skip pill — same ranges as auto-skip but
+   fires on demand (no setting needed). The pill only appears while the
+   playhead sits inside a known intro, on mirrors we can drive. */
+function introHit(){
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return null;
+  const cur = pState.cur || 0;
+  return _introRanges.find(r => cur >= r.start && cur < r.end - 1) || null;
+}
+function skipIntroNow(){
+  const hit = introHit();
+  if (!hit) return;
+  _skipT = Date.now();
+  if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
+  else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
+  else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
+  const ws = document.getElementById("watchStatus");
+  if (ws) ws.textContent = "Intro skipped ✓";
+  paintSkipPill();
+}
+function paintSkipPill(){
+  const sk = document.getElementById("ctlSkipIntro");
+  if (!sk) return;
+  sk.classList.toggle("hidden", !introHit());
 }
 function autoSkipIntro(){
   if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return;
