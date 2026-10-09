@@ -162,6 +162,12 @@
   .tv-mode { font-size: 18px; }
   .tv-mode .card { min-width: 200px !important; max-width: 200px !important; }
   .tv-mode h1 { font-size: 3rem !important; }
+  /* TV hero: the inflated tv-mode type makes the billboard text taller than
+     the 75vh hero, so it overflows upward under the fixed nav (badge kissing
+     the logo). Taller hero + capped title + top clearance fixes the overlap. */
+  .tv-mode #hero { min-height: 88vh; }
+  .tv-mode #hero h1 { font-size: 2.4rem !important; }
+  .tv-mode #hero > div.relative { padding-top: 110px; }
   /* TV nav: keep every link on ONE line — wrapped two-line buttons made the
      row two-storey tall, which is what hid the 🔒/title row and crowded the
      hero badge on Google TV. */
@@ -291,7 +297,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 104; // bump every release alongside version.txt
+  const BUILD_NUM = 105; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
