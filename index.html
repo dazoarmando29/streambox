@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 91; // bump every release alongside version.txt
+  const BUILD_NUM = 92; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -408,7 +408,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <!-- trailer mode chip (control bar hides; trailers need no controls) -->
         <div id="trailerBar" class="hidden absolute top-3 left-3 z-[7] flex items-center gap-2 bg-black/70 rounded-full pl-4 pr-1.5 py-1.5 text-xs">
           <span>🎬 Trailer</span>
-          <button onclick="setMirror('cinesrc')" class="bg-teal-500 hover:bg-teal-400 font-bold px-3 py-1.5 rounded-full">▶ Watch feature</button>
+          <button onclick="mirrorHome()" class="bg-teal-500 hover:bg-teal-400 font-bold px-3 py-1.5 rounded-full">▶ Watch feature</button>
         </div>
         <!-- volume readout for TV remotes (bar buttons stay focused underneath) -->
         <div id="volToast" class="hidden absolute bottom-24 right-4 z-[7] bg-black/70 rounded-full px-4 py-2 text-sm font-bold pointer-events-none"></div>
@@ -436,7 +436,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <div id="mirrorBar" class="hidden mt-3 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 flex flex-wrap items-center gap-2 text-sm">
         <span>Mirror: <b id="mirrorName">–</b> — use its own player controls</span>
         <button onclick="focusMirror()" title="Send remote keys to this mirror's own player (some answer OK/arrows, some need a pointer)" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🎯 Control</button>
-        <button onclick="setMirror('cinesrc')" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold">⇄ CineSrc</button>
+        <button id="mirrorHomeBtn" onclick="mirrorHome()" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold">⇄ CineSrc</button>
         <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">⚙</button>
         <button onclick="cursorToggle()" title="Remote cursor: arrows glide a pointer, OK clicks" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🖱</button>
       </div>
@@ -3004,8 +3004,9 @@ async function fetchTrailer(type, id){
     }
   } catch(e){}
 }
-function setMirror(m){
-  if (m === "trailer" && !trailerKey) {
+/* "Back to primary" — anime returns to AniPM, everything else to CineSrc */
+function mirrorHome(){ setMirror(watchState.anime ? "anipm" : "cinesrc"); }
+function setMirror(m){  if (m === "trailer" && !trailerKey) {
     document.getElementById("watchStatus").textContent = "No trailer found for this title.";
     return;
   }
@@ -3028,6 +3029,8 @@ function updateMirrorUI(){
   if (!isCS && !isTrailer) {
     const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
     document.getElementById("mirrorName").textContent = label;
+    const home = document.getElementById("mirrorHomeBtn");
+    if (home) home.textContent = watchState.anime ? "⇄ AniPM" : "⇄ CineSrc";
     if (mirror === "yapgrid" && typeof subFile !== "undefined" && subFile && subFile.corsUrl) {
       document.getElementById("watchStatus").textContent = `YapGrid: showing your ${subFile.lang || "loaded"} subs ✓ — change language in ⚙ → Subs · no Ad Shield here, use Brave/uBlock`;
       return;
