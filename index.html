@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 100; // bump every release alongside version.txt
+  const BUILD_NUM = 101; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -426,7 +426,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <button id="ctlRate" onclick="ctlRateCycle()" aria-label="Playback speed" title="Speed" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">1×</button>
           <button id="ctlQ" onclick="qualityStep(1)" aria-label="Video quality" title="Quality: tap to cycle Auto → 4K → 1080p → 720p → 480p" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Auto</button>
           <button onclick="ctlFullscreen()" aria-label="Fullscreen" title="Fullscreen" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⛶</button>
-          <button onclick="openSettings()" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⚙</button>
+          <button onclick="openSettings()" id="ctlSettings" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⚙</button>
           <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">☰ Episodes</button>
           <button onclick="ctlSubsToggle()" id="ctlSubs" aria-label="Subtitles on or off" title="Subtitles on/off — opens Subs settings when nothing is loaded yet" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">CC</button>
           <button id="avBtn" onclick="openAV()" aria-label="Audio and subtitles" title="Audio (sub/dub), subtitles and quality — no settings detour" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">A/V</button>
@@ -3079,6 +3079,11 @@ function updateMirrorUI(){
   // A/V sheet button only exists where it works (AniPM carries tracks)
   const av = document.getElementById("avBtn");
   if (av) av.classList.toggle("hidden", mirror !== "anipm");
+  // anime declutter: quality + settings live in the A/V sheet now
+  const q = document.getElementById("ctlQ");
+  if (q) q.classList.toggle("hidden", mirror === "anipm");
+  const st = document.getElementById("ctlSettings");
+  if (st) st.classList.toggle("hidden", mirror === "anipm");
   if (!isCS && !isTrailer) {
     const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
     document.getElementById("mirrorName").textContent = label;
