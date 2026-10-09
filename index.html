@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 94; // bump every release alongside version.txt
+  const BUILD_NUM = 95; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2221,19 +2221,21 @@ function loadPlayer(){
     if (window._anipmRawFor !== watchState.id) { window._anipmRaw = false; window._anipmRawFor = watchState.id; }
     window._watchdog = setTimeout(() => {
       if (window._cinePlaying || mirror !== "anipm") return;
-      // stage 1 (8s): no sign of life — some players refuse ANY sandbox
-      // (YapGrid precedent). Drop Ad Shield once and reload; if the frame
-      // was sandbox-wedged this revives it, otherwise nothing is lost.
-      window._anipmRaw = true;
+      // stage 1 (8s): no sign of life — drop a sandbox if one is still on
+      // (normally AniPM ships unsandboxed via NO_SANDBOX; this is the net).
       try {
         const f2 = document.getElementById("player");
-        f2.removeAttribute("sandbox");
-        const sh = document.getElementById("optShield");
-        if (sh) { sh.checked = false; sh.disabled = true; sh.title = "Ad Shield unavailable on this mirror"; }
-        f2.src = f2.src.split("&_=")[0] + "&_=" + Date.now();
+        if (f2 && f2.hasAttribute("sandbox")) {
+          window._anipmRaw = true;
+          f2.removeAttribute("sandbox");
+          const sh = document.getElementById("optShield");
+          if (sh) { sh.checked = false; sh.disabled = true; sh.title = "Ad Shield unavailable on this mirror"; }
+          f2.src = f2.src.split("&_=")[0] + "&_=" + Date.now();
+          const ws1 = document.getElementById("watchStatus");
+          if (ws1) ws1.textContent = "Retrying without Ad Shield…";
+          return;
+        }
       } catch(e){}
-      const ws1 = document.getElementById("watchStatus");
-      if (ws1) ws1.textContent = "Retrying without Ad Shield…";
     }, 8000);
     window._watchdog2 = setTimeout(() => {
       if (window._cinePlaying || mirror !== "anipm") return;
@@ -2853,7 +2855,7 @@ const MIRRORS = [
   { id: "anipm", name: "AniPM" }
 ];
 /* mirrors that break inside ANY sandboxed iframe: load without sandbox */
-const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid"]);
+const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm"]);
 /* TV-safe lineup helpers (TV_REMOTE_OK / IS_TV_DEVICE live in CONFIG above):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
@@ -3076,8 +3078,8 @@ function updateMirrorUI(){
     document.getElementById("watchStatus").textContent = "🎬 Playing official trailer";
   }
 }
-/* Per-mirror sandbox: VidFast/VidLink refuse ANY sandboxed iframe, so drop
-   the sandbox attr entirely for those two. Everything else keeps Ad Shield. */
+/* Per-mirror sandbox: these refuse ANY sandboxed iframe, so drop
+   the sandbox attr entirely for them. Everything else keeps Ad Shield. */
 function applyMirrorSandbox(){
   const f = document.getElementById("player");
   if (!f) return;
