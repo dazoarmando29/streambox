@@ -297,7 +297,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 107; // bump every release alongside version.txt
+  const BUILD_NUM = 108; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2552,7 +2552,10 @@ function pokeHud(){
     // never hide while a popup needs the bar visible underneath
     if (topPopup()) return;
     document.getElementById("ctlBar").classList.add("bar-hidden");
+    try { document.getElementById("titleCard").classList.add("hidden"); } catch(e){}
   }, 4000);
+  // the title card rides with the bar: visible together, gone together
+  try { showTitleCard(true); } catch(e){}
 }
 
 /* ---------- CineSrc remote controls (per https://cinesrc.st/docs player methods) ---------- */
@@ -4337,13 +4340,19 @@ function paintAV(){
 }
 /* episode title card: Netflix-style toast (show · S/E + name · arc pill),
    5s on every fresh episode, all mirrors — pure overlay, never touches play */
-function showTitleCard(){
+function showTitleCard(paired){
   try {
     if (watchState.type !== "tv") return;
     if (document.getElementById("watchView").classList.contains("hidden")) return;
     const key = `${watchState.id}/${watchState.s}/${watchState.e}`;
-    if (window._tcKey === key) return; // reloads/seeks don't re-toast
-    window._tcKey = key;
+    // episode starts respect the once-per-episode key; bar-pairing re-shows
+    // freely (it hides again with the bar)
+    if (!paired) {
+      if (window._tcKey === key) return;
+      window._tcKey = key;
+    } else {
+      window._tcKey = key;
+    }
     const card = document.getElementById("titleCard");
     document.getElementById("tcShow").textContent = (titleOf(currentItem || {}) || "").toUpperCase();
     document.getElementById("tcMain").textContent = `S${watchState.s} E${watchState.e}`;
