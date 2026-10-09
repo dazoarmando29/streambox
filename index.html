@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 96; // bump every release alongside version.txt
+  const BUILD_NUM = 97; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -4101,9 +4101,9 @@ function avPill(label, active, onclick){
 }
 function openAV(){
   if (mirror !== "anipm") return;
-  paintAV();
   document.getElementById("avSheet").classList.remove("hidden");
   document.body.classList.add("modal-open");
+  paintAV(); // after unhide — it guards on visibility
   // TV landing: focus the active audio pill so arrows start somewhere sane
   const first = document.querySelector("#avSheet button");
   if (first && document.body.classList.contains("tv-mode")) { try { first.focus({ preventScroll: true }); } catch(e){} }
