@@ -144,6 +144,12 @@
     padding: 10px 14px !important; gap: 8px;
   }
   .tv-mode #playerBox #ctlBar { left: 18px; right: 18px; bottom: 18px; padding: 12px 18px !important; }
+  /* one row, always: many pills (⏭/Episodes/CC/A/V/🖱) overflowed into an
+     ugly wrapped second row — scroll instead, focus pulls items into view */
+  #playerBox #ctlBar { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; }
+  #playerBox #ctlBar::-webkit-scrollbar { display: none; }
+  #playerBox #ctlBar > * { flex-shrink: 0; }
+  #playerBox #ctlSeek { flex: 1 1 100px !important; min-width: 80px !important; }
   #ctlBar button {
     background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.1);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
@@ -347,7 +353,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 113; // bump every release alongside version.txt
+  const BUILD_NUM = 114; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1400,7 +1406,9 @@ function skeletonRow(title){
           if (!btns.length) return;
           const bi2 = btns.indexOf(document.activeElement);
           const bn2 = dir === "down" ? (bi2 + 1) % btns.length : (bi2 - 1 + btns.length) % btns.length;
-          safeFocus(btns[bn2]); return;
+          safeFocus(btns[bn2]);
+          try { btns[bn2].scrollIntoView({ inline: "nearest", block: "nearest" }); } catch(e){}
+          return;
         }
         // TV remote scheme, bar VISIBLE: 4s after a L/R skim you're in
         // "bar mode" — arrows walk the buttons (⚙/CC/Episodes/🖱 reachable),
@@ -1420,7 +1428,9 @@ function skeletonRow(title){
           if (!btns.length) return;
           const bi = btns.indexOf(document.activeElement);
           const bn = dir === "right" ? (bi + 1) % btns.length : (bi - 1 + btns.length) % btns.length;
-          safeFocus(btns[bn]); return;
+          safeFocus(btns[bn]);
+          try { btns[bn].scrollIntoView({ inline: "nearest", block: "nearest" }); } catch(e){}
+          return;
         }
         if (!cineSrc) {
           // VidRift U/D steps INTO the strip (Up=first button, Down=last) so
