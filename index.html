@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 89; // bump every release alongside version.txt
+  const BUILD_NUM = 90; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -303,7 +303,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 /* TV-safe lineup (early: boot code below reads these at parse time):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
-const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid"]);
+const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift"]);
 const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVIA|Fire TV|AFT/i.test(navigator.userAgent || "");
 </script>
 
@@ -1939,10 +1939,15 @@ function closeTvGuide(){
 
 /* ---------- WATCH ---------- */
 async function openWatch(type, id, s=1, e=1, t=0){
-  watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)) };
+  const anime = detectAnime(type, id);
+  watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
   try {
     const pm = localStorage.getItem("streambox_mirror") || "cinesrc";
-    mirror = (pm === "trailer" || !MIRRORS.some(x => x.id === pm) || !mirrorAllowed(pm)) ? "cinesrc" : pm;
+    // anime defaults to VidRift (CineSrc's sources don't cover it) — unless
+    // the user explicitly picked a different mirror, which always wins.
+    const def = (anime && (pm === "cinesrc")) ? "vidrift" : pm;
+    mirror = (def === "trailer" || !MIRRORS.some(x => x.id === def) || !mirrorAllowed(def)) ? "cinesrc" : def;
+    if (mirror === "cinesrc" && anime && mirrorAllowed("vidrift")) mirror = "vidrift";
   } catch(e){ mirror = "cinesrc"; }
   trailerKey = null; // trailer is a per-viewing fallback, never default
   updateMirrorUI();
@@ -1967,6 +1972,17 @@ async function openWatch(type, id, s=1, e=1, t=0){
     return;
   }
   currentItem = d;
+  // late anime catch (deep links / cold continue entries): metadata now proves
+  // it's JP animation but we started on CineSrc-by-default — reroute once.
+  if (type === "tv" && !watchState.anime && isAnimeData(d)) {
+    watchState.anime = true;
+    try {
+      if ((localStorage.getItem("streambox_mirror") || "cinesrc") === "cinesrc" && mirrorAllowed("vidrift")) {
+        mirror = "vidrift";
+        updateMirrorUI(); paintMirrors();
+      }
+    } catch(e){}
+  }
   document.getElementById("wPoster").src = IMG(d.poster_path, "w342");
   document.getElementById("wPoster").loading = "eager";
   document.getElementById("wTitle").textContent = titleOf(d);
@@ -2188,12 +2204,21 @@ function loadPlayer(){
     }, 18000);
     window._watchdog2 = setTimeout(() => {
       if (window._cinePlaying || mirror !== "cinesrc") return;
-      const fb = document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi";
+      // anime never belongs on the generic fallback — it lives on VidRift
+      const fb = watchState.anime ? "vidrift" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi");
       const nm = (MIRRORS.find(x => x.id === fb) || {}).name || fb;
       setMirror(fb);
       const ws2 = document.getElementById("watchStatus");
       if (ws2) ws2.textContent = `CineSrc stayed stuck — moved you to ${nm}. ⇄ Source anytime to go back.`;
     }, 35000);
+  }
+  if (mirror === "vidrift") {
+    // intro ranges for autoskip + resume where we left off (safe pre-ready)
+    fetchIntroRanges();
+    if ((watchState.t || 0) > 0) {
+      const _rt = Math.floor(watchState.t); watchState.t = 0;
+      setTimeout(() => vidriftSend({ type: "vidrift:resume", currentTime: _rt }), 1500);
+    }
   }
   // fallback: hide spinner after 8s even if player never fires ready (ad-blocked network etc.)
   clearTimeout(window._spinT);
@@ -2310,6 +2335,7 @@ function saveContinue(){
     const prev = arr.find(x=>x.type===watchState.type&&x.id===watchState.id&&(x.s||1)===watchState.s&&(x.e||1)===watchState.e);
     const item = { type: watchState.type, id: watchState.id, s: watchState.s, e: watchState.e,
       title: titleOf(currentItem||{}), poster: (currentItem||{}).poster_path,
+      anime: !!watchState.anime,
       pos: prev ? (prev.pos || 0) : 0, dur: prev ? (prev.dur || 0) : 0, at: Date.now() };
     arr = [item, ...arr.filter(x=>!(x.type===item.type&&x.id===item.id))].slice(0,20);
     localStorage.setItem(k, JSON.stringify(arr));
@@ -2319,7 +2345,7 @@ function saveContinue(){
 let lastProgSave = 0;
 function saveProgress(cur, dur){
   // throttled resume-point saver (trailer mirror never writes playback position)
-  if (typeof mirror !== "undefined" && mirror !== "cinesrc") return;
+  if (typeof mirror !== "undefined" && mirror !== "cinesrc" && mirror !== "vidrift") return;
   if (!(dur > 60) || !(cur > 5)) return;
   const now = Date.now();
   if (now - lastProgSave < 15000) return;
@@ -2739,13 +2765,39 @@ const MIRRORS = [
   { id: "twoembed", name: "2Embed" },
   { id: "yapgrid", name: "YapGrid" },
   { id: "vidapi", name: "VidAPI" },
-  { id: "vidcore", name: "VidCore" }
+  { id: "vidcore", name: "VidCore" },
+  { id: "vidrift", name: "VidRift" }
 ];
 /* mirrors that break inside ANY sandboxed iframe: load without sandbox */
 const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid"]);
 /* TV-safe lineup helpers (TV_REMOTE_OK / IS_TV_DEVICE live in CONFIG above):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
+/* Anime routing: CineSrc's sources don't cover anime, so anime titles
+   default to VidRift (TMDB-native, sub/dub, own subs). Detection: the anime
+   browse rail, JP-animation metadata, or the remembered continue entry. */
+function isAnimeData(d){
+  try {
+    if (!d || d.id == null) return false;
+    const anim = (d.genres || []).some(g => g.id === 16 || /animation/i.test(g.name || ""));
+    if (!anim) return false;
+    if (d.original_language === "ja") return true;
+    if ((d.origin_country || []).some(c => /jp/i.test(c))) return true;
+  } catch(e){}
+  return false;
+}
+function detectAnime(type, id){
+  if (type !== "tv") return false;
+  try { if (typeof browse !== "undefined" && browse && browse.type === "anime") return true; } catch(e){}
+  try {
+    if (typeof currentDetail !== "undefined" && currentDetail && currentDetail.id === id && isAnimeData(currentDetail.data)) return true;
+  } catch(e){}
+  try {
+    const arr = JSON.parse(localStorage.getItem("streambox_continue") || "[]");
+    if (arr.some(x => x.type === "tv" && x.id === id && x.anime)) return true;
+  } catch(e){}
+  return false;
+}
 function tvSafeOnly(){
   try { const v = localStorage.getItem("streambox_tv_safe"); if (v !== null) return v === "1"; } catch(e){}
   return IS_TV_DEVICE;
@@ -2854,6 +2906,15 @@ function mirrorUrl(id){
         ? `https://vidcore.org/embed/tv/${tmdb}/${s}/${e}?${cq}`
         : `https://vidcore.org/embed/movie/${tmdb}?${cq}`;
     }
+    case "vidrift": {
+      // anime-first mirror (TMDB-native, sub/dub + own 30-language subs,
+      // auto-next + episode picker built in). Events drive our progress and
+      // episode sync; resume-seek is inbound-capable (autoskip uses it).
+      // Bare URL only — their docs define the player surface, no invented params.
+      return tv
+        ? `https://embed.vidrift.net/embed/tv/${tmdb}/${s}/${e}`
+        : `https://embed.vidrift.net/embed/movie/${tmdb}`;
+    }
     case "autoembed":
       return tv
         ? `https://autoembed.co/tv/tmdb/${tmdb}-${s}-${e}`
@@ -2905,6 +2966,12 @@ function updateMirrorUI(){
     document.getElementById("mirrorName").textContent = label;
     if (mirror === "yapgrid" && typeof subFile !== "undefined" && subFile && subFile.corsUrl) {
       document.getElementById("watchStatus").textContent = `YapGrid: showing your ${subFile.lang || "loaded"} subs ✓ — change language in ⚙ → Subs · no Ad Shield here, use Brave/uBlock`;
+      return;
+    }
+    if (mirror === "vidrift") {
+      document.getElementById("watchStatus").textContent = watchState.anime
+        ? "VidRift: anime home — sub/dub, 30-language subs and auto-next live in its player · 🎯/🖱 drive it on TV"
+        : "VidRift: sub/dub, auto-next and its own subs live in its player · 🎯/🖱 drive it on TV";
       return;
     }
     document.getElementById("watchStatus").textContent = NO_SANDBOX.has(mirror)
@@ -3606,7 +3673,7 @@ async function fetchIntroRanges(){
   } catch(e){}
 }
 function autoSkipIntro(){
-  if (mirror !== "cinesrc") return;
+  if (mirror !== "cinesrc" && mirror !== "vidrift") return;
   try { if (!document.getElementById("optAutoskip").checked) return; } catch(e){ return; }
   const cur = pState.cur || 0;
   const hit = _introRanges.find(r => cur >= r.start && cur < r.end - 1);
@@ -3614,10 +3681,51 @@ function autoSkipIntro(){
   const now = Date.now();
   if (now - _skipT < 5000) return; // don't seek-spam while the last skip lands
   _skipT = now;
-  sendCmd("seek", [Math.floor(hit.end)]);
+  if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
+  else vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Intro skipped ✓";
 }
+/* VidRift two-way messages (per their docs): progress/pause/ended/episode
+   out, resume-seek in. Feeds the same pState our bar reads, so continue
+   watching, auto-next sync and autoskip all work on anime too. */
+function vidriftSend(msg){
+  try {
+    document.getElementById("player").contentWindow.postMessage(msg, "https://embed.vidrift.net");
+  } catch(e){}
+}
+window.addEventListener("message", (event)=>{
+  if (event.origin !== "https://embed.vidrift.net") return;
+  if (mirror !== "vidrift") return; // stale frame from a switched-away mirror
+  const d = event.data || {};
+  if (d.type === "vidrift:progress") {
+    if (typeof d.currentTime === "number") pState.cur = d.currentTime;
+    if (typeof d.duration === "number" && d.duration > 0) pState.dur = d.duration;
+    if (typeof d.currentTime === "number" && d.currentTime > 0.5) window._cinePlaying = true;
+    hideSpin(); ctlPaint();
+    if (d.duration > 0) saveProgress(d.currentTime, d.duration);
+    autoSkipIntro();
+  }
+  if (d.type === "vidrift:paused") { pState.paused = true; ctlPaint(); }
+  if (d.type === "vidrift:unpaused") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
+  if (d.type === "vidrift:episode") {
+    // player advanced internally (Up Next / picker) — sync, don't reload
+    if (d.season) watchState.s = d.season;
+    if (d.episode) watchState.e = d.episode;
+    _introKey = ""; // new episode, new intro range
+    if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
+    loadEpisodes(); saveContinue();
+    const ws = document.getElementById("watchStatus");
+    if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e}`;
+  }
+  if (d.type === "vidrift:ended") {
+    try { markWatched(); } catch(e){}
+    if (watchState.type === "movie") {
+      try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+      if (document.body.classList.contains("video-fs")) exitVideoFs();
+    }
+  }
+});
 function hideSpin(){ const s = document.getElementById("playerSpin"); if (s) s.style.display = "none"; }
 document.getElementById("player").addEventListener("load", ()=>{ setTimeout(hideSpin, 800); });
 window.addEventListener("message", (event)=>{
