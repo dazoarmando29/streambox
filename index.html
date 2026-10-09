@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 90; // bump every release alongside version.txt
+  const BUILD_NUM = 91; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -303,7 +303,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 /* TV-safe lineup (early: boot code below reads these at parse time):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
-const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift"]);
+const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift", "anipm"]);
 const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVIA|Fire TV|AFT/i.test(navigator.userAgent || "");
 </script>
 
@@ -1290,8 +1290,10 @@ function skeletonRow(title){
         // L/R skim the timeline, U/D volume, and chained L/R keeps skipping
         // for ~4s before the bar's button row takes over (_lrT window).
         e.preventDefault(); pokeHud();
-        if (mirror !== "cinesrc" || !document.body.classList.contains("tv-mode")) {
+        if ((mirror !== "cinesrc" && mirror !== "anipm") || !document.body.classList.contains("tv-mode")) {
           if (mirror === "cinesrc" && (dir === "left" || dir === "right")) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
+          else if (mirror === "vidrift" && (dir === "left" || dir === "right")) { vidriftSeekRel(dir === "left" ? -10 : 30); }
+          else if (mirror === "vidrift") { vidriftVolHint(); }
           return;
         }
         if (dir === "left" || dir === "right") { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
@@ -1319,16 +1321,32 @@ function skeletonRow(title){
         // U/D volume, OK = press focused / play-pause when none is. Keep
         // mashing L/R inside the skim window to chain more skips instead.
         e.preventDefault(); pokeHud();
-        const cineSrc = mirror === "cinesrc" && !onMirrorBar;
+        const cineSrc = (mirror === "cinesrc" || mirror === "anipm") && !onMirrorBar;
         const skimming = cineSrc && window._lrT && (Date.now() - window._lrT < 4000);
         if (dir === "left" || dir === "right") {
           if (skimming) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); return; }
+          if (mirror === "vidrift") {
+            // strip focus decides: ON the strip → walk it (servers/cursor
+            // stay reachable); OFF it → skim the timeline from our side.
+            const onStrip = document.activeElement && document.activeElement.closest && document.activeElement.closest("#mirrorBar");
+            if (!onStrip) { vidriftSeekRel(dir === "left" ? -10 : 30); return; }
+          }
           if (!btns.length) return;
           const bi = btns.indexOf(document.activeElement);
           const bn = dir === "right" ? (bi + 1) % btns.length : (bi - 1 + btns.length) % btns.length;
           safeFocus(btns[bn]); return;
         }
-        if (!cineSrc) return; // mirrors: their own controls
+        if (!cineSrc) {
+          // VidRift U/D steps INTO the strip (Up=first button, Down=last) so
+          // servers/cursor never strand; volume is the TV's own keys. Other
+          // mirrors: their own controls.
+          if (mirror === "vidrift") {
+            const strip = [...document.querySelectorAll("#mirrorBar button")].filter(b => b.offsetParent !== null && !b.disabled);
+            if (strip.length) { safeFocus(dir === "up" ? strip[0] : strip[strip.length - 1]); return; }
+            vidriftVolHint();
+          }
+          return;
+        }
         volStep(dir === "up" ? 0.1 : -0.1);
         volFlash();
         return;
@@ -1943,11 +1961,11 @@ async function openWatch(type, id, s=1, e=1, t=0){
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
   try {
     const pm = localStorage.getItem("streambox_mirror") || "cinesrc";
-    // anime defaults to VidRift (CineSrc's sources don't cover it) — unless
-    // the user explicitly picked a different mirror, which always wins.
-    const def = (anime && (pm === "cinesrc")) ? "vidrift" : pm;
+    // anime defaults to AniPM (two-way player API, sub/dub, built-in skip;
+    // VidRift stays as fallback) — unless the user picked another mirror.
+    const def = (anime && (pm === "cinesrc")) ? "anipm" : pm;
     mirror = (def === "trailer" || !MIRRORS.some(x => x.id === def) || !mirrorAllowed(def)) ? "cinesrc" : def;
-    if (mirror === "cinesrc" && anime && mirrorAllowed("vidrift")) mirror = "vidrift";
+    if (mirror === "cinesrc" && anime && mirrorAllowed("anipm")) mirror = "anipm";
   } catch(e){ mirror = "cinesrc"; }
   trailerKey = null; // trailer is a per-viewing fallback, never default
   updateMirrorUI();
@@ -1977,8 +1995,8 @@ async function openWatch(type, id, s=1, e=1, t=0){
   if (type === "tv" && !watchState.anime && isAnimeData(d)) {
     watchState.anime = true;
     try {
-      if ((localStorage.getItem("streambox_mirror") || "cinesrc") === "cinesrc" && mirrorAllowed("vidrift")) {
-        mirror = "vidrift";
+      if ((localStorage.getItem("streambox_mirror") || "cinesrc") === "cinesrc" && mirrorAllowed("anipm")) {
+        mirror = "anipm";
         updateMirrorUI(); paintMirrors();
       }
     } catch(e){}
@@ -2121,7 +2139,16 @@ function paintQuality(){
   });
 }
 function qualityStep(dir){
-  qIdx = (qIdx + dir + QLEVELS.length) % QLEVELS.length;
+  // AniPM has no server to re-pick — cycle renditions live instead of reloading
+  if (mirror === "anipm") {
+    const AQ = ["Auto", 1080, 720, 480];
+    window._anipmQi = (((window._anipmQi == null ? 0 : window._anipmQi) + dir) + AQ.length * 10) % AQ.length;
+    const h = AQ[window._anipmQi];
+    const q = document.getElementById("ctlQ");
+    if (q) q.textContent = h === "Auto" ? "Auto" : h + "p";
+    if (typeof h === "number") anipmSend("setQuality", { height: h });
+    return;
+  }  qIdx = (qIdx + dir + QLEVELS.length) % QLEVELS.length;
   paintQuality();
   try { localStorage.setItem("streambox_quality", QLEVELS[qIdx].v); } catch(e){}
   // debounce remote repeats: reload once the user settles (keeps position)
@@ -2176,6 +2203,27 @@ function loadPlayer(){
   const spin = document.getElementById("playerSpin");
   if (spin) spin.style.display = "grid";
   const f = document.getElementById("player");
+  if (mirror === "anipm") {
+    // async ID mapping — the generic URL builder can't do this one
+    window._lrT = 0; window._cinePlaying = false; window._anipmResume = 0;
+    clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
+    ctlReset(); ctlPollStop();
+    fetchIntroRanges();
+    try {
+      // first press must land INSIDE their player (their rule) — TV app hands
+      // the remote straight there; everyone else gets 🎯/🖱 on the strip
+      if (document.body.classList.contains("tv-mode") && /\bwv\b/.test(navigator.userAgent || "")) focusPlayer();
+    } catch(e){}
+    loadAnipmPlayer();
+    pokeHud();
+    window._watchdog = setTimeout(() => {
+      if (window._cinePlaying || mirror !== "anipm") return;
+      const ws = document.getElementById("watchStatus");
+      if (ws && /Matching anime|Now playing/.test(ws.textContent || ""))
+        ws.textContent = "AniPM isn't starting — ⇄ Source to VidRift, or ↻ Reload";
+    }, 20000);
+    return;
+  }
   // cache-bust so back-to-back reloads always refresh (keeps position via &t=)
   const _u = buildEmbedUrlClean();
   f.src = _u + (_u.includes("?") ? "&" : "?") + "_=" + Date.now();
@@ -2204,8 +2252,8 @@ function loadPlayer(){
     }, 18000);
     window._watchdog2 = setTimeout(() => {
       if (window._cinePlaying || mirror !== "cinesrc") return;
-      // anime never belongs on the generic fallback — it lives on VidRift
-      const fb = watchState.anime ? "vidrift" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi");
+      // anime never belongs on the generic fallback — it lives on AniPM
+      const fb = watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi");
       const nm = (MIRRORS.find(x => x.id === fb) || {}).name || fb;
       setMirror(fb);
       const ws2 = document.getElementById("watchStatus");
@@ -2345,7 +2393,7 @@ function saveContinue(){
 let lastProgSave = 0;
 function saveProgress(cur, dur){
   // throttled resume-point saver (trailer mirror never writes playback position)
-  if (typeof mirror !== "undefined" && mirror !== "cinesrc" && mirror !== "vidrift") return;
+  if (typeof mirror !== "undefined" && mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return;
   if (!(dur > 60) || !(cur > 5)) return;
   const now = Date.now();
   if (now - lastProgSave < 15000) return;
@@ -2465,12 +2513,19 @@ function ctlReset(){
 function ctlToggle(){ // optimistic flip; corrected by play/pause events
   // un-gate muted-first desktop starts: our first real touch carries sound
   if (window._startMuted) { window._startMuted = false; sendCmd("setMuted", [false]); }
+  if (mirror === "anipm") { anipmSend(pState.paused ? "play" : "pause"); return; } // events correct us
   pState.paused = !pState.paused;
   sendCmd(pState.paused ? "pause" : "play");
   ctlPaint();
 }
 function ctlSeekRel(d){
-  if (mirror !== "cinesrc") return; // alternate mirrors use their own controls
+  if (mirror !== "cinesrc" && mirror !== "anipm") return; // undriven mirrors use their own controls
+  if (mirror === "anipm") {
+    const t = Math.max(0, (pState.cur || 0) + d);
+    anipmSend("seek", { time: Math.floor(pState.dur > 0 ? Math.min(t, pState.dur) : t) });
+    skipFlash(d);
+    return;
+  }
   // always fire: the player clamps out-of-range seeks itself. (The old
   // dur-guard swallowed every skip until metadata arrived — remotes mashed
   // L/R and saw nothing happen.)
@@ -2490,14 +2545,16 @@ function skipFlash(d){
 }
 function ctlMuteToggle(){
   pState.muted = !pState.muted;
-  sendCmd("setMuted", [pState.muted]);
+  if (mirror === "anipm") anipmSend("setMuted", { muted: pState.muted });
+  else sendCmd("setMuted", [pState.muted]);
   ctlPaint();
 }
 const RATES = [1, 1.25, 1.5, 2, 0.5];
 function ctlRateCycle(){
   const i = (RATES.indexOf(pState.rate) + 1 + RATES.length) % RATES.length;
   pState.rate = RATES[i] < 0 ? 1 : RATES[i];
-  sendCmd("setPlaybackRate", [pState.rate]);
+  if (mirror === "anipm") anipmSend("setPlaybackRate", { rate: pState.rate });
+  else sendCmd("setPlaybackRate", [pState.rate]);
   ctlPaint();
 }
 function ctlFullscreen(){
@@ -2661,8 +2718,13 @@ function paintSpeed(){
 /* volume 0-100 in remote-friendly steps (player caps at 100: no boost API exists) */
 function volStep(d){
   pState.vol = Math.min(1, Math.max(0, Math.round(((pState.vol == null ? 1 : pState.vol) + d) * 10) / 10));
-  sendCmd("setVolume", [pState.vol]);
-  if (pState.vol > 0 && pState.muted) { pState.muted = false; sendCmd("setMuted", [false]); }
+  if (mirror === "anipm") anipmSend("setVolume", { volume: pState.vol });
+  else sendCmd("setVolume", [pState.vol]);
+  if (pState.vol > 0 && pState.muted) {
+    pState.muted = false;
+    if (mirror === "anipm") anipmSend("setMuted", { muted: false });
+    else sendCmd("setMuted", [false]);
+  }
   ctlPaint(); paintVol();
 }
 function paintVol(){
@@ -2727,7 +2789,8 @@ function sleepTick(){
   if (sleep.endAt && Date.now() >= sleep.endAt) {
     sleep.endAt = 0;
     try { localStorage.setItem("streambox_sleep_min", "0"); } catch(e){}
-    sendCmd("pause");
+    if (mirror === "anipm") anipmSend("pause");
+    else sendCmd("pause");
     pState.paused = true; ctlPaint(); paintSleep();
     const ws = document.getElementById("watchStatus");
     if (ws) ws.textContent = "😴 Sleep timer — playback paused";
@@ -2766,7 +2829,8 @@ const MIRRORS = [
   { id: "yapgrid", name: "YapGrid" },
   { id: "vidapi", name: "VidAPI" },
   { id: "vidcore", name: "VidCore" },
-  { id: "vidrift", name: "VidRift" }
+  { id: "vidrift", name: "VidRift" },
+  { id: "anipm", name: "AniPM" }
 ];
 /* mirrors that break inside ANY sandboxed iframe: load without sandbox */
 const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid"]);
@@ -2957,7 +3021,7 @@ function setMirror(m){
 }
 function updateMirrorUI(){
   const isTrailer = mirror === "trailer";
-  const isCS = mirror === "cinesrc";
+  const isCS = mirror === "cinesrc" || mirror === "anipm";
   document.getElementById("trailerBar").classList.toggle("hidden", !isTrailer);
   document.getElementById("ctlBar").classList.toggle("hidden", !isCS);
   document.getElementById("mirrorBar").classList.toggle("hidden", isCS || isTrailer);
@@ -2966,6 +3030,12 @@ function updateMirrorUI(){
     document.getElementById("mirrorName").textContent = label;
     if (mirror === "yapgrid" && typeof subFile !== "undefined" && subFile && subFile.corsUrl) {
       document.getElementById("watchStatus").textContent = `YapGrid: showing your ${subFile.lang || "loaded"} subs ✓ — change language in ⚙ → Subs · no Ad Shield here, use Brave/uBlock`;
+      return;
+    }
+    if (mirror === "anipm") {
+      document.getElementById("watchStatus").textContent = watchState.anime
+        ? "AniPM: our bar drives it after one ▶ tap inside · sub/dub + skip-intro built in"
+        : "AniPM: our bar drives it after one ▶ tap inside · ⇄ Source anytime";
       return;
     }
     if (mirror === "vidrift") {
@@ -3386,6 +3456,13 @@ let subsOn = true;
 try { subsOn = localStorage.getItem("streambox_subs_on") !== "0"; } catch(e){}
 function ctlSubsToggle(){
   // bar CC button: captions on/off. Nothing loaded yet? Open Subs settings instead.
+  // AniPM carries its own sub tracks — toggle those, not our overlay.
+  if (mirror === "anipm") {
+    window._anipmSubs = window._anipmSubs === false;
+    anipmSend("setSubtitles", { enabled: !!window._anipmSubs });
+    paintSubsBtn();
+    return;
+  }
   if (!subFile || !subFile.cues || !subFile.cues.length) { openSettings(); setTab("subs"); return; }
   subsOn = !subsOn;
   try { localStorage.setItem("streambox_subs_on", subsOn ? "1" : "0"); } catch(e){}
@@ -3395,6 +3472,14 @@ function ctlSubsToggle(){
 function paintSubsBtn(){
   const b = document.getElementById("ctlSubs");
   if (!b) return;
+  if (mirror === "anipm") {
+    // AniPM's own tracks (default on) — our overlay file stays out of it
+    const on = window._anipmSubs !== false;
+    b.dataset.s = on ? "1" : "0";
+    b.textContent = on ? "CC ✓" : "CC";
+    b.className = "h-11 px-3 rounded-full text-sm font-bold " + (on ? "bg-teal-500 hover:bg-teal-400" : "bg-white/10 hover:bg-white/20");
+    return;
+  }
   const on = subsOn && subFile && subFile.cues && subFile.cues.length;
   const key = on ? "1" : "0";
   if (b.dataset.s === key) return;
@@ -3673,7 +3758,7 @@ async function fetchIntroRanges(){
   } catch(e){}
 }
 function autoSkipIntro(){
-  if (mirror !== "cinesrc" && mirror !== "vidrift") return;
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return;
   try { if (!document.getElementById("optAutoskip").checked) return; } catch(e){ return; }
   const cur = pState.cur || 0;
   const hit = _introRanges.find(r => cur >= r.start && cur < r.end - 1);
@@ -3682,7 +3767,8 @@ function autoSkipIntro(){
   if (now - _skipT < 5000) return; // don't seek-spam while the last skip lands
   _skipT = now;
   if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
-  else vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
+  else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
+  else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Intro skipped ✓";
 }
@@ -3693,6 +3779,14 @@ function vidriftSend(msg){
   try {
     document.getElementById("player").contentWindow.postMessage(msg, "https://embed.vidrift.net");
   } catch(e){}
+}
+function vidriftSeekRel(d){
+  // TV remote L/R for VidRift: its own menu may ignore the D-pad entirely,
+  // but resume-seek always answers — skip from OUR side using last progress.
+  if (mirror !== "vidrift") return;
+  const t = Math.max(0, (pState.cur || 0) + d);
+  vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(t) });
+  skipFlash(d);
 }
 window.addEventListener("message", (event)=>{
   if (event.origin !== "https://embed.vidrift.net") return;
@@ -3724,6 +3818,119 @@ window.addEventListener("message", (event)=>{
       try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
       if (document.body.classList.contains("video-fs")) exitVideoFs();
     }
+  }
+});
+/* ---------- AniPM: anime-native two-way player (like CineSrc, for anime)
+   Embed by MAL id, driven over {ns:'anipm.player'} messages: play/pause/
+   seek/volume/subs/quality/episodes in, full event set out. Keyless end to
+   end: TMDB→MAL mapping rides the keyless Jikan API, cached per title. */
+const ANIPM_ORIGIN = "https://ani.pm";
+let _anipmSeq = 0;
+function anipmSend(cmd, args){
+  try {
+    document.getElementById("player").contentWindow.postMessage(
+      { ns: "anipm.player", v: 1, id: ++_anipmSeq, cmd, args: args || {} }, ANIPM_ORIGIN);
+  } catch(e){}
+}
+async function anipmMalId(tmdbId, title){
+  const ck = "sb:ani:" + tmdbId;
+  try { const c = JSON.parse(localStorage.getItem(ck) || "null"); if (c && c.mal) return c.mal; } catch(e){}
+  try {
+    const r = await fetch("https://api.jikan.moe/v4/anime?q=" + encodeURIComponent(title || "") + "&limit=5&sfw=true");
+    if (!r.ok) return 0;
+    const d = await r.json();
+    const list = (d && d.data) || [];
+    if (!list.length) return 0;
+    const norm = s => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const nt = norm(title);
+    const exact = list.find(x => norm(x.title_english) === nt || norm(x.title) === nt);
+    const pick = exact || list[0];
+    if (pick && pick.mal_id) { try { localStorage.setItem(ck, JSON.stringify({ mal: pick.mal_id })); } catch(e){} return pick.mal_id; }
+  } catch(e){}
+  return 0;
+}
+async function loadAnipmPlayer(){
+  const id = watchState.id;
+  const f = document.getElementById("player");
+  const spin = document.getElementById("playerSpin");
+  const ws = document.getElementById("watchStatus");
+  if (spin) spin.style.display = "grid";
+  if (ws) ws.textContent = "Matching anime…";
+  const mal = await anipmMalId(id, titleOf(currentItem || {}));
+  if (watchState.id !== id || mirror !== "anipm") return; // user moved on
+  if (!mal) {
+    if (spin) spin.style.display = "none";
+    if (ws) ws.textContent = "Couldn't match this anime — ⇄ Source to VidRift";
+    return;
+  }
+  const ep = Math.max(1, watchState.e || 1);
+  f.src = `https://ani.pm/embed/mal/${mal}/${ep}/sub`;
+  if (ws) ws.textContent = `Now playing E${ep} — first ▶ tap goes inside, then our bar drives`;
+  if ((watchState.t || 0) > 0) { window._anipmResume = Math.floor(watchState.t); watchState.t = 0; }
+  else window._anipmResume = 0;
+}
+function anipmProgress(cur, dur){
+  if (typeof cur === "number") pState.cur = cur;
+  if (typeof dur === "number" && dur > 0) pState.dur = dur;
+  if (typeof cur === "number" && cur > 0.5) window._cinePlaying = true;
+  ctlPaint();
+  if (dur > 0) saveProgress(cur, dur);
+  try { sleepTick(); } catch(e){}
+  autoSkipIntro();
+}
+function anipmEnded(){
+  try { markWatched(); } catch(e){}
+  if (watchState.type === "movie") {
+    try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+    if (document.body.classList.contains("video-fs")) exitVideoFs();
+  }
+}
+window.addEventListener("message", (event)=>{
+  if (event.origin !== "https://ani.pm") return;
+  if (mirror !== "anipm") return; // stale frame from a switched-away mirror
+  const m = event.data || {};
+  // legacy progress-shape the player also emits (other anime embeds speak it)
+  if (m.channel === "megacloud" && m.event === "time") { anipmProgress(m.time, m.duration); return; }
+  if (m.channel === "megacloud" && m.event === "complete") { anipmEnded(); return; }
+  if (!m || m.ns !== "anipm.player") return;
+  const d = m.data || {};
+  switch (m.event) {
+    case "loaded": hideSpin(); break;
+    case "ready":
+      hideSpin(); window._cinePlaying = true;
+      anipmSend("hello");
+      try {
+        anipmSend("setAutoNext", { on: !!document.getElementById("optAutonext").checked });
+        anipmSend("setAutoSkip", { on: !!document.getElementById("optAutoskip").checked });
+      } catch(e){}
+      if (window._anipmResume > 0) { anipmSend("seek", { time: window._anipmResume }); window._anipmResume = 0; }
+      ctlPaint();
+      break;
+    case "play": case "playing": pState.paused = false; window._cinePlaying = true; ctlPaint(); break;
+    case "pause": pState.paused = true; ctlPaint(); break;
+    case "seeking": pState.seeking = true; break;
+    case "seeked":
+      pState.seeking = false;
+      if (typeof d.currentTime === "number") pState.cur = d.currentTime;
+      ctlPaint();
+      break;
+    case "timeupdate": anipmProgress(d.currentTime, d.duration); break;
+    case "durationchange": if (typeof d.duration === "number") pState.dur = d.duration; ctlPaint(); break;
+    case "volumechange":
+      if (typeof d.muted === "boolean") pState.muted = d.muted;
+      if (typeof d.volume === "number") pState.vol = Math.min(1, Math.max(0, d.volume));
+      ctlPaint(); paintVol();
+      break;
+    case "ratechange": if (typeof d.playbackRate === "number") pState.rate = d.playbackRate; ctlPaint(); break;
+    case "ended": anipmEnded(); break;
+    case "episodechange":
+      if (d.episode) watchState.e = d.episode;
+      if (d.season) watchState.s = d.season;
+      _introKey = "";
+      if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
+      loadEpisodes(); saveContinue();
+      { const wse = document.getElementById("watchStatus"); if (wse) wse.textContent = `Now playing S${watchState.s} E${watchState.e}`; }
+      break;
   }
 });
 function hideSpin(){ const s = document.getElementById("playerSpin"); if (s) s.style.display = "none"; }
