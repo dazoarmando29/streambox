@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 97; // bump every release alongside version.txt
+  const BUILD_NUM = 98; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -3886,12 +3886,15 @@ const ANIPM_ORIGIN = "https://ani.pm";
 let _anipmSeq = 0, _anipmLive = false, _anipmHelloT = 0;
 const _anipmQueue = [];
 function anipmSend(cmd, args){
-  // queue until the hello handshake lands (their player drops early mail)
+  // send NOW and queue a copy until hello lands: the player drops pre-ready
+  // mail (hence the queue), but if the hello reply shape ever differs from
+  // the SDK's, immediate-send keeps every tap working. All our commands here
+  // are idempotent (explicit play/pause/seek/levels), so a duplicate is safe.
   const msg = { ns: "anipm.player", v: 1, id: ++_anipmSeq, cmd, args: args || {} };
-  if (!_anipmLive) { _anipmQueue.push(msg); anipmHello(); return; }
   try {
     document.getElementById("player").contentWindow.postMessage(msg, ANIPM_ORIGIN);
   } catch(e){}
+  if (!_anipmLive) { _anipmQueue.push(msg); anipmHello(); }
 }
 function anipmHello(){
   // SDK-style knock: hello id:0 until the player answers ok (max ~10 tries)
@@ -3908,6 +3911,16 @@ function anipmHello(){
 /* live track state for the A/V sheet (filled by quality/subtitle/language
    events; defaults keep the sheet useful before the first event) */
 window._anipmTracks = { qualities: [1080, 720, 480], quality: "Auto", subTracks: null, lang: "sub" };
+/* qualities arrive as objects ({height,label,…}) on some titles — normalize */
+function anipmQInfo(h){
+  if (typeof h === "number") return { height: h, label: h + "p" };
+  if (h && typeof h === "object") {
+    const height = h.height || h.value || parseInt(h.label || h.name || "", 10) || 0;
+    const label = h.label || h.name || (height ? height + "p" : "?");
+    return { height, label: String(label) };
+  }
+  return { height: 0, label: String(h) };
+}
 async function anipmIds(tmdbId, title){
   // TMDB→player-ID mapping, two hosts: Jikan (MAL id) first, Consumet
   // (AniList id) as backup on a different network path — one blocked API
@@ -4122,7 +4135,8 @@ function paintAV(){
     }));
   });
   const subs = document.getElementById("avSubs"); subs.innerHTML = "";
-  const off = window._anipmSubs === false;
+  const sel = window._anipmSubs;
+  const off = sel === false;
   subs.appendChild(avPill((off ? "● " : "") + "Off", off, () => {
     window._anipmSubs = false; anipmSend("setSubtitles", { enabled: false }); paintAV(); paintSubsBtn();
   }));
@@ -4130,9 +4144,9 @@ function paintAV(){
   if (tracks && tracks.length) {
     tracks.slice(0, 8).forEach(t => {
       const label = (t && (t.label || t.language)) || "CC";
-      const isOn = !off;
-      subs.appendChild(avPill(label, false, () => {
-        window._anipmSubs = true;
+      const isOn = !off && (sel === true || sel === label);
+      subs.appendChild(avPill((isOn && sel === label ? "● " : "") + label, sel === label, () => {
+        window._anipmSubs = label;
         const m = { enabled: true };
         if (t.language) m.language = t.language; else m.label = label;
         anipmSend("setSubtitles", m); paintAV(); paintSubsBtn();
@@ -4144,20 +4158,21 @@ function paintAV(){
     }));
   }
   const qual = document.getElementById("avQuality"); qual.innerHTML = "";
-  const qs = (Array.isArray(T.qualities) && T.qualities.length ? T.qualities : [1080, 720, 480]);
-  const cur = String(window._anipmQi == null ? "Auto" : (["Auto", 1080, 720, 480][window._anipmQi] ?? "Auto"));
+  const qs = (Array.isArray(T.qualities) && T.qualities.length ? T.qualities : [1080, 720, 480]).map(anipmQInfo);
+  const curQ = anipmQInfo(T.quality);
+  const cur = String(window._anipmQi == null ? (curQ.label || "Auto") : (["Auto", 1080, 720, 480][window._anipmQi] ?? "Auto"));
   qual.appendChild(avPill((cur === "Auto" ? "● " : "") + "Auto", cur === "Auto", () => {
     window._anipmQi = 0;
     const q = document.getElementById("ctlQ"); if (q) q.textContent = "Auto";
     paintAV();
   }));
-  qs.slice(0, 5).forEach(h => {
-    const label = typeof h === "number" ? h + "p" : String(h);
-    const isCur = cur === label || String(T.quality) === String(h);
-    qual.appendChild(avPill((isCur ? "● " : "") + label, isCur, () => {
-      if (typeof h === "number") anipmSend("setQuality", { height: h });
-      const q = document.getElementById("ctlQ"); if (q) q.textContent = label;
+  qs.slice(0, 5).forEach(info => {
+    const isCur = cur === info.label;
+    qual.appendChild(avPill((isCur ? "● " : "") + info.label, isCur, () => {
+      if (info.height > 0) anipmSend("setQuality", { height: info.height });
+      const q = document.getElementById("ctlQ"); if (q) q.textContent = info.label;
       window._anipmQi = null;
+      window._anipmTracks.quality = info.label;
       paintAV();
     }));
   });
