@@ -48,7 +48,7 @@
      TV SoCs. This list covers all our animated chrome and nothing else. */
   nav, nav *, #mobileNav, #mobileNav *, .card, .glass, button, input, select, a,
   #ctlBar, #ctlBar *, #mirrorBar, #mirrorBar *, #mirrorRow, #mirrorRow *,
-  #modal, #modal *, #searchPanel, #epDrawer, #setPanel, #tvGuide, #pinPad,
+  #modal, #modal *, #searchPanel, #epDrawer, #setPanel, #tvGuide, #pinPad, #avSheet, #avSheet *,
   #hero, #hero *, #rows, #continueRow, #cursorBtn, .skel-poster, .skel-line {
     transition-duration: calc(.05s + var(--mot) * .25s) !important;
     animation-duration: calc(.08s + var(--mot) * .32s) !important; }
@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 95; // bump every release alongside version.txt
+  const BUILD_NUM = 96; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -429,6 +429,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <button onclick="openSettings()" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⚙</button>
           <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">☰ Episodes</button>
           <button onclick="ctlSubsToggle()" id="ctlSubs" aria-label="Subtitles on or off" title="Subtitles on/off — opens Subs settings when nothing is loaded yet" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">CC</button>
+          <button id="avBtn" onclick="openAV()" aria-label="Audio and subtitles" title="Audio (sub/dub), subtitles and quality — no settings detour" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">A/V</button>
           <button onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows glide a pointer, OK clicks — TV fallback for stubborn players" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🖱</button>
         </div>
       </div>
@@ -730,6 +731,24 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   </div>
 </div>
 
+<!-- A/V SHEET: in-player audio + subtitles + quality (anime/AniPM).
+     Bottom sheet on phone, centered card on TV/desktop. Big targets,
+     arrows walk it on remotes, Back/Esc closes. -->
+<div id="avSheet" class="hidden fixed inset-0 z-[67] bg-black/70" onclick="if(event.target===this)closePanels()">
+  <div class="absolute left-0 right-0 bottom-0 md:left-1/2 md:right-auto md:bottom-auto md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[440px] bg-[#131e35] border border-white/10 rounded-t-3xl md:rounded-3xl p-5 max-h-[82vh] overflow-y-auto" style="padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px))">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-xl font-black">Audio &amp; Subtitles</h2>
+      <button onclick="closePanels()" aria-label="Close audio and subtitles" class="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-lg">✕</button>
+    </div>
+    <p class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">AUDIO</p>
+    <div id="avAudio" class="flex gap-2 mb-5"></div>
+    <p class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">SUBTITLES</p>
+    <div id="avSubs" class="flex flex-wrap gap-2 mb-5"></div>
+    <p class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">QUALITY</p>
+    <div id="avQuality" class="flex flex-wrap gap-2"></div>
+  </div>
+</div>
+
 <!-- SEARCH WINDOW (TV-friendly overlay) -->
 <div id="searchPanel" class="hidden fixed inset-0 z-[68] bg-black/85 p-4" onclick="if(event.target===this)closeSearch()">
   <div class="max-w-4xl mx-auto mt-[6vh] bg-[#131e35] border border-white/10 rounded-2xl p-4 md:p-5 max-h-[86vh] flex flex-col">
@@ -813,7 +832,7 @@ function restoreFocus(el){
 }
 function topPopup(){
   // topmost visible popup wins (search sits above drawers, guide above all)
-  const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal,#pinPad")].filter(p => !p.classList.contains("hidden"));
+  const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal,#pinPad,#avSheet")].filter(p => !p.classList.contains("hidden"));
   return ps.length ? ps[ps.length - 1] : null;
 }
 function dirOf(e){
@@ -2703,8 +2722,10 @@ async function openEpisodes(){
 function closePanels(){
   document.getElementById("setPanel").classList.add("hidden");
   document.getElementById("epDrawer").classList.add("hidden");
+  document.getElementById("avSheet").classList.add("hidden");
   if (document.getElementById("modal").classList.contains("hidden")
       && document.getElementById("searchPanel").classList.contains("hidden")
+      && document.getElementById("avSheet").classList.contains("hidden")
       && document.getElementById("tvGuide").classList.contains("hidden"))
     document.body.classList.remove("modal-open");
   if (panelOpener && panelOpener.tagName !== "IFRAME" && panelOpener.focus) { try { panelOpener.focus({ preventScroll: true }); } catch(e){} }
@@ -3050,6 +3071,9 @@ function updateMirrorUI(){
   document.getElementById("trailerBar").classList.toggle("hidden", !isTrailer);
   document.getElementById("ctlBar").classList.toggle("hidden", !isCS);
   document.getElementById("mirrorBar").classList.toggle("hidden", isCS || isTrailer);
+  // A/V sheet button only exists where it works (AniPM carries tracks)
+  const av = document.getElementById("avBtn");
+  if (av) av.classList.toggle("hidden", mirror !== "anipm");
   if (!isCS && !isTrailer) {
     const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
     document.getElementById("mirrorName").textContent = label;
@@ -3859,13 +3883,31 @@ window.addEventListener("message", (event)=>{
    seek/volume/subs/quality/episodes in, full event set out. Keyless end to
    end: TMDB→MAL mapping rides the keyless Jikan API, cached per title. */
 const ANIPM_ORIGIN = "https://ani.pm";
-let _anipmSeq = 0;
+let _anipmSeq = 0, _anipmLive = false, _anipmHelloT = 0;
+const _anipmQueue = [];
 function anipmSend(cmd, args){
+  // queue until the hello handshake lands (their player drops early mail)
+  const msg = { ns: "anipm.player", v: 1, id: ++_anipmSeq, cmd, args: args || {} };
+  if (!_anipmLive) { _anipmQueue.push(msg); anipmHello(); return; }
   try {
-    document.getElementById("player").contentWindow.postMessage(
-      { ns: "anipm.player", v: 1, id: ++_anipmSeq, cmd, args: args || {} }, ANIPM_ORIGIN);
+    document.getElementById("player").contentWindow.postMessage(msg, ANIPM_ORIGIN);
   } catch(e){}
 }
+function anipmHello(){
+  // SDK-style knock: hello id:0 until the player answers ok (max ~10 tries)
+  if (_anipmLive || mirror !== "anipm") return;
+  if (_anipmHelloT > 10) return;
+  _anipmHelloT++;
+  try {
+    document.getElementById("player").contentWindow.postMessage(
+      { ns: "anipm.player", v: 1, id: 0, cmd: "hello", args: {} }, ANIPM_ORIGIN);
+  } catch(e){}
+  clearTimeout(window._anipmHelloTo);
+  window._anipmHelloTo = setTimeout(anipmHello, 1000);
+}
+/* live track state for the A/V sheet (filled by quality/subtitle/language
+   events; defaults keep the sheet useful before the first event) */
+window._anipmTracks = { qualities: [1080, 720, 480], quality: "Auto", subTracks: null, lang: "sub" };
 async function anipmIds(tmdbId, title){
   // TMDB→player-ID mapping, two hosts: Jikan (MAL id) first, Consumet
   // (AniList id) as backup on a different network path — one blocked API
@@ -3931,17 +3973,29 @@ async function loadAnipmPlayer(){
   if (ws) ws.textContent = "Matching anime…";
   const ids = await anipmIds(id, titleOf(currentItem || {}));
   if (watchState.id !== id || mirror !== "anipm") return; // user moved on
-  const ep = Math.max(1, watchState.e || 1);
-  const src = ids.mal ? `https://ani.pm/embed/mal/${ids.mal}/${ep}/sub`
-    : ids.ani ? `https://ani.pm/embed/ani/${ids.ani}/${ep}/sub` : null;
-  if (!src) {
-    // both mapping hosts failed — don't sit black, fall to VidRift
+  if (!ids.mal && !ids.ani) {
+    // all three mapping hosts failed — don't sit black, fall to VidRift
     if (spin) spin.style.display = "none";
     if (ws) ws.textContent = "Couldn't match this anime — moved you to VidRift";
     setMirror("vidrift", true);
     return;
   }
-  f.src = src;
+  const ep = Math.max(1, watchState.e || 1);
+  // first-class embed options (per their SDK): our accent, auto-next/episode
+  // skip follow Settings, and resume rides ?start= (no seek race on load)
+  const aq = new URLSearchParams({ color: "14b8a6" });
+  try {
+    aq.set("autonext", document.getElementById("optAutonext").checked ? "1" : "0");
+    aq.set("autoskip", document.getElementById("optAutoskip").checked ? "1" : "0");
+  } catch(e){}
+  if ((watchState.t || 0) > 0) { aq.set("start", String(Math.floor(watchState.t))); watchState.t = 0; }
+  const as = aq.toString();
+  const base = ids.mal ? `https://ani.pm/embed/mal/${ids.mal}/${ep}/sub`
+    : `https://ani.pm/embed/ani/${ids.ani}/${ep}/sub`;
+  f.src = as ? `${base}?${as}` : base;
+  _anipmLive = false; _anipmHelloT = 0; _anipmQueue.length = 0;
+  window._anipmTracks.lang = "sub";
+  setTimeout(anipmHello, 800);
   if (ws) ws.textContent = `Now playing E${ep} — first ▶ tap goes inside, then our bar drives`;
   if ((watchState.t || 0) > 0) { window._anipmResume = Math.floor(watchState.t); watchState.t = 0; }
   else window._anipmResume = 0;
@@ -3970,12 +4024,22 @@ window.addEventListener("message", (event)=>{
   if (m.channel === "megacloud" && m.event === "time") { anipmProgress(m.time, m.duration); return; }
   if (m.channel === "megacloud" && m.event === "complete") { anipmEnded(); return; }
   if (!m || m.ns !== "anipm.player") return;
+  // hello reply: connection live — flush anything queued before it
+  if (m.id === 0 && m.ok) {
+    _anipmLive = true;
+    try {
+      const f = document.getElementById("player");
+      let q;
+      while ((q = _anipmQueue.shift())) f.contentWindow.postMessage(q, ANIPM_ORIGIN);
+    } catch(e){}
+    return;
+  }
   const d = m.data || {};
   switch (m.event) {
     case "loaded": hideSpin(); break;
     case "ready":
       hideSpin(); window._cinePlaying = true;
-      anipmSend("hello");
+      _anipmLive = true;
       try {
         anipmSend("setAutoNext", { on: !!document.getElementById("optAutonext").checked });
         anipmSend("setAutoSkip", { on: !!document.getElementById("optAutoskip").checked });
@@ -3999,6 +4063,22 @@ window.addEventListener("message", (event)=>{
       ctlPaint(); paintVol();
       break;
     case "ratechange": if (typeof d.playbackRate === "number") pState.rate = d.playbackRate; ctlPaint(); break;
+    case "qualitychange":
+      if (d.qualities && d.qualities.length) window._anipmTracks.qualities = d.qualities;
+      if (d.quality != null) window._anipmTracks.quality = d.quality;
+      paintAV(); break;
+    case "subtitlechange":
+      if (d.tracks) window._anipmTracks.subTracks = d.tracks;
+      paintAV(); break;
+    case "languagechange":
+      if (d.lang) window._anipmTracks.lang = d.lang;
+      else if (d.language) window._anipmTracks.lang = d.language;
+      paintAV(); break;
+    case "autoplayblocked": {
+      const wsb = document.getElementById("watchStatus");
+      if (wsb) wsb.textContent = "Tap ▶ inside once, then our bar drives";
+      break;
+    }
     case "ended": anipmEnded(); break;
     case "episodechange":
       if (d.episode) watchState.e = d.episode;
@@ -4010,6 +4090,78 @@ window.addEventListener("message", (event)=>{
       break;
   }
 });
+/* A/V sheet: modern in-player picker (no more ⚙ detour). Anime/AniPM only —
+   other mirrors keep their own menus. Every pill ≥48px, arrows walk them. */
+function avPill(label, active, onclick){
+  const b = document.createElement("button");
+  b.textContent = label;
+  b.className = "min-h-[48px] px-5 rounded-full text-sm font-bold " + (active ? "bg-teal-500 hover:bg-teal-400" : "bg-white/10 hover:bg-white/20");
+  b.onclick = onclick;
+  return b;
+}
+function openAV(){
+  if (mirror !== "anipm") return;
+  paintAV();
+  document.getElementById("avSheet").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  // TV landing: focus the active audio pill so arrows start somewhere sane
+  const first = document.querySelector("#avSheet button");
+  if (first && document.body.classList.contains("tv-mode")) { try { first.focus({ preventScroll: true }); } catch(e){} }
+}
+function paintAV(){
+  if (document.getElementById("avSheet").classList.contains("hidden")) return;
+  if (mirror !== "anipm") return;
+  const T = window._anipmTracks || {};
+  const audio = document.getElementById("avAudio"); audio.innerHTML = "";
+  const lang = (T.lang || "sub").toLowerCase();
+  [["Sub", "sub"], ["Dub", "dub"]].forEach(([label, v]) => {
+    audio.appendChild(avPill((lang === v ? "● " : "") + label, lang === v, () => {
+      window._anipmTracks.lang = v;
+      anipmSend("setLanguage", { lang: v });
+      paintAV();
+    }));
+  });
+  const subs = document.getElementById("avSubs"); subs.innerHTML = "";
+  const off = window._anipmSubs === false;
+  subs.appendChild(avPill((off ? "● " : "") + "Off", off, () => {
+    window._anipmSubs = false; anipmSend("setSubtitles", { enabled: false }); paintAV(); paintSubsBtn();
+  }));
+  const tracks = Array.isArray(T.subTracks) ? T.subTracks : null;
+  if (tracks && tracks.length) {
+    tracks.slice(0, 8).forEach(t => {
+      const label = (t && (t.label || t.language)) || "CC";
+      const isOn = !off;
+      subs.appendChild(avPill(label, false, () => {
+        window._anipmSubs = true;
+        const m = { enabled: true };
+        if (t.language) m.language = t.language; else m.label = label;
+        anipmSend("setSubtitles", m); paintAV(); paintSubsBtn();
+      }));
+    });
+  } else {
+    subs.appendChild(avPill((!off ? "● " : "") + "On", !off, () => {
+      window._anipmSubs = true; anipmSend("setSubtitles", { enabled: true }); paintAV(); paintSubsBtn();
+    }));
+  }
+  const qual = document.getElementById("avQuality"); qual.innerHTML = "";
+  const qs = (Array.isArray(T.qualities) && T.qualities.length ? T.qualities : [1080, 720, 480]);
+  const cur = String(window._anipmQi == null ? "Auto" : (["Auto", 1080, 720, 480][window._anipmQi] ?? "Auto"));
+  qual.appendChild(avPill((cur === "Auto" ? "● " : "") + "Auto", cur === "Auto", () => {
+    window._anipmQi = 0;
+    const q = document.getElementById("ctlQ"); if (q) q.textContent = "Auto";
+    paintAV();
+  }));
+  qs.slice(0, 5).forEach(h => {
+    const label = typeof h === "number" ? h + "p" : String(h);
+    const isCur = cur === label || String(T.quality) === String(h);
+    qual.appendChild(avPill((isCur ? "● " : "") + label, isCur, () => {
+      if (typeof h === "number") anipmSend("setQuality", { height: h });
+      const q = document.getElementById("ctlQ"); if (q) q.textContent = label;
+      window._anipmQi = null;
+      paintAV();
+    }));
+  });
+}
 function hideSpin(){ const s = document.getElementById("playerSpin"); if (s) s.style.display = "none"; }
 document.getElementById("player").addEventListener("load", ()=>{ setTimeout(hideSpin, 800); });
 window.addEventListener("message", (event)=>{
