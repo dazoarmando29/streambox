@@ -297,7 +297,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 105; // bump every release alongside version.txt
+  const BUILD_NUM = 106; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1954,7 +1954,8 @@ async function loadModalEpisodes(){
   updateModalEpLabel();
   const ms = document.getElementById("mSeasonSub");
   if (ms) {
-    const arcM = seasonArc(titleOf((currentDetail || {}).data || {}), d.overview || "");
+    const arcM = seasonArc(titleOf((currentDetail || {}).data || {}), d.overview || "", s);
+    window._seasonArc = arcM;
     const base = seasonSub(d, (modalSeasons[modalSeasonIdx]||{}).episode_count);
     ms.textContent = arcM ? arcM + " · " + base : base;
   }
@@ -1995,6 +1996,7 @@ function closeTvGuide(){
 async function openWatch(type, id, s=1, e=1, t=0){
   const anime = detectAnime(type, id);
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
+  try { gridS = s; } catch(e){}
   try {
     const pm = localStorage.getItem("streambox_mirror") || "cinesrc";
     // anime defaults to AniPM (two-way player API, sub/dub, built-in skip;
@@ -2064,20 +2066,27 @@ async function openWatch(type, id, s=1, e=1, t=0){
   clearTimeout(window._tipT);
   window._tipT = setTimeout(() => { if (!document.body.classList.contains("video-fs")) showSubTip(false); }, 2500);
 }
-async function loadEpisodes(){
-  const { id, s, e } = watchState;
-  const d = await tmdb(`/tv/${id}/season/${s}`);
+async function loadEpisodes(s){
+  const sv = s || gridS;
+  const { id } = watchState;
+  const e = watchState.e;
+  const d = await tmdb(`/tv/${id}/season/${sv}`);
   const grid = document.getElementById("epGrid"); grid.innerHTML = "";
+  window._seasonArc = seasonArc(titleOf(currentItem || {}), d.overview || "", sv);
+  updateSeasonLabel();
     (d.episodes||[]).forEach(ep=>{
     const b = document.createElement("button");
     b.textContent = "E" + ep.episode_number;
     b.title = ep.name;
     b.setAttribute("data-focusable", "1");
-    b.className = "text-xs px-2 py-2 rounded-lg " + (ep.episode_number==e ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
-    b.onclick = ()=>{ watchState.e = ep.episode_number; loadPlayer(); loadEpisodes(); saveContinue(); };
+    const isCur = sv === watchState.s && ep.episode_number == e;
+    b.className = "text-xs px-2 py-2 rounded-lg " + (isCur ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
+    b.onclick = ()=>{ watchState.s = sv; gridS = sv; watchState.e = ep.episode_number; loadPlayer(); loadEpisodes(); updateSeasonLabel(); saveContinue(); };
     grid.appendChild(b);
   });
-  paintUpNext(d.episodes || []);
+  const box = document.getElementById("upNext");
+  if (sv === watchState.s) paintUpNext(d.episodes || []);
+  else if (box) box.classList.add("hidden");
 }
 function paintUpNext(eps){
   const box = document.getElementById("upNext");
@@ -2089,18 +2098,19 @@ function paintUpNext(eps){
   document.getElementById("upNextTitle").textContent = `S${watchState.s} E${nxt.episode_number} • ${nxt.name || ""}`;
   document.getElementById("upNextMeta").textContent = nxt.runtime ? `${nxt.runtime}m` : "";
 }
-let watchSeasons = [];
+let watchSeasons = [], gridS = 1; // gridS: watch-grid browse cursor (never autoplays)
 function updateSeasonLabel(){
-  document.getElementById("seasonLabel").textContent = `Season ${watchState.s}`;
+  const arc = window._seasonArc || "";
+  document.getElementById("seasonLabel").textContent = `Season ${gridS}${arc ? " · " + arc : ""}${gridS === watchState.s ? " ✓" : ""}`;
 }
 function watchSeasonStep(dir){
   if (!watchSeasons.length) return;
   const nums = watchSeasons.map(x=>x.season_number).sort((a,b)=>a-b);
-  let i = nums.indexOf(watchState.s);
+  let i = nums.indexOf(gridS);
+  if (i < 0) i = nums.indexOf(watchState.s);
   if (i < 0) i = 0;
-  watchState.s = nums[(i + dir + nums.length) % nums.length];
-  watchState.e = 1;
-  updateSeasonLabel(); loadEpisodes(); loadPlayer(); saveContinue();
+  gridS = nums[(i + dir + nums.length) % nums.length];
+  updateSeasonLabel(); loadEpisodes();
 }
 function nextEpisode(dir){
   watchState.e += dir;
@@ -3761,15 +3771,28 @@ const ARC_KEYS = [
   [/golden frieza|resurrection/i, "Golden Frieza Saga"],
   [/beerus|whis|battle of gods/i, "God of Destruction Saga"],
   [/baby|super 17|shadow dragon|omega shenron/i, "Shadow Dragon Saga"],
-  [/red ribbon|king piccolo|daimao/i, "King Piccolo Saga"],
+  [/red ribbon|king piccolo(?! daimaoh)/i, "King Piccolo Saga"],
   [/tournament(?! of power)/i, "Tournament Saga"],
   [/saiyan|vegeta|raditz|nappa/i, "Saiyan Saga"],
 ];
-function seasonArc(title, overview){
+/* S1 fallbacks for the franchise (overviews often recap instead of naming):
+   matched only when the summary names no saga. Order matters: Z before DB. */
+const ARC_S1 = [
+  [/dragon ball super/i, "God of Destruction Saga"],
+  [/dragon ball gt/i, "Black Star Dragon Ball Saga"],
+  [/dragon ball z/i, "Saiyan Saga"],
+  [/^dragon ball$/i, "Emperor Pilaf Saga"],
+];
+function seasonArc(title, overview, s){
   try {
     if (!/dragon\s*ball/i.test(title || "")) return "";
     const hit = ARC_KEYS.find(([re]) => re.test(overview || ""));
-    return hit ? hit[1] : "";
+    if (hit) return hit[1];
+    if ((s || 1) === 1) {
+      const d = ARC_S1.find(([re]) => re.test((title || "").trim()));
+      if (d) return d[1];
+    }
+    return "";
   } catch(e){ return ""; }
 }
 function seasonSub(seasonDetail, fallbackCount){
@@ -3819,7 +3842,8 @@ async function renderEpDrawer(){
     return;
   }
   drawerEps = d.episodes || [];
-  const arcD = seasonArc(titleOf(currentItem || {}), d.overview || "");
+  const arcD = seasonArc(titleOf(currentItem || {}), d.overview || "", drawerS);
+  window._seasonArc = arcD;
   updateDrawerSeasonLabel(arcD);
   const sub = document.getElementById("drawerSeasonSub");
   if (sub) sub.textContent = drawerS === watchState.s ? `You're watching here · ${seasonSub(d)}` : seasonSub(d);
@@ -3846,7 +3870,7 @@ async function renderEpDrawer(){
         ${hidden ? `<button class="mt-2 text-xs font-bold bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full">Click to reveal</button>` : ""}
       </div>`;
     const play = activatable(() => {
-      watchState.s = drawerS;
+      watchState.s = drawerS; gridS = drawerS;
       watchState.e = ep.episode_number;
       closePanels();
       loadPlayer(); loadEpisodes(); updateSeasonLabel(); updateDrawerSeasonLabel(); saveContinue();
@@ -3930,6 +3954,7 @@ window.addEventListener("message", (event)=>{
     // player advanced internally (Up Next / picker) — sync, don't reload
     if (d.season) watchState.s = d.season;
     if (d.episode) watchState.e = d.episode;
+    try { gridS = watchState.s; } catch(e){}
     _introKey = ""; // new episode, new intro range
     if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
     loadEpisodes(); saveContinue();
@@ -4205,6 +4230,7 @@ window.addEventListener("message", (event)=>{
     case "episodechange":
       if (d.episode) watchState.e = d.episode;
       if (d.season) watchState.s = d.season;
+      try { gridS = watchState.s; } catch(e){}
       _introKey = "";
       if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
       loadEpisodes(); saveContinue();
@@ -4336,6 +4362,7 @@ window.addEventListener("message", (event)=>{
     // player advanced internally — sync our UI, do NOT reload iframe
     if(data.season) watchState.s = data.season;
     if(data.episode) watchState.e = data.episode;
+    try { gridS = watchState.s; } catch(e){}
     if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
     loadEpisodes(); saveContinue();
     document.getElementById("watchStatus").textContent = `Now playing S${watchState.s} E${watchState.e}`;
