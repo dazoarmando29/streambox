@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 99; // bump every release alongside version.txt
+  const BUILD_NUM = 100; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -550,6 +550,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
             <button onclick="modalEpStep(1)" aria-label="Next episode" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
           </div>
         </div>
+        <p id="mSeasonSub" class="text-xs text-gray-400 mt-2 leading-relaxed"></p>
       </div>
     </div>
   </div>
@@ -727,6 +728,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       </div>
       <input id="epFilter" oninput="renderEpDrawer()" placeholder="Filter…" autocomplete="off" class="flex-1 min-w-0 px-3 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm">
     </div>
+    <p id="drawerSeasonSub" class="text-xs text-gray-400 mb-3 leading-relaxed"></p>
     <div id="epDrawerList" class="space-y-3 pb-4"></div>
   </div>
 </div>
@@ -1941,6 +1943,8 @@ async function loadModalEpisodes(){
   modalEpisodes = d.episodes || [];
   modalEpIdx = 0;
   updateModalEpLabel();
+  const ms = document.getElementById("mSeasonSub");
+  if (ms) ms.textContent = seasonSub(d, (modalSeasons[modalSeasonIdx]||{}).episode_count);
 }
 function modalSeasonStep(dir){
   if (!modalSeasons.length) return;
@@ -2715,6 +2719,7 @@ async function openEpisodes(){
   panelOpener = document.activeElement;
   document.getElementById("epDrawer").classList.remove("hidden");
   document.body.classList.add("modal-open");
+  drawerS = watchState.s; // drawer opens on the playing season; browsing never plays
   updateDrawerSeasonLabel();
   await renderEpDrawer();
   setTimeout(() => safeFocus(document.querySelector("#epDrawer button")), 60);
@@ -3717,11 +3722,23 @@ function paintCaps(force){
   ov.classList.remove("cap-bottom", "cap-center", "cap-top");
   ov.classList.add("cap-" + ((subFile && subFile.pos) || "bottom"));
 }
-/* episodes drawer */
-let drawerEps = [], drawerRevealed = new Set(), spoilerOn = false;
+/* episodes drawer — browsing seasons NEVER touches playback: the drawer
+   keeps its own season cursor (drawerS); only tapping an episode plays. */
+let drawerEps = [], drawerRevealed = new Set(), spoilerOn = false, drawerS = 1;
 try { spoilerOn = localStorage.getItem("streambox_spoiler") === "1"; } catch(e){}
+/* season arc line: TMDB's own season summary (real arc description) + year +
+   episode count. Season numbers are never replaced — always "Season N" first. */
+function seasonSub(seasonDetail, fallbackCount){
+  const ov = (seasonDetail && seasonDetail.overview || "").trim();
+  const yr = (seasonDetail && seasonDetail.air_date || "").slice(0, 4);
+  const n = (seasonDetail && seasonDetail.episodes ? seasonDetail.episodes.length : fallbackCount) || "?";
+  const tail = [yr, n + " eps"].filter(Boolean).join(" · ");
+  if (ov) return ov.length > 150 ? ov.slice(0, 150) + "…" : ov;
+  return tail;
+}
 function updateDrawerSeasonLabel(){
-  document.getElementById("drawerSeasonLabel").textContent = `Season ${watchState.s}`;
+  const watching = drawerS === watchState.s;
+  document.getElementById("drawerSeasonLabel").textContent = `Season ${drawerS}${watching ? " ✓" : ""}`;
   paintSpoilerBtn();
 }
 function paintSpoilerBtn(){
@@ -3737,12 +3754,12 @@ function spoilerToggle(){
 function drawerSeasonStep(dir){
   if (!watchSeasons.length) return;
   const nums = watchSeasons.map(x => x.season_number).sort((a, b) => a - b);
-  let i = nums.indexOf(watchState.s);
+  let i = nums.indexOf(drawerS);
+  if (i < 0) i = nums.indexOf(watchState.s);
   if (i < 0) i = 0;
-  watchState.s = nums[(i + dir + nums.length) % nums.length];
-  watchState.e = 1;
+  drawerS = nums[(i + dir + nums.length) % nums.length];
   drawerRevealed = new Set();
-  updateDrawerSeasonLabel(); updateSeasonLabel(); loadEpisodes(); loadPlayer(); saveContinue();
+  updateDrawerSeasonLabel();
   renderEpDrawer();
 }
 async function renderEpDrawer(){
@@ -3752,18 +3769,20 @@ async function renderEpDrawer(){
   list.innerHTML = `<p class="text-sm text-gray-500">Loading…</p>`;
   let d;
   try {
-    d = await tmdb(`/tv/${watchState.id}/season/${watchState.s}`);
+    d = await tmdb(`/tv/${watchState.id}/season/${drawerS}`);
   } catch(err) {
     list.innerHTML = `<p class="text-sm text-gray-500">Couldn't load episodes. Check connection.</p>`;
     return;
   }
   drawerEps = d.episodes || [];
+  const sub = document.getElementById("drawerSeasonSub");
+  if (sub) sub.textContent = drawerS === watchState.s ? `You're watching here · ${seasonSub(d)}` : seasonSub(d);
   list.innerHTML = "";
   const shown = drawerEps.filter(ep =>
     !q || ("e" + ep.episode_number).includes(q) || (ep.name || "").toLowerCase().includes(q));
   if (!shown.length) list.innerHTML = `<p class="text-sm text-gray-500">No episodes match.</p>`;
   shown.forEach(ep => {
-    const isCur = ep.episode_number === watchState.e;
+    const isCur = drawerS === watchState.s && ep.episode_number === watchState.e;
     const hidden = spoilerOn && !drawerRevealed.has(ep.episode_number) && !isCur;
     const card = document.createElement("div");
     card.className = "relative bg-white/5 border rounded-xl overflow-hidden " + (isCur ? "border-teal-500" : "border-white/10");
@@ -3781,9 +3800,10 @@ async function renderEpDrawer(){
         ${hidden ? `<button class="mt-2 text-xs font-bold bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full">Click to reveal</button>` : ""}
       </div>`;
     const play = activatable(() => {
+      watchState.s = drawerS;
       watchState.e = ep.episode_number;
       closePanels();
-      loadPlayer(); loadEpisodes(); saveContinue();
+      loadPlayer(); loadEpisodes(); updateSeasonLabel(); updateDrawerSeasonLabel(); saveContinue();
       const ws = document.getElementById("watchStatus");
       if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e}`;
     });
