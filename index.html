@@ -297,7 +297,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 106; // bump every release alongside version.txt
+  const BUILD_NUM = 107; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -418,6 +418,14 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         </div>
         <!-- volume readout for TV remotes (bar buttons stay focused underneath) -->
         <div id="volToast" class="hidden absolute bottom-24 right-4 z-[7] bg-black/70 rounded-full px-4 py-2 text-sm font-bold pointer-events-none"></div>
+        <!-- episode title card: show/season/arc toast on episode start, gone in 5s -->
+        <div id="titleCard" class="hidden absolute top-4 left-4 z-[6] max-w-[82%] pointer-events-none">
+          <div class="bg-black/60 backdrop-blur-md border border-white/10 rounded-2xl px-5 py-3.5 shadow-2xl">
+            <p id="tcShow" class="text-[11px] font-bold tracking-[0.2em] text-teal-300 truncate"></p>
+            <p id="tcMain" class="mt-1 text-lg font-black text-white leading-tight"></p>
+            <p id="tcArc" class="hidden mt-1.5 text-[11px] font-bold text-[#0b1426] bg-teal-400 rounded-full px-2.5 py-0.5 w-fit"></p>
+          </div>
+        </div>
         <!-- control bar floats over the video (auto-hides when idle) -->
         <div id="ctlBar" class="absolute left-0 right-0 bottom-0 px-3 py-2.5 flex flex-wrap items-center gap-2">
           <button id="ctlPlay" onclick="ctlToggle()" aria-label="Play or pause" title="Play/Pause (OK)" class="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-400 text-xl font-bold grid place-items-center">▶</button>
@@ -2290,6 +2298,7 @@ function loadPlayer(){
       if (wsa) wsa.textContent = "AniPM isn't starting here — moved you to VidRift";
       setMirror("vidrift", true);
     }, 20000);
+    showTitleCard();
     return;
   }
   // cache-bust so back-to-back reloads always refresh (keeps position via &t=)
@@ -2356,6 +2365,7 @@ function loadPlayer(){
       focusMirror();
   } catch(e){}
   pokeHud(); // reveal HUD + bar briefly on every (re)load
+  showTitleCard();
 }
 function reloadPlayer(){ loadPlayer(); }
 function otherSource(){
@@ -3960,6 +3970,7 @@ window.addEventListener("message", (event)=>{
     loadEpisodes(); saveContinue();
     const ws = document.getElementById("watchStatus");
     if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e}`;
+    showTitleCard();
   }
   if (d.type === "vidrift:ended") {
     try { markWatched(); } catch(e){}
@@ -4234,7 +4245,7 @@ window.addEventListener("message", (event)=>{
       _introKey = "";
       if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
       loadEpisodes(); saveContinue();
-      { const wse = document.getElementById("watchStatus"); if (wse) wse.textContent = `Now playing S${watchState.s} E${watchState.e}`; }
+      { const wse = document.getElementById("watchStatus"); if (wse) wse.textContent = `Now playing S${watchState.s} E${watchState.e}`; showTitleCard(); }
       break;
   }
 });
@@ -4324,6 +4335,33 @@ function paintAV(){
     }));
   });
 }
+/* episode title card: Netflix-style toast (show · S/E + name · arc pill),
+   5s on every fresh episode, all mirrors — pure overlay, never touches play */
+function showTitleCard(){
+  try {
+    if (watchState.type !== "tv") return;
+    if (document.getElementById("watchView").classList.contains("hidden")) return;
+    const key = `${watchState.id}/${watchState.s}/${watchState.e}`;
+    if (window._tcKey === key) return; // reloads/seeks don't re-toast
+    window._tcKey = key;
+    const card = document.getElementById("titleCard");
+    document.getElementById("tcShow").textContent = (titleOf(currentItem || {}) || "").toUpperCase();
+    document.getElementById("tcMain").textContent = `S${watchState.s} E${watchState.e}`;
+    const arcEl = document.getElementById("tcArc");
+    arcEl.classList.add("hidden");
+    card.classList.remove("hidden");
+    clearTimeout(window._tcT);
+    window._tcT = setTimeout(() => card.classList.add("hidden"), 5000);
+    const s = watchState.s, e = watchState.e, id = watchState.id;
+    tmdb(`/tv/${id}/season/${s}`).then(d => {
+      if (!d || watchState.s !== s || watchState.e !== e || watchState.id !== id) return; // moved on
+      const ep = (d.episodes || []).find(x => x.episode_number === e);
+      if (ep && ep.name) document.getElementById("tcMain").textContent = `S${s} E${e} · ${ep.name}`;
+      const arc = seasonArc(titleOf(currentItem || {}), d.overview || "", s);
+      if (arc) { arcEl.textContent = arc; arcEl.classList.remove("hidden"); }
+    }).catch(() => {});
+  } catch(e){}
+}
 function hideSpin(){ const s = document.getElementById("playerSpin"); if (s) s.style.display = "none"; }
 document.getElementById("player").addEventListener("load", ()=>{ setTimeout(hideSpin, 800); });
 window.addEventListener("message", (event)=>{
@@ -4366,6 +4404,7 @@ window.addEventListener("message", (event)=>{
     if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
     loadEpisodes(); saveContinue();
     document.getElementById("watchStatus").textContent = `Now playing S${watchState.s} E${watchState.e}`;
+    showTitleCard();
   }
   if(type === "cinesrc:skipintro" && typeof data.time === "number"){
     pState.cur = data.time; ctlPaint();
