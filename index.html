@@ -159,6 +159,12 @@
     box-shadow: 0 4px 18px rgba(45,212,191,.45), inset 0 1px 0 rgba(255,255,255,.35) !important;
   }
   #ctlPlay:hover { filter: brightness(1.12); }
+  #ctlSkipIntro {
+    background: linear-gradient(135deg,#2dd4bf,#0ea5e9) !important;
+    border: 1px solid rgba(255,255,255,.25) !important;
+    box-shadow: 0 4px 18px rgba(45,212,191,.45), inset 0 1px 0 rgba(255,255,255,.35) !important;
+  }
+  #ctlSkipIntro:hover { filter: brightness(1.12); }
   /* gradient seek track with glowing thumb (webkit + firefox) */
   #ctlSeek { -webkit-appearance: none; appearance: none; background: transparent; height: 28px; }
   #ctlSeek::-webkit-slider-runnable-track { height: 6px; border-radius: 99px;
@@ -341,7 +347,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 112; // bump every release alongside version.txt
+  const BUILD_NUM = 113; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
