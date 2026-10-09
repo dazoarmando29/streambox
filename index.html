@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 101; // bump every release alongside version.txt
+  const BUILD_NUM = 102; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2691,7 +2691,10 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
   bar.addEventListener("focus", () => { pState.seeking = false; });
   bar.addEventListener("change", () => { // committed value (drag release, or −10s/+30s buttons)
     pState.seeking = false;
-    if (pState.dur > 0) sendCmd("seek", [Math.floor(bar.value / 1000 * pState.dur)]);
+    if (!(pState.dur > 0)) return;
+    const t = Math.floor(bar.value / 1000 * pState.dur);
+    if (mirror === "anipm") anipmSend("seek", { time: t });
+    else sendCmd("seek", [t]);
   });
 })();
 
@@ -4014,6 +4017,18 @@ function animeLangDefault(title){
   } catch(e){}
   return "sub";
 }
+/* anime episode math: TMDB numbers per-season (S2E1), but anime players
+   count absolute episodes. Sum previous seasons' counts to translate. */
+function animeAbsEp(){
+  try {
+    let base = 0;
+    if (watchSeasons && watchSeasons.length) {
+      watchSeasons.filter(x => x.season_number > 0 && x.season_number < watchState.s)
+        .forEach(x => { base += x.episode_count || 0; });
+    }
+    return base + Math.max(1, watchState.e || 1);
+  } catch(e){ return Math.max(1, watchState.e || 1); }
+}
 async function loadAnipmPlayer(){
   const id = watchState.id;
   const f = document.getElementById("player");
@@ -4030,7 +4045,7 @@ async function loadAnipmPlayer(){
     setMirror("vidrift", true);
     return;
   }
-  const ep = Math.max(1, watchState.e || 1);
+  const ep = watchState.anime ? animeAbsEp() : Math.max(1, watchState.e || 1);
   // house-rule dub (Dragon Ball → Faulconer English) or sub default
   const lang0 = animeLangDefault(titleOf(currentItem || {}));
   window._anipmTracks.lang = lang0;
@@ -4049,7 +4064,7 @@ async function loadAnipmPlayer(){
   _anipmLive = false; _anipmHelloT = 0; _anipmQueue.length = 0;
   if (!window._anipmTracks.lang) window._anipmTracks.lang = "sub";
   setTimeout(anipmHello, 800);
-  if (ws) ws.textContent = `Now playing E${ep} — first ▶ tap goes inside, then our bar drives`;
+  if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e} — first ▶ tap goes inside, then our bar drives`;
   if ((watchState.t || 0) > 0) { window._anipmResume = Math.floor(watchState.t); watchState.t = 0; }
   else window._anipmResume = 0;
 }
