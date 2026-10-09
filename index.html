@@ -144,13 +144,35 @@
     padding: 10px 14px !important; gap: 8px;
   }
   .tv-mode #playerBox #ctlBar { left: 18px; right: 18px; bottom: 18px; padding: 12px 18px !important; }
-  /* one row, always (TV app only — desktop/phone keep the wrapping bar):
-     many pills overflowed into an ugly wrapped second row on TV, so the app
-     build scrolls instead, and focus pulls items into view */
+  /* one row, everywhere: the wrapping bar spilled pills (🖱 alone on row two
+     on desktop) and looked broken, so every target scrolls a single row
+     instead, and focus pulls items into view */
+  #playerBox #ctlBar { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  #playerBox #ctlBar::-webkit-scrollbar { display: none; }
+  #playerBox #ctlBar > * { flex-shrink: 0; }
+  #playerBox #ctlSeek { flex: 1 1 100px !important; min-width: 80px !important; }
   body.tv-app #playerBox #ctlBar { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; }
   body.tv-app #playerBox #ctlBar::-webkit-scrollbar { display: none; }
   body.tv-app #playerBox #ctlBar > * { flex-shrink: 0; }
   body.tv-app #playerBox #ctlSeek { flex: 1 1 100px !important; min-width: 80px !important; }
+  /* floating Skip Intro (website/PC only): sits above the bar, bottom-right —
+     a bold white pill that's impossible to miss and never crowds the bar.
+     TV (tv-mode/tv-app) hides this and keeps the in-bar Skip for D-pad walk. */
+  #skipFloat { position: absolute; right: 16px; bottom: 88px; z-index: 7;
+    min-height: 44px; min-width: 44px; padding: 0 22px; border-radius: 99px;
+    background: #fff; color: #0b1426; font-weight: 800; font-size: 15px;
+    border: 1px solid rgba(255,255,255,.6); white-space: nowrap;
+    box-shadow: 0 8px 30px rgba(0,0,0,.55), 0 0 24px rgba(45,212,191,.35);
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    animation: skipIn .25s ease-out; }
+  #skipFloat:hover { background: #f0fdfa; transform: scale(1.03); }
+  #skipFloat:focus-visible { outline: 3px solid #2dd4bf; outline-offset: 2px;
+    box-shadow: 0 0 0 6px rgba(45,212,191,.35), 0 8px 30px rgba(0,0,0,.55); }
+  #skipFloat:active { transform: scale(.97); }
+  @keyframes skipIn { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
+  body.tv-mode #skipFloat, body.tv-app #skipFloat { display: none !important; }
+  /* in-bar Skip lives on TV only (D-pad walk); website/PC use the floating pill */
+  body:not(.tv-mode):not(.tv-app) #ctlSkipIntro { display: none !important; }
   #ctlBar button {
     background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.1);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
@@ -354,7 +376,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 115; // bump every release alongside version.txt
+  const BUILD_NUM = 116; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -483,6 +505,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
             <p id="tcArc" class="hidden mt-1.5 text-[11px] font-bold text-[#0b1426] bg-teal-400 rounded-full px-2.5 py-0.5 w-fit"></p>
           </div>
         </div>
+        <!-- floating Skip Intro (website/PC only — TV keeps the in-bar Skip for D-pad) -->
+        <button id="skipFloat" onclick="skipIntroNow()" aria-label="Skip intro" title="Skip intro" class="hidden">⏭ Skip Intro</button>
         <!-- control bar floats over the video (auto-hides when idle) -->
         <div id="ctlBar" class="absolute left-0 right-0 bottom-0 px-3 py-2.5 flex flex-wrap items-center gap-2">
           <button id="ctlPlay" onclick="ctlToggle()" aria-label="Play or pause" title="Play/Pause (OK)" class="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-400 text-xl font-bold grid place-items-center">▶</button>
@@ -3991,6 +4015,7 @@ async function fetchIntroRanges(){
   const key = `${watchState.type}/${watchState.id}/${watchState.s||""}/${watchState.e||""}`;
   if (key === _introKey) return; // already fetched for this title
   _introKey = key; _introRanges = [];
+  if (watchState.type !== "tv") return; // TV shows + anime only — movies never skip
   try {
     let url = `https://api.theintrodb.org/v3/media?tmdb_id=${watchState.id}`;
     if (watchState.type === "tv") url += `&season=${watchState.s}&episode=${watchState.e}`;
@@ -4005,6 +4030,7 @@ async function fetchIntroRanges(){
    fires on demand (no setting needed). The pill only appears while the
    playhead sits inside a known intro, on mirrors we can drive. */
 function introHit(){
+  if (watchState.type !== "tv") return null; // TV shows + anime only — never movies
   if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return null;
   const cur = pState.cur || 0;
   return _introRanges.find(r => cur >= r.start && cur < r.end - 1) || null;
@@ -4021,9 +4047,12 @@ function skipIntroNow(){
   paintSkipPill();
 }
 function paintSkipPill(){
+  const hit = introHit();
+  const isTV = document.body.classList.contains("tv-mode") || document.body.classList.contains("tv-app");
   const sk = document.getElementById("ctlSkipIntro");
-  if (!sk) return;
-  sk.classList.toggle("hidden", !introHit());
+  if (sk) sk.classList.toggle("hidden", !(hit && isTV)); // TV remote walks the bar
+  const fl = document.getElementById("skipFloat");
+  if (fl) fl.classList.toggle("hidden", !(hit && !isTV)); // website/PC gets the floating pill
 }
 function autoSkipIntro(){
   if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return;
