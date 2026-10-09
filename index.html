@@ -43,7 +43,13 @@
      eases between states. Cannot touch the film's frames (those live inside
      a cross-origin player — your TV's own Motion setting handles those). */
   :root { --mot: 1; }
-  *, *::before, *::after {
+  /* scoped (never `*`): a universal !important duration rule forces the
+     engine to re-resolve transitions on every element — felt as lag on
+     TV SoCs. This list covers all our animated chrome and nothing else. */
+  nav, nav *, #mobileNav, #mobileNav *, .card, .glass, button, input, select, a,
+  #ctlBar, #ctlBar *, #mirrorBar, #mirrorBar *, #mirrorRow, #mirrorRow *,
+  #modal, #modal *, #searchPanel, #epDrawer, #setPanel, #tvGuide, #pinPad,
+  #hero, #hero *, #rows, #continueRow, #cursorBtn, .skel-poster, .skel-line {
     transition-duration: calc(.05s + var(--mot) * .25s) !important;
     animation-duration: calc(.08s + var(--mot) * .32s) !important; }
   /* Netflix cue: transparent over the billboard, solid once you scroll */
@@ -285,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 88; // bump every release alongside version.txt
+  const BUILD_NUM = 89; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2159,6 +2165,7 @@ function loadPlayer(){
   f.src = _u + (_u.includes("?") ? "&" : "?") + "_=" + Date.now();
   const { type, s, e } = watchState;
   window._cinePlaying = false;
+  window._lrT = 0; // fresh video = fresh skim state (no stale chain window)
   // watchdog: CineSrc loads and "finds a server" but never starts playback
   // (blocked source, dead CDN — or a desktop ad-blocker killing the player's
   // own heartbeat calls, which wedges its start logic while bytes still flow).
