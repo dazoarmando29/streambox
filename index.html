@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 93; // bump every release alongside version.txt
+  const BUILD_NUM = 94; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -3894,6 +3894,25 @@ async function anipmIds(tmdbId, title){
       const pick2 = list2.length ? exactIn(list2, x => [x.title && x.title.english, x.title && x.title.romaji, x.title && x.title.userPreferred]) : null;
       if (pick2 && pick2.id) {
         const out = { ani: pick2.id };
+        try { localStorage.setItem(ck, JSON.stringify(out)); } catch(e){}
+        return out;
+      }
+    }
+  } catch(e){}
+  // 3) AniList itself: read-only GraphQL search needs NO auth (OAuth on that
+  // docs page is only for user-list actions). Native AniList IDs back.
+  try {
+    const r3 = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ query: "query($q:String){Page(perPage:5){media(search:$q,type:ANIME){id title{romaji english}}}}", variables: { q: title || "" } })
+    });
+    if (r3.ok) {
+      const d3 = await r3.json();
+      const list3 = (d3 && d3.data && d3.data.Page && d3.data.Page.media) || [];
+      const pick3 = list3.length ? exactIn(list3, x => [x.title && x.title.english, x.title && x.title.romaji]) : null;
+      if (pick3 && pick3.id) {
+        const out = { ani: pick3.id };
         try { localStorage.setItem(ck, JSON.stringify(out)); } catch(e){}
         return out;
       }
