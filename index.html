@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 92; // bump every release alongside version.txt
+  const BUILD_NUM = 93; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2216,11 +2216,31 @@ function loadPlayer(){
     } catch(e){}
     loadAnipmPlayer();
     pokeHud();
+    // a title that already earned its unsandboxed retry keeps it across
+    // episode reloads (no 8s dark wait every episode); new title = re-probe
+    if (window._anipmRawFor !== watchState.id) { window._anipmRaw = false; window._anipmRawFor = watchState.id; }
     window._watchdog = setTimeout(() => {
       if (window._cinePlaying || mirror !== "anipm") return;
-      const ws = document.getElementById("watchStatus");
-      if (ws && /Matching anime|Now playing/.test(ws.textContent || ""))
-        ws.textContent = "AniPM isn't starting — ⇄ Source to VidRift, or ↻ Reload";
+      // stage 1 (8s): no sign of life — some players refuse ANY sandbox
+      // (YapGrid precedent). Drop Ad Shield once and reload; if the frame
+      // was sandbox-wedged this revives it, otherwise nothing is lost.
+      window._anipmRaw = true;
+      try {
+        const f2 = document.getElementById("player");
+        f2.removeAttribute("sandbox");
+        const sh = document.getElementById("optShield");
+        if (sh) { sh.checked = false; sh.disabled = true; sh.title = "Ad Shield unavailable on this mirror"; }
+        f2.src = f2.src.split("&_=")[0] + "&_=" + Date.now();
+      } catch(e){}
+      const ws1 = document.getElementById("watchStatus");
+      if (ws1) ws1.textContent = "Retrying without Ad Shield…";
+    }, 8000);
+    window._watchdog2 = setTimeout(() => {
+      if (window._cinePlaying || mirror !== "anipm") return;
+      // stage 2 (20s): still dark (blocked hosts / dead title) — heal to VidRift
+      const wsa = document.getElementById("watchStatus");
+      if (wsa) wsa.textContent = "AniPM isn't starting here — moved you to VidRift";
+      setMirror("vidrift", true);
     }, 20000);
     return;
   }
@@ -2255,7 +2275,7 @@ function loadPlayer(){
       // anime never belongs on the generic fallback — it lives on AniPM
       const fb = watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi");
       const nm = (MIRRORS.find(x => x.id === fb) || {}).name || fb;
-      setMirror(fb);
+      setMirror(fb, true);
       const ws2 = document.getElementById("watchStatus");
       if (ws2) ws2.textContent = `CineSrc stayed stuck — moved you to ${nm}. ⇄ Source anytime to go back.`;
     }, 35000);
@@ -3006,13 +3026,15 @@ async function fetchTrailer(type, id){
 }
 /* "Back to primary" — anime returns to AniPM, everything else to CineSrc */
 function mirrorHome(){ setMirror(watchState.anime ? "anipm" : "cinesrc"); }
-function setMirror(m){  if (m === "trailer" && !trailerKey) {
+function setMirror(m, auto){  if (m === "trailer" && !trailerKey) {
     document.getElementById("watchStatus").textContent = "No trailer found for this title.";
     return;
   }
   const wasTrailer = mirror === "trailer";
   mirror = m;
-  if (m !== "trailer") { try { localStorage.setItem("streambox_mirror", m); } catch(e){} }
+  // auto-heals never rewrite the saved preference (or every movie after
+  // would open on the fallback mirror)
+  if (m !== "trailer" && !auto) { try { localStorage.setItem("streambox_mirror", m); } catch(e){} }
   updateMirrorUI();
   paintMirrors();
   applyMirrorSandbox();
@@ -3059,6 +3081,13 @@ function updateMirrorUI(){
 function applyMirrorSandbox(){
   const f = document.getElementById("player");
   if (!f) return;
+  // AniPM earned an unsandboxed retry (stage-1 probe): keep it off on reloads
+  if (mirror === "anipm" && window._anipmRaw) {
+    f.removeAttribute("sandbox");
+    const sh0 = document.getElementById("optShield");
+    if (sh0) { sh0.checked = false; sh0.disabled = true; sh0.title = "Ad Shield unavailable on this mirror"; }
+    return;
+  }
   if (NO_SANDBOX.has(mirror)) {
     f.removeAttribute("sandbox");
     const sh = document.getElementById("optShield");
@@ -3835,22 +3864,42 @@ function anipmSend(cmd, args){
       { ns: "anipm.player", v: 1, id: ++_anipmSeq, cmd, args: args || {} }, ANIPM_ORIGIN);
   } catch(e){}
 }
-async function anipmMalId(tmdbId, title){
+async function anipmIds(tmdbId, title){
+  // TMDB→player-ID mapping, two hosts: Jikan (MAL id) first, Consumet
+  // (AniList id) as backup on a different network path — one blocked API
+  // no longer means a black player. Cached per title either way.
   const ck = "sb:ani:" + tmdbId;
-  try { const c = JSON.parse(localStorage.getItem(ck) || "null"); if (c && c.mal) return c.mal; } catch(e){}
+  try { const c = JSON.parse(localStorage.getItem(ck) || "null"); if (c && (c.mal || c.ani)) return c; } catch(e){}
+  const norm = s => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const nt = norm(title);
+  const exactIn = (list, names) => list.find(x => names(x).some(n => n && norm(n) === nt)) || list[0];
   try {
     const r = await fetch("https://api.jikan.moe/v4/anime?q=" + encodeURIComponent(title || "") + "&limit=5&sfw=true");
-    if (!r.ok) return 0;
-    const d = await r.json();
-    const list = (d && d.data) || [];
-    if (!list.length) return 0;
-    const norm = s => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    const nt = norm(title);
-    const exact = list.find(x => norm(x.title_english) === nt || norm(x.title) === nt);
-    const pick = exact || list[0];
-    if (pick && pick.mal_id) { try { localStorage.setItem(ck, JSON.stringify({ mal: pick.mal_id })); } catch(e){} return pick.mal_id; }
+    if (r.ok) {
+      const d = await r.json();
+      const list = (d && d.data) || [];
+      const pick = list.length ? exactIn(list, x => [x.title_english, x.title]) : null;
+      if (pick && pick.mal_id) {
+        const out = { mal: pick.mal_id };
+        try { localStorage.setItem(ck, JSON.stringify(out)); } catch(e){}
+        return out;
+      }
+    }
   } catch(e){}
-  return 0;
+  try {
+    const r2 = await fetch("https://api.consumet.org/meta/anilist/" + encodeURIComponent(title || ""));
+    if (r2.ok) {
+      const d2 = await r2.json();
+      const list2 = (d2 && d2.results) || [];
+      const pick2 = list2.length ? exactIn(list2, x => [x.title && x.title.english, x.title && x.title.romaji, x.title && x.title.userPreferred]) : null;
+      if (pick2 && pick2.id) {
+        const out = { ani: pick2.id };
+        try { localStorage.setItem(ck, JSON.stringify(out)); } catch(e){}
+        return out;
+      }
+    }
+  } catch(e){}
+  return {};
 }
 async function loadAnipmPlayer(){
   const id = watchState.id;
@@ -3859,15 +3908,19 @@ async function loadAnipmPlayer(){
   const ws = document.getElementById("watchStatus");
   if (spin) spin.style.display = "grid";
   if (ws) ws.textContent = "Matching anime…";
-  const mal = await anipmMalId(id, titleOf(currentItem || {}));
+  const ids = await anipmIds(id, titleOf(currentItem || {}));
   if (watchState.id !== id || mirror !== "anipm") return; // user moved on
-  if (!mal) {
+  const ep = Math.max(1, watchState.e || 1);
+  const src = ids.mal ? `https://ani.pm/embed/mal/${ids.mal}/${ep}/sub`
+    : ids.ani ? `https://ani.pm/embed/ani/${ids.ani}/${ep}/sub` : null;
+  if (!src) {
+    // both mapping hosts failed — don't sit black, fall to VidRift
     if (spin) spin.style.display = "none";
-    if (ws) ws.textContent = "Couldn't match this anime — ⇄ Source to VidRift";
+    if (ws) ws.textContent = "Couldn't match this anime — moved you to VidRift";
+    setMirror("vidrift", true);
     return;
   }
-  const ep = Math.max(1, watchState.e || 1);
-  f.src = `https://ani.pm/embed/mal/${mal}/${ep}/sub`;
+  f.src = src;
   if (ws) ws.textContent = `Now playing E${ep} — first ▶ tap goes inside, then our bar drives`;
   if ((watchState.t || 0) > 0) { window._anipmResume = Math.floor(watchState.t); watchState.t = 0; }
   else window._anipmResume = 0;
