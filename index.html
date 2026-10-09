@@ -297,7 +297,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 108; // bump every release alongside version.txt
+  const BUILD_NUM = 109; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -3796,9 +3796,16 @@ const ARC_S1 = [
   [/dragon ball z/i, "Saiyan Saga"],
   [/^dragon ball$/i, "Emperor Pilaf Saga"],
 ];
+/* Pinned season→saga tables (fan-verified beats sniffing every time).
+   Checked FIRST; keyword sniffing only fills seasons with no pin. */
+const SEASON_ARC_OVERRIDES = [
+  // { match: /show title/i, arcs: { 1: "Saga", 2: "Saga" } },
+];
 function seasonArc(title, overview, s){
   try {
     if (!/dragon\s*ball/i.test(title || "")) return "";
+    const pin = SEASON_ARC_OVERRIDES.find(o => o.match.test(title || ""));
+    if (pin && pin.arcs && pin.arcs[s]) return pin.arcs[s];
     const hit = ARC_KEYS.find(([re]) => re.test(overview || ""));
     if (hit) return hit[1];
     if ((s || 1) === 1) {
