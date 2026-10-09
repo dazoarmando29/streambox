@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 103; // bump every release alongside version.txt
+  const BUILD_NUM = 104; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1904,7 +1904,10 @@ async function openDetail(type, id){
   }
   if (my !== detailReq) return; // a newer open/close superseded this one
   currentDetail = { type, id, data: d };
-  document.getElementById("mBackdrop").src = IMG(d.backdrop_path, "w780");
+  const mb = document.getElementById("mBackdrop");
+  mb.style.display = ""; // reset: a past error hides this shared img forever
+  mb.src = d.backdrop_path ? IMG(d.backdrop_path, "w780") : (d.poster_path ? IMG(d.poster_path, "w780") : "");
+  if (!mb.src) mb.style.display = "none";
   document.getElementById("mBackdrop").loading = "eager";
   document.getElementById("mTitle").textContent = titleOf(d);
   document.getElementById("mMeta").textContent = `★ ${Number(d.vote_average||0).toFixed(1)} • ${(d.release_date||d.first_air_date||"").slice(0,4)} • ${(d.genres||[]).map(g=>g.name).join(", ")}`;
@@ -1944,7 +1947,11 @@ async function loadModalEpisodes(){
   modalEpIdx = 0;
   updateModalEpLabel();
   const ms = document.getElementById("mSeasonSub");
-  if (ms) ms.textContent = seasonSub(d, (modalSeasons[modalSeasonIdx]||{}).episode_count);
+  if (ms) {
+    const arcM = seasonArc(titleOf((currentDetail || {}).data || {}), d.overview || "");
+    const base = seasonSub(d, (modalSeasons[modalSeasonIdx]||{}).episode_count);
+    ms.textContent = arcM ? arcM + " · " + base : base;
+  }
 }
 function modalSeasonStep(dir){
   if (!modalSeasons.length) return;
@@ -3734,8 +3741,31 @@ function paintCaps(force){
    keeps its own season cursor (drawerS); only tapping an episode plays. */
 let drawerEps = [], drawerRevealed = new Set(), spoilerOn = false, drawerS = 1;
 try { spoilerOn = localStorage.getItem("streambox_spoiler") === "1"; } catch(e){}
-/* season arc line: TMDB's own season summary (real arc description) + year +
-   episode count. Season numbers are never replaced — always "Season N" first. */
+/* season arc names: sniffed from TMDB's own season summary (real data, no
+   invented tables). Dragon Ball sagas in check order (later sagas first so
+   "Vegeta" in a Buu recap can't win). Returns "" when unknown. */
+const ARC_KEYS = [
+  [/buu|babidi|dabura|gotenks/i, "Majin Buu Saga"],
+  [/cell|androids|cell games/i, "Cell Saga"],
+  [/frieza|ginyu|namek/i, "Frieza Saga"],
+  [/garlic/i, "Garlic Jr. Saga"],
+  [/tournament of power|jiren|toppo|zeno/i, "Tournament of Power"],
+  [/goku black|zamasu/i, "Future Trunks Saga"],
+  [/champa|universe 6|beerus.*champa/i, "Universe 6 Saga"],
+  [/golden frieza|resurrection/i, "Golden Frieza Saga"],
+  [/beerus|whis|battle of gods/i, "God of Destruction Saga"],
+  [/baby|super 17|shadow dragon|omega shenron/i, "Shadow Dragon Saga"],
+  [/red ribbon|king piccolo|daimao/i, "King Piccolo Saga"],
+  [/tournament(?! of power)/i, "Tournament Saga"],
+  [/saiyan|vegeta|raditz|nappa/i, "Saiyan Saga"],
+];
+function seasonArc(title, overview){
+  try {
+    if (!/dragon\s*ball/i.test(title || "")) return "";
+    const hit = ARC_KEYS.find(([re]) => re.test(overview || ""));
+    return hit ? hit[1] : "";
+  } catch(e){ return ""; }
+}
 function seasonSub(seasonDetail, fallbackCount){
   const ov = (seasonDetail && seasonDetail.overview || "").trim();
   const yr = (seasonDetail && seasonDetail.air_date || "").slice(0, 4);
@@ -3744,9 +3774,9 @@ function seasonSub(seasonDetail, fallbackCount){
   if (ov) return ov.length > 150 ? ov.slice(0, 150) + "…" : ov;
   return tail;
 }
-function updateDrawerSeasonLabel(){
+function updateDrawerSeasonLabel(arc){
   const watching = drawerS === watchState.s;
-  document.getElementById("drawerSeasonLabel").textContent = `Season ${drawerS}${watching ? " ✓" : ""}`;
+  document.getElementById("drawerSeasonLabel").textContent = `Season ${drawerS}${arc ? " · " + arc : ""}${watching ? " ✓" : ""}`;
   paintSpoilerBtn();
 }
 function paintSpoilerBtn(){
@@ -3783,6 +3813,8 @@ async function renderEpDrawer(){
     return;
   }
   drawerEps = d.episodes || [];
+  const arcD = seasonArc(titleOf(currentItem || {}), d.overview || "");
+  updateDrawerSeasonLabel(arcD);
   const sub = document.getElementById("drawerSeasonSub");
   if (sub) sub.textContent = drawerS === watchState.s ? `You're watching here · ${seasonSub(d)}` : seasonSub(d);
   list.innerHTML = "";
