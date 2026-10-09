@@ -291,7 +291,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 102; // bump every release alongside version.txt
+  const BUILD_NUM = 103; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -4092,6 +4092,22 @@ window.addEventListener("message", (event)=>{
   if (m.channel === "megacloud" && m.event === "time") { anipmProgress(m.time, m.duration); return; }
   if (m.channel === "megacloud" && m.event === "complete") { anipmEnded(); return; }
   if (!m || m.ns !== "anipm.player") return;
+  // generic audio-track sniffing: stash any reported track arrays so the A/V
+  // sheet can offer every dub variant (Faulconer vs others) by name
+  try {
+    const dd = m.data || {};
+    Object.keys(dd).forEach(k => {
+      const v = dd[k];
+      if (Array.isArray(v) && v.length && typeof v[0] === "object") {
+        const hasH = v.some(x => x && (x.height || x.value));
+        if (hasH) return; // qualities handled by qualitychange
+        const looksAudio = /audio|lang/i.test(k);
+        const T = window._anipmTracks;
+        if (looksAudio) T.audioTracks = v;
+        else if (!T.subTracks) T.subTracks = v;
+      }
+    });
+  } catch(e){}
   // hello reply: connection live — flush anything queued before it
   if (m.id === 0 && m.ok) {
     _anipmLive = true;
@@ -4189,6 +4205,18 @@ function paintAV(){
       paintAV();
     }));
   });
+  // every reported dub variant by name (Faulconer cut vs others, when listed)
+  if (Array.isArray(T.audioTracks)) {
+    T.audioTracks.slice(0, 6).forEach(t => {
+      const label = (t && (t.label || t.language || t.name)) || null;
+      if (!label || /^(sub|dub)$/i.test(label)) return;
+      const isCur = lang === String(label).toLowerCase();
+      audio.appendChild(avPill((isCur ? "● " : "") + label, isCur, () => {
+        anipmSend("setLanguage", { lang: label });
+        paintAV();
+      }));
+    });
+  }
   const subs = document.getElementById("avSubs"); subs.innerHTML = "";
   const sel = window._anipmSubs;
   const off = sel === false;
