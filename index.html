@@ -226,6 +226,9 @@
     transition: transform .12s ease-out, background-color .15s ease-out; }
   button:active { transform: scale(.95); }
   #epGrid button { min-height: 44px; }
+  /* unaired episodes: greyed + dead (real <button disabled>, so Tab/D-pad
+     skip them and no pointer can fire them) */
+  #epGrid button:disabled { opacity: .45; cursor: not-allowed; }
   /* phones: tighter hero, full-width player controls */
   @media (max-width: 640px) {
     #hero { height: 62vh !important; }
@@ -376,7 +379,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 116; // bump every release alongside version.txt
+  const BUILD_NUM = 117; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2017,7 +2020,10 @@ async function openDetail(type, id){
   document.getElementById("mWatch").onclick = () => {
     if(type==="tv"){
       const s = (modalSeasons[modalSeasonIdx]||{}).season_number || 1;
-      const e = (modalEpisodes[modalEpIdx]||{}).episode_number || 1;
+      const mep = modalEpisodes[modalEpIdx] || {};
+      const e = mep.episode_number || 1;
+      const un = epUnaired(mep);
+      if (un) { updateModalEpLabel(); return; } // label already says when it airs — no dead player
       closeModal(); openWatch(type, id, s, e);
     } else { closeModal(); openWatch(type, id); }
   };
@@ -2040,7 +2046,11 @@ function updateModalSeasonLabel(){
 }
 function updateModalEpLabel(){
   const e = modalEpisodes[modalEpIdx];
-  document.getElementById("mEpisodeLabel").textContent = e ? `E${e.episode_number} — ${(e.name||"").slice(0,18)}` : "E1";
+  if (!e) { document.getElementById("mEpisodeLabel").textContent = "E1"; return; }
+  const un = epUnaired(e);
+  document.getElementById("mEpisodeLabel").textContent = un
+    ? `E${e.episode_number} 📅 airs ${epAirPretty(un)}`
+    : `E${e.episode_number} — ${(e.name||"").slice(0,18)}`;
 }
 async function loadModalEpisodes(){
   const s = (modalSeasons[modalSeasonIdx]||{}).season_number || 1;
@@ -2064,7 +2074,12 @@ function modalSeasonStep(dir){
 }
 function modalEpStep(dir){
   if (!modalEpisodes.length) return;
-  modalEpIdx = (modalEpIdx + dir + modalEpisodes.length) % modalEpisodes.length;
+  // step past unaired episodes so the stepper never parks on one (loop-guarded:
+  // an all-unaired season just lands back where it started, label shows 📅)
+  for (let i = 0; i < modalEpisodes.length; i++) {
+    modalEpIdx = (modalEpIdx + dir + modalEpisodes.length) % modalEpisodes.length;
+    if (!epUnaired(modalEpisodes[modalEpIdx])) break;
+  }
   updateModalEpLabel();
 }
 function closeModal(){
@@ -2162,6 +2177,21 @@ async function openWatch(type, id, s=1, e=1, t=0){
   clearTimeout(window._tipT);
   window._tipT = setTimeout(() => { if (!document.body.classList.contains("video-fs")) showSubTip(false); }, 2500);
 }
+/* Unaired-episode guard (TMDB air_date vs local today, day granularity):
+   returns the future air-date string when the episode isn't out yet, else
+   null. Missing/blank dates stay clickable — old catalog rows often lack
+   dates, and we'd rather never lock a real episode. */
+function epUnaired(ep){
+  const a = ep && ep.air_date;
+  if (!a) return null;
+  const d = new Date();
+  const today = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  return a > today ? a : null;
+}
+function epAirPretty(iso){
+  try { return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); }
+  catch(e){ return iso; }
+}
 async function loadEpisodes(s){
   const sv = s || gridS;
   const { id } = watchState;
@@ -2171,15 +2201,25 @@ async function loadEpisodes(s){
   window._seasonArc = seasonDisplayName(d, seasonArc(titleOf(currentItem || {}), d.overview || "", sv));
   updateSeasonLabel();
     (d.episodes||[]).forEach(ep=>{
+    const unaired = epUnaired(ep);
     const b = document.createElement("button");
-    b.textContent = "E" + ep.episode_number;
-    b.title = ep.name;
-    b.setAttribute("data-focusable", "1");
+    b.textContent = unaired ? "E" + ep.episode_number + " 📅" : "E" + ep.episode_number;
+    b.title = unaired ? `Airs ${epAirPretty(unaired)} — not out yet` : (ep.name || "");
     const isCur = sv === watchState.s && ep.episode_number == e;
-    b.className = "text-xs px-2 py-2 rounded-lg " + (isCur ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
-    b.onclick = ()=>{ watchState.s = sv; gridS = sv; watchState.e = ep.episode_number; loadPlayer(); loadEpisodes(); updateSeasonLabel(); saveContinue(); };
+    if (unaired) {
+      // greyed + dead: no data-focusable (stays out of D-pad/Tab order),
+      // no handler — a real disabled button can't be mistaken for content
+      b.disabled = true;
+      b.setAttribute("aria-disabled", "true");
+      b.className = "text-xs px-2 py-2 rounded-lg bg-white/5 text-gray-500";
+    } else {
+      b.setAttribute("data-focusable", "1");
+      b.className = "text-xs px-2 py-2 rounded-lg " + (isCur ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
+      b.onclick = ()=>{ watchState.s = sv; gridS = sv; watchState.e = ep.episode_number; loadPlayer(); loadEpisodes(); updateSeasonLabel(); saveContinue(); };
+    }
     grid.appendChild(b);
   });
+  window._watchEps = { s: sv, eps: d.episodes || [] }; // Next-Ep guard consults this
   const box = document.getElementById("upNext");
   if (sv === watchState.s) paintUpNext(d.episodes || []);
   else if (box) box.classList.add("hidden");
@@ -2189,7 +2229,7 @@ function paintUpNext(eps){
   if (!box) return;
   if (watchState.type !== "tv") { box.classList.add("hidden"); return; }
   const nxt = (eps || []).find(x => x.episode_number === watchState.e + 1);
-  if (!nxt) { box.classList.add("hidden"); return; }
+  if (!nxt || epUnaired(nxt)) { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
   document.getElementById("upNextTitle").textContent = `S${watchState.s} E${nxt.episode_number} • ${nxt.name || ""}`;
   document.getElementById("upNextMeta").textContent = nxt.runtime ? `${nxt.runtime}m` : "";
@@ -2209,6 +2249,18 @@ function watchSeasonStep(dir){
   updateSeasonLabel(); loadEpisodes();
 }
 function nextEpisode(dir){
+  // never step into an unaired episode (Next Ep on a season finale, etc):
+  // say when it airs instead of loading a dead player
+  const target = watchState.e + dir;
+  if (target >= 1 && window._watchEps && window._watchEps.s === watchState.s) {
+    const t = (window._watchEps.eps || []).find(x => x.episode_number === target);
+    const un = t && epUnaired(t);
+    if (un) {
+      const ws = document.getElementById("watchStatus");
+      if (ws) ws.textContent = `S${watchState.s} E${target} airs ${epAirPretty(un)} — not out yet 📅`;
+      return;
+    }
+  }
   watchState.e += dir;
   if(watchState.e < 1) watchState.e = 1;
   loadPlayer(); loadEpisodes(); saveContinue();
@@ -3972,7 +4024,26 @@ async function renderEpDrawer(){
     !q || ("e" + ep.episode_number).includes(q) || (ep.name || "").toLowerCase().includes(q));
   if (!shown.length) list.innerHTML = `<p class="text-sm text-gray-500">No episodes match.</p>`;
   shown.forEach(ep => {
+    const unaired = epUnaired(ep);
     const isCur = drawerS === watchState.s && ep.episode_number === watchState.e;
+    if (unaired) {
+      // greyed + dead: out of tab/D-pad order, no handlers — visible so
+      // nobody wonders where the episode went, but unmistakably unavailable
+      const card = document.createElement("div");
+      card.className = "relative bg-white/5 border border-dashed rounded-xl overflow-hidden border-white/10 opacity-60";
+      card.setAttribute("aria-disabled", "true");
+      card.setAttribute("aria-label", `Episode ${ep.episode_number} airs ${epAirPretty(unaired)} — not out yet`);
+      const still = ep.still_path ? IMG(ep.still_path, "w300") : "";
+      card.innerHTML = `
+        ${still ? `<img loading="lazy" decoding="async" src="${still}" class="w-full aspect-video object-cover" onerror="this.style.display='none'">` : ""}
+        <span class="absolute top-2 right-2 text-[11px] font-bold bg-white/10 text-gray-300 px-2 py-0.5 rounded-full">📅 NOT OUT YET</span>
+        <div class="p-3">
+          <p class="font-bold text-sm text-gray-400">E${ep.episode_number} — ${ep.name || ""}</p>
+          <p class="text-[11px] text-gray-500 mt-1">Airs ${epAirPretty(unaired)} — check back then</p>
+        </div>`;
+      list.appendChild(card);
+      return;
+    }
     const hidden = spoilerOn && !drawerRevealed.has(ep.episode_number) && !isCur;
     const card = document.createElement("div");
     card.className = "relative bg-white/5 border rounded-xl overflow-hidden " + (isCur ? "border-teal-500" : "border-white/10");
