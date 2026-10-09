@@ -134,11 +134,55 @@
   #capOverlay.cap-bottom { bottom: 12%; }
   #capOverlay.cap-center { top: 44%; }
   #capOverlay.cap-top { top: 10%; }
-  /* the bar floats over the video (all modes): no strips, no covered captions */
+  /* the bar floats over the video (all modes): a glass pill, not a strip */
   #playerBox #ctlBar {
-    position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
-    background: linear-gradient(to top, rgba(11,20,38,.94), rgba(11,20,38,.55) 65%, transparent);
-    border: 0; border-radius: 0; margin: 0;
+    position: absolute; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 6;
+    background: rgba(9, 15, 30, .72) !important;
+    -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3);
+    border: 1px solid rgba(255,255,255,.12) !important; border-radius: 20px !important; margin: 0;
+    box-shadow: 0 12px 40px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.08);
+    padding: 10px 14px !important; gap: 8px;
+  }
+  .tv-mode #playerBox #ctlBar { left: 18px; right: 18px; bottom: 18px; padding: 12px 18px !important; }
+  #ctlBar button {
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  #ctlBar button:hover { background: rgba(255,255,255,.17); }
+  #ctlBar button:focus-visible {
+    outline: 2px solid #2dd4bf; outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(45,212,191,.28);
+  }
+  #ctlPlay {
+    background: linear-gradient(135deg, #2dd4bf, #0ea5e9) !important;
+    border: 1px solid rgba(255,255,255,.25) !important;
+    box-shadow: 0 4px 18px rgba(45,212,191,.45), inset 0 1px 0 rgba(255,255,255,.35) !important;
+  }
+  #ctlPlay:hover { filter: brightness(1.12); }
+  /* gradient seek track with glowing thumb (webkit + firefox) */
+  #ctlSeek { -webkit-appearance: none; appearance: none; background: transparent; height: 28px; }
+  #ctlSeek::-webkit-slider-runnable-track { height: 6px; border-radius: 99px;
+    background: linear-gradient(to right, #2dd4bf var(--fill,0%), rgba(255,255,255,.18) var(--fill,0%)); }
+  #ctlSeek::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -5px;
+    border-radius: 50%; background: #fff; border: 3px solid #2dd4bf;
+    box-shadow: 0 0 12px rgba(45,212,191,.8); cursor: pointer; }
+  #ctlSeek::-moz-range-track { height: 6px; border-radius: 99px; background: rgba(255,255,255,.18); }
+  #ctlSeek::-moz-range-progress { height: 6px; border-radius: 99px; background: #2dd4bf; }
+  #ctlSeek::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%;
+    background: #fff; border: 3px solid #2dd4bf; box-shadow: 0 0 12px rgba(45,212,191,.8); }
+  #ctlSeek:focus-visible { outline: 2px solid #2dd4bf; outline-offset: 4px; border-radius: 99px; }
+  /* mirror strip + toasts share the glass language */
+  #mirrorBar {
+    background: rgba(9, 15, 30, .72) !important;
+    -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3);
+    border: 1px solid rgba(255,255,255,.12) !important; border-radius: 18px !important;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.08);
+  }
+  #volToast {
+    background: rgba(9, 15, 30, .8) !important;
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    border: 1px solid rgba(45,212,191,.4) !important;
+    box-shadow: 0 8px 28px rgba(0,0,0,.5);
   }
   .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   /* touch targets: no button under 44px (fingers + TV remotes).
@@ -297,7 +341,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 110; // bump every release alongside version.txt
+  const BUILD_NUM = 111; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2584,6 +2628,7 @@ function ctlPaint(){
   paintSubsBtn();
   if (!pState.seeking && pState.dur > 0) {
     document.getElementById("ctlSeek").value = Math.round(pState.cur / pState.dur * 1000);
+    try { document.getElementById("ctlSeek").style.setProperty("--fill", (pState.cur / pState.dur * 100) + "%"); } catch(e){}
   }
 }
 function ctlReset(){
@@ -4033,7 +4078,13 @@ function anipmHello(){
 /* live track state for the A/V sheet (filled by quality/subtitle/language
    events; defaults keep the sheet useful before the first event) */
 window._anipmTracks = { qualities: [1080, 720, 480], quality: "Auto", subTracks: null, lang: "sub" };
-/* qualities arrive as objects ({height,label,…}) on some titles — normalize */
+/* subtitle track names: the player often reports anonymous tracks, so name
+   them from every field it might use, numbered when duplicated */
+function anipmTrackLabel(t, i){
+  const raw = t && (t.label || t.name || t.language || t.srclang || t.lang || t.code || t.id);
+  if (raw && String(raw).length <= 24) return String(raw);
+  return "Track " + (i + 1);
+}
 function anipmQInfo(h){
   if (typeof h === "number") return { height: h, label: h + "p" };
   if (h && typeof h === "object") {
@@ -4320,13 +4371,17 @@ function paintAV(){
   }));
   const tracks = Array.isArray(T.subTracks) ? T.subTracks : null;
   if (tracks && tracks.length) {
-    tracks.slice(0, 8).forEach(t => {
-      const label = (t && (t.label || t.language)) || "CC";
+    const seen = {};
+    tracks.slice(0, 8).forEach((t, i) => {
+      let label = anipmTrackLabel(t, i);
+      if (seen[label] != null) { seen[label]++; label = label + " " + seen[label]; }
+      else seen[label] = 1;
       const isOn = !off && (sel === true || sel === label);
       subs.appendChild(avPill((isOn && sel === label ? "● " : "") + label, sel === label, () => {
         window._anipmSubs = label;
         const m = { enabled: true };
-        if (t.language) m.language = t.language; else m.label = label;
+        if (t && t.language) m.language = t.language;
+        else if (t && (t.label || t.name)) m.label = t.label || t.name;
         anipmSend("setSubtitles", m); paintAV(); paintSubsBtn();
       }));
     });
