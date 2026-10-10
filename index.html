@@ -176,6 +176,9 @@
   #skipFloat:active { transform: scale(.97); }
   @keyframes skipIn { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
   body.tv-mode #skipFloat, body.tv-app #skipFloat { display: none !important; }
+  /* the ID rule above sets display:flex, which outranks Tailwind's .hidden —
+     without this the pill could never hide and sat through the whole video */
+  #skipFloat.hidden { display: none !important; }
   /* in-bar Skip lives on TV only (D-pad walk); website/PC use the floating pill */
   body:not(.tv-mode):not(.tv-app) #ctlSkipIntro { display: none !important; }
   #ctlBar button {
@@ -384,7 +387,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 126; // bump every release alongside version.txt
+  const BUILD_NUM = 127; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -571,6 +574,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <label class="flex items-center gap-2"><input type="checkbox" id="optAutoplay" checked class="switch"> Autoplay</label>
         <label class="flex items-center gap-2"><input type="checkbox" id="optAutonext" checked class="switch"> Auto-next</label>
         <label class="flex items-center gap-2"><input type="checkbox" id="optAutoskip" class="switch"> Auto-skip intro</label>
+        <label class="flex items-center gap-2" title="Stuck player hops mirrors by itself. Off = we just name the server to try, and you hop with ⇄ Source."><input type="checkbox" id="optAutoswitch" class="switch" onchange="autoSwitchSave()"> Auto-switch server</label>
         <label class="flex items-center gap-1">Accent <input type="color" id="optColor" value="#14b8a6" class="w-8 h-6 bg-transparent"></label>
         <label class="flex items-center gap-1" title="Smoothness of StreamBox's own UI motion (your TV's Motion setting handles the film itself)">🎞 Motion
           <input type="checkbox" id="optMotion" checked class="switch" onchange="motionOpts()"></label>
@@ -1143,6 +1147,7 @@ setTimeout(checkCinesrc, 2500);
 
 /* ---------- HOME ---------- */
 async function init(){
+  try { autoSwitchRestore(); } catch(e){} // manual hop mode persists across visits
   renderContinue();
   const rows = document.getElementById("rows");
   // beauty: shimmer placeholders so the page never looks broken while loading
@@ -2519,6 +2524,43 @@ function buildEmbedUrlClean(){
   if(watchState.type==="movie") return `https://cinesrc.st/embed/movie/${watchState.id}?${p}`;
   return `https://cinesrc.st/embed/tv/${watchState.id}?s=${watchState.s}&e=${watchState.e}&${p}`;
 }
+/* Server hopping: automatic by nobody's default — a stuck player NAMES its
+   fallback and you hop with ⇄ Source (strip ⇄ button or ⚙ → ⇄ Source).
+   Tick Playback Settings → Auto-switch server to restore the old self-heal. */
+function autoSwitchOn(){
+  try { return !!document.getElementById("optAutoswitch").checked; }
+  catch(e){ return false; }
+}
+function autoSwitchSave(){
+  try { localStorage.setItem("streambox_autoswitch", document.getElementById("optAutoswitch").checked ? "1" : "0"); } catch(e){}
+}
+function autoSwitchRestore(){
+  try {
+    const el = document.getElementById("optAutoswitch");
+    if (el) el.checked = localStorage.getItem("streambox_autoswitch") === "1";
+  } catch(e){}
+}
+/* manual-mode recommendation: toast in-player (visible in cinema) + status
+   below. Vanishes on first real playback (clearStuckTip) or Back/load. */
+function stuckRecommend(msg, fbName){
+  window._stuckShown = true;
+  const ws = document.getElementById("watchStatus");
+  if (ws) ws.textContent = msg + ` — press ⇄ Source to try ${fbName}`;
+  try {
+    const t = document.getElementById("volToast");
+    if (t) {
+      t.textContent = `⚠ Stuck — ⇄ Source tries ${fbName}`;
+      t.classList.remove("hidden");
+      clearTimeout(window._stuckT);
+      window._stuckT = setTimeout(() => { try { t.classList.add("hidden"); } catch(e){} }, 8000);
+    }
+  } catch(e){}
+}
+function clearStuckTip(){
+  if (!window._stuckShown) return;
+  window._stuckShown = false;
+  try { document.getElementById("volToast").classList.add("hidden"); } catch(e){}
+}
 /* Stuck-player clocks for the anime mirrors (AniPM + VidRift): armed at ask
    time AND re-armed on every frame load, so slow ID-mapping + slow networks
    can't eat the budget before loading even begins — only a frame that arrived
@@ -2550,7 +2592,9 @@ function armStuckWatchdogs(){
     window._watchdog2 = setTimeout(() => {
       if (window._cinePlaying || mirror !== "anipm") return;
       // stage 2: still dark (blocked hosts / dead title / robot-check a
-      // remote can't complete) — heal to VidRift, which arms its own stage 3
+      // remote can't complete) — auto mode heals to VidRift (which arms its
+      // own stage 3); manual mode just names the fallback and waits for you
+      if (!autoSwitchOn()) { stuckRecommend("AniPM isn't starting here", "VidRift"); return; }
       const wsa = document.getElementById("watchStatus");
       if (wsa) wsa.textContent = "AniPM isn't starting here — moved you to VidRift. Robot-check on the new player? ⇄ Source hops mirrors";
       setMirror("vidrift", true);
@@ -2564,6 +2608,7 @@ function armStuckWatchdogs(){
   if (watchState.anime && _aTV && mirrorAllowed("yapgrid")) {
     window._watchdog2 = setTimeout(() => {
       if (window._cinePlaying || mirror !== "vidrift") return;
+      if (!autoSwitchOn()) { stuckRecommend("VidRift is showing a check this remote can't complete", "YapGrid"); return; }
       const ws3 = document.getElementById("watchStatus");
       if (ws3) ws3.textContent = "VidRift is showing a check this remote can't complete — moved you to YapGrid. ⇄ Source anytime to hop again";
       setMirror("yapgrid", true);
@@ -2575,6 +2620,8 @@ function loadPlayer(){
   // never strand playback on a hidden server.
   if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
   ctlReset();
+  window._stuckShown = false; // fresh video, fresh verdict (no stale hop advice)
+  try { document.getElementById("volToast").classList.add("hidden"); } catch(e){}
   applyMirrorSandbox();
   const spin = document.getElementById("playerSpin");
   if (spin) spin.style.display = "grid";
@@ -2640,6 +2687,7 @@ function loadPlayer(){
       // anime never belongs on the generic fallback — it lives on AniPM
       const fb = watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi");
       const nm = (MIRRORS.find(x => x.id === fb) || {}).name || fb;
+      if (!autoSwitchOn()) { stuckRecommend("CineSrc stayed stuck", nm); return; }
       setMirror(fb, true);
       const ws2 = document.getElementById("watchStatus");
       if (ws2) ws2.textContent = `CineSrc stayed stuck — moved you to ${nm}. ⇄ Source anytime to go back.`;
@@ -2744,7 +2792,7 @@ function goHome(ev){
   // may leak into the next one (stale auto-heals used to yank new titles
   // onto the previous title's fallback server)
   clearTimeout(window._watchdog); clearTimeout(window._watchdog2); clearTimeout(window._spinT);
-  resumeAt = -1; window._cmdQ = []; window._qSeekD = 0; window._cinePlaying = false;
+  resumeAt = -1; window._cmdQ = []; window._qSeekD = 0; window._cinePlaying = false; window._stuckShown = false;
   try { document.getElementById("healthBar").classList.add("hidden"); } catch(e){}
   exitVideoFs();
   closePanels();
@@ -4449,6 +4497,7 @@ window.addEventListener("message", (event)=>{
     if (typeof d.currentTime === "number") pState.cur = d.currentTime;
     if (typeof d.duration === "number" && d.duration > 0) pState.dur = d.duration;
     if (typeof d.currentTime === "number" && d.currentTime > 0.5) window._cinePlaying = true;
+    try { clearStuckTip(); } catch(e){}
     hideSpin(); ctlPaint();
     if (d.duration > 0) saveProgress(d.currentTime, d.duration);
     autoSkipIntro();
@@ -4524,21 +4573,33 @@ function anipmQInfo(h){
   }
   return { height: 0, label: String(h) };
 }
-async function anipmIds(tmdbId, title){
+async function anipmIds(tmdbId, title, tmdbYear){
   // TMDB→player-ID mapping, two hosts: Jikan (MAL id) first, Consumet
   // (AniList id) as backup on a different network path — one blocked API
   // no longer means a black player. Cached per title either way.
-  const ck = "sb:ani:" + tmdbId;
+  // Cache v2: v1 ignored release years, so same-name remakes (Hunter x
+  // Hunter 1999 vs 2011) could lock onto the wrong series — v2 re-maps once.
+  const ck = "sb:ani2:" + tmdbId;
   try { const c = JSON.parse(localStorage.getItem(ck) || "null"); if (c && (c.mal || c.ani)) return c; } catch(e){}
   const norm = s => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const nt = norm(title);
+  const yrOf = x => x.year || x.seasonYear
+    || parseInt(String(x.releaseDate || "").slice(0, 4), 10)
+    || (x.aired && x.aired.from ? parseInt(String(x.aired.from).slice(0, 4), 10) : 0) || 0;
+  // same title, many years (remakes live here): prefer TMDB's year ±1 first,
+  // fall back to the whole list when nothing matches (year data is spotty)
+  const preferYear = list => {
+    if (!tmdbYear || !list.length) return list;
+    const same = list.filter(x => { const y = yrOf(x); return y && Math.abs(y - tmdbYear) <= 1; });
+    return same.length ? same : list;
+  };
   const exactIn = (list, names) => list.find(x => names(x).some(n => n && norm(n) === nt)) || list[0];
   try {
     const r = await fetch("https://api.jikan.moe/v4/anime?q=" + encodeURIComponent(title || "") + "&limit=5&sfw=true");
     if (r.ok) {
       const d = await r.json();
       const list = (d && d.data) || [];
-      const pick = list.length ? exactIn(list, x => [x.title_english, x.title]) : null;
+      const pick = list.length ? exactIn(preferYear(list), x => [x.title_english, x.title]) : null;
       if (pick && pick.mal_id) {
         const out = { mal: pick.mal_id };
         try { localStorage.setItem(ck, JSON.stringify(out)); } catch(e){}
@@ -4551,7 +4612,7 @@ async function anipmIds(tmdbId, title){
     if (r2.ok) {
       const d2 = await r2.json();
       const list2 = (d2 && d2.results) || [];
-      const pick2 = list2.length ? exactIn(list2, x => [x.title && x.title.english, x.title && x.title.romaji, x.title && x.title.userPreferred]) : null;
+      const pick2 = list2.length ? exactIn(preferYear(list2), x => [x.title && x.title.english, x.title && x.title.romaji, x.title && x.title.userPreferred]) : null;
       if (pick2 && pick2.id) {
         const out = { ani: pick2.id };
         try { localStorage.setItem(ck, JSON.stringify(out)); } catch(e){}
@@ -4565,12 +4626,12 @@ async function anipmIds(tmdbId, title){
     const r3 = await fetch("https://graphql.anilist.co", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({ query: "query($q:String){Page(perPage:5){media(search:$q,type:ANIME){id title{romaji english}}}}", variables: { q: title || "" } })
+      body: JSON.stringify({ query: "query($q:String){Page(perPage:5){media(search:$q,type:ANIME){id seasonYear title{romaji english}}}}", variables: { q: title || "" } })
     });
     if (r3.ok) {
       const d3 = await r3.json();
       const list3 = (d3 && d3.data && d3.data.Page && d3.data.Page.media) || [];
-      const pick3 = list3.length ? exactIn(list3, x => [x.title && x.title.english, x.title && x.title.romaji]) : null;
+      const pick3 = list3.length ? exactIn(preferYear(list3), x => [x.title && x.title.english, x.title && x.title.romaji]) : null;
       if (pick3 && pick3.id) {
         const out = { ani: pick3.id };
         try { localStorage.setItem(ck, JSON.stringify(out)); } catch(e){}
@@ -4611,7 +4672,8 @@ async function loadAnipmPlayer(){
   const ws = document.getElementById("watchStatus");
   if (spin) spin.style.display = "grid";
   if (ws) ws.textContent = "Matching anime…";
-  const ids = await anipmIds(id, titleOf(currentItem || {}));
+  const tmdbYear = parseInt(String((currentItem || {}).first_air_date || "").slice(0, 4), 10) || 0;
+  const ids = await anipmIds(id, titleOf(currentItem || {}), tmdbYear);
   if (watchState.id !== id || mirror !== "anipm") return; // user moved on
   if (!ids.mal && !ids.ani) {
     // all three mapping hosts failed — don't sit black, fall to VidRift
@@ -4647,6 +4709,7 @@ function anipmProgress(cur, dur){
   if (typeof cur === "number") pState.cur = cur;
   if (typeof dur === "number" && dur > 0) pState.dur = dur;
   if (typeof cur === "number" && cur > 0.5) window._cinePlaying = true;
+  try { clearStuckTip(); } catch(e){} // playing for real: hop advice served its purpose
   ctlPaint();
   if (dur > 0) saveProgress(cur, dur);
   try { sleepTick(); } catch(e){}
@@ -4900,6 +4963,7 @@ window.addEventListener("message", (event)=>{
     if (typeof data.currentTime === "number") pState.cur = data.currentTime;
     if (typeof data.duration === "number" && data.duration > 0) pState.dur = data.duration;
     if (typeof data.currentTime === "number" && data.currentTime > 0.5) window._cinePlaying = true;
+    try { clearStuckTip(); } catch(e){}
     ctlPaint();
     autoSkipIntro();
   }
