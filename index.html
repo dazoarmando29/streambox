@@ -387,7 +387,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 127; // bump every release alongside version.txt
+  const BUILD_NUM = 128; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2218,11 +2218,20 @@ async function openWatch(type, id, s=1, e=1, t=0){
     const pm = localStorage.getItem("streambox_mirror") || "cinesrc";
     // anime defaults to AniPM (two-way player API, sub/dub, built-in skip;
     // VidRift stays as fallback) — unless the user picked another mirror.
-    const def = (anime && (pm === "cinesrc")) ? "anipm" : pm;
+    // Non-anime can never play on AniPM (no mapping exists), so a stale
+    // saved anipm pref falls back instead of hanging on an unmatchable load.
+    let def = (anime && (pm === "cinesrc")) ? "anipm" : pm;
+    if (!anime && def === "anipm") def = "cinesrc";
     mirror = (def === "trailer" || !MIRRORS.some(x => x.id === def) || !mirrorAllowed(def)) ? "cinesrc" : def;
     if (mirror === "cinesrc" && anime && mirrorAllowed("anipm")) mirror = "anipm";
   } catch(e){ mirror = "cinesrc"; }
   trailerKey = null; // trailer is a per-viewing fallback, never default
+  // no stale frames: blank the player NOW (modal-direct switches skip Back,
+  // and a hung mapper below must never leave the previous show on screen)
+  try {
+    document.getElementById("player").src = "about:blank";
+    document.getElementById("playerSpin").style.display = "grid";
+  } catch(e){}
   updateMirrorUI();
   document.getElementById("homeView").classList.add("hidden");
   document.getElementById("watchView").classList.remove("hidden");
@@ -4673,11 +4682,15 @@ async function loadAnipmPlayer(){
   if (spin) spin.style.display = "grid";
   if (ws) ws.textContent = "Matching anime…";
   const tmdbYear = parseInt(String((currentItem || {}).first_air_date || "").slice(0, 4), 10) || 0;
-  const ids = await anipmIds(id, titleOf(currentItem || {}), tmdbYear);
+  // mapping must never hang the player: 15s cap, then the no-match path below
+  let ids = {};
+  try { ids = await withTimeout(anipmIds(id, titleOf(currentItem || {}), tmdbYear), 15000, "anime-map"); } catch(e){ ids = {}; }
   if (watchState.id !== id || mirror !== "anipm") return; // user moved on
   if (!ids.mal && !ids.ani) {
     // all three mapping hosts failed — don't sit black, fall to VidRift
+    // (manual hop mode just names it instead of moving)
     if (spin) spin.style.display = "none";
+    if (!autoSwitchOn()) { stuckRecommend("Couldn't match this anime", "VidRift"); return; }
     if (ws) ws.textContent = "Couldn't match this anime — moved you to VidRift";
     setMirror("vidrift", true);
     return;
