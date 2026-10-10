@@ -384,7 +384,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 124; // bump every release alongside version.txt
+  const BUILD_NUM = 125; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2491,35 +2491,16 @@ function buildEmbedUrlClean(){
   if(watchState.type==="movie") return `https://cinesrc.st/embed/movie/${watchState.id}?${p}`;
   return `https://cinesrc.st/embed/tv/${watchState.id}?s=${watchState.s}&e=${watchState.e}&${p}`;
 }
-function loadPlayer(){
-  preconnectCinesrc();
-  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
-  // never strand playback on a hidden server.
-  if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
-  ctlReset();
-  applyMirrorSandbox();
-  const spin = document.getElementById("playerSpin");
-  if (spin) spin.style.display = "grid";
-  const f = document.getElementById("player");
+/* Stuck-player clocks for the anime mirrors (AniPM + VidRift): armed at ask
+   time AND re-armed on every frame load, so slow ID-mapping + slow networks
+   can't eat the budget before loading even begins — only a frame that arrived
+   and still shows zero playback may trigger a retry or heal. */
+function armStuckWatchdogs(){
+  clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
+  if (window._cinePlaying) return;
+  if (mirror !== "anipm" && mirror !== "vidrift") return;
+  const _aTV = document.body.classList.contains("tv-mode");
   if (mirror === "anipm") {
-    // async ID mapping — the generic URL builder can't do this one
-    window._lrT = 0; window._cinePlaying = false; window._anipmResume = 0;
-    clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
-    ctlReset(); ctlPollStop();
-    fetchIntroRanges();
-    try {
-      // first press must land INSIDE their player (their rule) — TV app hands
-      // the remote straight there; everyone else gets 🎯/🖱 on the strip
-      if (document.body.classList.contains("tv-mode") && /\bwv\b/.test(navigator.userAgent || "")) focusPlayer();
-    } catch(e){}
-    loadAnipmPlayer();
-    pokeHud();
-    // a title that already earned its unsandboxed retry keeps it across
-    // episode reloads (no 8s dark wait every episode); new title = re-probe
-    if (window._anipmRawFor !== watchState.id) { window._anipmRaw = false; window._anipmRawFor = watchState.id; }
-    // slow TV boxes can take a minute just to get going — TV gets 30s/60s
-    // before we retry or heal, so a merely-loading player is never yanked
-    const _aTV = document.body.classList.contains("tv-mode");
     window._watchdog = setTimeout(() => {
       if (window._cinePlaying || mirror !== "anipm") return;
       // stage 1: no sign of life — drop a sandbox if one is still on
@@ -2546,6 +2527,49 @@ function loadPlayer(){
       if (wsa) wsa.textContent = "AniPM isn't starting here — moved you to VidRift. Robot-check on the new player? ⇄ Source hops mirrors";
       setMirror("vidrift", true);
     }, _aTV ? 60000 : 20000);
+    return;
+  }
+  // stage 3 (TV anime only): VidRift stuck on a robot/phone check a remote
+  // can't complete looks exactly like a dead load (zero progress events) —
+  // hop to YapGrid instead of stranding on it. Desktop keeps manual
+  // control: a QR there is solvable with the phone in your hand.
+  if (watchState.anime && _aTV && mirrorAllowed("yapgrid")) {
+    window._watchdog2 = setTimeout(() => {
+      if (window._cinePlaying || mirror !== "vidrift") return;
+      const ws3 = document.getElementById("watchStatus");
+      if (ws3) ws3.textContent = "VidRift is showing a check this remote can't complete — moved you to YapGrid. ⇄ Source anytime to hop again";
+      setMirror("yapgrid", true);
+    }, 60000);
+  }
+}
+function loadPlayer(){
+  preconnectCinesrc();  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
+  // never strand playback on a hidden server.
+  if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
+  ctlReset();
+  applyMirrorSandbox();
+  const spin = document.getElementById("playerSpin");
+  if (spin) spin.style.display = "grid";
+  const f = document.getElementById("player");
+  if (mirror === "anipm") {
+    // async ID mapping — the generic URL builder can't do this one
+    window._lrT = 0; window._cinePlaying = false; window._anipmResume = 0;
+    clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
+    ctlReset(); ctlPollStop();
+    fetchIntroRanges();
+    try {
+      // first press must land INSIDE their player (their rule) — TV app hands
+      // the remote straight there; everyone else gets 🎯/🖱 on the strip
+      if (document.body.classList.contains("tv-mode") && /\bwv\b/.test(navigator.userAgent || "")) focusPlayer();
+    } catch(e){}
+    loadAnipmPlayer();
+    pokeHud();
+    // a title that already earned its unsandboxed retry keeps it across
+    // episode reloads (no 8s dark wait every episode); new title = re-probe
+    if (window._anipmRawFor !== watchState.id) { window._anipmRaw = false; window._anipmRawFor = watchState.id; }
+    // slow TV boxes can take a minute just to get going — TV gets 30s/60s
+    // before we retry or heal, so a merely-loading player is never yanked
+    armStuckWatchdogs();
     showTitleCard();
     return;
   }
@@ -2600,19 +2624,7 @@ function loadPlayer(){
       const _rt = Math.floor(watchState.t); watchState.t = 0;
       setTimeout(() => vidriftSend({ type: "vidrift:resume", currentTime: _rt }), 1500);
     }
-    // stage 3 (TV anime only): VidRift stuck on a robot/phone check a remote
-    // can't complete looks exactly like a dead load (zero progress events) —
-    // hop to YapGrid instead of stranding on it. Desktop keeps manual
-    // control: a QR there is solvable with the phone in your hand.
-    clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
-    if (watchState.anime && document.body.classList.contains("tv-mode") && mirrorAllowed("yapgrid")) {
-      window._watchdog2 = setTimeout(() => {
-        if (window._cinePlaying || mirror !== "vidrift") return;
-        const ws3 = document.getElementById("watchStatus");
-        if (ws3) ws3.textContent = "VidRift is showing a check this remote can't complete — moved you to YapGrid. ⇄ Source anytime to hop again";
-        setMirror("yapgrid", true);
-      }, 60000);
-    }
+    armStuckWatchdogs(); // stage 3 lives here (TV anime only)
   }
   // fallback: hide spinner even if the player never fires ready
   // (ad-blocked network etc.) — slow TV boxes get longer before we nudge
@@ -4754,7 +4766,15 @@ function showTitleCard(paired){
   } catch(e){}
 }
 function hideSpin(){ const s = document.getElementById("playerSpin"); if (s) s.style.display = "none"; }
-document.getElementById("player").addEventListener("load", ()=>{ setTimeout(hideSpin, 800); });
+document.getElementById("player").addEventListener("load", ()=>{
+  setTimeout(hideSpin, 800);
+  // fresh frame = fresh patience: the ask-time clocks started before ID
+  // mapping + network fetch, so restart them from arrival — a slow loader
+  // may no longer burn the whole budget before its first byte
+  try {
+    if (!document.getElementById("watchView").classList.contains("hidden")) armStuckWatchdogs();
+  } catch(e){}
+});
 window.addEventListener("message", (event)=>{
   if(event.origin !== "https://cinesrc.st") return;
   const { type, ...data } = event.data || {};
