@@ -179,6 +179,18 @@
   /* the ID rule above sets display:flex, which outranks Tailwind's .hidden —
      without this the pill could never hide and sat through the whole video */
   #skipFloat.hidden { display: none !important; }
+  /* toast popup: side-styled, GPU-cheap (opacity + transform only, no blur —
+     weak TV SoCs stay smooth), calm-mode safe (motion just snaps off) */
+  #toast { position: fixed; left: 50%; bottom: 26px; z-index: 120;
+    transform: translateX(-50%) translateY(16px); opacity: 0; pointer-events: none;
+    transition: opacity .25s ease, transform .25s ease;
+    background: rgba(9, 15, 30, .9); border: 1px solid rgba(45,212,191,.45);
+    border-radius: 18px; box-shadow: 0 12px 40px rgba(0,0,0,.55);
+    padding: 10px 10px 10px 18px; display: flex; align-items: center; gap: 12px;
+    max-width: min(92vw, 600px); }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+  #toastMsg { font-weight: 700; font-size: 14px; color: #fff; flex: 1; min-width: 0; }
+  #toast:focus-visible { outline: 3px solid #2dd4bf; outline-offset: 2px; }
   /* in-bar Skip lives on TV only (D-pad walk); website/PC use the floating pill */
   body:not(.tv-mode):not(.tv-app) #ctlSkipIntro { display: none !important; }
   #ctlBar button {
@@ -385,9 +397,16 @@
   <button onclick="document.getElementById('healthBar').classList.add('hidden')" class="shrink-0 h-11 px-5 rounded-full bg-black/20 font-black">Got it</button>
 </div>
 
+<!-- TOAST: site-styled popup (replaces every native alert) — message plus
+  optional action buttons (Continue / My List →). Transform-only motion. -->
+<div id="toast" role="status" aria-live="polite">
+  <span id="toastMsg"></span>
+  <span id="toastBtns" class="flex gap-2 shrink-0"></span>
+</div>
+
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 128; // bump every release alongside version.txt
+  const BUILD_NUM = 129; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -416,7 +435,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <button id="navMovies" onclick="filterType('movie',event)" class="navlink">Movies</button>
     <button id="navTv" onclick="filterType('tv',event)" class="navlink">TV Shows</button>
     <button id="navAnime" onclick="filterType('anime',event)" class="navlink">Anime</button>
-    <button id="navList" onclick="showContinue(event)" class="navlink">My List</button>
+    <button id="navList" onclick="showList(event)" class="navlink">My List</button>
     <button onclick="openTvGuide(event)" class="navlink" title="How to install & use on TV">📺 TV Setup</button>
   </div>
   <div class="ml-auto flex gap-2 w-full md:w-auto justify-end">
@@ -432,7 +451,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <button id="mnavMovies" onclick="filterType('movie',event)" class="mnav-btn"><span class="text-xl leading-none">🎬</span><span>Movies</span></button>
     <button id="mnavTv" onclick="filterType('tv',event)" class="mnav-btn"><span class="text-xl leading-none">📺</span><span>TV</span></button>
     <button id="mnavAnime" onclick="filterType('anime',event)" class="mnav-btn"><span class="text-xl leading-none">✨</span><span>Anime</span></button>
-    <button id="mnavList" onclick="showContinue(event)" class="mnav-btn"><span class="text-xl leading-none">📌</span><span>My List</span></button>
+    <button id="mnavList" onclick="showList(event)" class="mnav-btn"><span class="text-xl leading-none">📌</span><span>My List</span></button>
   </div>
 </nav>
 
@@ -469,6 +488,21 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <div id="genreRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
     <button id="loadMoreBtn" onclick="browseMore()" class="hidden mx-auto mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 font-bold text-sm">Load more ↓</button>
+  </main>
+
+  <!-- MY LIST -->
+  <main id="listView" class="hidden px-4 md:px-10 pt-28 md:pt-32 pb-20">
+    <div class="flex items-center gap-3 mb-4">
+      <h2 class="row-title text-xl font-bold flex-1">My List</h2>
+      <span id="listCount" class="text-xs text-gray-500 font-bold"></span>
+    </div>
+    <div id="listEmpty" class="hidden text-center py-16 px-6">
+      <p class="text-4xl">📌</p>
+      <p class="font-black text-xl mt-4">Your list is empty</p>
+      <p class="text-sm text-gray-400 mt-2 max-w-sm mx-auto">Save movies, shows and anime with <b>+ My List</b> — they land here for one-tap watching on every device.</p>
+      <button onclick="goHome(event)" class="mt-6 bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full text-sm">Browse titles</button>
+    </div>
+    <div id="listGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
   </main>
   <!-- FOOTER: brand + credits (text-only, never enters remote tab order) -->
   <footer class="px-4 md:px-10 pb-10 pt-2 text-[11px] text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -641,7 +675,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <p id="mOverview" class="text-sm text-gray-300 mt-3 leading-relaxed"></p>
       <div class="flex flex-wrap gap-3 mt-5 items-center">
         <button id="mWatch" class="bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">▶ Watch Now</button>
-        <button onclick="addToList()" class="bg-white/10 hover:bg-white/20 px-5 py-2.5 rounded-full text-sm">+ My List</button>
+        <button id="mListBtn" onclick="addToList()" class="bg-white/10 hover:bg-white/20 px-5 py-2.5 rounded-full text-sm">+ My List</button>
       </div>
       <div id="mSeasons" class="mt-5 hidden">
         <div class="flex flex-wrap items-center gap-3">
@@ -1644,7 +1678,15 @@ function skeletonRow(title){
       } catch(err){}
       if (document.body.classList.contains("video-fs")) { exitVideoFs(); goHome(e); e.preventDefault(); return; }
       const watch = document.getElementById("watchView");
-      if (watch && !watch.classList.contains("hidden")) { goHome(e); e.preventDefault(); }
+      if (watch && !watch.classList.contains("hidden")) { goHome(e); e.preventDefault(); return; }
+      // action toast dismisses before anything navigates
+      try {
+        const tst = document.getElementById("toast");
+        if (tst && tst.classList.contains("show")) { hideToast(); e.preventDefault(); return; }
+      } catch(err){}
+      // browse grids + My List fall back home (never a dead-end for Back)
+      const lv = document.getElementById("listView"), gv2 = document.getElementById("gridView");
+      if ((lv && !lv.classList.contains("hidden")) || (gv2 && !gv2.classList.contains("hidden"))) { goHome(e); e.preventDefault(); return; }
     }
   }, true);
   // Glow ring follows REMOTE/KEYBOARD focus only (TV always qualifies):
@@ -1819,6 +1861,7 @@ function showGrid(title, items){
   document.getElementById("loadMoreBtn").classList.add("hidden");
   const gv = document.getElementById("gridView");
   gv.classList.remove("hidden");
+  document.getElementById("listView").classList.add("hidden");
   document.getElementById("gridTitle").textContent = title;
   const g = document.getElementById("grid"); g.innerHTML = "";
   items.forEach(x=>{
@@ -1829,6 +1872,7 @@ function showGrid(title, items){
 }
 function showRows(){
   document.getElementById("gridView").classList.add("hidden");
+  document.getElementById("listView").classList.add("hidden");
   document.getElementById("rows").classList.remove("hidden");
   document.getElementById("hero").classList.remove("hidden");
   renderContinue();
@@ -2002,6 +2046,7 @@ async function openBrowse(type, ev){
   document.getElementById("rows").classList.add("hidden");
   document.getElementById("hero").classList.add("hidden");
   document.getElementById("continueRow").classList.add("hidden");
+  document.getElementById("listView").classList.add("hidden");
   document.getElementById("gridView").classList.remove("hidden");
   document.getElementById("gridTitle").textContent = type === "movie" ? "Movies" : type === "anime" ? "Anime" : "TV Shows";
   paintNav(type === "movie" ? "navMovies" : type === "anime" ? "navAnime" : "navTv");
@@ -2110,7 +2155,7 @@ async function openDetail(type, id){
   try {
     d = await tmdb(`/${type}/${id}?append_to_response=credits`);
   } catch(err) {
-    alert("Couldn't load details. Check your connection and try again.");
+    toast("Couldn't load details — check connection and try again.");
     return;
   }
   if (my !== detailReq) return; // a newer open/close superseded this one
@@ -2123,6 +2168,9 @@ async function openDetail(type, id){
   document.getElementById("mTitle").textContent = titleOf(d);
   document.getElementById("mMeta").textContent = `★ ${Number(d.vote_average||0).toFixed(1)} • ${(d.release_date||d.first_air_date||"").slice(0,4)} • ${(d.genres||[]).map(g=>g.name).join(", ")}`;
   document.getElementById("mOverview").textContent = d.overview || "No overview.";
+  try {
+    document.getElementById("mListBtn").textContent = inList(type, id) ? "✓ In My List" : "+ My List";
+  } catch(e){}
   document.getElementById("mWatch").onclick = () => {
     if(type==="tv"){
       const s = (modalSeasons[modalSeasonIdx]||{}).season_number || 1;
@@ -2251,6 +2299,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
     d = await tmdb(`/${type}/${id}?append_to_response=credits`);
   } catch(err) {
     document.getElementById("watchStatus").textContent = "Couldn't load details — check connection, then press Back and retry.";
+    toast("Couldn't load details — check connection and try again.");
     return;
   }
   currentItem = d;
@@ -2816,6 +2865,39 @@ function goHome(ev){
   showRows();
 }
 
+/* ---------- Toast popup (every native alert() died for this) ----------
+   Glass pill, teal hairline, transform-only motion (TV-GPU cheap). Plain
+   messages vanish in ~2.6s; action toasts hold ~9s, longer while focused. */
+function toast(msg, actions){
+  const t = document.getElementById("toast");
+  if (!t) return;
+  document.getElementById("toastMsg").textContent = msg;
+  const row = document.getElementById("toastBtns");
+  row.innerHTML = "";
+  (actions || []).forEach((a, i) => {
+    const b = document.createElement("button");
+    b.textContent = a.label;
+    b.className = "min-h-[44px] px-5 rounded-full text-sm font-bold " + (i === 0 ? "bg-teal-500 hover:bg-teal-400" : "bg-white/10 hover:bg-white/20");
+    b.onclick = () => { hideToast(); try { a.fn && a.fn(); } catch(e){} };
+    row.appendChild(b);
+  });
+  row.style.display = (actions && actions.length) ? "" : "none";
+  t.classList.add("show");
+  clearTimeout(window._toastT);
+  window._toastT = setTimeout(hideToast, (actions && actions.length) ? 9000 : 2600);
+}
+function hideToast(){ try { document.getElementById("toast").classList.remove("show"); } catch(e){} clearTimeout(window._toastT); }
+function toastSaveActions(){
+  return [
+    { label: "Continue", fn: null },
+    { label: "My List →", fn: () => showList() },
+  ];
+}
+try {
+  document.getElementById("toast").addEventListener("focusin", () => clearTimeout(window._toastT));
+  document.getElementById("toast").addEventListener("focusout", () => { clearTimeout(window._toastT); window._toastT = setTimeout(hideToast, 4000); });
+} catch(e){}
+
 /* ---------- Continue watching + My List (localStorage) ---------- */
 // one-time migration from old CineStream key
 try {
@@ -2898,14 +2980,80 @@ function removeContinue(type,id){
   localStorage.setItem("streambox_continue", JSON.stringify(arr));
   renderContinue();
 }
+/* ---------- My List (its own shelf — Continue Watching keeps progress) ---------- */
+function getList(){
+  try { return JSON.parse(localStorage.getItem("streambox_mylist") || "[]"); } catch(e){ return []; }
+}
+function saveList(arr){
+  try { localStorage.setItem("streambox_mylist", JSON.stringify((arr || []).slice(0, 100))); } catch(e){}
+}
+function inList(type, id){
+  return getList().some(x => x.type === type && x.id === id);
+}
 function addToList(){
   if(!currentDetail) return;
-  let arr = JSON.parse(localStorage.getItem("streambox_continue")||"[]");
   const d = currentDetail.data;
-  const item = { type: currentDetail.type, id: currentDetail.id, s:1, e:1, title: titleOf(d), poster: d.poster_path, pos: 0, dur: 0, at: Date.now() };
-  arr = [item, ...arr.filter(x=>!(x.type===item.type&&x.id===item.id))].slice(0,20);
-  localStorage.setItem("streambox_continue", JSON.stringify(arr));
-  alert("Added to My List ✓");
+  const btn = document.getElementById("mListBtn");
+  if (inList(currentDetail.type, currentDetail.id)) {
+    saveList(getList().filter(x => !(x.type === currentDetail.type && x.id === currentDetail.id)));
+    if (btn) btn.textContent = "+ My List";
+    toast("Removed from My List");
+  } else {
+    const item = { type: currentDetail.type, id: currentDetail.id, title: titleOf(d),
+      poster: d.poster_path, rating: d.vote_average,
+      year: (d.release_date || d.first_air_date || "").slice(0, 4), at: Date.now() };
+    saveList([item, ...getList()]);
+    if (btn) btn.textContent = "✓ In My List";
+    toast("✓ Saved to My List", toastSaveActions());
+  }
+  try {
+    if (!document.getElementById("listView").classList.contains("hidden")) renderList();
+  } catch(e){}
+}
+function removeFromList(type, id){
+  saveList(getList().filter(x => !(x.type === type && x.id === id)));
+  renderList();
+  toast("Removed from My List");
+}
+function showList(ev){
+  if (ev) ev.preventDefault();
+  closePanels();
+  document.getElementById("hero").classList.add("hidden");
+  document.getElementById("rows").classList.add("hidden");
+  document.getElementById("continueRow").classList.add("hidden");
+  document.getElementById("gridView").classList.add("hidden");
+  document.getElementById("homeView").classList.remove("hidden");
+  document.getElementById("watchView").classList.add("hidden");
+  document.getElementById("listView").classList.remove("hidden");
+  paintNav("navList");
+  try { window.scrollTo(0, 0); } catch(e){}
+  renderList();
+  if (document.body.classList.contains("tv-mode")) {
+    setTimeout(() => {
+      const first = document.querySelector("#listGrid .card") || document.querySelector("#listView button");
+      if (first) { try { first.focus({ preventScroll: true }); } catch(e){} }
+    }, 60);
+  }
+}
+function renderList(){
+  const arr = getList();
+  const grid = document.getElementById("listGrid");
+  const empty = document.getElementById("listEmpty");
+  const count = document.getElementById("listCount");
+  if (count) count.textContent = arr.length ? arr.length + (arr.length === 1 ? " title" : " titles") : "";
+  grid.innerHTML = "";
+  empty.classList.toggle("hidden", arr.length > 0);
+  arr.forEach(x => {
+    const c = cardEl({ title: x.title, name: x.title, poster_path: x.poster, vote_average: x.rating, media_type: x.type }, x.type);
+    const rm = document.createElement("button");
+    rm.className = "absolute top-1 right-1 z-[2] w-9 h-9 rounded-full bg-black/60 hover:bg-black/90 text-sm";
+    rm.setAttribute("aria-label", `Remove ${x.title} from My List`);
+    rm.textContent = "✕";
+    rm.onclick = (ev) => { ev.stopPropagation(); removeFromList(x.type, x.id); };
+    rm.onkeydown = (ev) => { if (okPressed(ev)) { ev.preventDefault(); ev.stopPropagation(); removeFromList(x.type, x.id); } };
+    c.appendChild(rm);
+    grid.appendChild(c);
+  });
 }
 
 /* ---------- Bar auto-hide: visible on interaction, gone after 4s idle ---------- */
