@@ -379,7 +379,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 120; // bump every release alongside version.txt
+  const BUILD_NUM = 121; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1152,11 +1152,14 @@ async function init(){
     rows.appendChild(makeRow("Trending Now", trend.results));
     hideSplash();
     markReady();
-    // TV: focus content immediately instead of waiting for the rest
+    // TV: focus content immediately instead of waiting for the rest —
+    // pinned to the top: a scrolling focus used to shove the hero title
+    // above the fold, forcing an Up press just to see the billboard
     if (document.body.classList.contains("tv-mode")) {
       setTimeout(() => {
+        try { window.scrollTo(0, 0); } catch(e){}
         const first = document.querySelector("#hero button") || document.querySelector("#rows .card");
-        if (first) first.focus();
+        if (first) first.focus({ preventScroll: true });
       }, 400);
     }
     // Below-the-fold rows load after first paint (fail soft, row by row)
