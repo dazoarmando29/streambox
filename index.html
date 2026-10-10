@@ -384,7 +384,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 125; // bump every release alongside version.txt
+  const BUILD_NUM = 126; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -514,13 +514,13 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           </div>
         </div>
         <!-- floating Skip Intro (website/PC only — TV keeps the in-bar Skip for D-pad) -->
-        <button id="skipFloat" onclick="skipIntroNow()" aria-label="Skip intro" title="Skip intro" class="hidden">⏭ Skip Intro</button>
+        <button id="skipFloat" onclick="skipPillNow()" aria-label="Skip intro or credits" title="Skip intro / credits" class="hidden">⏭ Skip Intro</button>
         <!-- control bar floats over the video (auto-hides when idle) -->
         <div id="ctlBar" class="absolute left-0 right-0 bottom-0 px-3 py-2.5 flex flex-wrap items-center gap-2">
           <button id="ctlPlay" onclick="ctlToggle()" aria-label="Play or pause" title="Play/Pause (OK)" class="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-400 text-xl font-bold grid place-items-center">▶</button>
           <button onclick="ctlSeekRel(-10)" aria-label="Back 10 seconds" title="Back 10s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">−10s</button>
           <button onclick="ctlSeekRel(30)" aria-label="Forward 30 seconds" title="Forward 30s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">+30s</button>
-          <button id="ctlSkipIntro" onclick="skipIntroNow()" aria-label="Skip intro" title="Skip intro" class="hidden h-11 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-sm font-bold">⏭ Skip</button>
+          <button id="ctlSkipIntro" onclick="skipPillNow()" aria-label="Skip intro or credits" title="Skip intro / credits" class="hidden h-11 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-sm font-bold">⏭ Skip</button>
           <span id="ctlCur" class="text-xs text-gray-300 tabular-nums ml-1">0:00</span>
           <input id="ctlSeek" type="range" min="0" max="1000" value="0" step="1" tabindex="-1" aria-label="Seek (pointer drag; remote uses −10s/+30s)" title="Drag to seek (remote: use −10s/+30s buttons)"
             class="flex-1 min-w-[120px] h-11 accent-teal-500 cursor-pointer">
@@ -615,10 +615,10 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <div id="wCast" class="text-xs text-gray-500 mt-3"></div>
     </div>
     <div id="upNext" class="no-cinema hidden bg-white/5 border border-white/10 rounded-xl p-5 mt-4">
-      <p class="text-[11px] font-black tracking-[.2em] text-teal-300">UP NEXT</p>
+      <p id="upNextKick" class="text-[11px] font-black tracking-[.2em] text-teal-300">UP NEXT</p>
       <p id="upNextTitle" class="font-bold mt-1"></p>
       <p id="upNextMeta" class="text-[11px] text-gray-500 mt-0.5"></p>
-      <button onclick="nextEpisode(1)" class="mt-3 bg-teal-500 hover:bg-teal-400 font-bold px-5 py-2 rounded-full text-sm">Play Now</button>
+      <button id="upNextPlay" onclick="nextEpisode(1)" class="mt-3 bg-teal-500 hover:bg-teal-400 font-bold px-5 py-2 rounded-full text-sm">Play Now</button>
     </div>
   </div>
 </div>
@@ -2301,11 +2301,22 @@ async function loadEpisodes(s){
   const grid = document.getElementById("epGrid"); grid.innerHTML = "";
   window._seasonArc = seasonDisplayName(d, seasonArc(titleOf(currentItem || {}), d.overview || "", sv));
   updateSeasonLabel();
+  // finale flags for this season: last aired ep gets 🏁 (series 👑 when this
+  // is also the show's last season) — same data TV + anime both ride on
+  const _airNums = (d.episodes || []).filter(x => !epUnaired(x)).map(x => x.episode_number);
+  const _maxEp = _airNums.length ? Math.max(..._airNums) : -1;
+  let _lastSeason = false;
+  try {
+    const _ss = ((currentItem || {}).seasons || []).map(s => s.season_number).filter(n => n > 0);
+    _lastSeason = _ss.length ? Math.max(..._ss) === sv : false;
+  } catch(e){}
     (d.episodes||[]).forEach(ep=>{
     const unaired = epUnaired(ep);
+    const isFin = !unaired && ep.episode_number === _maxEp;
+    const finTag = isFin ? (_lastSeason ? "Series finale" : "Season finale") : "";
     const b = document.createElement("button");
-    b.textContent = unaired ? "E" + ep.episode_number + " 📅" : "E" + ep.episode_number;
-    b.title = unaired ? `Airs ${epAirPretty(unaired)} — not out yet` : (ep.name || "");
+    b.textContent = unaired ? "E" + ep.episode_number + " 📅" : "E" + ep.episode_number + (isFin ? " 🏁" : "");
+    b.title = unaired ? `Airs ${epAirPretty(unaired)} — not out yet` : (finTag || ep.name || "");
     const isCur = sv === watchState.s && ep.episode_number == e;
     if (unaired) {
       // greyed + dead: no data-focusable (stays out of D-pad/Tab order),
@@ -2330,10 +2341,27 @@ function paintUpNext(eps){
   if (!box) return;
   if (watchState.type !== "tv") { box.classList.add("hidden"); return; }
   const nxt = (eps || []).find(x => x.episode_number === watchState.e + 1);
-  if (!nxt || epUnaired(nxt)) { box.classList.add("hidden"); return; }
+  const playBtn = document.getElementById("upNextPlay");
+  const kick = document.getElementById("upNextKick");
+  if (nxt && !epUnaired(nxt)) {
+    box.classList.remove("hidden");
+    if (kick) kick.textContent = "UP NEXT";
+    document.getElementById("upNextTitle").textContent = `S${watchState.s} E${nxt.episode_number} • ${nxt.name || ""}`;
+    document.getElementById("upNextMeta").textContent = nxt.runtime ? `${nxt.runtime}m` : "";
+    if (playBtn) playBtn.classList.remove("hidden");
+    return;
+  }
+  if (nxt) { box.classList.add("hidden"); return; } // announced but not out — grid shows its 📅
+  // season over: announce the finale instead of an Up Next (TV + anime alike)
+  const fin = finaleInfo();
+  if (!fin) { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
-  document.getElementById("upNextTitle").textContent = `S${watchState.s} E${nxt.episode_number} • ${nxt.name || ""}`;
-  document.getElementById("upNextMeta").textContent = nxt.runtime ? `${nxt.runtime}m` : "";
+  if (kick) kick.textContent = fin.series ? "👑 SERIES FINALE" : "🏁 SEASON FINALE";
+  document.getElementById("upNextTitle").textContent = fin.series
+    ? `Final episode of ${titleOf(currentItem || {}) || "this series"}`
+    : `Final episode of Season ${watchState.s}`;
+  document.getElementById("upNextMeta").textContent = "You're all caught up — no next episode";
+  if (playBtn) playBtn.classList.add("hidden");
 }
 let watchSeasons = [], gridS = 1; // gridS: watch-grid browse cursor (never autoplays)
 function updateSeasonLabel(){
@@ -4190,8 +4218,18 @@ async function renderEpDrawer(){
   const shown = drawerEps.filter(ep =>
     !q || ("e" + ep.episode_number).includes(q) || (ep.name || "").toLowerCase().includes(q));
   if (!shown.length) list.innerHTML = `<p class="text-sm text-gray-500">No episodes match.</p>`;
+  // finale flags (same as the watch grid — TV + anime share it all)
+  const _dNums = drawerEps.filter(x => !epUnaired(x)).map(x => x.episode_number);
+  const _dMax = _dNums.length ? Math.max(..._dNums) : -1;
+  let _dLast = false;
+  try {
+    const _dss = ((currentItem || {}).seasons || []).map(s => s.season_number).filter(n => n > 0);
+    _dLast = _dss.length ? Math.max(..._dss) === drawerS : false;
+  } catch(e){}
   shown.forEach(ep => {
     const unaired = epUnaired(ep);
+    const isFin = !unaired && ep.episode_number === _dMax;
+    const finBadge = isFin ? (_dLast ? "👑 SERIES FINALE" : "🏁 SEASON FINALE") : "";
     const isCur = drawerS === watchState.s && ep.episode_number === watchState.e;
     if (unaired) {
       // greyed + dead: out of tab/D-pad order, no handlers — visible so
@@ -4216,13 +4254,14 @@ async function renderEpDrawer(){
     card.className = "relative bg-white/5 border rounded-xl overflow-hidden " + (isCur ? "border-teal-500" : "border-white/10");
     card.tabIndex = 0;
     card.setAttribute("role", "button");
-    card.setAttribute("aria-label", `Episode ${ep.episode_number}: ${ep.name}`);
+    card.setAttribute("aria-label", `Episode ${ep.episode_number}: ${ep.name}${isFin ? ", " + (_dLast ? "series finale" : "season finale") : ""}`);
     const still = ep.still_path ? IMG(ep.still_path, "w300") : "";
     card.innerHTML = `
       ${still ? `<img loading="lazy" decoding="async" src="${still}" class="w-full aspect-video object-cover ${hidden ? "blur-md" : ""}" onerror="this.style.display='none'">` : ""}
-      ${isCur ? `<span class="absolute top-2 right-2 text-[11px] font-bold bg-teal-500 px-2 py-0.5 rounded-full">WATCHING</span>` : ""}
+      ${isCur ? `<span class="absolute top-2 right-2 text-[11px] font-bold bg-teal-500 px-2 py-0.5 rounded-full">WATCHING</span>`
+        : isFin ? `<span class="absolute top-2 right-2 text-[11px] font-bold bg-white/10 text-gray-200 px-2 py-0.5 rounded-full">${finBadge}</span>` : ""}
       <div class="p-3">
-        <p class="font-bold text-sm">E${ep.episode_number} — ${ep.name || ""}</p>
+        <p class="font-bold text-sm">E${ep.episode_number} — ${ep.name || ""}${isFin && !isCur ? " 🏁" : ""}</p>
         <p class="text-[11px] text-gray-500">${ep.runtime ? ep.runtime + "m" : ""}</p>
         <p class="text-xs text-gray-400 mt-1 ${hidden ? "blur-sm select-none" : ""}">${ep.overview || "No synopsis."}</p>
         ${hidden ? `<button class="mt-2 text-xs font-bold bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full">Click to reveal</button>` : ""}
@@ -4248,11 +4287,11 @@ async function renderEpDrawer(){
 /* Our own intro-skip: CineSrc's autoskip param never fires on TV episodes,
    so we fetch the intro range from TheIntroDB (free, TMDB-keyed, keyless API)
    and seek past it ourselves when Auto-skip is on. */
-let _introRanges = [], _introKey = "", _skipT = 0;
+let _introRanges = [], _outroRanges = [], _introKey = "", _skipT = 0;
 async function fetchIntroRanges(){
   const key = `${watchState.type}/${watchState.id}/${watchState.s||""}/${watchState.e||""}`;
   if (key === _introKey) return; // already fetched for this title
-  _introKey = key; _introRanges = [];
+  _introKey = key; _introRanges = []; _outroRanges = [];
   if (watchState.type !== "tv") return; // TV shows + anime only — movies never skip
   try {
     let url = `https://api.theintrodb.org/v3/media?tmdb_id=${watchState.id}`;
@@ -4262,6 +4301,9 @@ async function fetchIntroRanges(){
     const d = await r.json();
     _introRanges = (d.intro || []).map(x => ({ start: (x.start_ms || 0) / 1000, end: (x.end_ms || 0) / 1000 }))
       .filter(x => x.end > x.start && x.end - x.start > 3);
+    // credits/outro doubles as the Next-Episode trigger (end may be null = runs out)
+    _outroRanges = (d.credits || []).map(x => ({ start: (x.start_ms || 0) / 1000, end: x.end_ms != null ? x.end_ms / 1000 : null }))
+      .filter(x => x.start >= 0 && (x.end == null || x.end > x.start));
   } catch(e){}
 }
 /* manual skip: the bar's own ⏭ Skip pill — same ranges as auto-skip but
@@ -4284,22 +4326,88 @@ function skipIntroNow(){
   if (ws) ws.textContent = "Intro skipped ✓";
   paintSkipPill();
 }
+/* next aired episode in THIS season (from the cached season list) — outro
+   jumps here; null when unknown, unaired, or season's over (finale) */
+function nextAiredEp(){
+  try {
+    const c = window._watchEps;
+    if (!c || c.s !== watchState.s) return null;
+    const n = (c.eps || []).find(x => x.episode_number === watchState.e + 1);
+    if (!n || epUnaired(n)) return null;
+    return n;
+  } catch(e){ return null; }
+}
+/* season/series finale detection (cached season list + TMDB season roster).
+   null normally; { series:boolean } on the last aired episode. */
+function finaleInfo(){
+  try {
+    if (watchState.type !== "tv") return null;
+    const c = window._watchEps;
+    if (!c || c.s !== watchState.s || !(c.eps || []).length) return null;
+    const nums = c.eps.filter(x => !epUnaired(x)).map(x => x.episode_number);
+    if (!nums.length || Math.max(...nums) !== watchState.e) return null;
+    let series = false;
+    const ss = ((currentItem || {}).seasons || []).map(s => s.season_number).filter(n => n > 0);
+    if (ss.length && Math.max(...ss) === watchState.s) series = true;
+    return { series };
+  } catch(e){ return null; }
+}
+function outroHit(){
+  if (watchState.type !== "tv") return null; // same gates as intros
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return null;
+  const cur = pState.cur || 0;
+  return _outroRanges.find(r => cur >= r.start && (r.end == null || cur < r.end)) || null;
+}
+function skipOutroNow(){
+  const hit = outroHit();
+  if (!hit) return;
+  _skipT = Date.now();
+  const nxt = nextAiredEp();
+  if (nxt) {
+    // credits → straight into the next episode (unaired/finale never reach here)
+    nextEpisode(1);
+    const ws = document.getElementById("watchStatus");
+    if (ws) ws.textContent = "Credits skipped — next episode ▶";
+    paintSkipPill();
+    return;
+  }
+  // finale or unknown lineup: jump to the end, let end-of-video flow take over
+  const end = Math.floor((pState.dur || 0) > 0 ? pState.dur : (hit.end || 0));
+  if (!end) return;
+  if (mirror === "cinesrc") sendCmd("seek", [end]);
+  else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: end });
+  else if (mirror === "anipm") anipmSend("seek", { time: end });
+  const ws = document.getElementById("watchStatus");
+  if (ws) ws.textContent = "Credits skipped ✓";
+  paintSkipPill();
+}
+/* shared pill router: intro first, else outro (credits). One pill, two jobs. */
+function skipPillNow(){
+  const r = introHit();
+  if (r && (pState.dur || 0) > 0) { skipIntroNow(); return; }
+  skipOutroNow();
+}
 function paintSkipPill(){
   const r = introHit();
   // loaded-gate: an intro starting at 0:00 matches a fresh cur=0 while the
   // player is still black ("Loading player…", dur unknown) — the pill must
   // wait for real metadata, not a zeroed playhead
-  const hit = (r && (pState.dur || 0) > 0) ? r : null;
+  const loaded = (pState.dur || 0) > 0;
+  const inHit = (r && loaded) ? r : null;
+  const oHit = (!inHit && loaded) ? outroHit() : null;
+  const hasNext = !!oHit && !!nextAiredEp();
   const isTV = document.body.classList.contains("tv-mode") || document.body.classList.contains("tv-app");
   const sk = document.getElementById("ctlSkipIntro");
   if (sk) {
-    sk.classList.toggle("hidden", !(hit && isTV)); // TV remote walks the bar
-    if (hit) { const t = "⏭ Skip " + fmtT(hit.end); if (sk.textContent !== t) sk.textContent = t; }
+    sk.classList.toggle("hidden", !((inHit || oHit) && isTV)); // TV remote walks the bar
+    if (inHit) { const t = "⏭ Skip " + fmtT(inHit.end); if (sk.textContent !== t) sk.textContent = t; }
+    else if (oHit) { const t = hasNext ? "⏭ Next Ep" : "⏭ Credits"; if (sk.textContent !== t) sk.textContent = t; }
   }
   const fl = document.getElementById("skipFloat");
   if (fl) {
-    fl.classList.toggle("hidden", !(hit && !isTV)); // website/PC gets the floating pill
-    if (hit) { const t = "⏭ Skip Intro · " + fmtT(hit.end); if (fl.textContent !== t) fl.textContent = t; }
+    fl.classList.toggle("hidden", !((inHit || oHit) && !isTV)); // website/PC gets the floating pill
+    if (inHit) { const t = "⏭ Skip Intro · " + fmtT(inHit.end); if (fl.textContent !== t) fl.textContent = t; }
+    else if (oHit) { const t = hasNext ? "⏭ Skip Credits · Next Ep" : "⏭ Skip Credits"; if (fl.textContent !== t) fl.textContent = t; }
   }
 }
 function autoSkipIntro(){
