@@ -406,7 +406,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 131; // bump every release alongside version.txt
+  const BUILD_NUM = 132; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -3771,11 +3771,12 @@ function paintMirrors(){
 /* server tiers for the picker: OUR PLAYERS (our bar + remote drive the
    video) vs MORE SERVERS (their own player — cursor/🎯 on TV). VidRift rides
    with ours: remote seeks + auto-skip sync + progress feed our UI. */
-const MAIN_PLAYERS = ["cinesrc", "anipm", "vidrift"];
+const MAIN_PLAYERS = ["cinesrc", "anipm", "vidrift", "vidzen"];
 const MAIN_HINTS = {
   cinesrc: "Our bar drives everything: play, seek, subs, speed",
   anipm: "Our bar drives it after one ▶ tap inside: sub/dub, quality, skip",
   vidrift: "Remote seeks + auto-skip sync; progress feeds Continue Watching",
+  vidzen: "Playback status feeds our UI (progress + resume); own player controls",
 };
 /* Wyzie subtitles: search + download with built-in shared key (personal
    override at store.wyzie.io/redeem — 1,000 req/day — wins when saved).
