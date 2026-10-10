@@ -406,7 +406,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 130; // bump every release alongside version.txt
+  const BUILD_NUM = 131; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -3744,20 +3744,39 @@ function paintMirrors(){
   const row = document.getElementById("mirrorRow");
   if (!row) return;
   row.innerHTML = "";
-  const mk = (id, label, enabled) => {
+  const head = (t) => {
+    const p = document.createElement("p");
+    p.className = "w-full text-[11px] font-black tracking-[.18em] text-teal-300 mt-1";
+    p.textContent = t;
+    row.appendChild(p);
+  };
+  const mk = (id, label, enabled, hint) => {
     const b = document.createElement("button");
     b.textContent = label;
     b.disabled = !enabled;
+    if (hint) b.title = hint;
     b.className = "px-4 h-10 rounded-full text-sm font-bold " + (!enabled
       ? "bg-white/5 text-gray-600"
       : (mirror === id ? "bg-teal-500" : "bg-white/10 hover:bg-white/20"));
     if (enabled) b.onclick = () => setMirror(id);
     row.appendChild(b);
   };
-  mk("cinesrc", "CineSrc", true);
-  tvSafeList().slice(1).forEach(m => mk(m.id, m.name, true));
+  head("OUR PLAYERS · BAR + REMOTE DRIVE THESE");
+  MAIN_PLAYERS.filter(id => mirrorAllowed(id)).forEach(id =>
+    mk(id, (MIRRORS.find(m => m.id === id) || {}).name || id, true, MAIN_HINTS[id]));
+  head("MORE SERVERS · THEIR OWN PLAYER (🎯/🖱 ON TV)");
+  tvSafeList().filter(m => !MAIN_PLAYERS.includes(m.id)).forEach(m => mk(m.id, m.name, true));
   mk("trailer", trailerKey ? "🎬 Trailer" : "🎬 …", !!trailerKey);
 }
+/* server tiers for the picker: OUR PLAYERS (our bar + remote drive the
+   video) vs MORE SERVERS (their own player — cursor/🎯 on TV). VidRift rides
+   with ours: remote seeks + auto-skip sync + progress feed our UI. */
+const MAIN_PLAYERS = ["cinesrc", "anipm", "vidrift"];
+const MAIN_HINTS = {
+  cinesrc: "Our bar drives everything: play, seek, subs, speed",
+  anipm: "Our bar drives it after one ▶ tap inside: sub/dub, quality, skip",
+  vidrift: "Remote seeks + auto-skip sync; progress feeds Continue Watching",
+};
 /* Wyzie subtitles: search + download with built-in shared key (personal
    override at store.wyzie.io/redeem — 1,000 req/day — wins when saved).
    Search costs 1 req, each download 1. */
@@ -4712,7 +4731,14 @@ window.addEventListener("message", (event)=>{
 window.addEventListener("message", (event)=>{
   if (event.origin !== "https://vidzen.fun") return;
   if (mirror !== "vidzen") return; // stale frame from a switched-away mirror
-  const m = event.data || {};
+  let m = event.data || {};
+  // PLAYER_EVENT family (VidAPI/VidCore shape): fold it into the same fields
+  if (m.type === "PLAYER_EVENT" && m.data && typeof m.data === "object") {
+    const dd = m.data;
+    m = { event: dd.event || dd.player_status,
+      currentTime: dd.currentTime != null ? dd.currentTime : dd.player_progress,
+      duration: dd.duration != null ? dd.duration : dd.player_duration };
+  }
   const inner = m.data && typeof m.data === "object" ? m.data : m;
   const ev = m.event || m.type || inner.event || inner.type || "";
   const cur = inner.currentTime != null ? inner.currentTime : m.currentTime;
