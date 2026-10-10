@@ -384,7 +384,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 123; // bump every release alongside version.txt
+  const BUILD_NUM = 124; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -4273,12 +4273,22 @@ function skipIntroNow(){
   paintSkipPill();
 }
 function paintSkipPill(){
-  const hit = introHit();
+  const r = introHit();
+  // loaded-gate: an intro starting at 0:00 matches a fresh cur=0 while the
+  // player is still black ("Loading player…", dur unknown) — the pill must
+  // wait for real metadata, not a zeroed playhead
+  const hit = (r && (pState.dur || 0) > 0) ? r : null;
   const isTV = document.body.classList.contains("tv-mode") || document.body.classList.contains("tv-app");
   const sk = document.getElementById("ctlSkipIntro");
-  if (sk) sk.classList.toggle("hidden", !(hit && isTV)); // TV remote walks the bar
+  if (sk) {
+    sk.classList.toggle("hidden", !(hit && isTV)); // TV remote walks the bar
+    if (hit) { const t = "⏭ Skip " + fmtT(hit.end); if (sk.textContent !== t) sk.textContent = t; }
+  }
   const fl = document.getElementById("skipFloat");
-  if (fl) fl.classList.toggle("hidden", !(hit && !isTV)); // website/PC gets the floating pill
+  if (fl) {
+    fl.classList.toggle("hidden", !(hit && !isTV)); // website/PC gets the floating pill
+    if (hit) { const t = "⏭ Skip Intro · " + fmtT(hit.end); if (fl.textContent !== t) fl.textContent = t; }
+  }
 }
 function autoSkipIntro(){
   if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return;
