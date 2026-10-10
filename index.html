@@ -406,7 +406,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 133; // bump every release alongside version.txt
+  const BUILD_NUM = 134; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -579,6 +579,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <span>Mirror: <b id="mirrorName">–</b> — use its own player controls</span>
         <button onclick="focusMirror()" title="Send remote keys to this mirror's own player (some answer OK/arrows, some need a pointer)" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🎯 Control</button>
         <button id="mirrorHomeBtn" onclick="mirrorHome()" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold">⇄ CineSrc</button>
+        <button id="stripSubs" onclick="ctlSubsToggle()" aria-label="Subtitles on or off" title="Our subtitles on/off — Wyzie + your files, over any mirror" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">CC</button>
         <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">⚙</button>
         <button onclick="cursorToggle()" title="Remote cursor: arrows glide a pointer, OK clicks" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🖱</button>
       </div>
@@ -2781,9 +2782,11 @@ function loadPlayer(){
       if (ws2) ws2.textContent = `CineSrc stayed stuck — moved you to ${nm}. ⇄ Source anytime to go back.`;
     }, _isTV ? 90000 : 35000);
   }
-  if (mirror === "vidrift") {
-    // intro ranges for autoskip + resume where we left off (safe pre-ready)
+  if (mirror === "vidrift" || mirror === "vidzen") {
+    // intro ranges for autoskip + skip pills (safe pre-ready)
     fetchIntroRanges();
+  }
+  if (mirror === "vidrift") {
     if ((watchState.t || 0) > 0) {
       const _rt = Math.floor(watchState.t); watchState.t = 0;
       setTimeout(() => vidriftSend({ type: "vidrift:resume", currentTime: _rt }), 1500);
@@ -2953,7 +2956,7 @@ function saveContinue(){
 let lastProgSave = 0;
 function saveProgress(cur, dur){
   // throttled resume-point saver (trailer mirror never writes playback position)
-  if (typeof mirror !== "undefined" && mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return;
+  if (typeof mirror !== "undefined" && mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm") return;
   if (!(dur > 60) || !(cur > 5)) return;
   const now = Date.now();
   if (now - lastProgSave < 15000) return;
@@ -3164,11 +3167,16 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
   // un-gate muted-first desktop starts: our first real touch carries sound
   if (window._startMuted) { window._startMuted = false; sendCmd("setMuted", [false]); }
   if (mirror === "anipm") { anipmSend(pState.paused ? "play" : "pause"); return; } // events correct us
+  // paired mirrors have no play API: hand keys into their player instead —
+  // its own OK/space/arrows drive it, Back returns (TV app)
+  if (mirror === "vidrift" || mirror === "vidzen") { focusMirror(); return; }
   pState.paused = !pState.paused;
   sendCmd(pState.paused ? "pause" : "play");
   ctlPaint();
 }
 function ctlSeekRel(d){
+  if (mirror === "vidrift") { vidriftSeekRel(d); return; } // resume-seek answers
+  if (mirror === "vidzen") { undrivenSeekRel(d); return; } // debounced startAt reload
   if (mirror !== "cinesrc" && mirror !== "anipm") return; // undriven mirrors use their own controls
   if (mirror === "anipm") {
     const t = Math.max(0, (pState.cur || 0) + d);
@@ -3301,6 +3309,8 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
     if (!(pState.dur > 0)) return;
     const t = Math.floor(bar.value / 1000 * pState.dur);
     if (mirror === "anipm") anipmSend("seek", { time: t });
+    else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: t });
+    else if (mirror === "vidzen") undrivenSeekTo(t);
     else sendCmd("seek", [t]);
   });
 })();
@@ -3492,8 +3502,9 @@ const MIRRORS = [
   { id: "vidbolt", name: "VidBolt" },
   { id: "anipm", name: "AniPM" }
 ];
-/* mirrors that break inside ANY sandboxed iframe: load without sandbox */
-const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm"]);
+/* mirrors that break inside ANY sandboxed iframe: load without sandbox
+   (VidRift shows "remove sandboxing" otherwise — their demand, not ours) */
+const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm", "vidrift"]);
 /* TV-safe lineup helpers (TV_REMOTE_OK / IS_TV_DEVICE live in CONFIG above):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
@@ -3529,7 +3540,13 @@ function tvSafeOnly(){
   return IS_TV_DEVICE;
 }
 function mirrorAllowed(id){ return id === "trailer" || !tvSafeOnly() || TV_REMOTE_OK.has(id); }
-function tvSafeList(){ return MIRRORS.filter(m => mirrorAllowed(m.id)); }
+function tvSafeList(){ return MIRRORS.filter(m => mirrorAllowed(m.id) && srvVisible(m.id)); }
+/* AniPM is anime-only (no mapping exists for anything else): it appears in
+   server lists while an anime is open, never for movies/TV shows. */
+function srvVisible(id){
+  if (id === "anipm") { try { return !!watchState.anime; } catch(e){ return false; } }
+  return true;
+}
 function tvSafeToggle(){
   try { localStorage.setItem("streambox_tv_safe", document.getElementById("optTvSafe").checked ? "1" : "0"); } catch(e){}
   paintMirrors();
@@ -3716,17 +3733,26 @@ function setMirror(m, auto){  if (m === "trailer" && !trailerKey) {
 function updateMirrorUI(){
   const isTrailer = mirror === "trailer";
   const isCS = mirror === "cinesrc" || mirror === "anipm";
+  // paired mirrors ride our bar too (seek/slider/skip/quality live; play
+  // hands keys in, mute/rate/speed live in their player — no dead buttons)
+  const isPaired = mirror === "vidrift" || mirror === "vidzen";
   document.getElementById("trailerBar").classList.toggle("hidden", !isTrailer);
-  document.getElementById("ctlBar").classList.toggle("hidden", !isCS);
+  document.getElementById("ctlBar").classList.toggle("hidden", !(isCS || isPaired));
   document.getElementById("mirrorBar").classList.toggle("hidden", isCS || isTrailer);
   // A/V sheet button only exists where it works (AniPM carries tracks)
   const av = document.getElementById("avBtn");
   if (av) av.classList.toggle("hidden", mirror !== "anipm");
   // anime declutter: quality + settings live in the A/V sheet now
   const q = document.getElementById("ctlQ");
-  if (q) q.classList.toggle("hidden", mirror === "anipm");
+  if (q) q.classList.toggle("hidden", mirror === "anipm" || mirror === "vidzen");
   const st = document.getElementById("ctlSettings");
   if (st) st.classList.toggle("hidden", mirror === "anipm");
+  // paired mirrors: play hands keys into their player; mute/rate/speed have
+  // no API there, so they hide instead of sitting dead
+  const mu = document.getElementById("ctlMute");
+  if (mu) mu.classList.toggle("hidden", isPaired);
+  const ra = document.getElementById("ctlRate");
+  if (ra) ra.classList.toggle("hidden", isPaired);
   if (!isCS && !isTrailer) {
     const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
     document.getElementById("mirrorName").textContent = label;
@@ -3744,8 +3770,8 @@ function updateMirrorUI(){
     }
     if (mirror === "vidrift") {
       document.getElementById("watchStatus").textContent = watchState.anime
-        ? "VidRift: anime home — sub/dub, 30-language subs and auto-next live in its player · 🎯/🖱 drive it on TV"
-        : "VidRift: sub/dub, auto-next and its own subs live in its player · 🎯/🖱 drive it on TV";
+        ? "VidRift: anime home — sub/dub, 30-language subs and auto-next live in its player · 🎯/🖱 drive it on TV · no Ad Shield (player refuses sandbox)"
+        : "VidRift: sub/dub, auto-next and its own subs live in its player · 🎯/🖱 drive it on TV · no Ad Shield (player refuses sandbox)";
       return;
     }
     if (mirror === "vidzen") {
@@ -3810,7 +3836,7 @@ function paintMirrors(){
     row.appendChild(b);
   };
   head("OUR PLAYERS · BAR + REMOTE DRIVE THESE");
-  MAIN_PLAYERS.filter(id => mirrorAllowed(id)).forEach(id =>
+  MAIN_PLAYERS.filter(id => mirrorAllowed(id) && srvVisible(id)).forEach(id =>
     mk(id, (MIRRORS.find(m => m.id === id) || {}).name || id, true, MAIN_HINTS[id]));
   head("MORE SERVERS · THEIR OWN PLAYER (🎯/🖱 ON TV)");
   tvSafeList().filter(m => !MAIN_PLAYERS.includes(m.id)).forEach(m => mk(m.id, m.name, true));
@@ -3823,8 +3849,8 @@ const MAIN_PLAYERS = ["cinesrc", "anipm", "vidrift", "vidzen"];
 const MAIN_HINTS = {
   cinesrc: "Our bar drives everything: play, seek, subs, speed",
   anipm: "Our bar drives it after one ▶ tap inside: sub/dub, quality, skip",
-  vidrift: "Remote seeks + auto-skip sync; Up Next + quality follow our UI",
-  vidzen: "Playback status feeds our UI (progress + resume); own player controls",
+  vidrift: "Remote seeks + auto-skip sync; Up Next + quality follow our UI; our bar drives seek/skip/subs",
+  vidzen: "Our bar seeks + skips (reload-skims) and subs; play hands keys in",
 };
 /* Wyzie subtitles: search + download with built-in shared key (personal
    override at store.wyzie.io/redeem — 1,000 req/day — wins when saved).
@@ -4227,6 +4253,11 @@ function paintSubsBtn(){
   b.dataset.s = key;
   b.textContent = on ? "CC ✓" : "CC";
   b.className = "h-11 px-3 rounded-full text-sm font-bold " + (on ? "bg-teal-500 hover:bg-teal-400" : "bg-white/10 hover:bg-white/20");
+  // mirror strip carries the same toggle (our bar is hidden over alt mirrors)
+  try {
+    const sb = document.getElementById("stripSubs");
+    if (sb) sb.textContent = on ? "CC ✓" : "CC";
+  } catch(e){}
 }
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -4608,9 +4639,18 @@ async function fetchIntroRanges(){
    playhead sits inside a known intro, on mirrors we can drive. */
 function introHit(){
   if (watchState.type !== "tv") return null; // TV shows + anime only — never movies
-  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return null;
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm") return null;
   const cur = pState.cur || 0;
   return _introRanges.find(r => cur >= r.start && cur < r.end - 1) || null;
+}
+function undrivenSeekTo(t){
+  // point-load a position on players with no command API (VidZen): the URL
+  // carries startAt, so this is a full reload — discrete jumps only
+  // (skip pills, slider drops), never mashing (see undrivenSeekRel).
+  if (mirror !== "vidzen") return;
+  const tgt = Math.max(0, Math.floor(t));
+  resumeAt = (pState.dur > 0) ? Math.min(tgt, Math.floor(pState.dur)) : tgt;
+  loadPlayer();
 }
 function skipIntroNow(){
   const hit = introHit();
@@ -4618,6 +4658,7 @@ function skipIntroNow(){
   _skipT = Date.now();
   if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
+  else if (mirror === "vidzen") undrivenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Intro skipped ✓";
@@ -4651,7 +4692,7 @@ function finaleInfo(){
 }
 function outroHit(){
   if (watchState.type !== "tv") return null; // same gates as intros
-  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return null;
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm") return null;
   const cur = pState.cur || 0;
   return _outroRanges.find(r => cur >= r.start && (r.end == null || cur < r.end)) || null;
 }
@@ -4673,6 +4714,7 @@ function skipOutroNow(){
   if (!end) return;
   if (mirror === "cinesrc") sendCmd("seek", [end]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: end });
+  else if (mirror === "vidzen") undrivenSeekTo(end);
   else if (mirror === "anipm") anipmSend("seek", { time: end });
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Credits skipped ✓";
@@ -4708,7 +4750,7 @@ function paintSkipPill(){
   }
 }
 function autoSkipIntro(){
-  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "anipm") return;
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm") return;
   try { if (!document.getElementById("optAutoskip").checked) return; } catch(e){ return; }
   const cur = pState.cur || 0;
   const hit = _introRanges.find(r => cur >= r.start && cur < r.end - 1);
@@ -4718,6 +4760,7 @@ function autoSkipIntro(){
   _skipT = now;
   if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
+  else if (mirror === "vidzen") undrivenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Intro skipped ✓";
