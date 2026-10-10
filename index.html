@@ -83,9 +83,10 @@
   .card:focus-visible { outline: none; }
   .card:focus-visible .poster-frame {
     box-shadow: 0 0 0 3px #14b8a6, 0 10px 30px rgba(0,0,0,.55), 0 0 26px rgba(20,184,166,.5); }
-  /* picked card's title lights up like an active tab */
+  /* picked card's title lights up like an active tab (pointer hover only —
+     TV remote focus must NOT recolor captions, ring stays on the poster) */
   .card .card-title { color: #cbd5e1; transition: color .18s ease-out; }
-  .card:hover .card-title, .card:focus-visible .card-title, .card.tv-focus .card-title { color: #fff; }
+  .card:hover .card-title, .card:focus-visible .card-title { color: #fff; }
   button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible {
     outline: 3px solid #14b8a6; outline-offset: 2px;
   }
@@ -94,6 +95,10 @@
   .tv-focus { outline: none !important;
     box-shadow: 0 0 0 3px #14b8a6, 0 0 18px rgba(20,184,166,.5) !important; }
   .row-scroll .card.tv-focus { transform: scale(1.07); z-index: 20; box-shadow: none !important; }
+  /* grid cards (Movies/TV/Anime tabs) never wore the zoom — same for the box:
+     a whole-card glow wraps the caption and lights the name/year with it.
+     Ring lives on the poster-frame only (next rule). */
+  .card.tv-focus { box-shadow: none !important; }
   .card.tv-focus .poster-frame {
     box-shadow: 0 0 0 3px #14b8a6, 0 0 20px rgba(20,184,166,.5) !important; }
   /* row titles: teal accent bar */
@@ -379,7 +384,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 122; // bump every release alongside version.txt
+  const BUILD_NUM = 123; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
