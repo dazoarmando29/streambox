@@ -108,7 +108,8 @@ public class MainActivity extends Activity {
                         || host.endsWith("autoembed.co") || host.endsWith("2embed.cc")
                         || host.endsWith("yapgrid.com") || host.endsWith("vaplayer.ru")
                         || host.endsWith("vidcore.org")
-                        || host.endsWith("vidrift.net") || host.endsWith("embed.vidrift.net")
+                         || host.endsWith("vidrift.net") || host.endsWith("embed.vidrift.net")
+                         || host.equals("vidzen.fun") || host.endsWith(".vidzen.fun")
                         || host.endsWith("ani.pm")
                         || host.endsWith("youtube-nocookie.com") || host.endsWith("youtube.com")
                         || host.endsWith("youtu.be");

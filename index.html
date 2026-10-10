@@ -406,7 +406,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 129; // bump every release alongside version.txt
+  const BUILD_NUM = 130; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -418,7 +418,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 /* TV-safe lineup (early: boot code below reads these at parse time):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
-const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift", "anipm"]);
+const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift", "vidzen", "anipm"]);
 const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVIA|Fire TV|AFT/i.test(navigator.userAgent || "");
 </script>
 
@@ -3457,6 +3457,7 @@ const MIRRORS = [
   { id: "vidapi", name: "VidAPI" },
   { id: "vidcore", name: "VidCore" },
   { id: "vidrift", name: "VidRift" },
+  { id: "vidzen", name: "VidZen" },
   { id: "anipm", name: "AniPM" }
 ];
 /* mirrors that break inside ANY sandboxed iframe: load without sandbox */
@@ -3608,6 +3609,25 @@ function mirrorUrl(id){
         ? `https://embed.vidrift.net/embed/tv/${tmdb}/${s}/${e}`
         : `https://embed.vidrift.net/embed/movie/${tmdb}`;
     }
+    case "vidzen": {
+      // planetary-server player (TMDB-native, 4K, in-player server picker +
+      // own subs). Documented params only: theme wears our accent, startAt
+      // resumes where you left off. Own controls tier (no command API known)
+      // — Ad Shield stays ON: sandboxed until it proves otherwise.
+      const zp = new URLSearchParams({ autoPlay: "true" });
+      try {
+        const c = String(document.getElementById("optColor").value || "#14b8a6").replace("#", "");
+        if (/^[0-9a-fA-F]{6}$/.test(c)) zp.set("theme", c);
+      } catch(e){}
+      let _st = -1;
+      if (resumeAt >= 0) { _st = resumeAt; resumeAt = -1; }
+      else if ((watchState.t || 0) > 0) { _st = Math.floor(watchState.t); watchState.t = 0; }
+      if (_st > 0) zp.set("startAt", String(Math.floor(_st)));
+      const zq = zp.toString();
+      return tv
+        ? `https://vidzen.fun/tv/${tmdb}/${s}/${e}?${zq}`
+        : `https://vidzen.fun/movie/${tmdb}?${zq}`;
+    }
     case "autoembed":
       return tv
         ? `https://autoembed.co/tv/tmdb/${tmdb}-${s}-${e}`
@@ -3684,6 +3704,10 @@ function updateMirrorUI(){
       document.getElementById("watchStatus").textContent = watchState.anime
         ? "VidRift: anime home — sub/dub, 30-language subs and auto-next live in its player · 🎯/🖱 drive it on TV"
         : "VidRift: sub/dub, auto-next and its own subs live in its player · 🎯/🖱 drive it on TV";
+      return;
+    }
+    if (mirror === "vidzen") {
+      document.getElementById("watchStatus").textContent = "VidZen: 4K planetary servers — server picker + subs live in its player · 🎯/🖱 drive it on TV";
       return;
     }
     document.getElementById("watchStatus").textContent = NO_SANDBOX.has(mirror)
@@ -4674,6 +4698,37 @@ window.addEventListener("message", (event)=>{
     showTitleCard();
   }
   if (d.type === "vidrift:ended") {
+    try { markWatched(); } catch(e){}
+    if (watchState.type === "movie") {
+      try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+      if (document.body.classList.contains("video-fs")) exitVideoFs();
+    }
+  }
+});
+/* ---------- VidZen: own-controls tier like VidRift (no command API known).
+   Accepts several documented player-event shapes (their Events/PostMessage
+   tab, VidCore/VidAPI-family PLAYER_EVENT, plain event names) — progress in
+   feeds continue-watching + Up Next sync. Posts nothing? Harmless no-op. */
+window.addEventListener("message", (event)=>{
+  if (event.origin !== "https://vidzen.fun") return;
+  if (mirror !== "vidzen") return; // stale frame from a switched-away mirror
+  const m = event.data || {};
+  const inner = m.data && typeof m.data === "object" ? m.data : m;
+  const ev = m.event || m.type || inner.event || inner.type || "";
+  const cur = inner.currentTime != null ? inner.currentTime : m.currentTime;
+  const dur = inner.duration != null ? inner.duration : m.duration;
+  const evn = String(ev || "").toLowerCase();
+  if (evn === "timeupdate" || evn === "progress" || evn === "seeked" || evn === "seeking") {
+    if (typeof cur === "number") pState.cur = cur;
+    if (typeof dur === "number" && dur > 0) pState.dur = dur;
+    if (typeof cur === "number" && cur > 0.5) window._cinePlaying = true;
+    try { clearStuckTip(); } catch(e){}
+    hideSpin(); ctlPaint();
+    if (dur > 0) saveProgress(cur, dur);
+  }
+  if (evn === "play" || evn === "playing" || evn === "unpaused") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
+  if (evn === "pause" || evn === "paused") { pState.paused = true; ctlPaint(); }
+  if (evn === "ended" || evn === "complete") {
     try { markWatched(); } catch(e){}
     if (watchState.type === "movie") {
       try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
