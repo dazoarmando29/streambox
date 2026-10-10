@@ -379,7 +379,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 118; // bump every release alongside version.txt
+  const BUILD_NUM = 119; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -951,7 +951,7 @@ function dirOf(e){
    cannot click INSIDE a cross-origin player (browser rule) — for actually
    driving the player use the 🎯 handoff instead. Pointer-events:none, so it
    never blocks a real tap on phone/desktop. */
-window._cursor = { on: false, x: 0, y: 0, el: null, dirs: new Set(), speed: 0, raf: 0, last: 0 };
+window._cursor = { on: false, x: 0, y: 0, gx: 0, gy: 0, el: null, dirs: new Set(), speed: 0, raf: 0, last: 0 };
 function cursorToggle(){
   const c = window._cursor;
   c.on = !c.on;
@@ -992,18 +992,32 @@ function cursorPaint(){
 function cursorLoop(now){
   const c = window._cursor;
   if (!c.on) { c.raf = 0; return; }
-  const dt = Math.min(0.05, (now - c.last) / 1000); c.last = now;
+  // weak TV GPUs drop frames while video decodes — clamp at 100ms (not 50)
+  // so the pointer keeps real-time speed instead of slow-motioning judder
+  const dt = Math.min(0.1, Math.max(0, ((now || performance.now()) - c.last) / 1000)); c.last = (now || performance.now());
+  // big TV screens need a faster pointer: higher top speed + harder ramp
+  const tvBoost = document.body.classList.contains("tv-mode");
+  const top = tvBoost ? 2300 : 1500, acc = tvBoost ? 10000 : 6000;
   let dx = 0, dy = 0;
   if (c.dirs.has("left")) dx -= 1; if (c.dirs.has("right")) dx += 1;
   if (c.dirs.has("up")) dy -= 1; if (c.dirs.has("down")) dy += 1;
   if (dx || dy) {
-    c.speed = Math.min(1500, c.speed + 6000 * dt); // 0 → 1500 px/s in ~0.25s
-    const len = Math.hypot(dx, dy); c.x += dx / len * c.speed * dt; c.y += dy / len * c.speed * dt;
+    const len = Math.hypot(dx, dy); c.gx = dx / len; c.gy = dy / len;
+    c.speed = Math.min(top, c.speed + acc * dt);
+    c.x += c.gx * c.speed * dt; c.y += c.gy * c.speed * dt;
     c.x = Math.max(6, Math.min(window.innerWidth - 6, c.x));
     c.y = Math.max(6, Math.min(window.innerHeight - 6, c.y));
     cursorPaint();
   } else if (c.speed > 0) {
-    c.speed = Math.max(0, c.speed - 9000 * dt); // quick glide-stop on release
+    // genuine ease-out: keep gliding along the last heading while braking
+    // (before, release just froze the pointer mid-screen)
+    c.speed = Math.max(0, c.speed - 9000 * dt);
+    if (c.gx || c.gy) {
+      c.x += c.gx * c.speed * dt; c.y += c.gy * c.speed * dt;
+      c.x = Math.max(6, Math.min(window.innerWidth - 6, c.x));
+      c.y = Math.max(6, Math.min(window.innerHeight - 6, c.y));
+      cursorPaint();
+    }
   }
   c.raf = requestAnimationFrame(cursorLoop);
 }
@@ -2472,9 +2486,12 @@ function loadPlayer(){
     // a title that already earned its unsandboxed retry keeps it across
     // episode reloads (no 8s dark wait every episode); new title = re-probe
     if (window._anipmRawFor !== watchState.id) { window._anipmRaw = false; window._anipmRawFor = watchState.id; }
+    // slow TV boxes can take a minute just to get going — TV gets 30s/60s
+    // before we retry or heal, so a merely-loading player is never yanked
+    const _aTV = document.body.classList.contains("tv-mode");
     window._watchdog = setTimeout(() => {
       if (window._cinePlaying || mirror !== "anipm") return;
-      // stage 1 (8s): no sign of life — drop a sandbox if one is still on
+      // stage 1: no sign of life — drop a sandbox if one is still on
       // (normally AniPM ships unsandboxed via NO_SANDBOX; this is the net).
       try {
         const f2 = document.getElementById("player");
@@ -2489,14 +2506,15 @@ function loadPlayer(){
           return;
         }
       } catch(e){}
-    }, 8000);
+    }, _aTV ? 30000 : 8000);
     window._watchdog2 = setTimeout(() => {
       if (window._cinePlaying || mirror !== "anipm") return;
-      // stage 2 (20s): still dark (blocked hosts / dead title) — heal to VidRift
+      // stage 2: still dark (blocked hosts / dead title / robot-check a
+      // remote can't complete) — heal to VidRift, which arms its own stage 3
       const wsa = document.getElementById("watchStatus");
-      if (wsa) wsa.textContent = "AniPM isn't starting here — moved you to VidRift";
+      if (wsa) wsa.textContent = "AniPM isn't starting here — moved you to VidRift. Robot-check on the new player? ⇄ Source hops mirrors";
       setMirror("vidrift", true);
-    }, 20000);
+    }, _aTV ? 60000 : 20000);
     showTitleCard();
     return;
   }
@@ -2550,6 +2568,19 @@ function loadPlayer(){
     if ((watchState.t || 0) > 0) {
       const _rt = Math.floor(watchState.t); watchState.t = 0;
       setTimeout(() => vidriftSend({ type: "vidrift:resume", currentTime: _rt }), 1500);
+    }
+    // stage 3 (TV anime only): VidRift stuck on a robot/phone check a remote
+    // can't complete looks exactly like a dead load (zero progress events) —
+    // hop to YapGrid instead of stranding on it. Desktop keeps manual
+    // control: a QR there is solvable with the phone in your hand.
+    clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
+    if (watchState.anime && document.body.classList.contains("tv-mode") && mirrorAllowed("yapgrid")) {
+      window._watchdog2 = setTimeout(() => {
+        if (window._cinePlaying || mirror !== "vidrift") return;
+        const ws3 = document.getElementById("watchStatus");
+        if (ws3) ws3.textContent = "VidRift is showing a check this remote can't complete — moved you to YapGrid. ⇄ Source anytime to hop again";
+        setMirror("yapgrid", true);
+      }, 60000);
     }
   }
   // fallback: hide spinner even if the player never fires ready
@@ -2642,6 +2673,12 @@ function goHome(ev){
   paintNav("navHome");
   ctlPollStop();
   clearTimeout(window._tipT);
+  // full player reset: no timer, banner, or queued seek from the last title
+  // may leak into the next one (stale auto-heals used to yank new titles
+  // onto the previous title's fallback server)
+  clearTimeout(window._watchdog); clearTimeout(window._watchdog2); clearTimeout(window._spinT);
+  resumeAt = -1; window._cmdQ = []; window._qSeekD = 0; window._cinePlaying = false;
+  try { document.getElementById("healthBar").classList.add("hidden"); } catch(e){}
   exitVideoFs();
   closePanels();
   if (!document.getElementById("searchPanel").classList.contains("hidden")) closeSearch();
@@ -3155,9 +3192,11 @@ const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm"]);
 /* TV-safe lineup helpers (TV_REMOTE_OK / IS_TV_DEVICE live in CONFIG above):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
-/* Anime routing: CineSrc's sources don't cover anime, so anime titles
-   default to VidRift (TMDB-native, sub/dub, own subs). Detection: the anime
-   browse rail, JP-animation metadata, or the remembered continue entry. */
+/* Anime routing: titles default to AniPM (two-way API, sub/dub). If it never
+   starts (blocked hosts, dead title, or a robot-check a remote can't tap),
+   TV auto-heals AniPM -> VidRift -> YapGrid on zero-progress timers, never
+   stranding on one check. CineSrc's own sources don't cover anime. Detection:
+   the anime browse rail, JP-animation metadata, or the remembered continue entry. */
 function isAnimeData(d){
   try {
     if (!d || d.id == null) return false;
