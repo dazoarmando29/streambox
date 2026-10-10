@@ -379,7 +379,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 119; // bump every release alongside version.txt
+  const BUILD_NUM = 120; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1438,7 +1438,14 @@ function skeletonRow(title){
         if ((mirror !== "cinesrc" && mirror !== "anipm") || !document.body.classList.contains("tv-mode")) {
           if (mirror === "cinesrc" && (dir === "left" || dir === "right")) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
           else if (mirror === "vidrift" && (dir === "left" || dir === "right")) { vidriftSeekRel(dir === "left" ? -10 : 30); }
-          else if (mirror === "vidrift") { vidriftVolHint(); }
+          else if (mirror === "vidrift") {
+            // TV asleep + U/D: wake and land on the strip (same as the bar);
+            // desktop keeps the volume hint.
+            if (document.body.classList.contains("tv-mode")) {
+              const st = [...document.querySelectorAll("#mirrorBar button")].filter(b => b.offsetParent !== null && !b.disabled);
+              if (st.length) safeFocus(dir === "up" ? st[0] : st[st.length - 1]);
+            } else vidriftVolHint();
+          }
           return;
         }
         if (dir === "left" || dir === "right") { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
@@ -1481,12 +1488,10 @@ function skeletonRow(title){
         const cineSrc = (mirror === "cinesrc" || mirror === "anipm") && !onMirrorBar;
         if (dir === "left" || dir === "right") {
           if (cineSrc) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); return; }
-          if (mirror === "vidrift") {
-            // strip focus decides: ON the strip → walk it (servers/cursor
-            // stay reachable); OFF it → skim the timeline from our side.
-            const onStrip = document.activeElement && document.activeElement.closest && document.activeElement.closest("#mirrorBar");
-            if (!onStrip) { vidriftSeekRel(dir === "left" ? -10 : 30); return; }
-          }
+          // VidRift: same deal — L/R always skims from our side. (Walking the
+          // strip used to eat seeks here too, stranding focus on it forever
+          // since nothing could move focus off.) Strip buttons ride ▼ now.
+          if (mirror === "vidrift") { vidriftSeekRel(dir === "left" ? -10 : 30); return; }
           if (!btns.length) return;
           const bi = btns.indexOf(document.activeElement);
           const bn = dir === "right" ? (bi + 1) % btns.length : (bi - 1 + btns.length) % btns.length;
@@ -1495,13 +1500,21 @@ function skeletonRow(title){
           return;
         }
         if (!cineSrc) {
-          // VidRift U/D steps INTO the strip (Up=first button, Down=last) so
-          // servers/cursor never strand; volume is the TV's own keys. Other
-          // mirrors: their own controls.
+          // VidRift U/D: ▲ climbs to the health banner, ▼ cycles the strip
+          // (Control / ⇄ / ⚙ / 🖱) — same split as the CineSrc row, so L/R
+          // can stay pure seek and focus always has somewhere to go.
+          // Other mirrors: their own controls.
           if (mirror === "vidrift") {
             const strip = [...document.querySelectorAll("#mirrorBar button")].filter(b => b.offsetParent !== null && !b.disabled);
-            if (strip.length) { safeFocus(dir === "up" ? strip[0] : strip[strip.length - 1]); return; }
-            vidriftVolHint();
+            const hbv = document.getElementById("healthBar");
+            const hbg = hbv && !hbv.classList.contains("hidden") ? hbv.querySelector("button") : null;
+            let hasG = false;
+            if (hbg) { try { hasG = hbg.getBoundingClientRect().width > 0; } catch(e){} }
+            if (dir === "up" && hasG) { safeFocus(hbg); return; }
+            if (dir === "down" && strip.length) {
+              const ni = (strip.indexOf(document.activeElement) + 1) % strip.length;
+              safeFocus(strip[ni]); return;
+            }
           }
           return;
         }
@@ -2594,15 +2607,11 @@ function loadPlayer(){
   }, document.body.classList.contains("tv-mode") ? 25000 : 8000);
   if (mirror === "cinesrc") ctlPollStart();
   else ctlPollStop();
-  // TV app only (WebView UA carries a "wv" marker): hand the D-pad straight
-  // to the mirror's own player — its menu (incl. subtitles) answers arrows/OK
-  // there, and native Back always returns. TV *browsers* keep manual 🎯 so
-  // their own Back key can't get trapped inside the frame.
-  try {
-    if (mirror !== "cinesrc" && mirror !== "trailer"
-        && document.body.classList.contains("tv-mode") && /\bwv\b/.test(navigator.userAgent || ""))
-      focusMirror();
-  } catch(e){}
+  // No auto-handoff into alt-mirror frames: a robot/phone check page swallows
+  // every key and traps the remote (only system Back escapes). Focus stays on
+  // OUR strip — arrows/OK keep working, ⇄ hops away. AniPM keeps its own
+  // load-time handoff above (their player demands first press inside);
+  // every other mirror is manual 🎯 only. TV *browsers* never had auto-handoff.
   pokeHud(); // reveal HUD + bar briefly on every (re)load
   showTitleCard();
 }
