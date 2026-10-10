@@ -406,7 +406,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 132; // bump every release alongside version.txt
+  const BUILD_NUM = 133; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -418,7 +418,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 /* TV-safe lineup (early: boot code below reads these at parse time):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
-const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift", "vidzen", "anipm"]);
+const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift", "vidzen", "vidbolt", "anipm"]);
 const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVIA|Fire TV|AFT/i.test(navigator.userAgent || "");
 </script>
 
@@ -942,12 +942,16 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   } catch(e){}
 })();
 function preconnectCinesrc(){
+  // one code path, every main player: warm TLS+DNS for all origins our
+  // remote can drive, so first loads skip the handshake on slow TV Wi-Fi
   try {
-    if (!document.querySelector('link[href="https://cinesrc.st"][rel="preconnect"]')) {
-      const l = document.createElement("link");
-      l.rel = "preconnect"; l.href = "https://cinesrc.st"; l.crossOrigin = "";
-      document.head.appendChild(l);
-    }
+    ["https://cinesrc.st", "https://ani.pm", "https://embed.vidrift.net", "https://vidzen.fun", "https://vidbolt.pro"].forEach(h => {
+      if (!document.querySelector(`link[href="${h}"][rel="preconnect"]`)) {
+        const l = document.createElement("link");
+        l.rel = "preconnect"; l.href = h; l.crossOrigin = "";
+        document.head.appendChild(l);
+      }
+    });
   } catch(e){}
 }
 
@@ -1485,13 +1489,14 @@ function skeletonRow(title){
         if ((mirror !== "cinesrc" && mirror !== "anipm") || !document.body.classList.contains("tv-mode")) {
           if (mirror === "cinesrc" && (dir === "left" || dir === "right")) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
           else if (mirror === "vidrift" && (dir === "left" || dir === "right")) { vidriftSeekRel(dir === "left" ? -10 : 30); }
-          else if (mirror === "vidrift") {
+          else if (mirror === "vidzen" && (dir === "left" || dir === "right")) { undrivenSeekRel(dir === "left" ? -10 : 30); }
+          else if (mirror === "vidrift" || mirror === "vidzen") {
             // TV asleep + U/D: wake and land on the strip (same as the bar);
-            // desktop keeps the volume hint.
+            // desktop keeps the volume hint (VidRift) or nothing (VidZen).
             if (document.body.classList.contains("tv-mode")) {
               const st = [...document.querySelectorAll("#mirrorBar button")].filter(b => b.offsetParent !== null && !b.disabled);
               if (st.length) safeFocus(dir === "up" ? st[0] : st[st.length - 1]);
-            } else vidriftVolHint();
+            } else if (mirror === "vidrift") vidriftVolHint();
           }
           return;
         }
@@ -1539,6 +1544,9 @@ function skeletonRow(title){
           // strip used to eat seeks here too, stranding focus on it forever
           // since nothing could move focus off.) Strip buttons ride ▼ now.
           if (mirror === "vidrift") { vidriftSeekRel(dir === "left" ? -10 : 30); return; }
+          // VidZen has no command API: debounced startAt reload-skims instead
+          // (mashes accumulate into ONE reload, position preserved)
+          if (mirror === "vidzen") { undrivenSeekRel(dir === "left" ? -10 : 30); return; }
           if (!btns.length) return;
           const bi = btns.indexOf(document.activeElement);
           const bn = dir === "right" ? (bi + 1) % btns.length : (bi - 1 + btns.length) % btns.length;
@@ -1547,11 +1555,11 @@ function skeletonRow(title){
           return;
         }
         if (!cineSrc) {
-          // VidRift U/D: ▲ climbs to the health banner, ▼ cycles the strip
-          // (Control / ⇄ / ⚙ / 🖱) — same split as the CineSrc row, so L/R
-          // can stay pure seek and focus always has somewhere to go.
+          // VidRift/VidZen U/D: ▲ climbs to the health banner, ▼ cycles the
+          // strip (Control / ⇄ / ⚙ / 🖱) — same split as the CineSrc row, so
+          // L/R can stay pure seek and focus always has somewhere to go.
           // Other mirrors: their own controls.
-          if (mirror === "vidrift") {
+          if (mirror === "vidrift" || mirror === "vidzen") {
             const strip = [...document.querySelectorAll("#mirrorBar button")].filter(b => b.offsetParent !== null && !b.disabled);
             const hbv = document.getElementById("healthBar");
             const hbg = hbv && !hbv.classList.contains("hidden") ? hbv.querySelector("button") : null;
@@ -2395,6 +2403,7 @@ async function loadEpisodes(s){
     grid.appendChild(b);
   });
   window._watchEps = { s: sv, eps: d.episodes || [] }; // Next-Ep guard consults this
+  if (mirror === "vidrift" && sv === watchState.s) vidriftNextup(d.episodes || []); // our list steers their Up Next
   const box = document.getElementById("upNext");
   if (sv === watchState.s) paintUpNext(d.episodes || []);
   else if (box) box.classList.add("hidden");
@@ -2534,7 +2543,16 @@ function qualityStep(dir){
     if (q) q.textContent = h === "Auto" ? "Auto" : h + "p";
     if (typeof h === "number") anipmSend("setQuality", { height: h });
     return;
-  }  qIdx = (qIdx + dir + QLEVELS.length) % QLEVELS.length;
+  }
+  if (mirror === "vidrift") {
+    // VidRift pins renditions live (no reload): 4K has no pin, so it rides Auto
+    qIdx = (qIdx + dir + QLEVELS.length) % QLEVELS.length;
+    paintQuality();
+    try { localStorage.setItem("streambox_quality", QLEVELS[qIdx].v); } catch(e){}
+    vidriftQuality();
+    return;
+  }
+  qIdx = (qIdx + dir + QLEVELS.length) % QLEVELS.length;
   paintQuality();
   try { localStorage.setItem("streambox_quality", QLEVELS[qIdx].v); } catch(e){}
   // debounce remote repeats: reload once the user settles (keeps position)
@@ -2706,6 +2724,18 @@ function loadPlayer(){
     showTitleCard();
     return;
   }
+  if (mirror === "vidbolt" && watchState.anime) {
+    // anime rides AniList/MAL IDs (same cached mapping as AniPM) with absolute
+    // episode numbers — async resolve, then the frame loads exactly once
+    window._lrT = 0; window._cinePlaying = false;
+    clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
+    ctlReset(); ctlPollStop();
+    fetchIntroRanges();
+    pokeHud();
+    loadVidboltAnime();
+    showTitleCard();
+    return;
+  }
   // cache-bust so back-to-back reloads always refresh (keeps position via &t=)
   const _u = buildEmbedUrlClean();
   f.src = _u + (_u.includes("?") ? "&" : "?") + "_=" + Date.now();
@@ -2758,6 +2788,7 @@ function loadPlayer(){
       const _rt = Math.floor(watchState.t); watchState.t = 0;
       setTimeout(() => vidriftSend({ type: "vidrift:resume", currentTime: _rt }), 1500);
     }
+    vidriftQuality(); // pin the saved rendition (best effort, pre-ready safe)
     armStuckWatchdogs(); // stage 3 lives here (TV anime only)
   }
   // fallback: hide spinner even if the player never fires ready
@@ -3458,6 +3489,7 @@ const MIRRORS = [
   { id: "vidcore", name: "VidCore" },
   { id: "vidrift", name: "VidRift" },
   { id: "vidzen", name: "VidZen" },
+  { id: "vidbolt", name: "VidBolt" },
   { id: "anipm", name: "AniPM" }
 ];
 /* mirrors that break inside ANY sandboxed iframe: load without sandbox */
@@ -3609,6 +3641,14 @@ function mirrorUrl(id){
         ? `https://embed.vidrift.net/embed/tv/${tmdb}/${s}/${e}`
         : `https://embed.vidrift.net/embed/movie/${tmdb}`;
     }
+    case "vidbolt": {
+      // docs shapes: /movie/{tmdb}, /tv/{tmdb}/{s}/{e} (+ /anime/{anilist} or
+      // /anime/mal/{mal} for anime — resolved async in loadPlayer, never here
+      // since mapping isn't synchronous). Bare URLs, own controls tier.
+      return tv
+        ? `https://vidbolt.pro/tv/${tmdb}/${s}/${e}`
+        : `https://vidbolt.pro/movie/${tmdb}`;
+    }
     case "vidzen": {
       // planetary-server player (TMDB-native, 4K, in-player server picker +
       // own subs). Documented params only: theme wears our accent, startAt
@@ -3624,6 +3664,8 @@ function mirrorUrl(id){
       else if ((watchState.t || 0) > 0) { _st = Math.floor(watchState.t); watchState.t = 0; }
       if (_st > 0) zp.set("startAt", String(Math.floor(_st)));
       const zq = zp.toString();
+      // wall-clock anchor so remote seeks work even before events arrive
+      window._vzT0 = Date.now(); window._vzStart = _st > 0 ? Math.floor(_st) : 0;
       return tv
         ? `https://vidzen.fun/tv/${tmdb}/${s}/${e}?${zq}`
         : `https://vidzen.fun/movie/${tmdb}?${zq}`;
@@ -3710,6 +3752,12 @@ function updateMirrorUI(){
       document.getElementById("watchStatus").textContent = "VidZen: 4K planetary servers — server picker + subs live in its player · 🎯/🖱 drive it on TV";
       return;
     }
+    if (mirror === "vidbolt") {
+      document.getElementById("watchStatus").textContent = watchState.anime
+        ? "VidBolt: AniList/MAL anime — own player controls · 🎯/🖱 drive it on TV"
+        : "VidBolt: TMDB movies + shows — own player controls · 🎯/🖱 drive it on TV";
+      return;
+    }
     document.getElementById("watchStatus").textContent = NO_SANDBOX.has(mirror)
       ? `Mirror: ${label} — no Ad Shield here (it blocks sandboxed players). Use Brave/uBlock.`
       : `Mirror: ${label} — use its own player controls` + ((typeof subFile !== "undefined" && subFile && subFile.cues && subFile.cues.length) ? " · your Wyzie subs return on CineSrc" : "");
@@ -3775,7 +3823,7 @@ const MAIN_PLAYERS = ["cinesrc", "anipm", "vidrift", "vidzen"];
 const MAIN_HINTS = {
   cinesrc: "Our bar drives everything: play, seek, subs, speed",
   anipm: "Our bar drives it after one ▶ tap inside: sub/dub, quality, skip",
-  vidrift: "Remote seeks + auto-skip sync; progress feeds Continue Watching",
+  vidrift: "Remote seeks + auto-skip sync; Up Next + quality follow our UI",
   vidzen: "Playback status feeds our UI (progress + resume); own player controls",
 };
 /* Wyzie subtitles: search + download with built-in shared key (personal
@@ -4682,6 +4730,26 @@ function vidriftSend(msg){
     document.getElementById("player").contentWindow.postMessage(msg, "https://embed.vidrift.net");
   } catch(e){}
 }
+function vidriftQuality(){
+  // pins the saved quality live (4K has no pin, rides Auto) — no reload
+  if (mirror !== "vidrift") return;
+  try {
+    const v = (typeof QLEVELS !== "undefined" && QLEVELS[qIdx]) ? QLEVELS[qIdx].v : "";
+    const label = v === "1080" ? "1080p" : v === "720" ? "720p" : v === "480" ? "480p" : "Auto";
+    vidriftSend({ type: "vidrift:quality-preference", label });
+  } catch(e){}
+}
+function vidriftNextup(eps){
+  // OUR episode list drives their Up Next card + Next button (unaired-aware;
+  // null on finale removes the button). Earliest send may predate the frame —
+  // harmless, latest send wins.
+  try {
+    if (mirror !== "vidrift" || watchState.type !== "tv") return;
+    const mine = (eps || []).filter(x => !epUnaired(x)).map(x => x.episode_number).filter(n => n > watchState.e);
+    const n = mine.length ? Math.min(...mine) : null;
+    vidriftSend({ type: "vidrift:nextup-info", next: n == null ? null : { season: watchState.s, episode: n } });
+  } catch(e){}
+}
 function vidriftSeekRel(d){
   // TV remote L/R for VidRift: its own menu may ignore the D-pad entirely,
   // but resume-seek always answers — skip from OUR side using last progress.
@@ -4689,6 +4757,27 @@ function vidriftSeekRel(d){
   const t = Math.max(0, (pState.cur || 0) + d);
   vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(t) });
   skipFlash(d);
+}
+function undrivenSeekRel(d){
+  // seeking players with no command API (VidZen): debounced startAt reload.
+  // Mashes accumulate into ONE reload so slow boxes never thrash; position
+  // comes from events when posted, else a wall-clock estimate from load.
+  if (mirror !== "vidzen") return;
+  let c = pState.cur || 0;
+  if (!(pState.dur > 0) && window._vzT0) c = Math.max(0, (Date.now() - window._vzT0) / 1000 + (window._vzStart || 0));
+  if (!((pState.dur > 0) || window._vzT0)) return; // no position at all: stay put, not a blind jump
+  window._uzD = (window._uzD || 0) + d;
+  skipFlash(d);
+  clearTimeout(window._uzT);
+  window._uzT = setTimeout(() => {
+    const total = window._uzD || 0; window._uzD = 0;
+    if (!total || mirror !== "vidzen") return;
+    let cc = pState.cur || 0;
+    if (!(pState.dur > 0) && window._vzT0) cc = Math.max(0, (Date.now() - window._vzT0) / 1000 + (window._vzStart || 0));
+    const tgt = Math.max(0, Math.floor(cc + total));
+    resumeAt = (pState.dur > 0) ? Math.min(tgt, Math.floor(pState.dur)) : tgt;
+    loadPlayer();
+  }, 600);
 }
 window.addEventListener("message", (event)=>{
   if (event.origin !== "https://embed.vidrift.net") return;
@@ -4715,6 +4804,20 @@ window.addEventListener("message", (event)=>{
     loadEpisodes(); saveContinue();
     const ws = document.getElementById("watchStatus");
     if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e}`;
+    showTitleCard();
+  }
+  if (d.type === "vidrift:nextup-play") {
+    // their countdown/Next fired under OUR nextup-info — advance ourselves
+    // (unaired can't arrive here: we advertised an aired ep or null)
+    const ns = d.season || watchState.s;
+    const ne = (d.episode || watchState.e) + 1;
+    watchState.s = ns; watchState.e = ne;
+    try { gridS = ns; } catch(e){}
+    _introKey = ""; // new episode, new intro range
+    if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
+    loadPlayer(); loadEpisodes(); saveContinue();
+    const wsn = document.getElementById("watchStatus");
+    if (wsn) wsn.textContent = `Now playing S${ns} E${ne}`;
     showTitleCard();
   }
   if (d.type === "vidrift:ended") {
@@ -4904,9 +5007,34 @@ function animeAbsEp(){
     return base + Math.max(1, watchState.e || 1);
   } catch(e){ return Math.max(1, watchState.e || 1); }
 }
-async function loadAnipmPlayer(){
+async function loadVidboltAnime(){
+  // VidBolt anime: AniList ID preferred, MAL fallback, absolute episode —
+  // same cached year-aware mapping as AniPM, 15s cap, manual-aware fallback
   const id = watchState.id;
   const f = document.getElementById("player");
+  const spin = document.getElementById("playerSpin");
+  const ws = document.getElementById("watchStatus");
+  if (spin) spin.style.display = "grid";
+  if (ws) ws.textContent = "Matching anime…";
+  const tmdbYear = parseInt(String((currentItem || {}).first_air_date || "").slice(0, 4), 10) || 0;
+  let ids = {};
+  try { ids = await withTimeout(anipmIds(id, titleOf(currentItem || {}), tmdbYear), 15000, "anime-map"); } catch(e){ ids = {}; }
+  if (watchState.id !== id || mirror !== "vidbolt") return; // user moved on
+  const ep = Math.max(1, animeAbsEp() || 1);
+  let vu = null;
+  if (ids.ani) vu = `https://vidbolt.pro/anime/${ids.ani}/${ep}`;
+  else if (ids.mal) vu = `https://vidbolt.pro/anime/mal/${ids.mal}/${ep}`;
+  if (!vu) {
+    if (spin) spin.style.display = "none";
+    if (!autoSwitchOn()) { stuckRecommend("Couldn't match this anime", "VidRift"); return; }
+    if (ws) ws.textContent = "Couldn't match this anime — moved you to VidRift";
+    setMirror("vidrift", true);
+    return;
+  }
+  f.src = vu + (vu.includes("?") ? "&" : "?") + "_=" + Date.now();
+}
+async function loadAnipmPlayer(){
+  const id = watchState.id;  const f = document.getElementById("player");
   const spin = document.getElementById("playerSpin");
   const ws = document.getElementById("watchStatus");
   if (spin) spin.style.display = "grid";

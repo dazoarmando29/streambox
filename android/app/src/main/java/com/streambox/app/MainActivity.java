@@ -110,6 +110,7 @@ public class MainActivity extends Activity {
                         || host.endsWith("vidcore.org")
                          || host.endsWith("vidrift.net") || host.endsWith("embed.vidrift.net")
                          || host.equals("vidzen.fun") || host.endsWith(".vidzen.fun")
+                         || host.equals("vidbolt.pro") || host.endsWith(".vidbolt.pro")
                         || host.endsWith("ani.pm")
                         || host.endsWith("youtube-nocookie.com") || host.endsWith("youtube.com")
                         || host.endsWith("youtu.be");
