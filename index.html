@@ -379,7 +379,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 117; // bump every release alongside version.txt
+  const BUILD_NUM = 118; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -555,7 +555,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         </div>
         <div class="tip-arrow"></div>
       </div>
-      <p class="no-cinema text-[11px] text-gray-600 mt-2">Cinema remote (TV): <b>◀</b> = −10s • <b>▶</b> = +30s • <b>▲ ▼</b> = volume • <b>OK</b> = play/pause. Desktop: same. <b>CC</b> toggles our subtitles on/off (opens Subs settings when empty). <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
+      <p class="no-cinema text-[11px] text-gray-600 mt-2">Cinema remote (TV): <b>◀</b> = −10s • <b>▶</b> = +30s • <b>▲</b> = banner/Got-it • <b>▼</b> = next button • <b>OK</b> = press / play-pause. Volume: your TV remote's own keys. Desktop: same. <b>CC</b> toggles our subtitles on/off (opens Subs settings when empty). <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
       <!-- player options -->
       <div class="no-cinema glass mt-3 p-4">
         <p class="font-bold text-sm">Playback Settings</p>
@@ -1108,7 +1108,9 @@ setInterval(checkUpdate, 30 * 60 * 1000);
 async function checkCinesrc(){
   try {
     const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 8000);
+    // slow TV Wi-Fi can take a while for one cold fetch — aborting at 8s
+    // there cried "down" on boxes that just needed longer
+    const t = setTimeout(() => ctl.abort(), document.body.classList.contains("tv-mode") ? 20000 : 8000);
     await fetch("https://cinesrc.st/embed/movie/550?_=" + Date.now(), { mode: "no-cors", cache: "no-store", signal: ctl.signal });
     clearTimeout(t);
   } catch(e) {
@@ -1370,19 +1372,25 @@ function skeletonRow(title){
         return;
       }
     }
-    // CINEMA scheme (video-fs, no popup): Left/Right ALWAYS skip,
-    // Up/Down walk along the bar, OK toggles when focus is off the buttons.
+    // CINEMA scheme (video-fs, no popup): Left/Right skim, Up/Down move
+    // focus (bar row <-> banners above like Got-it), OK presses focused.
     if (okPressed(e)) {
       pokeHud();
       const top0 = topPopup();
       const bar0 = !top0 && document.body.classList.contains("video-fs") ? document.getElementById("ctlBar") : null;
       if (bar0 && bar0.classList.contains("bar-hidden")) {
-        // asleep bar + OK from TV = the play/pause Netflix muscle memory
+        // asleep bar + OK from TV = the play/pause Netflix muscle memory —
+        // unless focus sits on a real button above the bar (health Got-it…),
+        // which OK must press, not override.
+        const fa = document.activeElement;
+        if (fa && fa.closest && !fa.closest("#ctlBar") && /^(BUTTON|A)$/.test(fa.tagName)) return;
         e.preventDefault(); ctlToggle(); return;
       }
       if (bar0 && !bar0.classList.contains("bar-hidden")) {
         const f0 = document.activeElement;
-        if (!f0 || f0 === document.body || f0 === document.documentElement || !(f0.closest && f0.closest("#ctlBar"))) {
+        const onBar = !!(f0 && f0.closest && f0.closest("#ctlBar"));
+        if (!onBar && f0 && /^(BUTTON|A)$/.test(f0.tagName)) return; // Got-it etc: let OK press it
+        if (!onBar) {
           e.preventDefault(); ctlToggle(); return;
         }
       }
@@ -1409,8 +1417,9 @@ function skeletonRow(title){
         : null;
       if (!top && bar && bar.classList.contains("bar-hidden")) {
         // bar asleep: quick-control mode (Netflix/YouTube-style):
-        // L/R skim the timeline, U/D volume, and chained L/R keeps skipping
-        // for ~4s before the bar's button row takes over (_lrT window).
+        // L/R skim the timeline, U/D wakes the bar and lands on it, and
+        // chained L/R keeps skipping for ~4s before the row takes over.
+        // (U/D never touches volume — the TV remote's own keys own that.)
         e.preventDefault(); pokeHud();
         if ((mirror !== "cinesrc" && mirror !== "anipm") || !document.body.classList.contains("tv-mode")) {
           if (mirror === "cinesrc" && (dir === "left" || dir === "right")) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
@@ -1419,7 +1428,16 @@ function skeletonRow(title){
           return;
         }
         if (dir === "left" || dir === "right") { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
-        else { volStep(dir === "up" ? 0.1 : -0.1); volFlash(); }
+        else {
+          // wake + land: bar is visible again (pokeHud above), so put
+          // focus on the row — further U/D can then climb to Got-it
+          const bb = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
+          if (bb.length) {
+            const go = dir === "up" ? bb[0] : bb[bb.length - 1];
+            safeFocus(go);
+            try { go.scrollIntoView({ inline: "nearest", block: "nearest" }); } catch(e){}
+          }
+        }
         return;
       }
       if (!top && bar && !bar.classList.contains("bar-hidden")) {
@@ -1440,15 +1458,15 @@ function skeletonRow(title){
           try { btns[bn2].scrollIntoView({ inline: "nearest", block: "nearest" }); } catch(e){}
           return;
         }
-        // TV remote scheme, bar VISIBLE: 4s after a L/R skim you're in
-        // "bar mode" — arrows walk the buttons (⚙/CC/Episodes/🖱 reachable),
-        // U/D volume, OK = press focused / play-pause when none is. Keep
-        // mashing L/R inside the skim window to chain more skips instead.
+        // TV remote scheme, bar VISIBLE: L/R ALWAYS seek (YouTube-style) —
+        // mashing can never degrade into button-walking, so ff/bw answers
+        // every press. Row buttons stay reachable: ▼ cycles them, ▲ climbs
+        // to banners above (health Got-it). OK = press focused / play-pause
+        // when none is. Volume lives on the TV remote's own keys, never arrows.
         e.preventDefault(); pokeHud();
         const cineSrc = (mirror === "cinesrc" || mirror === "anipm") && !onMirrorBar;
-        const skimming = cineSrc && window._lrT && (Date.now() - window._lrT < 4000);
         if (dir === "left" || dir === "right") {
-          if (skimming) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); return; }
+          if (cineSrc) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); return; }
           if (mirror === "vidrift") {
             // strip focus decides: ON the strip → walk it (servers/cursor
             // stay reachable); OFF it → skim the timeline from our side.
@@ -1473,8 +1491,46 @@ function skeletonRow(title){
           }
           return;
         }
-        volStep(dir === "up" ? 0.1 : -0.1);
-        volFlash();
+        // U/D moves focus between the bar row and banners above it, so the
+        // health Got-it is always one press away — never volume (TV keys).
+        const hb0 = document.getElementById("healthBar");
+        const hg = hb0 && !hb0.classList.contains("hidden") ? hb0.querySelector("button") : null;
+        const pool = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
+        if (hg) { try { const hr = hg.getBoundingClientRect(); if (hr.width > 0 && hr.height > 0) pool.push(hg); } catch(e){} }
+        const cur0 = document.activeElement;
+        let bx = 0, by = 0, hasOrigin = false;
+        if (cur0 && cur0 !== document.body && cur0 !== document.documentElement && cur0.getBoundingClientRect) {
+          const rc = cur0.getBoundingClientRect(); bx = rc.left + rc.width / 2; by = rc.top + rc.height / 2; hasOrigin = true;
+        }
+        if (!hasOrigin) {
+          if (pool.length) safeFocus(dir === "up" ? pool[pool.length - 1] : pool[0]);
+          return;
+        }
+        let best = null, bestScore = Infinity;
+        for (const el of pool) {
+          if (el === cur0) continue;
+          const r = el.getBoundingClientRect();
+          const dx = (r.left + r.width / 2) - bx, dy = (r.top + r.height / 2) - by;
+          let ok = false, primary = 0, secondary = 0;
+          if (dir === "up" && dy < -10) { ok = true; primary = -dy; secondary = Math.abs(dx); }
+          if (dir === "down" && dy > 10) { ok = true; primary = dy; secondary = Math.abs(dx); }
+          if (!ok) continue;
+          const score = primary + secondary * 2.5;
+          if (score < bestScore) { bestScore = score; best = el; }
+        }
+        if (best) {
+          safeFocus(best);
+          try { best.scrollIntoView({ inline: "nearest", block: "nearest" }); } catch(e){}
+        } else if (dir === "down" && cur0 && bar.contains(cur0)) {
+          // nothing below the bottom-anchored row: ▼ cycles to the next
+          // button instead, so every pill stays reachable now L/R seeks
+          const row = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
+          if (row.length) {
+            const ni = (row.indexOf(cur0) + 1) % row.length;
+            safeFocus(row[ni]);
+            try { row[ni].scrollIntoView({ inline: "nearest", block: "nearest" }); } catch(e){}
+          }
+        }
         return;
       }
       // TV content lock: the top nav is only reachable from nav/hero/back —
@@ -2367,8 +2423,11 @@ function buildEmbedUrlClean(){
   p += `&controls=${pControls ? "true" : "false"}`;
   if (resumeAt >= 0) { p += `&t=${resumeAt}&continueprompt=false`; resumeAt = -1; }
   else if ((watchState.t || 0) > 0) {
-    // continue-watching resume: let the player's own Continue/Restart prompt ask
     p += `&t=${Math.floor(watchState.t)}`;
+    // TV remotes can't reach the player's own Continue/Restart prompt
+    // (it lives inside the frame), so TV resumes straight in — desktop
+    // and phone keep the prompt, their pointers can tap it.
+    if (document.body.classList.contains("tv-mode")) p += `&continueprompt=false`;
     watchState.t = 0;
   }
   // remember the last working server so repeat watches start faster
@@ -2446,27 +2505,35 @@ function loadPlayer(){
   f.src = _u + (_u.includes("?") ? "&" : "?") + "_=" + Date.now();
   const { type, s, e } = watchState;
   window._cinePlaying = false;
+  window._cineReady = false; window._cmdQ = []; window._qSeekD = 0; // fresh player = fresh command listener
   window._lrT = 0; // fresh video = fresh skim state (no stale chain window)
   // watchdog: CineSrc loads and "finds a server" but never starts playback
   // (blocked source, dead CDN — or a desktop ad-blocker killing the player's
   // own heartbeat calls, which wedges its start logic while bytes still flow).
-  // Stage 1 (18s): banner + status naming the likely cause. Stage 2 (35s):
-  // self-heal onto a working mirror instead of waiting forever.
+  // Slow TV boxes can need a minute just to get going, so TV gets ~2.5x the
+  // patience before we warn (stage 1) or self-heal mirrors (stage 2).
+  // Stage 1: banner + status naming the likely cause.
+  // Stage 2: self-heal onto a working mirror instead of waiting forever.
   clearTimeout(window._watchdog);
   clearTimeout(window._watchdog2);
   if (mirror === "cinesrc") {
+    const _isTV = document.body.classList.contains("tv-mode");
     fetchIntroRanges();
     document.getElementById("watchStatus").textContent = type==="tv" ? `Now playing S${s} E${e}` : "Now playing";
     window._watchdog = setTimeout(() => {
       if (window._cinePlaying || mirror !== "cinesrc") return;
       const ws = document.getElementById("watchStatus");
-      if (ws) ws.textContent = "CineSrc found the title but playback is stuck — desktop ad-blocker? Allow this site + cinesrc.st (Brave: Shields down), or switch Source";
+      if (ws) ws.textContent = _isTV
+        ? "CineSrc is taking a while — slow boxes can need a full minute. If it never starts, press ⇄ Source"
+        : "CineSrc found the title but playback is stuck — desktop ad-blocker? Allow this site + cinesrc.st (Brave: Shields down), or switch Source";
       const hb = document.getElementById("healthBar");
       if (hb) {
-        hb.querySelector("span").textContent = "⚠ CineSrc won't start here — desktop ad-blockers (Brave Shields etc.) break its player even while video loads. Allow this site + cinesrc.st, or use ⇄ Source. Mirrors still play.";
+        hb.querySelector("span").textContent = _isTV
+          ? "⚠ CineSrc is still loading — slow boxes can need a full minute. Wait a little, or use ⇄ Source. Mirrors still play."
+          : "⚠ CineSrc won't start here — desktop ad-blockers (Brave Shields etc.) break its player even while video loads. Allow this site + cinesrc.st, or use ⇄ Source. Mirrors still play.";
         hb.classList.remove("hidden");
       }
-    }, 18000);
+    }, _isTV ? 45000 : 18000);
     window._watchdog2 = setTimeout(() => {
       if (window._cinePlaying || mirror !== "cinesrc") return;
       // anime never belongs on the generic fallback — it lives on AniPM
@@ -2475,7 +2542,7 @@ function loadPlayer(){
       setMirror(fb, true);
       const ws2 = document.getElementById("watchStatus");
       if (ws2) ws2.textContent = `CineSrc stayed stuck — moved you to ${nm}. ⇄ Source anytime to go back.`;
-    }, 35000);
+    }, _isTV ? 90000 : 35000);
   }
   if (mirror === "vidrift") {
     // intro ranges for autoskip + resume where we left off (safe pre-ready)
@@ -2485,14 +2552,15 @@ function loadPlayer(){
       setTimeout(() => vidriftSend({ type: "vidrift:resume", currentTime: _rt }), 1500);
     }
   }
-  // fallback: hide spinner after 8s even if player never fires ready (ad-blocked network etc.)
+  // fallback: hide spinner even if the player never fires ready
+  // (ad-blocked network etc.) — slow TV boxes get longer before we nudge
   clearTimeout(window._spinT);
   window._spinT = setTimeout(()=>{
     if (spin) spin.style.display = "none";
     const ws = document.getElementById("watchStatus");
     if (ws && mirror === "cinesrc" && /Now playing|Loading/.test(ws.textContent || ""))
       ws.textContent = "Still loading? Press ↻ Reload, or ⇄ Source to try another server.";
-  }, 8000);
+  }, document.body.classList.contains("tv-mode") ? 25000 : 8000);
   if (mirror === "cinesrc") ctlPollStart();
   else ctlPollStop();
   // TV app only (WebView UA carries a "wv" marker): hand the D-pad straight
@@ -2700,12 +2768,31 @@ function pokeHud(){
 
 /* ---------- CineSrc remote controls (per https://cinesrc.st/docs player methods) ---------- */
 const pState = { paused: true, muted: false, rate: 1, cur: 0, dur: 0, seeking: false };
+window._cmdQ = []; window._cineReady = false; window._qSeekD = 0;
 function sendCmd(command, args = []) {
   if (mirror !== "cinesrc") return; // YouTube/alternate players have no command API
+  // slow boxes (TV WebView especially) smash keys before the player's own
+  // command listener is up — park seeks/play/pause until ready, then flush
+  // in order, so not a single press vanishes into the void.
+  if (!window._cineReady && (command === "seek" || command === "play" || command === "pause")) {
+    window._cmdQ.push({ command, args });
+    if (window._cmdQ.length > 20) window._cmdQ.shift();
+    return;
+  }
   try {
     document.getElementById("player").contentWindow.postMessage(
       { type: "cinesrc:command", command, args }, "https://cinesrc.st");
   } catch(e){}
+}
+function flushCmdQ(){
+  if (!window._cmdQ.length) return;
+  const q = window._cmdQ; window._cmdQ = []; window._qSeekD = 0;
+  q.forEach(m => {
+    try {
+      document.getElementById("player").contentWindow.postMessage(
+        { type: "cinesrc:command", command: m.command, args: m.args }, "https://cinesrc.st");
+    } catch(e){}
+  });
 }
 function fmtT(s){
   s = Math.max(0, Math.floor(s || 0));
@@ -2751,9 +2838,11 @@ function ctlSeekRel(d){
   }
   // always fire: the player clamps out-of-range seeks itself. (The old
   // dur-guard swallowed every skip until metadata arrived — remotes mashed
-  // L/R and saw nothing happen.)
+  // L/R and saw nothing happen.) Pre-ready mashes accumulate onto the
+  // queued total, so triple-tapped +30s lands at +90s, not +30s.
   if (!(pState.dur > 0)) sendCmd("getDuration");
-  const t = Math.max(0, (pState.cur || 0) + d);
+  const t = Math.max(0, (pState.cur || 0) + (window._qSeekD || 0) + d);
+  if (!window._cineReady) window._qSeekD = (window._qSeekD || 0) + d;
   sendCmd("seek", [Math.floor(pState.dur > 0 ? Math.min(t, pState.dur) : t)]);
   skipFlash(d);
 }
@@ -4595,6 +4684,9 @@ window.addEventListener("message", (event)=>{
   const { type, ...data } = event.data || {};
   if(type === "cinesrc:ready" || type === "cinesrc:play" || type === "cinesrc:loadedmetadata" || type === "cinesrc:timeupdate" || type === "cinesrc:seeked") hideSpin();
   if(type === "cinesrc:ready") {
+    // player command listener is up: release everything smashed pre-ready
+    window._cineReady = true;
+    flushCmdQ();
     // pull initial state for the control bar
     sendCmd("getPaused"); sendCmd("getDuration"); sendCmd("getMuted"); sendCmd("getPlaybackRate"); sendCmd("getVolume");
   }
