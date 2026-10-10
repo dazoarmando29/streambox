@@ -379,7 +379,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 121; // bump every release alongside version.txt
+  const BUILD_NUM = 122; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2062,6 +2062,7 @@ async function browseMore(focusFirst){
     browse.page = next;
     browse.totalPages = d.total_pages || 1;
     const grid = document.getElementById("grid");
+    const prevCount = grid.children.length;
     const bt = browse.type === "anime" ? "tv" : browse.type;
     const lockedBr = adultLocked();
     (d.results || []).filter(x => x.poster_path && (!lockedBr || !isAdult(x))).forEach(x => {
@@ -2071,6 +2072,15 @@ async function browseMore(focusFirst){
     if (focusFirst) {
       const first = grid.querySelector(".card");
       if (first && document.body.classList.contains("tv-mode")) first.focus();
+    } else if (document.body.classList.contains("tv-mode")) {
+      // the button hid during load, dropping focus to body — the next arrow
+      // from body reboots to the grid top. Land on the first NEW card
+      // instead, so position holds and new titles scroll into view.
+      const anchor = grid.children[prevCount] || (!btn.classList.contains("hidden") ? btn : null);
+      if (anchor) {
+        try { anchor.focus({ preventScroll: true }); } catch(e){}
+        try { anchor.scrollIntoView({ block: "nearest", behavior: "auto" }); } catch(e){}
+      }
     }
   } catch(e){
     const grid = document.getElementById("grid");
