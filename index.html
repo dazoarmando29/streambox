@@ -433,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 152; // bump every release alongside version.txt
+  const BUILD_NUM = 153; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2872,6 +2872,7 @@ function loadPlayer(){
   // cache-bust so back-to-back reloads always refresh (keeps position via &t=)
   const _u = buildEmbedUrlClean();
   f.src = _u + (_u.includes("?") ? "&" : "?") + "_=" + Date.now();
+  window._loadT = Date.now(); // frame birth: dead-press guidance measures from here
   const { type, s, e } = watchState;
   window._cinePlaying = false;
   window._cineReady = false; window._cmdQ = []; window._qSeekD = 0; // fresh player = fresh command listener
@@ -3328,6 +3329,16 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
   if (mirror === "vidrift") { focusMirror(); return; }
   if (mirror === "vidbolt") { boltSend(pState.paused ? { type: "play" } : { type: "pause" }); return; }
   if (mirror === "vidzen") { zenSend(pState.paused ? { type: "play" } : { type: "pause" }); return; }
+  if (mirror === "cinesrc" && !window._cineReady && !(pState.dur > 0) && window._loadT
+      && Date.now() - window._loadT > (document.body.classList.contains("tv-mode") ? 45000 : 18000)) {
+    // play pressed on a frame that never said hello (blocked embed, dead
+    // source): parking the command would answer with silence — name the hop
+    // instead. Same patience as the watchdog warn stage, never earlier.
+    const fb = watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi");
+    const nm = (MIRRORS.find(x => x.id === fb) || {}).name || fb;
+    stuckRecommend("CineSrc isn't answering", nm);
+    return;
+  }
   pState.paused = !pState.paused;
   sendCmd(pState.paused ? "pause" : "play");
   ctlPaint();
