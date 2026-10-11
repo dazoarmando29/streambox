@@ -562,7 +562,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 168; // bump every release alongside version.txt
+  const BUILD_NUM = 169; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -4246,9 +4246,11 @@ function mirrorUrl(id){
         ? `https://vidlink.pro/tv/${tmdb}/${s}/${e}`
         : `https://vidlink.pro/movie/${tmdb}`;
     case "vidfast":
+      // vidfast.pro 301s to vidfast.vc now (domain move) — go direct, one hop
+      // less per load; both hosts stay in the APK allowlist
       return tv
-        ? `https://vidfast.pro/tv/${tmdb}/${s}/${e}?autoPlay=true`
-        : `https://vidfast.pro/movie/${tmdb}?autoPlay=true`;
+        ? `https://vidfast.vc/tv/${tmdb}/${s}/${e}?autoPlay=true`
+        : `https://vidfast.vc/movie/${tmdb}?autoPlay=true`;
     case "vidsrcto":
       // vidsrc.to docs: /embed/movie/{tmdb} and /embed/tv/{id}/{s}/{e}
       return tv

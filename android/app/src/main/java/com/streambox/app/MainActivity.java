@@ -172,6 +172,28 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) {}
                 return super.shouldInterceptRequest(view, request);
             }
+
+            @Override
+            public void onReceivedSslError(WebView view, android.webkit.SslErrorHandler handler, android.net.http.SslError error) {
+                // VidCore serves a broken cert chain (leaf without its
+                // intermediate). Modern Chromium self-heals via AIA fetching;
+                // strict/old WebViews reject the chain and the player dies.
+                // Scope is surgical: THAT host + chain-trust errors ONLY -
+                // date/hostname/expired errors and every other host abort.
+                try {
+                    String h = "";
+                    try {
+                        java.net.URI u = new java.net.URI(error.getUrl() == null ? "" : error.getUrl());
+                        if (u.getHost() != null) h = u.getHost().toLowerCase(java.util.Locale.US);
+                    } catch (Exception ignored) {}
+                    if (h.endsWith("vidcore.org")
+                            && error.getPrimaryError() == android.net.http.SslError.SSL_UNTRUSTED) {
+                        handler.proceed();
+                        return;
+                    }
+                } catch (Exception ignored) {}
+                handler.cancel();
+            }
         });
 
         web.setWebChromeClient(new WebChromeClient() {
