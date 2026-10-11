@@ -433,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 150; // bump every release alongside version.txt
+  const BUILD_NUM = 151; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -4151,6 +4151,16 @@ async function wyzQuotaMsg(res){
     ? `Daily limit reached (1,000 free/day) — resets ${reset}.`
     : "Daily limit reached (1,000 free/day) — try again later.";
 }
+/* quota quiet-mode: the cap gets ONE calm switch-note per session, never a ⚠
+   on every episode/season — backups still load silently underneath. */
+function wyzCapNote(){
+  if (window._wyzCapNoted) return;
+  window._wyzCapNoted = true;
+  try {
+    const wq = document.getElementById("watchStatus");
+    if (wq) wq.textContent = "Subtitles: switched to backup source ✓";
+  } catch(e){}
+}
 function paintWyzKey(){
   // key UI retired (built-in key + backups just work) — null-safe no-op kept
   // for the quota path that still reports through it.
@@ -4263,10 +4273,9 @@ async function wyzAutoSubs(){
     if (subFile && subFile.cues && subFile.cues.length) return;
     if (mirror !== "cinesrc") return;
     if (wyzQuota && Date.now() - wyzQuota.at < 3600000) {
-      const wq = document.getElementById("watchStatus");
-      if (wq) wq.textContent = `⚠ Subtitles off — free key's 1,000/day used up${wyzQuota.reset ? " (resets " + wyzQuota.reset + ")" : ""}. Trying backups…`;
+      wyzCapNote(); // capped: one calm switch-note per session, then silence
       bsAuto(); // capped: silent backup attempt, once per title (movies via TSDB)
-      return; // capped: warn without burning more Wyzie requests
+      return; // capped: never burn more Wyzie requests
     }
     const q = new URLSearchParams({
       id: String(watchState.id), language: wyzLang, format: "srt", limit: "5", key: wyzKeyEffective()
@@ -4277,8 +4286,8 @@ async function wyzAutoSubs(){
     }
     const r = await fetch(`${WYZ_BASE}/search?${q}`);
     if (r.status === 429) {
-      const wq = document.getElementById("watchStatus");
-      if (wq) wq.textContent = "⚠ " + await wyzQuotaMsg(r) + " Trying backup sources…";
+      await wyzQuotaMsg(r);
+      wyzCapNote();
       bsAuto(); // capped mid-title: backups now, not next title
       return;
     }
@@ -4291,8 +4300,8 @@ async function wyzAutoSubs(){
     const pick = ranked.find(x => !x.isHearingImpaired) || ranked[0];
     const fr = await fetch(pick.url);
     if (fr.status === 429) {
-      const wq = document.getElementById("watchStatus");
-      if (wq) wq.textContent = "⚠ " + await wyzQuotaMsg(fr) + " Trying backup sources…";
+      await wyzQuotaMsg(fr);
+      wyzCapNote();
       bsAuto(); // capped on download: backups now, not next title
       return;
     }
@@ -4430,7 +4439,7 @@ async function bsSearch(append){
       box.innerHTML = "";
       const h = document.createElement("p");
       h.className = "text-[11px] text-amber-300/90";
-      h.textContent = "⚠ Wyzie 1,000/day used up — backup results (TSDB + BetaSeries).";
+      h.textContent = "Backup results (TSDB + BetaSeries) — Wyzie quota used up.";
       box.appendChild(h);
     }
     list.forEach(s => box.appendChild(bsRow(s, "Backup")));
@@ -4488,7 +4497,12 @@ async function bsAuto(){
     const gl = guessLang(pick.file);
     setSubs({ name: (pick.file || "backup.srt"), lang: gl !== "Custom" ? gl : (pick.language || wyzLang.toUpperCase()), cues, src: pick.tsdbUrl ? "tsdb" : "betaseries", corsUrl: (pick.tsdbUrl || ""), pos: "bottom", offset: 0 });
     const ws = document.getElementById("watchStatus");
-    if (ws && mirror === "cinesrc") ws.textContent = `Backup subtitles auto-loaded (${cues.length} lines) ✓ — Wyzie quota resets later`;
+    // quiet-mode: the switch-note (if this session already noted it) stands —
+    // later episodes load backups with no further messages
+    if (ws && mirror === "cinesrc" && !window._wyzCapNoted) {
+      window._wyzCapNoted = true;
+      ws.textContent = `Backup subtitles auto-loaded (${cues.length} lines) ✓`;
+    }
   } catch(e){}
 }
 /* my subtitles: external .srt/.vtt files with position + sync control */
