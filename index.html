@@ -433,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 147; // bump every release alongside version.txt
+  const BUILD_NUM = 148; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -4885,11 +4885,11 @@ async function renderEpDrawer(){
 /* Our own intro-skip: CineSrc's autoskip param never fires on TV episodes,
    so we fetch the intro range from TheIntroDB (free, TMDB-keyed, keyless API)
    and seek past it ourselves when Auto-skip is on. */
-let _introRanges = [], _outroRanges = [], _introKey = "", _skipT = 0;
+let _introRanges = [], _outroRanges = [], _recapRanges = [], _introKey = "", _skipT = 0;
 async function fetchIntroRanges(){
   const key = `${watchState.type}/${watchState.id}/${watchState.s||""}/${watchState.e||""}`;
   if (key === _introKey) return; // already fetched for this title
-  _introKey = key; _introRanges = []; _outroRanges = [];
+  _introKey = key; _introRanges = []; _outroRanges = []; _recapRanges = [];
   if (watchState.type !== "tv") return; // TV shows + anime only — movies never skip
   try {
     let url = `https://api.theintrodb.org/v3/media?tmdb_id=${watchState.id}`;
@@ -4898,6 +4898,10 @@ async function fetchIntroRanges(){
     if (!r.ok) return;
     const d = await r.json();
     _introRanges = (d.intro || []).map(x => ({ start: (x.start_ms || 0) / 1000, end: (x.end_ms || 0) / 1000 }))
+      .filter(x => x.end > x.start && x.end - x.start > 3);
+    // recaps ("previously on…") ride the same shapes — absent where the
+    // community hasn't submitted them, possibly several per episode
+    _recapRanges = (d.recap || []).map(x => ({ start: (x.start_ms || 0) / 1000, end: (x.end_ms || 0) / 1000 }))
       .filter(x => x.end > x.start && x.end - x.start > 3);
     // credits/outro doubles as the Next-Episode trigger (end may be null = runs out)
     _outroRanges = (d.credits || []).map(x => ({ start: (x.start_ms || 0) / 1000, end: x.end_ms != null ? x.end_ms / 1000 : null }))
@@ -4924,6 +4928,27 @@ function skipIntroNow(){
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Intro skipped ✓";
+  paintSkipPill();
+}
+/* recap check: same gates as intros (TV + anime, drivable mirrors) — the
+   pill only appears while the playhead sits inside a submitted recap. */
+function recapHit(){
+  if (watchState.type !== "tv") return null; // TV shows + anime only — never movies
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt") return null;
+  const cur = pState.cur || 0;
+  return _recapRanges.find(r => cur >= r.start && cur < r.end - 1) || null;
+}
+function skipRecapNow(){
+  const hit = recapHit();
+  if (!hit) return;
+  _skipT = Date.now();
+  if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
+  else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
+  else if (mirror === "vidbolt") boltSeekTo(hit.end);
+  else if (mirror === "vidzen") zenSeekTo(hit.end);
+  else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
+  const ws = document.getElementById("watchStatus");
+  if (ws) ws.textContent = "Recap skipped ✓";
   paintSkipPill();
 }
 /* next aired episode in THIS season (from the cached season list) — outro
@@ -4983,32 +5008,39 @@ function skipOutroNow(){
   if (ws) ws.textContent = "Credits skipped ✓";
   paintSkipPill();
 }
-/* shared pill router: intro first, else outro (credits). One pill, two jobs. */
+/* shared pill router: recap first (it precedes the intro), then intro, else
+   outro (credits). One pill, three jobs. */
 function skipPillNow(){
+  const c = recapHit();
+  if (c && (pState.dur || 0) > 0) { skipRecapNow(); return; }
   const r = introHit();
   if (r && (pState.dur || 0) > 0) { skipIntroNow(); return; }
   skipOutroNow();
 }
 function paintSkipPill(){
   const r = introHit();
+  const rc = recapHit();
   // loaded-gate: an intro starting at 0:00 matches a fresh cur=0 while the
   // player is still black ("Loading player…", dur unknown) — the pill must
   // wait for real metadata, not a zeroed playhead
   const loaded = (pState.dur || 0) > 0;
-  const inHit = (r && loaded) ? r : null;
-  const oHit = (!inHit && loaded) ? outroHit() : null;
+  const cHit = (rc && loaded) ? rc : null; // recap precedes the intro — first priority
+  const inHit = (!cHit && r && loaded) ? r : null;
+  const oHit = (!cHit && !inHit && loaded) ? outroHit() : null;
   const hasNext = !!oHit && !!nextAiredEp();
   const isTV = document.body.classList.contains("tv-mode") || document.body.classList.contains("tv-app");
   const sk = document.getElementById("ctlSkipIntro");
   if (sk) {
     sk.classList.add("hidden"); // retired: the floating pill owns Skip on every target
-    if (inHit) { const t = "⏭ Skip " + fmtT(inHit.end); if (sk.textContent !== t) sk.textContent = t; }
+    if (cHit) { const t = "⏭ Skip Recap"; if (sk.textContent !== t) sk.textContent = t; }
+    else if (inHit) { const t = "⏭ Skip " + fmtT(inHit.end); if (sk.textContent !== t) sk.textContent = t; }
     else if (oHit) { const t = hasNext ? "⏭ Next Ep" : "⏭ Credits"; if (sk.textContent !== t) sk.textContent = t; }
   }
   const fl = document.getElementById("skipFloat");
   if (fl) {
-    fl.classList.toggle("hidden", !(inHit || oHit)); // every target gets the floating pill
-    if (inHit) { const t = "⏭ Skip Intro · " + fmtT(inHit.end); if (fl.textContent !== t) fl.textContent = t; }
+    fl.classList.toggle("hidden", !(cHit || inHit || oHit)); // every target gets the floating pill
+    if (cHit) { const t = "⏭ Skip Recap · " + fmtT(cHit.end); if (fl.textContent !== t) fl.textContent = t; }
+    else if (inHit) { const t = "⏭ Skip Intro · " + fmtT(inHit.end); if (fl.textContent !== t) fl.textContent = t; }
     else if (oHit) { const t = hasNext ? "⏭ Skip Credits · Next Ep" : "⏭ Skip Credits"; if (fl.textContent !== t) fl.textContent = t; }
     // focus rescue: the pill just left while a remote sat on it — park on ▶
     // instead of stranding focus on a hidden pill
