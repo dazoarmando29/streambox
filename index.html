@@ -433,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 151; // bump every release alongside version.txt
+  const BUILD_NUM = 152; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -4555,6 +4555,11 @@ function toSecs(s){
   if (!m) return 0;
   return (+(m[1] || 0)) * 3600 + (+m[2]) * 60 + (+m[3]) + (+("0." + (m[4] || "0")));
 }
+/* Wyzie free downloads inject an upsell banner as cue #1 ("free plan …
+   store.wyzie.io") — it renders over the video like a real line. These URL +
+   slogan fingerprints never occur in genuine dialogue, so every load drops
+   them (remembered files get scrubbed on restore below). */
+const WYZ_PROMO_RE = /wyzie\.io|unlock every source|ad-free subs/i;
 function parseSubs(text){
   const out = [];
   text = String(text || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
@@ -4581,7 +4586,7 @@ function parseSubs(text){
   push();
   return out
     .map(c => ({ s: c.s, e: c.e, text: c.lines.join("\n").replace(/<[^>]*>/g, "").trim() }))
-    .filter(c => c.text && c.e > c.s);
+    .filter(c => c.text && c.e > c.s && !WYZ_PROMO_RE.test(c.text));
 }
 function guessLang(name){
   const n = (name || "").toLowerCase();
@@ -4613,7 +4618,12 @@ function loadStoredSubs(){
     const raw = localStorage.getItem(subStorageKey());
     if (raw) {
       const o = JSON.parse(raw);
-      if (o && o.cues && o.cues.length) subFile = o;
+      if (o && o.cues && o.cues.length) {
+        // scrub remembered promo banners (saved before the filter existed)
+        o.cues = o.cues.filter(c => c && c.text && !WYZ_PROMO_RE.test(c.text));
+        if (o.cues.length) subFile = o;
+        else { try { localStorage.removeItem(subStorageKey()); } catch(e){} }
+      }
     }
   } catch(e){}
   paintSubsUI();
