@@ -433,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 158; // bump every release alongside version.txt
+  const BUILD_NUM = 159; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2840,6 +2840,33 @@ function stuckFallback(staticFb){
 function stuckFallbackName(id){
   try { return (MIRRORS.find(x => x.id === id) || {}).name || id; } catch(e){ return id; }
 }
+function clearTapHint(){ try { clearTimeout(window._tapT); } catch(e){} }
+function armTapHint(){
+  // desktop browsers gate audible auto-start behind a real in-frame click —
+  // our postMessage play() is not a user gesture, and their bundle swallows
+  // the rejection silently (metadata arrives, zero frames flow). If that is
+  // where we end up, say so once (TV/app builds autoplay freely — never
+  // armed there; no-metadata stalls belong to the stuck path, not this).
+  clearTapHint();
+  try {
+    if (document.body.classList.contains("tv-mode") || document.body.classList.contains("tv-app")) return;
+    if (mirror !== "vidbolt" && mirror !== "vidzen") return;
+  } catch(e){ return; }
+  window._tapT = setTimeout(() => {
+    if (mirror !== "vidbolt" && mirror !== "vidzen") return;
+    if (window._boltStarted || window._zenStarted || window._cinePlaying) return;
+    if (!((pState.dur || 0) > 0)) return;
+    try {
+      const t = document.getElementById("volToast");
+      if (t) {
+        t.textContent = "▶ Click the video once — your browser blocks auto-start. Our bar drives it after that.";
+        t.classList.remove("hidden");
+        clearTimeout(window._tapMsgT);
+        window._tapMsgT = setTimeout(() => { try { t.classList.add("hidden"); } catch(e){} }, 9000);
+      }
+    } catch(e){}
+  }, 14000);
+}
 /* Stuck-player clocks for the anime mirrors (AniPM + VidRift): armed at ask
    time AND re-armed on every frame load, so slow ID-mapping + slow networks
    can't eat the budget before loading even begins — only a frame that arrived
@@ -2925,6 +2952,7 @@ function loadPlayer(){
   // never strand playback on a hidden server.
   closeVrSheet(); // fresh frame = fresh panel state (options may belong to another episode)
   clearTimeout(window._playKickT); // fresh video, fresh kick verdict
+  clearTapHint(); // fresh video, fresh tap verdict
   if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
   ctlReset();
   window._stuckShown = false; // fresh video, fresh verdict (no stale hop advice)
@@ -3028,6 +3056,7 @@ function loadPlayer(){
   if (mirror === "vidzen" || mirror === "vidbolt") {
     // direct-drive mirrors finally get clocks too (warn → heal-once)
     armStuckWatchdogs();
+    armTapHint(); // gesture-gated browsers may need one in-frame click
     // TV WebViews often block autoplay-with-sound (PC allows it): one
     // explicit play kick after the frame settles — a no-op if playing.
     clearTimeout(window._playKickT);
@@ -5390,7 +5419,7 @@ window.addEventListener("message", (event)=>{
     if (typeof d.currentTime === "number") pState.cur = d.currentTime;
     if (typeof d.duration === "number" && d.duration > 0) pState.dur = d.duration;
     if (typeof d.currentTime === "number" && d.currentTime > 0.5) window._cinePlaying = true;
-    try { clearStuckTip(); } catch(e){}
+    try { clearStuckTip(); } catch(e){} try { clearTapHint(); } catch(e){}
     hideSpin(); ctlPaint();
     if (d.duration > 0) saveProgress(d.currentTime, d.duration);
     autoSkipIntro();
@@ -5482,7 +5511,7 @@ window.addEventListener("message", (event)=>{
     if (typeof cur === "number") pState.cur = cur;
     if (typeof dur === "number" && dur > 0) pState.dur = dur;
     if (typeof cur === "number" && cur > 0.5) { window._cinePlaying = true; window._zenStarted = true; }
-    try { clearStuckTip(); } catch(e){}
+    try { clearStuckTip(); } catch(e){} try { clearTapHint(); } catch(e){}
     hideSpin(); ctlPaint();
     // flush any seek that queued before the frame announced itself
     if (window._zenSeekQ != null) { const q = window._zenSeekQ; window._zenSeekQ = null; zenSend({ type: "seek", time: Math.floor(q) }); }
@@ -5577,7 +5606,7 @@ window.addEventListener("message", (event)=>{
     if (typeof d.time === "number") pState.cur = d.time;
     if ((window._boltDur || 0) > 0) pState.dur = window._boltDur;
     if (typeof d.time === "number" && d.time > 0.5) { window._cinePlaying = true; window._boltStarted = true; }
-    try { clearStuckTip(); } catch(e){}
+    try { clearStuckTip(); } catch(e){} try { clearTapHint(); } catch(e){}
     hideSpin(); ctlPaint();
     // flush any seek that queued before the frame announced itself
     if (window._boltSeekQ != null) { const q = window._boltSeekQ; window._boltSeekQ = null; boltSend({ type: "seek", time: Math.floor(q) }); }
@@ -5842,11 +5871,13 @@ async function loadVidboltAnime(){
   armStuckWatchdogs(); // anime path returns early — needs its own clocks
   // same autoplay-kick as the generic path (TV WebViews block audible autoplay)
   clearTimeout(window._playKickT);
+  clearTapHint();
   window._playKickT = setTimeout(() => {
     if (mirror !== "vidbolt" || watchState.id !== id) return;
     if (window._cinePlaying || window._boltStarted) return;
     boltSend({ type: "play" });
   }, document.body.classList.contains("tv-mode") ? 10000 : 6000);
+  armTapHint();
 }
 async function loadAnipmPlayer(){
   const id = watchState.id;  const f = document.getElementById("player");
@@ -5900,7 +5931,7 @@ function anipmProgress(cur, dur){
   if (typeof cur === "number") pState.cur = cur;
   if (typeof dur === "number" && dur > 0) pState.dur = dur;
   if (typeof cur === "number" && cur > 0.5) { window._cinePlaying = true; window._anipmStarted = true; }
-  try { clearStuckTip(); } catch(e){} // playing for real: hop advice served its purpose
+  try { clearStuckTip(); } catch(e){} try { clearTapHint(); } catch(e){} // playing for real: hop advice served its purpose
   ctlPaint();
   if (dur > 0) saveProgress(cur, dur);
   try { sleepTick(); } catch(e){}
@@ -6239,7 +6270,7 @@ window.addEventListener("message", (event)=>{
     if (typeof data.currentTime === "number") pState.cur = data.currentTime;
     if (typeof data.duration === "number" && data.duration > 0) pState.dur = data.duration;
     if (typeof data.currentTime === "number" && data.currentTime > 0.5) window._cinePlaying = true;
-    try { clearStuckTip(); } catch(e){}
+    try { clearStuckTip(); } catch(e){} try { clearTapHint(); } catch(e){}
     ctlPaint();
     autoSkipIntro();
   }
