@@ -431,7 +431,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 142; // bump every release alongside version.txt
+  const BUILD_NUM = 143; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -3681,7 +3681,26 @@ function tvSafeList(){ return MIRRORS.filter(m => mirrorAllowed(m.id) && srvVisi
    server lists while an anime is open, never for movies/TV shows. */
 function srvVisible(id){
   if (id === "anipm") { try { return !!watchState.anime; } catch(e){ return false; } }
+  // catalog-fault titles never list the broken mirror (see ANIME_BAD_CATALOG)
+  try {
+    if (watchState.anime && animeBadCatalog(titleOf(currentItem || {}), id)) return false;
+  } catch(e){}
   return true;
+}
+/* Per-title catalog-fault workarounds: the mapping is RIGHT (verified IDs)
+   but the player's catalog serves a stranger for it — nothing the matcher
+   can do. Doraemon on VidBolt plays Fullmetal Alchemist for the correct
+   8687 id (MAL + AniList agree on 8687), so Doraemon never lists VidBolt and
+   loads reroute to AniPM instead. Reversible per title if a catalog heals. */
+const ANIME_BAD_CATALOG = [
+  { match: /doraemon/i, skip: ["vidbolt"], instead: "anipm" },
+];
+function animeBadCatalog(title, mid){
+  try {
+    const hit = ANIME_BAD_CATALOG.find(r => r.match.test(title || ""));
+    if (hit && hit.skip.includes(mid)) return hit;
+  } catch(e){}
+  return null;
 }
 function tvSafeToggle(){
   try { localStorage.setItem("streambox_tv_safe", document.getElementById("optTvSafe").checked ? "1" : "0"); } catch(e){}
@@ -5513,6 +5532,14 @@ async function loadVidboltAnime(){
   const f = document.getElementById("player");
   const spin = document.getElementById("playerSpin");
   const ws = document.getElementById("watchStatus");
+  // catalog-fault titles (VidBolt serves a stranger for the right id):
+  // reroute before any mapping work, auto-mode so no saved pref is rewritten
+  const bad = animeBadCatalog(titleOf(currentItem || {}), "vidbolt");
+  if (bad) {
+    if (ws) ws.textContent = "VidBolt serves the wrong show for this title — moved you to AniPM";
+    setMirror(bad.instead || "anipm", true);
+    return;
+  }
   if (spin) spin.style.display = "grid";
   if (ws) ws.textContent = "Matching anime…";
   const tmdbYear = parseInt(String((currentItem || {}).first_air_date || "").slice(0, 4), 10) || 0;
@@ -5530,6 +5557,10 @@ async function loadVidboltAnime(){
     setMirror("vidrift", true);
     return;
   }
+  // mapped-id transparency: the id on screen names exactly what the player
+  // was asked for — a wrong show with the right id here is catalog fault
+  window._aniPlayId = ids.ani ? ("AniList " + ids.ani) : ("MAL " + ids.mal);
+  if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e} · ${window._aniPlayId} · ep ${ep}`;
   // same player params as the builder (autoplay + panels + accent + resume)
   const ap = new URLSearchParams({ autoPlay: "true", mobileSheets: "true" });
   try {
@@ -5581,7 +5612,10 @@ async function loadAnipmPlayer(){
   clearTimeout(window._anipmKickT);
   if (!window._anipmTracks.lang) window._anipmTracks.lang = "sub";
   setTimeout(anipmHello, 800);
-  if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e} — first ▶ tap goes inside, then our bar drives`;
+  // mapped-id transparency (see loadVidboltAnime): the id on screen names
+  // exactly what the player was asked for
+  window._aniPlayId = ids.mal ? ("MAL " + ids.mal) : ("AniList " + ids.ani);
+  if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e} · ${window._aniPlayId} — first ▶ tap goes inside, then our bar drives`;
   if ((watchState.t || 0) > 0) { window._anipmResume = Math.floor(watchState.t); watchState.t = 0; }
   else window._anipmResume = 0;
 }
