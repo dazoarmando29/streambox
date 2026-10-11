@@ -431,7 +431,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 139; // bump every release alongside version.txt
+  const BUILD_NUM = 140; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1539,7 +1539,7 @@ function skeletonRow(title){
           if (mirror === "cinesrc" && (dir === "left" || dir === "right")) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
           else if (mirror === "vidrift" && (dir === "left" || dir === "right")) { vidriftSeekRel(dir === "left" ? -10 : 30); }
           else if (mirror === "vidbolt" && (dir === "left" || dir === "right")) { boltSeekRel(dir === "left" ? -10 : 30); }
-          else if (mirror === "vidzen" && (dir === "left" || dir === "right")) { undrivenSeekRel(dir === "left" ? -10 : 30); }
+          else if (mirror === "vidzen" && (dir === "left" || dir === "right")) { zenSeekRel(dir === "left" ? -10 : 30); }
           else if (mirror === "vidrift" || mirror === "vidzen" || mirror === "vidbolt") {
             // TV asleep + U/D: wake and land on the visible bar (same row the
             // waking bar shows); desktop keeps the volume hint (VidRift) or
@@ -1589,18 +1589,15 @@ function skeletonRow(title){
         // when none is. Volume lives on the TV remote's own keys, never arrows.
         e.preventDefault(); pokeHud();
         // ownBar = mirrors OUR bar drives (L/R always seeks via its funnel,
-        // U/D walks the visible bar row + banners). VidBolt joins via its
-        // seek API; VidRift/VidZen keep their strip behavior below.
-        const ownBar = (mirror === "cinesrc" || mirror === "anipm" || mirror === "vidbolt") && !onMirrorBar;
+        // U/D walks the visible bar row + banners). VidBolt + VidZen join via
+        // their seek APIs; VidRift keeps its strip behavior below.
+        const ownBar = (mirror === "cinesrc" || mirror === "anipm" || mirror === "vidbolt" || mirror === "vidzen") && !onMirrorBar;
         if (dir === "left" || dir === "right") {
           if (ownBar) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); return; }
           // VidRift: same deal — L/R always skims from our side. (Walking the
           // strip used to eat seeks here too, stranding focus on it forever
           // since nothing could move focus off.) Strip buttons ride ▼ now.
           if (mirror === "vidrift") { vidriftSeekRel(dir === "left" ? -10 : 30); return; }
-          // VidZen has no command API: debounced startAt reload-skims instead
-          // (mashes accumulate into ONE reload, position preserved)
-          if (mirror === "vidzen") { undrivenSeekRel(dir === "left" ? -10 : 30); return; }
           if (!btns.length) return;
           const bi = btns.indexOf(document.activeElement);
           const bn = dir === "right" ? (bi + 1) % btns.length : (bi - 1 + btns.length) % btns.length;
@@ -1609,11 +1606,11 @@ function skeletonRow(title){
           return;
         }
         if (!ownBar) {
-          // VidRift/VidZen U/D: ▲ climbs to the health banner, ▼ cycles the
-          // strip (Control / ⇄ / ⚙ / 🖱) — same split as the CineSrc row, so
+          // VidRift U/D: ▲ climbs to the health banner, ▼ cycles the
+          // strip (Control / ⇄ / ⚙ / 🖱) — same split as our bar row, so
           // L/R can stay pure seek and focus always has somewhere to go.
           // Other mirrors: their own controls.
-          if (mirror === "vidrift" || mirror === "vidzen") {
+          if (mirror === "vidrift") {
             const strip = [...document.querySelectorAll("#mirrorBar button")].filter(b => b.offsetParent !== null && !b.disabled);
             const hbv = document.getElementById("healthBar");
             const hbg = hbv && !hbv.classList.contains("hidden") ? hbv.querySelector("button") : null;
@@ -3252,11 +3249,12 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
     }
     anipmSend(pState.paused ? "play" : "pause"); return;
   } // events correct us
-  // paired mirrors have no play API: hand keys into their player instead —
-  // its own OK/space/arrows drive it, Back returns (TV app). VidBolt HAS one,
-  // so ▶ talks straight to it like AniPM (events correct us).
-  if (mirror === "vidrift" || mirror === "vidzen") { focusMirror(); return; }
+  // VidRift has no play API: hand keys into its player instead — its own
+  // OK/space/arrows drive it, Back returns (TV app). VidBolt + VidZen HAVE
+  // play APIs, so ▶ talks straight to them (events correct us).
+  if (mirror === "vidrift") { focusMirror(); return; }
   if (mirror === "vidbolt") { boltSend(pState.paused ? { type: "play" } : { type: "pause" }); return; }
+  if (mirror === "vidzen") { zenSend(pState.paused ? { type: "play" } : { type: "pause" }); return; }
   pState.paused = !pState.paused;
   sendCmd(pState.paused ? "pause" : "play");
   ctlPaint();
@@ -3264,7 +3262,7 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
 function ctlSeekRel(d){
   if (mirror === "vidrift") { vidriftSeekRel(d); return; } // resume-seek answers
   if (mirror === "vidbolt") { boltSeekRel(d); return; } // direct seek answers
-  if (mirror === "vidzen") { undrivenSeekRel(d); return; } // debounced startAt reload
+  if (mirror === "vidzen") { zenSeekRel(d); return; } // direct seek answers
   if (mirror !== "cinesrc" && mirror !== "anipm") return; // undriven mirrors use their own controls
   if (mirror === "anipm") {
     const t = Math.max(0, (pState.cur || 0) + d);
@@ -3350,12 +3348,24 @@ function focusPlayer(fromFs){
   document.getElementById("watchStatus").textContent = "Player focused — its menu takes all keys. TV app: Back returns here • Browser: click our bar below to return";
 }
 function focusMirror(){
-  // alternate mirrors don't speak our command API — hand the remote to their
-  // own player instead. Some answer OK/arrows, some only answer a pointer.
+  // VidRift speaks no play/pause command (their published surface ends at
+  // resume/quality/nextup/panels), so the remote goes to its own player
+  // instead. Some answer OK/arrows, some only answer a pointer. The guidance
+  // rides volToast, not watchStatus — watchStatus sits below, invisible in
+  // cinema, which is exactly where this handoff happens.
   const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
   const f = document.getElementById("player");
   try { f.focus({ preventScroll: true }); } catch(e){}
   document.getElementById("watchStatus").textContent = `Remote sent to ${label} — its own menu takes arrows + OK (subtitles live in there). TV app: Back returns here`;
+  try {
+    const t = document.getElementById("volToast");
+    if (t) {
+      t.textContent = `🎯 Inside ${label}: OK plays/pauses · ◀ ▶ seek · Back returns`;
+      t.classList.remove("hidden");
+      clearTimeout(window._volT);
+      window._volT = setTimeout(() => { try { t.classList.add("hidden"); } catch(e){} }, 3000);
+    }
+  } catch(e){}
 }
 /* Subtitles coach tip: shows until permanently dismissed */
 function showSubTip(force){
@@ -3399,7 +3409,7 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
     if (mirror === "anipm") anipmSend("seek", { time: t });
     else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: t });
     else if (mirror === "vidbolt") boltSeekTo(t);
-    else if (mirror === "vidzen") undrivenSeekTo(t);
+    else if (mirror === "vidzen") zenSeekTo(t);
     else sendCmd("seek", [t]);
   });
 })();
@@ -3573,9 +3583,10 @@ function forgetServer(){
   paintSettings();
   document.getElementById("watchStatus").textContent = "Server preference cleared — Auto mode";
 }
-/* source mirrors: CineSrc default + alternates. CineSrc/AniPM/VidRift/VidBolt
-   speak a two-way protocol (our bar drives them); VidZen pairs progress-only
-   with the 🎯 handoff for control; the rest use their own player entirely.
+/* source mirrors: CineSrc default + alternates. CineSrc/AniPM/VidRift/VidBolt/
+   VidZen speak a two-way protocol (our bar drives them — VidRift play/pause
+   excepted: their published surface has no play command, so ▶ hands keys in
+   there); the rest use their own player entirely.
    NO_SANDBOX members load UNSANDBOXED (see applyMirrorSandbox): Ad Shield is
    off there by necessity, use Brave/uBlock for in-stream ads. All other
    mirrors stay sandboxed. */
@@ -3796,8 +3807,6 @@ function mirrorUrl(id){
       else if ((watchState.t || 0) > 0) { _st = Math.floor(watchState.t); watchState.t = 0; }
       if (_st > 0) zp.set("startAt", String(Math.floor(_st)));
       const zq = zp.toString();
-      // wall-clock anchor so remote seeks work even before events arrive
-      window._vzT0 = Date.now(); window._vzStart = _st > 0 ? Math.floor(_st) : 0;
       return tv
         ? `https://vidzen.fun/tv/${tmdb}/${s}/${e}?${zq}`
         : `https://vidzen.fun/movie/${tmdb}?${zq}`;
@@ -3849,9 +3858,10 @@ function updateMirrorUI(){
   const isTrailer = mirror === "trailer";
   const isCS = mirror === "cinesrc" || mirror === "anipm";
   // paired mirrors ride our bar too. VidRift seeks via resume-seek, VidBolt
-  // via a real seek API, VidZen via reload-skims; play hands keys in except
-  // where an API exists (VidBolt). Mute/rate/speed live in their player or
-  // have no events to stay honest — they hide instead of sitting dead.
+  // + VidZen via real seek APIs, play direct where an API exists (VidBolt,
+  // VidZen); otherwise play hands keys in (VidRift). Mute/rate/speed live in
+  // their player or have no events to stay honest — they hide instead of
+  // sitting dead.
   const isPaired = mirror === "vidrift" || mirror === "vidzen" || mirror === "vidbolt";
   document.getElementById("trailerBar").classList.toggle("hidden", !isTrailer);
   document.getElementById("ctlBar").classList.toggle("hidden", !(isCS || isPaired));
@@ -3903,7 +3913,7 @@ function updateMirrorUI(){
       return;
     }
     if (mirror === "vidzen") {
-      document.getElementById("watchStatus").textContent = "VidZen: 4K planetary servers — server picker + subs live in its player · 🎯/🖱 drive it on TV";
+      document.getElementById("watchStatus").textContent = "VidZen: our bar drives play/seek/skip · server picker + subs live in its player";
       return;
     }
     if (mirror === "vidbolt") {
@@ -3978,7 +3988,7 @@ const MAIN_HINTS = {
   cinesrc: "Our bar drives everything: play, seek, subs, speed",
   anipm: "Our bar drives it after one ▶ tap inside: sub/dub, quality, skip",
   vidrift: "Remote seeks + auto-skip sync; Up Next + quality follow our UI; our bar drives seek/skip/subs; phone panels open in our sheet",
-  vidzen: "Our bar seeks + skips (reload-skims) and subs; play hands keys in",
+  vidzen: "Our bar drives play, seek, skip; server picker + subs in its player",
   vidbolt: "Our bar drives play, seek, skip; servers shelf on A/V; phone panels open in our sheet",
 };
 /* Wyzie subtitles: search + download with built-in shared key (personal
@@ -4772,15 +4782,6 @@ function introHit(){
   const cur = pState.cur || 0;
   return _introRanges.find(r => cur >= r.start && cur < r.end - 1) || null;
 }
-function undrivenSeekTo(t){
-  // point-load a position on players with no command API (VidZen): the URL
-  // carries startAt, so this is a full reload — discrete jumps only
-  // (skip pills, slider drops), never mashing (see undrivenSeekRel).
-  if (mirror !== "vidzen") return;
-  const tgt = Math.max(0, Math.floor(t));
-  resumeAt = (pState.dur > 0) ? Math.min(tgt, Math.floor(pState.dur)) : tgt;
-  loadPlayer();
-}
 function skipIntroNow(){
   const hit = introHit();
   if (!hit) return;
@@ -4788,7 +4789,7 @@ function skipIntroNow(){
   if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
   else if (mirror === "vidbolt") boltSeekTo(hit.end);
-  else if (mirror === "vidzen") undrivenSeekTo(hit.end);
+  else if (mirror === "vidzen") zenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Intro skipped ✓";
@@ -4845,7 +4846,7 @@ function skipOutroNow(){
   if (mirror === "cinesrc") sendCmd("seek", [end]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: end });
   else if (mirror === "vidbolt") boltSeekTo(end);
-  else if (mirror === "vidzen") undrivenSeekTo(end);
+  else if (mirror === "vidzen") zenSeekTo(end);
   else if (mirror === "anipm") anipmSend("seek", { time: end });
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Credits skipped ✓";
@@ -4892,7 +4893,7 @@ function autoSkipIntro(){
   if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
   else if (mirror === "vidbolt") boltSeekTo(hit.end);
-  else if (mirror === "vidzen") undrivenSeekTo(hit.end);
+  else if (mirror === "vidzen") zenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Intro skipped ✓";
@@ -5027,26 +5028,34 @@ function openVrSheet(panel, options, current, reply){
   const btn = document.querySelector("#vrSheet button");
   if (btn && document.body.classList.contains("tv-mode")) { try { btn.focus({ preventScroll: true }); } catch(e){} }
 }
-function undrivenSeekRel(d){
-  // seeking players with no command API (VidZen): debounced startAt reload.
-  // Mashes accumulate into ONE reload so slow boxes never thrash; position
-  // comes from events when posted, else a wall-clock estimate from load.
+/* ---------- VidZen: direct drive (v2.3 PostMessage controller, shapes
+    mined from their player bundle: inbound accepts command|action|type with
+    play / pause / seek+time / volume+level / mute / changeServer / getStatus;
+    outbound is {type:"vidzen", event, currentTime, duration} plus
+    {type:"vidzen:status",...} and legacy PLAYER_EVENT folds). Our bar drives
+    play/pause/seek/slider/skip straight at it — no reload-skims, no handoff.
+    Volume has a command but mute stays hidden (TV keys own volume, and blind
+    toggles desync); changeServer stays in its own picker (IDs are theirs). */
+const ZEN_ORIGIN = "https://vidzen.fun";
+function zenSend(msg){
+  try {
+    document.getElementById("player").contentWindow.postMessage(msg, ZEN_ORIGIN);
+  } catch(e){}
+}
+function zenSeekTo(t){
+  // absolute seek in seconds (player clamps; pre-ready mail is dropped, so
+  // only fire when the frame has announced itself — callers ensure this via
+  // the loaded-gate / event-fed position)
   if (mirror !== "vidzen") return;
-  let c = pState.cur || 0;
-  if (!(pState.dur > 0) && window._vzT0) c = Math.max(0, (Date.now() - window._vzT0) / 1000 + (window._vzStart || 0));
-  if (!((pState.dur > 0) || window._vzT0)) return; // no position at all: stay put, not a blind jump
-  window._uzD = (window._uzD || 0) + d;
+  const tgt = Math.max(0, Math.floor(t));
+  zenSend({ type: "seek", time: (pState.dur > 0) ? Math.min(tgt, Math.floor(pState.dur)) : tgt });
+}
+function zenSeekRel(d){
+  // TV remote L/R: skip from OUR side using last progress (same as VidBolt)
+  if (mirror !== "vidzen") return;
+  const t = Math.max(0, (pState.cur || 0) + d);
+  zenSend({ type: "seek", time: Math.floor(t) });
   skipFlash(d);
-  clearTimeout(window._uzT);
-  window._uzT = setTimeout(() => {
-    const total = window._uzD || 0; window._uzD = 0;
-    if (!total || mirror !== "vidzen") return;
-    let cc = pState.cur || 0;
-    if (!(pState.dur > 0) && window._vzT0) cc = Math.max(0, (Date.now() - window._vzT0) / 1000 + (window._vzStart || 0));
-    const tgt = Math.max(0, Math.floor(cc + total));
-    resumeAt = (pState.dur > 0) ? Math.min(tgt, Math.floor(pState.dur)) : tgt;
-    loadPlayer();
-  }, 600);
 }
 window.addEventListener("message", (event)=>{
   if (event.origin !== "https://embed.vidrift.net") return;
@@ -5107,26 +5116,43 @@ window.addEventListener("message", (event)=>{
     }
   }
 });
-/* ---------- VidZen: own-controls tier like VidRift (no command API known).
-   Accepts several documented player-event shapes (their Events/PostMessage
-   tab, VidCore/VidAPI-family PLAYER_EVENT, plain event names) — progress in
-   feeds continue-watching + Up Next sync. Posts nothing? Harmless no-op. */
+/* ---------- VidZen: direct drive (v2.3 PostMessage controller, shapes
+    mined from their player bundle: inbound accepts command|action|type with
+    play / pause / seek+time / volume / mute / changeServer / getStatus;
+    outbound is {type:"vidzen", event, currentTime, duration} plus
+    {type:"vidzen:status",...}). Our bar drives play/pause/seek/slider/skip
+    straight at it — no reload-skims, no handoff. A legacy PLAYER_EVENT fold
+    stays as a net for older builds. Volume/mute stay hidden (TV keys own
+    volume); changeServer stays in its own picker (IDs are theirs). */
 window.addEventListener("message", (event)=>{
-  if (event.origin !== "https://vidzen.fun") return;
+  if (event.origin !== ZEN_ORIGIN) return;
   if (mirror !== "vidzen") return; // stale frame from a switched-away mirror
-  let m = event.data || {};
-  // PLAYER_EVENT family (VidAPI/VidCore shape): fold it into the same fields
-  if (m.type === "PLAYER_EVENT" && m.data && typeof m.data === "object") {
-    const dd = m.data;
-    m = { event: dd.event || dd.player_status,
-      currentTime: dd.currentTime != null ? dd.currentTime : dd.player_progress,
-      duration: dd.duration != null ? dd.duration : dd.player_duration };
+  const d = event.data || {};
+  let evn = "", cur, dur;
+  if (d.type === "vidzen") {
+    // native bus: {type:"vidzen", event:"timeupdate"|"seeked"|"play"|
+    // "pause"|"ended", currentTime, duration}
+    evn = String(d.event || "").toLowerCase();
+    cur = d.currentTime; dur = d.duration;
+  } else if (d.type === "vidzen:status") {
+    // status push (answers getStatus): paused/volume/muted/server/theme
+    evn = "status";
+    cur = d.currentTime; dur = d.duration;
+    if (typeof d.paused === "boolean") pState.paused = d.paused;
+  } else {
+    // legacy folds (older builds / VidAPI-family shapes): harmless net
+    let m = d;
+    if (m.type === "PLAYER_EVENT" && m.data && typeof m.data === "object") {
+      const dd = m.data;
+      m = { event: dd.event || dd.player_status,
+        currentTime: dd.currentTime != null ? dd.currentTime : dd.player_progress,
+        duration: dd.duration != null ? dd.duration : dd.player_duration };
+    }
+    const inner = m.data && typeof m.data === "object" ? m.data : m;
+    evn = String(m.event || m.type || inner.event || inner.type || "").toLowerCase();
+    cur = inner.currentTime != null ? inner.currentTime : m.currentTime;
+    dur = inner.duration != null ? inner.duration : m.duration;
   }
-  const inner = m.data && typeof m.data === "object" ? m.data : m;
-  const ev = m.event || m.type || inner.event || inner.type || "";
-  const cur = inner.currentTime != null ? inner.currentTime : m.currentTime;
-  const dur = inner.duration != null ? inner.duration : m.duration;
-  const evn = String(ev || "").toLowerCase();
   if (evn === "timeupdate" || evn === "progress" || evn === "seeked" || evn === "seeking") {
     if (typeof cur === "number") pState.cur = cur;
     if (typeof dur === "number" && dur > 0) pState.dur = dur;
@@ -5134,9 +5160,11 @@ window.addEventListener("message", (event)=>{
     try { clearStuckTip(); } catch(e){}
     hideSpin(); ctlPaint();
     if (dur > 0) saveProgress(cur, dur);
+    autoSkipIntro();
   }
   if (evn === "play" || evn === "playing" || evn === "unpaused") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
   if (evn === "pause" || evn === "paused") { pState.paused = true; ctlPaint(); }
+  if (evn === "status") { hideSpin(); ctlPaint(); }
   if (evn === "ended" || evn === "complete") {
     try { markWatched(); } catch(e){}
     if (watchState.type === "movie") {
