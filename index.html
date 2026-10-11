@@ -431,7 +431,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 141; // bump every release alongside version.txt
+  const BUILD_NUM = 142; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1368,7 +1368,38 @@ function skeletonRow(title){
 }
 
 /* ---------- Devices: PWA + Android TV / tablets / iOS ---------- */
+/* ---------- Cache hygiene: versioned namespaces that purge themselves.
+   Every derived cache lives under sb:<name><version>: — when the logic that
+   FILLS a namespace changes (like the anime matcher), bump its version here
+   and every older generation purges itself once at boot. Poisoned entries can
+   never replay forever again, and no hand-migration is ever needed. Malformed
+   Continue / My List rows are dropped in the same pass (a half-written row
+   must never wedge a view). */
+const CACHE_VERSIONS = { ani: 3 };
+function purgeRetiredCaches(){
+  try {
+    const drop = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      const m = /^sb:([a-z]+)(\d+):/.exec(k);
+      if (m && (CACHE_VERSIONS[m[1]] || 0) > parseInt(m[2], 10)) drop.push(k);
+    }
+    drop.forEach(k => { try { localStorage.removeItem(k); } catch(e){} });
+    [["streambox_continue", x => x && x.type && x.id != null],
+     ["streambox_mylist", x => x && x.type && x.id != null]].forEach(([key, ok]) => {
+      try {
+        const arr = JSON.parse(localStorage.getItem(key) || "[]");
+        if (Array.isArray(arr)) {
+          const clean = arr.filter(ok);
+          if (clean.length !== arr.length) localStorage.setItem(key, JSON.stringify(clean));
+        }
+      } catch(e){}
+    });
+  } catch(e){}
+}
 (function setupDevices(){
+  purgeRetiredCaches(); // sick caches heal before anything reads them
   // TV detection: Android TV, Fire TV, Tizen, WebOS, Smart TV UAs
   const ua = navigator.userAgent || "";
   const isTV = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVIA|Fire TV|AFT/i.test(ua) || new URLSearchParams(location.search).has("tv");
@@ -3786,7 +3817,7 @@ function mirrorUrl(id){
       if (resumeAt >= 0) { _bt = resumeAt; resumeAt = -1; }
       else if ((watchState.t || 0) > 0) { _bt = Math.floor(watchState.t); watchState.t = 0; }
       if (_bt > 0) bp.set("startAt", String(Math.floor(_bt)));
-      window._boltDur = 0; window._boltStarted = false; // fresh frame, fresh duration
+      window._boltDur = 0; window._boltStarted = false; window._boltSeekQ = null; // fresh frame, fresh duration
       const bq = bp.toString();
       return tv
         ? `https://vidbolt.pro/tv/${tmdb}/${s}/${e}?${bq}`
@@ -3794,9 +3825,9 @@ function mirrorUrl(id){
     }
     case "vidzen": {
       // planetary-server player (TMDB-native, 4K, in-player server picker +
-      // own subs). Documented params only: theme wears our accent, startAt
-      // resumes where you left off. Own controls tier (no command API known)
-      // — Ad Shield stays ON: sandboxed until it proves otherwise.
+      // own subs). Documented params: theme wears our accent, startAt resumes
+      // where you left off. Direct drive via its v2.3 controller (play/pause/
+      // seek), Ad Shield sandbox stays ON (postMessage needs only scripts).
       const zp = new URLSearchParams({ autoPlay: "true" });
       try {
         const c = String(document.getElementById("optColor").value || "#14b8a6").replace("#", "");
@@ -3807,6 +3838,7 @@ function mirrorUrl(id){
       else if ((watchState.t || 0) > 0) { _st = Math.floor(watchState.t); watchState.t = 0; }
       if (_st > 0) zp.set("startAt", String(Math.floor(_st)));
       const zq = zp.toString();
+      window._zenSeekQ = null; window._zenStarted = false; // fresh frame, no queued seek
       return tv
         ? `https://vidzen.fun/tv/${tmdb}/${s}/${e}?${zq}`
         : `https://vidzen.fun/movie/${tmdb}?${zq}`;
@@ -3885,12 +3917,26 @@ function updateMirrorUI(){
   if (q) q.classList.toggle("hidden", mirror === "anipm" || mirror === "vidzen" || mirror === "vidbolt");
   const st = document.getElementById("ctlSettings");
   if (st) st.classList.toggle("hidden", mirror === "anipm");
-  // paired mirrors: play hands keys into their player; mute/rate/speed have
-  // no API there, so they hide instead of sitting dead
+  // paired mirrors: mute/rate/speed have no drivable API (volume is blind,
+  // TV keys own it anyway) — they hide instead of sitting dead
   const mu = document.getElementById("ctlMute");
   if (mu) mu.classList.toggle("hidden", isPaired);
   const ra = document.getElementById("ctlRate");
   if (ra) ra.classList.toggle("hidden", isPaired);
+  // sheet hygiene (audit): a mirror hop with the sheet open (auto-heal while
+  // picking) must never strand ineligible sections — repaint it for the new
+  // mirror, or hide it. closePanels() is NOT used here: setMirror fires from
+  // inside Settings pills, which must stay open.
+  try {
+    const avs = document.getElementById("avSheet");
+    if (avs && !avs.classList.contains("hidden")) {
+      if (mirror === "anipm" || mirror === "vidbolt") paintAV();
+      else {
+        avs.classList.add("hidden");
+        if (!topPopup()) document.body.classList.remove("modal-open");
+      }
+    }
+  } catch(e){}
   if (!isCS && !isTrailer) {
     const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
     document.getElementById("mirrorName").textContent = label;
@@ -5043,18 +5089,20 @@ function zenSend(msg){
   } catch(e){}
 }
 function zenSeekTo(t){
-  // absolute seek in seconds (player clamps; pre-ready mail is dropped, so
-  // only fire when the frame has announced itself — callers ensure this via
-  // the loaded-gate / event-fed position)
+  // absolute seek in seconds (player clamps). Pre-ready mail may be dropped,
+  // so seeks before the frame's first progress queue up and flush there —
+  // no remote mash is ever silently swallowed.
   if (mirror !== "vidzen") return;
   const tgt = Math.max(0, Math.floor(t));
-  zenSend({ type: "seek", time: (pState.dur > 0) ? Math.min(tgt, Math.floor(pState.dur)) : tgt });
+  const cl = (pState.dur > 0) ? Math.min(tgt, Math.floor(pState.dur)) : tgt;
+  if (!window._zenStarted && !(pState.dur > 0)) { window._zenSeekQ = cl; return; }
+  window._zenSeekQ = null;
+  zenSend({ type: "seek", time: cl });
 }
 function zenSeekRel(d){
   // TV remote L/R: skip from OUR side using last progress (same as VidBolt)
   if (mirror !== "vidzen") return;
-  const t = Math.max(0, (pState.cur || 0) + d);
-  zenSend({ type: "seek", time: Math.floor(t) });
+  zenSeekTo(Math.max(0, (pState.cur || 0) + d));
   skipFlash(d);
 }
 window.addEventListener("message", (event)=>{
@@ -5156,13 +5204,15 @@ window.addEventListener("message", (event)=>{
   if (evn === "timeupdate" || evn === "progress" || evn === "seeked" || evn === "seeking") {
     if (typeof cur === "number") pState.cur = cur;
     if (typeof dur === "number" && dur > 0) pState.dur = dur;
-    if (typeof cur === "number" && cur > 0.5) window._cinePlaying = true;
+    if (typeof cur === "number" && cur > 0.5) { window._cinePlaying = true; window._zenStarted = true; }
     try { clearStuckTip(); } catch(e){}
     hideSpin(); ctlPaint();
+    // flush any seek that queued before the frame announced itself
+    if (window._zenSeekQ != null) { const q = window._zenSeekQ; window._zenSeekQ = null; zenSend({ type: "seek", time: Math.floor(q) }); }
     if (dur > 0) saveProgress(cur, dur);
     autoSkipIntro();
   }
-  if (evn === "play" || evn === "playing" || evn === "unpaused") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
+  if (evn === "play" || evn === "playing" || evn === "unpaused") { pState.paused = false; window._cinePlaying = true; window._zenStarted = true; ctlPaint(); }
   if (evn === "pause" || evn === "paused") { pState.paused = true; ctlPaint(); }
   if (evn === "status") { hideSpin(); ctlPaint(); }
   if (evn === "ended" || evn === "complete") {
@@ -5191,16 +5241,20 @@ function boltSend(msg){
   } catch(e){}
 }
 function boltSeekTo(t){
-  // absolute seek (their seek takes seconds into currentTime, player clamps)
+  // absolute seek in seconds (player clamps). Pre-ready mail may be dropped,
+  // so seeks before the frame's first progress queue up and flush there —
+  // no remote mash is ever silently swallowed.
   if (mirror !== "vidbolt") return;
   const tgt = Math.max(0, Math.floor(t));
-  boltSend({ type: "seek", time: (pState.dur > 0) ? Math.min(tgt, Math.floor(pState.dur)) : tgt });
+  const cl = (pState.dur > 0) ? Math.min(tgt, Math.floor(pState.dur)) : tgt;
+  if (!window._boltStarted && !(pState.dur > 0)) { window._boltSeekQ = cl; return; }
+  window._boltSeekQ = null;
+  boltSend({ type: "seek", time: cl });
 }
 function boltSeekRel(d){
   // TV remote L/R: skip from OUR side using last progress (same as VidRift)
   if (mirror !== "vidbolt") return;
-  const t = Math.max(0, (pState.cur || 0) + d);
-  boltSend({ type: "seek", time: Math.floor(t) });
+  boltSeekTo(Math.max(0, (pState.cur || 0) + d));
   skipFlash(d);
 }
 function boltMobileOption(option, value){
@@ -5237,6 +5291,8 @@ window.addEventListener("message", (event)=>{
     if (typeof d.time === "number" && d.time > 0.5) { window._cinePlaying = true; window._boltStarted = true; }
     try { clearStuckTip(); } catch(e){}
     hideSpin(); ctlPaint();
+    // flush any seek that queued before the frame announced itself
+    if (window._boltSeekQ != null) { const q = window._boltSeekQ; window._boltSeekQ = null; boltSend({ type: "seek", time: Math.floor(q) }); }
     if ((pState.dur || 0) > 0) saveProgress(pState.cur, pState.dur);
     autoSkipIntro();
     return;
@@ -5324,9 +5380,9 @@ async function anipmIds(tmdbId, title, tmdbYear){
   // and therefore always the RIGHT show), and re-maps every title once.
   const ck = "sb:ani3:" + tmdbId;
   try { const c = JSON.parse(localStorage.getItem(ck) || "null"); if (c && (c.mal || c.ani)) return c; } catch(e){}
-  // one-time poison purge: a v2 entry may name the wrong show — drop it so
-  // the title re-maps under v3 rules instead of replaying the stranger
-  try { localStorage.removeItem("sb:ani2:" + tmdbId); } catch(e){}
+  // session blacklist (see animeRematch): IDs the viewer already rejected as
+  // the wrong show are excluded from every host's candidates this session
+  const skipped = ((window._aniSkip || {})[tmdbId] || []);
   const norm = s => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const nt = norm(title);
   if (!nt) return {}; // no title, no mapping — containment against "" matches everything
@@ -5365,7 +5421,7 @@ async function anipmIds(tmdbId, title, tmdbYear){
     const r = await fetch("https://api.jikan.moe/v4/anime?q=" + encodeURIComponent(title || "") + "&limit=10&sfw=true");
     if (r.ok) {
       const d = await r.json();
-      const list = (d && d.data) || [];
+      const list = ((d && d.data) || []).filter(x => x && !skipped.includes(x.mal_id));
       const pick = list.length ? pickYear(list, x => [x.title_english, x.title]) : null;
       if (pick && pick.mal_id) {
         const out = { mal: pick.mal_id };
@@ -5378,7 +5434,7 @@ async function anipmIds(tmdbId, title, tmdbYear){
     const r2 = await fetch("https://api.consumet.org/meta/anilist/" + encodeURIComponent(title || ""));
     if (r2.ok) {
       const d2 = await r2.json();
-      const list2 = (d2 && d2.results) || [];
+      const list2 = ((d2 && d2.results) || []).filter(x => x && !skipped.includes(x.id));
       const pick2 = list2.length ? pickYear(list2, x => [x.title && x.title.english, x.title && x.title.romaji, x.title && x.title.userPreferred]) : null;
       if (pick2 && pick2.id) {
         const out = { ani: pick2.id };
@@ -5397,7 +5453,7 @@ async function anipmIds(tmdbId, title, tmdbYear){
     });
     if (r3.ok) {
       const d3 = await r3.json();
-      const list3 = (d3 && d3.data && d3.data.Page && d3.data.Page.media) || [];
+      const list3 = ((d3 && d3.data && d3.data.Page && d3.data.Page.media) || []).filter(x => x && !skipped.includes(x.id));
       const pick3 = list3.length ? pickYear(list3, x => [x.title && x.title.english, x.title && x.title.romaji]) : null;
       if (pick3 && pick3.id) {
         const out = { ani: pick3.id };
@@ -5407,6 +5463,24 @@ async function anipmIds(tmdbId, title, tmdbYear){
     }
   } catch(e){}
   return {};
+}
+/* wrong show playing (mapped to a stranger): blacklist the current pick for
+   this session, drop the cached mapping, reload the SAME mirror so it
+   re-maps around the reject. No alternative clears the matcher → the normal
+   no-match path escalates by itself (VidRift hop, or a named fallback in
+   manual mode). One tap, TV-reachable from the SERVERS shelf. */
+function animeRematch(){
+  try {
+    if (!watchState.anime) return;
+    const id = watchState.id;
+    const cur = JSON.parse(localStorage.getItem("sb:ani3:" + id) || "null");
+    window._aniSkip = window._aniSkip || {};
+    if (cur && (cur.mal || cur.ani)) (window._aniSkip[id] = window._aniSkip[id] || []).push(cur.mal || cur.ani);
+    try { localStorage.removeItem("sb:ani3:" + id); } catch(e){}
+    const ws = document.getElementById("watchStatus");
+    if (ws) ws.textContent = "Re-matching this anime…";
+    loadPlayer();
+  } catch(e){}
 }
 /* Per-title A/V house rules (fan requests, pinned forever):
    Dragon Ball = English dub with the Bruce Faulconer score, always. */
@@ -5463,7 +5537,7 @@ async function loadVidboltAnime(){
     if (/^[0-9a-fA-F]{6}$/.test(c)) ap.set("theme", c);
   } catch(e){}
   if ((watchState.t || 0) > 0) { ap.set("startAt", String(Math.floor(watchState.t))); watchState.t = 0; }
-  window._boltDur = 0; window._boltStarted = false; // fresh frame, fresh duration
+  window._boltDur = 0; window._boltStarted = false; window._boltSeekQ = null; // fresh frame, fresh duration
   f.src = vu + "?" + ap.toString() + "&_=" + Date.now();
 }
 async function loadAnipmPlayer(){
@@ -5660,6 +5734,11 @@ function paintAVServers(){
   // tvSafeList hides anime-ineligible entries by itself (AniPM on movies).
   const box = document.getElementById("avServers"); if (!box) return;
   box.innerHTML = "";
+  // anime on a mapped mirror: wrong show playing gets a one-tap rematch
+  // (blacklists the stranger, re-maps the title) before any mirror hop
+  if (watchState.anime && (mirror === "anipm" || mirror === "vidbolt")) {
+    box.appendChild(avPill("↻ Rematch show", false, () => { animeRematch(); }));
+  }
   tvSafeList().forEach(m => {
     const cur = m.id === mirror;
     box.appendChild(avPill((cur ? "● " : "") + m.name, cur, () => {
