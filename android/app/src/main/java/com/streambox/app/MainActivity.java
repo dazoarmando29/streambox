@@ -103,6 +103,17 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
+                // SUBFRAME traffic must never be cancelled: players (AniPM et
+                // al) navigate their own inner frames to video hosts, and the
+                // old blanket allowlist killed those -> black frame, "player
+                // never starts" (TV-only: the website has no allowlist). Only
+                // MAIN-FRAME navigations get the allowlist - that is what
+                // keeps hijacks from walking the app away. Exotic schemes are
+                // blocked everywhere; ad hosts die in shouldInterceptRequest.
+                if (!request.isForMainFrame()) {
+                    if (!url.startsWith("http://") && !url.startsWith("https://")) return true;
+                    return false;
+                }
                 String host = "";
                 try { host = request.getUrl().getHost(); if (host == null) host = ""; }
                 catch (Exception ignored) { host = ""; }
@@ -114,7 +125,7 @@ public class MainActivity extends Activity {
                         url.startsWith("https://dazoarmando29.github.io/")
                         || host.equals("cinesrc.st") || host.endsWith(".cinesrc.st")
                         || host.endsWith("themoviedb.org") || host.endsWith("image.tmdb.org")
-                        || host.endsWith("vidlink.pro") || host.endsWith("vidfast.pro")
+                        || host.endsWith("vidlink.pro") || host.endsWith("vidfast.pro") || host.endsWith("vidfast.vc")
                         || host.endsWith("vidsrc.to") || host.endsWith("vsembed.su")
                         || host.endsWith("autoembed.co") || host.endsWith("2embed.cc")
                         || host.endsWith("yapgrid.com") || host.endsWith("vaplayer.ru")
