@@ -433,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 159; // bump every release alongside version.txt
+  const BUILD_NUM = 160; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1724,6 +1724,23 @@ function purgeRetiredCaches(){
           const wrap = ae0.closest(".sb-row") || ae0.closest(".row-scroll");
           if (wrap) scope = wrap;
         } catch(e){}
+      }
+      // results-list lock: U/D with focus inside the Subs results walks the
+      // list's own buttons first — pure spatial nav otherwise escapes to the
+      // wide language pills above on every press and the list never scrolls.
+      // At the list edges we fall through to spatial (up exits to the pills,
+      // down exits toward the file buttons below).
+      const aeL = document.activeElement;
+      if (top && aeL && aeL.closest && aeL.closest("#wyzResults") && (dir === "up" || dir === "down")) {
+        const lbs = [...document.querySelectorAll("#wyzResults button")].filter(b => b.offsetParent !== null && !b.disabled);
+        const li = lbs.indexOf(aeL);
+        const ln = dir === "up" ? li - 1 : li + 1;
+        if (li >= 0 && ln >= 0 && ln < lbs.length) {
+          e.preventDefault();
+          safeFocus(lbs[ln]);
+          try { lbs[ln].scrollIntoView({ block: "nearest", inline: "nearest" }); } catch(e2){}
+          return;
+        }
       }
       const items = [...scope.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
         .filter(el => el.offsetParent !== null && !el.disabled
