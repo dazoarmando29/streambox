@@ -250,27 +250,81 @@
   /* unaired episodes: greyed + dead (real <button disabled>, so Tab/D-pad
      skip them and no pointer can fire them) */
   #epGrid button:disabled { opacity: .45; cursor: not-allowed; }
+  /* touch polish (phones + tablets): no 300ms double-tap zoom delay on any
+     control, no grey flash on tap (iOS/Android WebViews) */
+  button, .card, .navlink, .mnav-btn, a, label, select, .switch {
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  /* iOS: focusing a sub-16px input auto-zooms the whole page and never
+     quite comes back — force 16px on text-like fields (iOS-only rule) */
+  @supports (-webkit-touch-callout: none) {
+    input, textarea { font-size: 16px !important; }
+  }
   /* phones: tighter hero, full-width player controls */
   @media (max-width: 640px) {
     #hero { height: 62vh !important; }
     .player-wrap { border-radius: 0; margin: 0 -1rem; }
   }
-  /* tablets landscape: 2-col watch layout breathes */
+  /* short landscape (phones sideways / split-screen): the billboard's
+     badge+title+overview+buttons overflowed the clipped hero and ate the
+     badge under the nav. Compact stack keeps everything on screen. */
+  @media (max-height: 520px) and (orientation: landscape) {
+    #hero { height: 82vh !important; }
+    #hero > div.relative { padding-top: 56px; padding-bottom: 18px; }
+    #hero h1 { font-size: 1.55rem !important; margin-top: 6px; }
+    #hero > div.relative > span { font-size: 10px; }
+    #hero .line-clamp-3 { -webkit-line-clamp: 2; margin-top: 4px; }
+    #hero .line-clamp-3 + div { margin-top: 8px; }
+    #hero button { height: 44px; padding: 0 18px; font-size: 13px; }
+  }
+  /* tablets (portrait + landscape): 4-col browse grids breathe at arm's
+     length — 3 cols looks childish, 5+ squeezes the titles */
   @media (min-width: 641px) and (max-width: 1024px) {
-    #grid { grid-template-columns: repeat(4, minmax(0,1fr)); }
+    #grid, #listGrid { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 18px; }
+    #searchResults { grid-template-columns: repeat(4, minmax(0,1fr)); }
   }
   /* render speed: skip off-screen rows until needed */
   #rows > div { content-visibility: auto; contain-intrinsic-size: auto 320px; }
   /* Android TV / large TV: bigger text + cards, show focus ring always */
   .tv-mode { font-size: 18px; }
-  .tv-mode .card { min-width: 200px !important; max-width: 200px !important; }
+  /* row posters only (browse grids fill their cells below; the Continue
+     cards keep their wide glass layout via .card-wide) */
+  .tv-mode .card:not(.card-wide) { min-width: 230px !important; max-width: 230px !important; }
+  .tv-mode .card-wide { min-width: 330px !important; max-width: 330px !important; }
+  .tv-mode .row-scroll > div:not(.card):not(.card-wide) { min-width: 230px !important; max-width: 230px !important; }
+  /* browse grids: cards FILL their cells (the 160px pin left dead space in
+     6 columns on 1080p+ — big Netflix-style posters now) */
+  #grid .card, #listGrid .card, #searchResults .card { min-width: 0 !important; max-width: none !important; }
+  .tv-mode #grid, .tv-mode #listGrid { gap: 24px; }
+  .tv-mode #grid .card-title, .tv-mode #listGrid .card-title { font-size: 1.05rem; }
+  .tv-mode .card .card-title + p { font-size: 13px; }
+  /* rows on TV: wider gutters + gaps so the zoom ring never clips */
+  .tv-mode .sb-row .row-scroll { gap: 18px; }
+  .tv-mode .row-scroll.row-scroll { padding: 24px 26px 28px; scroll-padding-left: 26px; }
+  .tv-mode .row-title { font-size: 1.45rem; gap: 12px; }
+  .tv-mode .row-title::before { width: 5px; height: 24px; }
+  /* rating badge readable from the couch */
+  .tv-mode .rate-badge { font-size: 14px; padding: 4px 12px; top: 10px; left: 10px; }
   .tv-mode h1 { font-size: 3rem !important; }
   /* TV hero: the inflated tv-mode type makes the billboard text taller than
      the 75vh hero, so it overflows upward under the fixed nav (badge kissing
      the logo). Taller hero + capped title + top clearance fixes the overlap. */
   .tv-mode #hero { min-height: 88vh; }
-  .tv-mode #hero h1 { font-size: 2.4rem !important; }
-  .tv-mode #hero > div.relative { padding-top: 110px; }
+  .tv-mode #hero h1 { font-size: 2.6rem !important; }
+  .tv-mode #hero > div.relative { padding-top: 110px; padding-bottom: 72px; }
+  /* TV hero CTAs: 10-foot buttons (thumb on the remote, not a finger) */
+  .tv-mode #hero button { min-height: 56px; font-size: 1.15rem; padding: 0 32px; }
+  .tv-mode #hero .line-clamp-3 { font-size: 1.05rem; max-width: 52rem; }
+  /* TV boot: bigger brand on the splash so 1080p panels don't show a stamp */
+  .tv-mode .splash-logo { width: 116px; height: 116px; border-radius: 30px; }
+  .tv-mode .splash-logo svg { width: 62px; height: 62px; }
+  .tv-mode .splash-name { font-size: 2.8rem; }
+  .tv-mode .splash-bar { width: 240px; height: 7px; }
+  .tv-mode .splash-sub { font-size: 1.05rem; }
+  /* toasts + skip pill: couch-sized type */
+  .tv-mode #toastMsg { font-size: 18px; }
+  .tv-mode #toast { padding: 14px 14px 14px 22px; border-radius: 22px; }
+  .tv-mode #skipFloat { font-size: 18px; min-height: 54px; padding: 0 28px; }
   /* TV nav: keep every link on ONE line — wrapped two-line buttons made the
      row two-storey tall, which is what hid the 🔒/title row and crowded the
      hero badge on Google TV. */
@@ -365,9 +419,13 @@
     border-radius: 0; background: #0b1426;
     border-top: 1px solid rgba(255,255,255,.12);
   }
-  @media (min-width: 1600px), (pointer: coarse) and (min-width: 1100px) {
+  /* big touch screens (tablets + large desktops): 180px row posters */
+  @media (min-width: 1600px), (pointer: coarse) and (min-width: 768px) {
     .card { min-width: 180px; }
   }
+  /* browse grids can run 100+ cards: skip off-screen cards until needed
+     (rows already use this above) */
+  #grid > .card, #listGrid > .card { content-visibility: auto; contain-intrinsic-size: auto 380px; }
   /* MODERN skin: glass cards, pill nav tabs, switch toggles */
   .glass { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); border-radius: 20px; }
   .card:hover .glass, .card:focus-visible .glass, .card.tv-focus .glass {
@@ -433,7 +491,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 161; // bump every release alongside version.txt
+  const BUILD_NUM = 162; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1309,6 +1367,17 @@ function paintRowArrows(sc){
   } catch(e){}
 }
 function paintAllRowArrows(){ try { document.querySelectorAll(".sb-row .row-scroll").forEach(paintRowArrows); } catch(e){} }
+/* responsive poster ladder: browsers pick w185/w342/w500 per screen density
+   from srcset (phones and cheap panels download less, retina + TV grids get
+   sharper art). Calm keeps its single w185 diet — no ladder to over-decode. */
+function posterTag(path, cls){
+  const on = `onerror="this.onerror=null;this.style.display='none'"`;
+  const fallback = `https://via.placeholder.com/500x750?text=No+Image`;
+  if (!path) return `<img loading="lazy" decoding="async" src="${fallback}" ${on} class="${cls}">`;
+  if (document.body.classList.contains("calm"))
+    return `<img loading="lazy" decoding="async" src="${IMG(path,"w342")}" ${on} class="${cls}">`;
+  return `<img loading="lazy" decoding="async" src="${IMG(path,"w342")}" srcset="${IMG(path,"w185")} 185w, ${IMG(path,"w342")} 342w, ${IMG(path,"w500")} 500w" sizes="(max-width: 640px) 42vw, (max-width: 1024px) 22vw, (min-width: 1700px) 300px, 185px" ${on} class="${cls}">`;
+}
 function makeRow(title, items, forceType){
   const div = document.createElement("div");
   div.className = "sb-row";
@@ -1333,7 +1402,7 @@ function cardEl(x, type){
   d.innerHTML = `
     <div class="relative poster-frame">
       <span class="rate-badge">★ ${Number(x.vote_average || 0).toFixed(1)}</span>
-      <img loading="lazy" decoding="async" src="${IMG(x.poster_path,"w342")}" onerror="this.onerror=null;this.style.display='none'" class="rounded-lg w-full aspect-[2/3] object-cover bg-white/5">
+      ${posterTag(x.poster_path, "rounded-lg w-full aspect-[2/3] object-cover bg-white/5")}
     </div>
     <p class="card-title text-xs mt-1.5 font-semibold truncate">${titleOf(x)}</p>
     <p class="text-[11px] text-gray-500">${yearOf(x)} • ${type.toUpperCase()}</p>`;
@@ -3297,13 +3366,13 @@ function renderContinue(){
     row.classList.remove("hidden"); grid.innerHTML = "";
     arr.forEach(x=>{
       const d = document.createElement("div");
-      d.className = "card min-w-[270px] max-w-[270px] focusable";
+      d.className = "card card-wide min-w-[270px] max-w-[270px] focusable";
       d.tabIndex = 0;
       d.setAttribute("role", "button");
       d.setAttribute("data-focusable", "1");
       d.setAttribute("aria-label", `${x.title||""} (${x.type})`);
       const pct = (x.dur > 60 && x.pos > 5) ? Math.min(99, Math.round(x.pos / x.dur * 100)) : 0;
-      d.innerHTML = `<div class="glass flex items-center gap-3 p-3"><img loading="lazy" decoding="async" src="${IMG(x.poster,"w342")}" onerror="this.onerror=null;this.style.display='none'" class="w-14 aspect-[2/3] object-cover rounded-lg shrink-0"><div class="flex-1 min-w-0"><p class="card-title text-sm font-bold truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p>${pct ? `<div class="h-1.5 rounded bg-white/15 mt-2 overflow-hidden"><div class="h-1.5 rounded bg-teal-400" style="width:${pct}%"></div></div><p class="text-[11px] text-teal-300 font-bold mt-1">${pct}% watched</p>` : `<p class="text-[11px] text-gray-600 mt-2">Not started</p>`}</div><button class="w-9 h-9 shrink-0 rounded-full bg-black/50 hover:bg-black/80 text-sm" aria-label="Remove">✕</button></div>`;
+      d.innerHTML = `<div class="glass flex items-center gap-3 p-3"><img loading="lazy" decoding="async" src="${IMG(x.poster,"w185")}" onerror="this.onerror=null;this.style.display='none'" class="w-14 aspect-[2/3] object-cover rounded-lg shrink-0"><div class="flex-1 min-w-0"><p class="card-title text-sm font-bold truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p>${pct ? `<div class="h-1.5 rounded bg-white/15 mt-2 overflow-hidden"><div class="h-1.5 rounded bg-teal-400" style="width:${pct}%"></div></div><p class="text-[11px] text-teal-300 font-bold mt-1">${pct}% watched</p>` : `<p class="text-[11px] text-gray-600 mt-2">Not started</p>`}</div><button class="w-9 h-9 shrink-0 rounded-full bg-black/50 hover:bg-black/80 text-sm" aria-label="Remove">✕</button></div>`;
       const resumeAt = (x.dur > 60 && x.pos > 10) ? x.pos : 0;
       d.onclick = activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt));
       // remote/keyboard: OK plays ONLY when the card itself has focus — the inner
