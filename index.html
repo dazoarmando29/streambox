@@ -431,7 +431,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 138; // bump every release alongside version.txt
+  const BUILD_NUM = 139; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -612,7 +612,6 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <button id="mirrorHomeBtn" onclick="mirrorHome()" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold">⇄ CineSrc</button>
         <button id="stripSubs" onclick="ctlSubsToggle()" aria-label="Subtitles on or off" title="Our subtitles on/off — Wyzie + your files, over any mirror" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">CC</button>
         <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">⚙</button>
-        <button id="srvBtn" onclick="openAV()" aria-label="Change server" title="Servers — hop mirrors without leaving the player" class="hidden h-11 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">⇄ Servers</button>
         <button onclick="cursorToggle()" title="Remote cursor: arrows glide a pointer, OK clicks" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🖱</button>
       </div>
       <!-- One-time subtitles coach tip (arrow points at the CC button) -->
@@ -1539,12 +1538,14 @@ function skeletonRow(title){
         if ((mirror !== "cinesrc" && mirror !== "anipm") || !document.body.classList.contains("tv-mode")) {
           if (mirror === "cinesrc" && (dir === "left" || dir === "right")) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
           else if (mirror === "vidrift" && (dir === "left" || dir === "right")) { vidriftSeekRel(dir === "left" ? -10 : 30); }
+          else if (mirror === "vidbolt" && (dir === "left" || dir === "right")) { boltSeekRel(dir === "left" ? -10 : 30); }
           else if (mirror === "vidzen" && (dir === "left" || dir === "right")) { undrivenSeekRel(dir === "left" ? -10 : 30); }
-          else if (mirror === "vidrift" || mirror === "vidzen") {
-            // TV asleep + U/D: wake and land on the strip (same as the bar);
-            // desktop keeps the volume hint (VidRift) or nothing (VidZen).
+          else if (mirror === "vidrift" || mirror === "vidzen" || mirror === "vidbolt") {
+            // TV asleep + U/D: wake and land on the visible bar (same row the
+            // waking bar shows); desktop keeps the volume hint (VidRift) or
+            // nothing (no blind commands there).
             if (document.body.classList.contains("tv-mode")) {
-              const st = [...document.querySelectorAll("#mirrorBar button")].filter(b => b.offsetParent !== null && !b.disabled);
+              const st = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
               if (st.length) safeFocus(dir === "up" ? st[0] : st[st.length - 1]);
             } else if (mirror === "vidrift") vidriftVolHint();
           }
@@ -1587,9 +1588,12 @@ function skeletonRow(title){
         // to banners above (health Got-it). OK = press focused / play-pause
         // when none is. Volume lives on the TV remote's own keys, never arrows.
         e.preventDefault(); pokeHud();
-        const cineSrc = (mirror === "cinesrc" || mirror === "anipm") && !onMirrorBar;
+        // ownBar = mirrors OUR bar drives (L/R always seeks via its funnel,
+        // U/D walks the visible bar row + banners). VidBolt joins via its
+        // seek API; VidRift/VidZen keep their strip behavior below.
+        const ownBar = (mirror === "cinesrc" || mirror === "anipm" || mirror === "vidbolt") && !onMirrorBar;
         if (dir === "left" || dir === "right") {
-          if (cineSrc) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); return; }
+          if (ownBar) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); return; }
           // VidRift: same deal — L/R always skims from our side. (Walking the
           // strip used to eat seeks here too, stranding focus on it forever
           // since nothing could move focus off.) Strip buttons ride ▼ now.
@@ -1604,7 +1608,7 @@ function skeletonRow(title){
           try { btns[bn].scrollIntoView({ inline: "nearest", block: "nearest" }); } catch(e){}
           return;
         }
-        if (!cineSrc) {
+        if (!ownBar) {
           // VidRift/VidZen U/D: ▲ climbs to the health banner, ▼ cycles the
           // strip (Control / ⇄ / ⚙ / 🖱) — same split as the CineSrc row, so
           // L/R can stay pure seek and focus always has somewhere to go.
@@ -3249,14 +3253,17 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
     anipmSend(pState.paused ? "play" : "pause"); return;
   } // events correct us
   // paired mirrors have no play API: hand keys into their player instead —
-  // its own OK/space/arrows drive it, Back returns (TV app)
+  // its own OK/space/arrows drive it, Back returns (TV app). VidBolt HAS one,
+  // so ▶ talks straight to it like AniPM (events correct us).
   if (mirror === "vidrift" || mirror === "vidzen") { focusMirror(); return; }
+  if (mirror === "vidbolt") { boltSend(pState.paused ? { type: "play" } : { type: "pause" }); return; }
   pState.paused = !pState.paused;
   sendCmd(pState.paused ? "pause" : "play");
   ctlPaint();
 }
 function ctlSeekRel(d){
   if (mirror === "vidrift") { vidriftSeekRel(d); return; } // resume-seek answers
+  if (mirror === "vidbolt") { boltSeekRel(d); return; } // direct seek answers
   if (mirror === "vidzen") { undrivenSeekRel(d); return; } // debounced startAt reload
   if (mirror !== "cinesrc" && mirror !== "anipm") return; // undriven mirrors use their own controls
   if (mirror === "anipm") {
@@ -3391,6 +3398,7 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
     const t = Math.floor(bar.value / 1000 * pState.dur);
     if (mirror === "anipm") anipmSend("seek", { time: t });
     else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: t });
+    else if (mirror === "vidbolt") boltSeekTo(t);
     else if (mirror === "vidzen") undrivenSeekTo(t);
     else sendCmd("seek", [t]);
   });
@@ -3565,8 +3573,8 @@ function forgetServer(){
   paintSettings();
   document.getElementById("watchStatus").textContent = "Server preference cleared — Auto mode";
 }
-/* source mirrors: CineSrc default + alternates. CineSrc/AniPM/VidRift speak a
-   two-way protocol (our bar drives them); VidZen/VidBolt pair progress-only
+/* source mirrors: CineSrc default + alternates. CineSrc/AniPM/VidRift/VidBolt
+   speak a two-way protocol (our bar drives them); VidZen pairs progress-only
    with the 🎯 handoff for control; the rest use their own player entirely.
    NO_SANDBOX members load UNSANDBOXED (see applyMirrorSandbox): Ad Shield is
    off there by necessity, use Brave/uBlock for in-stream ads. All other
@@ -3751,12 +3759,27 @@ function mirrorUrl(id){
         : `https://embed.vidrift.net/embed/movie/${tmdb}?${rq}`;
     }
     case "vidbolt": {
-      // docs shapes: /movie/{tmdb}, /tv/{tmdb}/{s}/{e} (+ /anime/{anilist} or
-      // /anime/mal/{mal} for anime — resolved async in loadPlayer, never here
-      // since mapping isn't synchronous). Bare URLs, own controls tier.
+      // player-bundle shapes (not docs — none published): /movie/{tmdb},
+      // /tv/{tmdb}/{s}/{e} (+ /anime/{anilist} or /anime/mal/{mal} for anime,
+      // resolved async in loadPlayer/loadVidboltAnime since mapping isn't
+      // synchronous). Documented-by-code params only: autoPlay attempts
+      // autoplay, startAt resumes in seconds, theme wears our accent,
+      // mobileSheets=true delegates Settings/Subtitles/Source/Server panels
+      // to our sheet via mobile-panel/mobile-option messages.
+      const bp = new URLSearchParams({ autoPlay: "true", mobileSheets: "true" });
+      try {
+        const c = String(document.getElementById("optColor").value || "#14b8a6").replace("#", "");
+        if (/^[0-9a-fA-F]{6}$/.test(c)) bp.set("theme", c);
+      } catch(e){}
+      let _bt = -1;
+      if (resumeAt >= 0) { _bt = resumeAt; resumeAt = -1; }
+      else if ((watchState.t || 0) > 0) { _bt = Math.floor(watchState.t); watchState.t = 0; }
+      if (_bt > 0) bp.set("startAt", String(Math.floor(_bt)));
+      window._boltDur = 0; window._boltStarted = false; // fresh frame, fresh duration
+      const bq = bp.toString();
       return tv
-        ? `https://vidbolt.pro/tv/${tmdb}/${s}/${e}`
-        : `https://vidbolt.pro/movie/${tmdb}`;
+        ? `https://vidbolt.pro/tv/${tmdb}/${s}/${e}?${bq}`
+        : `https://vidbolt.pro/movie/${tmdb}?${bq}`;
     }
     case "vidzen": {
       // planetary-server player (TMDB-native, 4K, in-player server picker +
@@ -3825,22 +3848,31 @@ function setMirror(m, auto){  if (m === "trailer" && !trailerKey) {
 function updateMirrorUI(){
   const isTrailer = mirror === "trailer";
   const isCS = mirror === "cinesrc" || mirror === "anipm";
-  // paired mirrors ride our bar too (seek/slider/skip/quality live; play
-  // hands keys in, mute/rate/speed live in their player — no dead buttons)
-  const isPaired = mirror === "vidrift" || mirror === "vidzen";
+  // paired mirrors ride our bar too. VidRift seeks via resume-seek, VidBolt
+  // via a real seek API, VidZen via reload-skims; play hands keys in except
+  // where an API exists (VidBolt). Mute/rate/speed live in their player or
+  // have no events to stay honest — they hide instead of sitting dead.
+  const isPaired = mirror === "vidrift" || mirror === "vidzen" || mirror === "vidbolt";
   document.getElementById("trailerBar").classList.toggle("hidden", !isTrailer);
   document.getElementById("ctlBar").classList.toggle("hidden", !(isCS || isPaired));
   document.getElementById("mirrorBar").classList.toggle("hidden", isCS || isTrailer);
-  // A/V sheet button only exists where it works (AniPM carries tracks)
+  // A/V sheet button: AniPM carries tracks; VidBolt carries the SERVERS shelf
+  // (mirror hops without leaving the player — its A/V lives in its own menus)
   const av = document.getElementById("avBtn");
-  if (av) av.classList.toggle("hidden", mirror !== "anipm");
-  // VidBolt rides the same sheet for server hops (its player owns A/V, so the
-  // strip gets a Servers button instead of the bar's A/V one)
-  const sb = document.getElementById("srvBtn");
-  if (sb) sb.classList.toggle("hidden", mirror !== "vidbolt");
-  // anime declutter: quality + settings live in the A/V sheet now
+  if (av) {
+    av.classList.toggle("hidden", mirror !== "anipm" && mirror !== "vidbolt");
+    const srv = mirror === "vidbolt";
+    if (av.textContent !== (srv ? "⇄ Servers" : "A/V")) {
+      av.textContent = srv ? "⇄ Servers" : "A/V";
+      av.setAttribute("aria-label", srv ? "Servers — hop mirrors without leaving the player" : "Audio and subtitles");
+      av.title = srv ? "Servers — hop mirrors without leaving the player" : "Audio (sub/dub), subtitles and quality — no settings detour";
+    }
+  }
+  // anime declutter: quality + settings live in the A/V sheet now. VidBolt
+  // quality lives in its own settings/sheet (no direct command), so its
+  // button hides too.
   const q = document.getElementById("ctlQ");
-  if (q) q.classList.toggle("hidden", mirror === "anipm" || mirror === "vidzen");
+  if (q) q.classList.toggle("hidden", mirror === "anipm" || mirror === "vidzen" || mirror === "vidbolt");
   const st = document.getElementById("ctlSettings");
   if (st) st.classList.toggle("hidden", mirror === "anipm");
   // paired mirrors: play hands keys into their player; mute/rate/speed have
@@ -3876,8 +3908,8 @@ function updateMirrorUI(){
     }
     if (mirror === "vidbolt") {
       document.getElementById("watchStatus").textContent = watchState.anime
-        ? "VidBolt: AniList/MAL anime — own player controls · 🎯/🖱 drive it on TV · ⇄ Servers hops mirrors"
-        : "VidBolt: TMDB movies + shows — own player controls · 🎯/🖱 drive it on TV · ⇄ Servers hops mirrors";
+        ? "VidBolt: our bar drives play/seek/skip · A/V opens the SERVERS shelf · no Ad Shield (player refuses sandbox)"
+        : "VidBolt: our bar drives play/seek/skip · phone panels open in our sheet · no Ad Shield (player refuses sandbox)";
       return;
     }
     document.getElementById("watchStatus").textContent = NO_SANDBOX.has(mirror)
@@ -3941,12 +3973,13 @@ function paintMirrors(){
 /* server tiers for the picker: OUR PLAYERS (our bar + remote drive the
    video) vs MORE SERVERS (their own player — cursor/🎯 on TV). VidRift rides
    with ours: remote seeks + auto-skip sync + progress feed our UI. */
-const MAIN_PLAYERS = ["cinesrc", "anipm", "vidrift", "vidzen"];
+const MAIN_PLAYERS = ["cinesrc", "anipm", "vidrift", "vidzen", "vidbolt"];
 const MAIN_HINTS = {
   cinesrc: "Our bar drives everything: play, seek, subs, speed",
   anipm: "Our bar drives it after one ▶ tap inside: sub/dub, quality, skip",
   vidrift: "Remote seeks + auto-skip sync; Up Next + quality follow our UI; our bar drives seek/skip/subs; phone panels open in our sheet",
   vidzen: "Our bar seeks + skips (reload-skims) and subs; play hands keys in",
+  vidbolt: "Our bar drives play, seek, skip; servers shelf on A/V; phone panels open in our sheet",
 };
 /* Wyzie subtitles: search + download with built-in shared key (personal
    override at store.wyzie.io/redeem — 1,000 req/day — wins when saved).
@@ -4735,7 +4768,7 @@ async function fetchIntroRanges(){
    playhead sits inside a known intro, on mirrors we can drive. */
 function introHit(){
   if (watchState.type !== "tv") return null; // TV shows + anime only — never movies
-  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm") return null;
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt") return null;
   const cur = pState.cur || 0;
   return _introRanges.find(r => cur >= r.start && cur < r.end - 1) || null;
 }
@@ -4754,6 +4787,7 @@ function skipIntroNow(){
   _skipT = Date.now();
   if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
+  else if (mirror === "vidbolt") boltSeekTo(hit.end);
   else if (mirror === "vidzen") undrivenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
@@ -4788,7 +4822,7 @@ function finaleInfo(){
 }
 function outroHit(){
   if (watchState.type !== "tv") return null; // same gates as intros
-  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm") return null;
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt") return null;
   const cur = pState.cur || 0;
   return _outroRanges.find(r => cur >= r.start && (r.end == null || cur < r.end)) || null;
 }
@@ -4810,6 +4844,7 @@ function skipOutroNow(){
   if (!end) return;
   if (mirror === "cinesrc") sendCmd("seek", [end]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: end });
+  else if (mirror === "vidbolt") boltSeekTo(end);
   else if (mirror === "vidzen") undrivenSeekTo(end);
   else if (mirror === "anipm") anipmSend("seek", { time: end });
   const ws = document.getElementById("watchStatus");
@@ -4846,7 +4881,7 @@ function paintSkipPill(){
   }
 }
 function autoSkipIntro(){
-  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm") return;
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt") return;
   try { if (!document.getElementById("optAutoskip").checked) return; } catch(e){ return; }
   const cur = pState.cur || 0;
   const hit = _introRanges.find(r => cur >= r.start && cur < r.end - 1);
@@ -4856,6 +4891,7 @@ function autoSkipIntro(){
   _skipT = now;
   if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
+  else if (mirror === "vidbolt") boltSeekTo(hit.end);
   else if (mirror === "vidzen") undrivenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
@@ -4904,23 +4940,26 @@ function vidriftMobileOption(option, value){
   vidriftSend({ type: "vidrift:mobile-option", option, value });
 }
 function closeVrSheet(){
-  // VidRift phone sheet only — never touches other panels. loadPlayer calls
-  // this on every fresh frame (panel options may belong to another episode),
-  // so it must not collapse Settings/an episode drawer the user is still in.
+  // delegated phone sheet (VidRift/VidBolt) only — never touches other
+  // panels. loadPlayer calls this on every fresh frame (panel options may
+  // belong to another episode), so it must not collapse Settings/an episode
+  // drawer the user is still in.
   try { document.getElementById("vrSheet").classList.add("hidden"); } catch(e){}
   window._vrPanel = null;
   try { if (!topPopup()) document.body.classList.remove("modal-open"); } catch(e){}
 }
-function openVrSheet(panel, options, current){
-  // VidRift phone-panel pairing: their Settings / Subtitles / Source sheet
-  // arrives as data and renders in OUR chrome — same ≥48px pills + Back/Esc
-  // + D-pad walk as the A/V sheet. TV/desktop never receive it (their
-  // player keeps its own menus there); fullscreen never arrives either
-  // (their sheet wins there by design). A pick replies vidrift:mobile-option
-  // and closes; dismissing keeps their previous value. Garbage shapes get a
-  // graceful Close-only sheet, never a stranded dead button.
-  if (mirror !== "vidrift") return;
-  window._vrPanel = { panel, options, current };
+function openVrSheet(panel, options, current, reply){
+  // delegated phone-panel pairing (VidRift + VidBolt): their Settings /
+  // Subtitles / Source (/Servers) sheet arrives as data and renders in OUR
+  // chrome — same ≥48px pills + Back/Esc + D-pad walk as the A/V sheet.
+  // TV/desktop never receive it (their players keep their own menus there);
+  // fullscreen never arrives either (their sheet wins there by design). A
+  // pick replies through the mirror's own answer channel and closes;
+  // dismissing keeps their previous value. Garbage shapes get a graceful
+  // Close-only sheet, never a stranded dead button.
+  if (mirror !== "vidrift" && mirror !== "vidbolt") return;
+  if (typeof reply !== "function") return; // no answer channel, no sheet
+  window._vrPanel = { panel, options, current, reply };
   const titles = { settings: "Settings", subtitles: "Subtitles", source: "Source" };
   document.getElementById("vrTitle").textContent = titles[panel] || "Player";
   const body = document.getElementById("vrBody"); body.innerHTML = "";
@@ -4933,9 +4972,9 @@ function openVrSheet(panel, options, current){
   } else {
     let wrap = null, lastGroup = null, first = true;
     list.forEach(o => {
-      // entries are {option, value, label, group, desc?} objects — anything
-      // else (or an entry with no identity at all) is skipped, never a
-      // broken pill that would reply garbage
+      // entries are {option, value, label, group} objects (+ optional desc /
+      // selected) — anything else (or an entry with no identity at all) is
+      // skipped, never a broken pill that would reply garbage
       if (!o || typeof o !== "object") return;
       const val = o.value;
       const rawLabel = (o.label != null && String(o.label) !== "") ? String(o.label) : (val != null && String(val) !== "" ? String(val) : null);
@@ -4955,14 +4994,19 @@ function openVrSheet(panel, options, current){
         body.appendChild(wrap);
       }
       first = false;
-      let active = false;
+      // current marks: VidRift sends a `current` map, VidBolt flags each
+      // entry with its own `selected` — honor whichever arrived
+      let active = o.selected === true;
       try {
         const ck = o ? o.option : null;
-        if (current && ck != null && current[ck] != null)
+        if (!active && current && ck != null && current[ck] != null)
           active = String(current[ck]).toLowerCase() === String(val).toLowerCase();
       } catch(e){}
       wrap.appendChild(avPill((active ? "● " : "") + label, active, () => {
-        try { vidriftMobileOption(o.option, val); } catch(e){}
+        try {
+          const r = (window._vrPanel || {}).reply;
+          if (typeof r === "function") r(o.option, val);
+        } catch(e){}
         closePanels();
       }));
       if (o && o.desc) {
@@ -5052,8 +5096,8 @@ window.addEventListener("message", (event)=>{
     // our chrome. Fullscreen never arrives here (their sheet wins there by
     // design); garbage shapes get a graceful Close-only sheet, never a
     // stranded dead button.
-    if (d && typeof d.panel === "string") openVrSheet(d.panel, d.options, d.current);
-    else openVrSheet("settings", [], null);
+    if (d && typeof d.panel === "string") openVrSheet(d.panel, d.options, d.current, vidriftMobileOption);
+    else openVrSheet("settings", [], null, vidriftMobileOption);
   }
   if (d.type === "vidrift:ended") {
     try { markWatched(); } catch(e){}
@@ -5101,38 +5145,77 @@ window.addEventListener("message", (event)=>{
     }
   }
 });
-/* ---------- VidBolt: own-controls tier (no command API known — the 🎯
-    handoff + its own menus drive playback, like VidZen). Listens for the
-    common player-event shapes and folds progress in, so continue-watching,
-    resume position and position-aware UI pair up; seeks/skip stay inside
-    its player (no invented outbound commands, no dead buttons). */
+/* ---------- VidBolt: full bar pairing (cracked from their player bundle:
+    inbound {type:play/pause/seek+time/volume+volume}, outbound
+    ready/timeupdate+time/durationchange+duration/play/pause/ended, plain
+    {type} shapes with targetOrigin "*" and no origin check on their side).
+    Our bar drives play/seek/slider/skip; Settings/Subtitles/Source/Server
+    panels delegate via ?mobileSheets=true into our sheet (mobile-option
+    answers quality/sourceQuality/subtitles/audio/server/speed/audioBoost).
+    ?startAt resumes; theme wears our accent. No episode event exists, so
+    in-player episode picks go stale in our state — our drawer owns episodes.
+    Volume has a command but no volume events (blind toggles desync) and TV
+    keys own volume anyway, so mute/rate stay hidden: no dead buttons. */
+const BOLT_ORIGIN = "https://vidbolt.pro";
+function boltSend(msg){
+  try {
+    document.getElementById("player").contentWindow.postMessage(msg, BOLT_ORIGIN);
+  } catch(e){}
+}
+function boltSeekTo(t){
+  // absolute seek (their seek takes seconds into currentTime, player clamps)
+  if (mirror !== "vidbolt") return;
+  const tgt = Math.max(0, Math.floor(t));
+  boltSend({ type: "seek", time: (pState.dur > 0) ? Math.min(tgt, Math.floor(pState.dur)) : tgt });
+}
+function boltSeekRel(d){
+  // TV remote L/R: skip from OUR side using last progress (same as VidRift)
+  if (mirror !== "vidbolt") return;
+  const t = Math.max(0, (pState.cur || 0) + d);
+  boltSend({ type: "seek", time: Math.floor(t) });
+  skipFlash(d);
+}
+function boltMobileOption(option, value){
+  // answers one delegated phone panel: echo the chosen option's OWN fields
+  if (mirror !== "vidbolt") return;
+  boltSend({ type: "mobile-option", option, value });
+}
 window.addEventListener("message", (event)=>{
-  if (event.origin !== "https://vidbolt.pro") return;
+  if (event.origin !== BOLT_ORIGIN) return;
   if (mirror !== "vidbolt") return; // stale frame from a switched-away mirror
-  let m = event.data || {};
-  // PLAYER_EVENT family (VidAPI/VidCore shape): fold it into the same fields
-  if (m.type === "PLAYER_EVENT" && m.data && typeof m.data === "object") {
-    const dd = m.data;
-    m = { event: dd.event || dd.player_status,
-      currentTime: dd.currentTime != null ? dd.currentTime : dd.player_progress,
-      duration: dd.duration != null ? dd.duration : dd.player_duration };
+  const d = event.data || {};
+  if (d.type === "mobile-panel") {
+    // phone sheet delegation (?mobileSheets=true): their Settings panel
+    // (quality + subtitles + audio + servers + speed) renders in our chrome.
+    // Entries carry their own `selected` flags; no `current` object exists.
+    if (d && typeof d.panel === "string") openVrSheet(d.panel, d.options, null, boltMobileOption);
+    else openVrSheet("settings", [], null, boltMobileOption);
+    return;
   }
-  const inner = m.data && typeof m.data === "object" ? m.data : m;
-  const ev = m.event || m.type || inner.event || inner.type || "";
-  const cur = inner.currentTime != null ? inner.currentTime : m.currentTime;
-  const dur = inner.duration != null ? inner.duration : m.duration;
-  const evn = String(ev || "").toLowerCase();
-  if (evn === "timeupdate" || evn === "progress" || evn === "seeked" || evn === "seeking") {
-    if (typeof cur === "number") pState.cur = cur;
-    if (typeof dur === "number" && dur > 0) pState.dur = dur;
-    if (typeof cur === "number" && cur > 0.5) window._cinePlaying = true;
+  if (d.type === "ready") {
+    hideSpin(); ctlPaint();
+    showTitleCard();
+    return;
+  }
+  if (d.type === "durationchange") {
+    if (typeof d.duration === "number" && d.duration > 0) { window._boltDur = d.duration; pState.dur = d.duration; }
+    hideSpin(); ctlPaint();
+    return;
+  }
+  if (d.type === "timeupdate") {
+    // timeupdate carries time only — duration rides the earlier durationchange
+    if (typeof d.time === "number") pState.cur = d.time;
+    if ((window._boltDur || 0) > 0) pState.dur = window._boltDur;
+    if (typeof d.time === "number" && d.time > 0.5) { window._cinePlaying = true; window._boltStarted = true; }
     try { clearStuckTip(); } catch(e){}
     hideSpin(); ctlPaint();
-    if (dur > 0) saveProgress(cur, dur);
+    if ((pState.dur || 0) > 0) saveProgress(pState.cur, pState.dur);
+    autoSkipIntro();
+    return;
   }
-  if (evn === "play" || evn === "playing" || evn === "unpaused") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
-  if (evn === "pause" || evn === "paused") { pState.paused = true; ctlPaint(); }
-  if (evn === "ended" || evn === "complete") {
+  if (d.type === "play" || d.type === "playing") { pState.paused = false; window._cinePlaying = true; window._boltStarted = true; ctlPaint(); }
+  if (d.type === "pause" || d.type === "paused") { pState.paused = true; ctlPaint(); }
+  if (d.type === "ended") {
     try { markWatched(); } catch(e){}
     if (watchState.type === "movie") {
       try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
@@ -5317,7 +5400,15 @@ async function loadVidboltAnime(){
     setMirror("vidrift", true);
     return;
   }
-  f.src = vu + (vu.includes("?") ? "&" : "?") + "_=" + Date.now();
+  // same player params as the builder (autoplay + panels + accent + resume)
+  const ap = new URLSearchParams({ autoPlay: "true", mobileSheets: "true" });
+  try {
+    const c = String(document.getElementById("optColor").value || "#14b8a6").replace("#", "");
+    if (/^[0-9a-fA-F]{6}$/.test(c)) ap.set("theme", c);
+  } catch(e){}
+  if ((watchState.t || 0) > 0) { ap.set("startAt", String(Math.floor(watchState.t))); watchState.t = 0; }
+  window._boltDur = 0; window._boltStarted = false; // fresh frame, fresh duration
+  f.src = vu + "?" + ap.toString() + "&_=" + Date.now();
 }
 async function loadAnipmPlayer(){
   const id = watchState.id;  const f = document.getElementById("player");
