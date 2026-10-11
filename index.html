@@ -431,7 +431,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 137; // bump every release alongside version.txt
+  const BUILD_NUM = 138; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1669,7 +1669,18 @@ function skeletonRow(title){
       // arrows from rows or the player never overshoot into logo/search/links
       const ae0 = document.activeElement;
       const navZone = !!(ae0 && ae0.closest && (ae0.closest("nav") || ae0.closest("#hero") || ae0.id === "backBtn"));
-      const scope = top || bar || document;
+      // weak-CPU fast path: L/R inside a row only walks that row (title +
+      // chevrons + cards) instead of scanning the whole document — same
+      // destinations in practice (rows are full-width; nothing sits
+      // left/right of a card), ~10x fewer rect reads per press. U/D keeps
+      // the full scan so focus can always leave the row.
+      let scope = top || bar || document;
+      if (!top && !bar && (dir === "left" || dir === "right") && ae0 && ae0.closest) {
+        try {
+          const wrap = ae0.closest(".sb-row") || ae0.closest(".row-scroll");
+          if (wrap) scope = wrap;
+        } catch(e){}
+      }
       const items = [...scope.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
         .filter(el => el.offsetParent !== null && !el.disabled
           && !(el.tagName === "INPUT" && (el.type === "range" || el.type === "color"))
@@ -1793,10 +1804,13 @@ function buildHero(items){
   heroItems = adultLocked() ? items.filter(x => !isAdult(x)) : items;
   if (!heroItems.length) heroItems = items; // never leave a blank billboard
   setHero(0);
+  // calm boxes keep one static billboard: rotation rebuilds the whole hero
+  // (big decode + layout) every 15s — a jank spike weak SoCs never stop paying
+  if (document.body.classList.contains("calm")) return;
   setInterval(()=>{
     if(!document.getElementById("homeView").classList.contains("hidden"))
       setHero((heroIdx+1)%heroItems.length);
-  }, (document.body.classList.contains("tv-mode") || document.body.classList.contains("calm")) ? 15000 : 8000);
+  }, document.body.classList.contains("tv-mode") ? 15000 : 8000);
 }
 function setHero(i){
   heroIdx = i;
@@ -1819,7 +1833,9 @@ function setHero(i){
         <button onclick='openDetail("${type}",${x.id})' class="bg-white/20 hover:bg-white/30 font-bold px-7 h-12 text-base rounded-full">ⓘ Details</button>
       </div>
     </div>`;
-  // preload next hero backdrop so rotation is instant
+  // preload next hero backdrop so rotation is instant (calm never rotates:
+  // no prefetch, no background decode burning CPU on weak boxes)
+  if (document.body.classList.contains("calm")) return;
   try {
     const nxt = heroItems[(i+1)%heroItems.length];
     if (nxt && nxt.backdrop_path) { const im = new Image(); im.decoding = "async"; im.src = IMG(nxt.backdrop_path, tvPic ? "w780" : "w1280"); }
@@ -2524,8 +2540,13 @@ try {
   const savedQ = localStorage.getItem("streambox_quality") || "";
   const qi = QLEVELS.findIndex(x => x.v === savedQ);
   if (qi >= 0) qIdx = qi;
-  // genuine TV boxes decode 1080p+ slowly: start fresh installs at 720p
-  // (smooth beats sharp on weak SoCs). Saved choice always wins; step up anytime.
+  // weak boxes decode 1080p+ slowly, so fresh installs start low (smooth
+  // beats sharp). Calm/Lite boxes go 480p, other TVs 720p. Saved choice
+  // always wins; step up anytime in Playback Settings.
+  else if (document.body.classList.contains("calm")) {
+    qIdx = QLEVELS.findIndex(x => x.v === "480");
+    try { localStorage.setItem("streambox_quality", "480"); } catch(e){}
+  }
   else if ((typeof IS_TV_DEVICE !== "undefined" && IS_TV_DEVICE)) {
     qIdx = QLEVELS.findIndex(x => x.v === "720");
     try { localStorage.setItem("streambox_quality", "720"); } catch(e){}
