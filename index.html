@@ -433,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 160; // bump every release alongside version.txt
+  const BUILD_NUM = 161; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -4378,6 +4378,10 @@ async function wyzSearch(){
     const list = (Array.isArray(items) ? items : []).slice(0, 25);
     if (!list.length) return bsSearch(); // nothing on Wyzie — backups straight into this list
     box.innerHTML = "";
+    const scope = document.createElement("p");
+    scope.className = "text-[11px] text-gray-500";
+    scope.textContent = "Same title, different releases — names like Felony/ViSiON are release groups, not movies. Pick yours for exact sync.";
+    box.appendChild(scope);
     list.forEach(it => {
       const row = document.createElement("div");
       row.className = "bg-white/5 border border-white/10 rounded-xl p-3";
