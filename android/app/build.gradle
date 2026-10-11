@@ -10,8 +10,8 @@ android {
         applicationId 'com.streambox.app'
         minSdk 24
         targetSdk 34
-        versionCode 16
-        versionName '2.5'
+        versionCode 17
+        versionName '2.6'
     }
 
     buildFeatures {
@@ -25,7 +25,7 @@ android {
             applicationId "com.streambox.app"
             buildConfigField "String", "HOME_URL", "\"https://dazoarmando29.github.io/streambox/?tv=1\""
         }
-        // Calm site (?calm=1 kills motion; same pixels, max smoothness)
+        // Calm site (?calm=1 kills motion/blur/glow + smaller posters; same pixels, max smoothness)
         lite {
             dimension "edition"
             applicationId "com.streambox.lite"

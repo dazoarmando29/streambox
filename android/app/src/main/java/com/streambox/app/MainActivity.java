@@ -37,6 +37,17 @@ public class MainActivity extends Activity {
         return false;
     }
 
+    /** Weak TV sticks/boxes (Android Go, 1GB sticks): even the Full flavor
+        boots the calm site — same pixels, none of the blur/glow/motion tax. */
+    private boolean isLowRamDevice() {
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager)
+                    getSystemService(android.content.Context.ACTIVITY_SERVICE);
+            if (am != null) return am.isLowRamDevice();
+        } catch (Exception ignored) {}
+        return false;
+    }
+
     /** HOME_URL carries the flavor params (?tv=1 / ?tv=1&calm=1); rebuild them
         per-device so phones never inherit the TV layout. */
     private String startUrl() {
@@ -46,7 +57,7 @@ public class MainActivity extends Activity {
             if (q >= 0) base = base.substring(0, q);
         } catch (Exception ignored) {}
         boolean calm = false;
-        try { calm = HOME.contains("calm=1"); } catch (Exception ignored) {}
+        try { calm = HOME.contains("calm=1") || isLowRamDevice(); } catch (Exception ignored) {}
         if (isTvDevice()) return base + (calm ? "?tv=1&calm=1" : "?tv=1");
         return base + (calm ? "?calm=1" : "");
     }
@@ -266,6 +277,18 @@ public class MainActivity extends Activity {
         super.onPause();
         // freeze page timers in background so a paused app burns no CPU
         if (web != null) { web.onPause(); web.pauseTimers(); }
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        // memory pressure: drop the WebView's RAM cache (disk cache kept, so
+        // no reload storm). Page state lives in DOM/localStorage, unaffected.
+        try {
+            if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_MODERATE && web != null) {
+                web.clearCache(false);
+            }
+        } catch (Exception ignored) {}
     }
 
     @Override

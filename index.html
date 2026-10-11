@@ -283,6 +283,28 @@
     transition: none !important; animation: none !important;
     scroll-behavior: auto !important;
   }
+  /* weak-SoC survival: blur + glow repaint every video frame underneath and
+     melt cheap GPUs (the bar's 18px blur sits over live video). Calm drops
+     both, keeps the focus rings (navigation-critical) and identical layout —
+     same pixels, none of the melt. */
+  body.calm #playerBox #ctlBar, body.calm #mirrorBar, body.calm #volToast,
+  body.calm #mobileNav, body.calm #cursorBtn, body.calm #titleCard > div {
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  }
+  body.calm #playerBox #ctlBar, body.calm #mirrorBar {
+    background: rgba(9,15,30,.94) !important; box-shadow: none !important;
+  }
+  body.calm #volToast, body.calm #toast,
+  body.calm #ctlPlay, body.calm #ctlSkipIntro,
+  body.calm #ctlSeek::-webkit-slider-thumb, body.calm #ctlSeek::-moz-range-thumb {
+    box-shadow: none !important;
+  }
+  body.calm .card:hover .poster-frame, body.calm .card:focus-visible .poster-frame,
+  body.calm .card:hover .glass, body.calm .card:focus-visible .glass,
+  body.calm .card.tv-focus .glass { box-shadow: 0 0 0 2px #14b8a6 !important; }
+  body.calm .card.tv-focus .poster-frame,
+  body.calm .tv-focus { box-shadow: 0 0 0 3px #14b8a6 !important; }
+  body.calm .mnav-active span:first-child { filter: none !important; }
   .tv-mode .skel-poster, .tv-mode .skel-line { animation: none !important; }
   /* cards/zoom/ring/popups all run from the base rules (TV shares desktop motion) */
   #modal .tv-focus { outline-width: 4px; }
@@ -409,13 +431,19 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 136; // bump every release alongside version.txt
+  const BUILD_NUM = 137; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
 const TMDB_API_KEY = atob(_sbk.map(s => s.split("").reverse().join("")).join(""));
 const TMDB_BASE = "https://api.themoviedb.org/3";
-const IMG = (p, size="w500") => p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
+/* weak-SoC image diet: calm boxes decode ~3.4x fewer pixels per poster
+   (w342→w185 still covers every card at display size); hero/stills keep
+   their resolution since they're one image each */
+const IMG = (p, size="w500") => {
+  if (size === "w342" && document.body.classList.contains("calm")) size = "w185";
+  return p ? `https://image.tmdb.org/t/p/${size}${p}` : "https://via.placeholder.com/500x750?text=No+Image";
+};
 const CINESRC_MOVIE = id => `https://cinesrc.st/embed/movie/${id}`;
 const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`;
 /* TV-safe lineup (early: boot code below reads these at parse time):
