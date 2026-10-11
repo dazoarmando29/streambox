@@ -431,7 +431,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 140; // bump every release alongside version.txt
+  const BUILD_NUM = 141; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -5313,32 +5313,60 @@ function anipmQInfo(h){
   return { height: 0, label: String(h) };
 }
 async function anipmIds(tmdbId, title, tmdbYear){
-  // TMDB→player-ID mapping, two hosts: Jikan (MAL id) first, Consumet
-  // (AniList id) as backup on a different network path — one blocked API
-  // no longer means a black player. Cached per title either way.
-  // Cache v2: v1 ignored release years, so same-name remakes (Hunter x
-  // Hunter 1999 vs 2011) could lock onto the wrong series — v2 re-maps once.
-  const ck = "sb:ani2:" + tmdbId;
+  // TMDB→player-ID mapping, three hosts: Jikan (MAL id) first, Consumet
+  // (AniList id) as backup on a different network path, AniList GraphQL
+  // third — one blocked API no longer means a black player. Cached per title.
+  // Cache v3: v2 could lock onto the WRONG show (Doraemon movie instead of
+  // the series — exact-title match fails on year-suffixed names like
+  // "Doraemon (2005)", so it fell back to blind list[0], movies included,
+  // and cached the poison forever). v3 scores title affinity + year + TV
+  // type, rejects strangers (no-match falls to VidRift, which is TMDB-direct
+  // and therefore always the RIGHT show), and re-maps every title once.
+  const ck = "sb:ani3:" + tmdbId;
   try { const c = JSON.parse(localStorage.getItem(ck) || "null"); if (c && (c.mal || c.ani)) return c; } catch(e){}
+  // one-time poison purge: a v2 entry may name the wrong show — drop it so
+  // the title re-maps under v3 rules instead of replaying the stranger
+  try { localStorage.removeItem("sb:ani2:" + tmdbId); } catch(e){}
   const norm = s => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const nt = norm(title);
+  if (!nt) return {}; // no title, no mapping — containment against "" matches everything
   const yrOf = x => x.year || x.seasonYear
     || parseInt(String(x.releaseDate || "").slice(0, 4), 10)
     || (x.aired && x.aired.from ? parseInt(String(x.aired.from).slice(0, 4), 10) : 0) || 0;
-  // same title, many years (remakes live here): prefer TMDB's year ±1 first,
-  // fall back to the whole list when nothing matches (year data is spotty)
-  const preferYear = list => {
-    if (!tmdbYear || !list.length) return list;
-    const same = list.filter(x => { const y = yrOf(x); return y && Math.abs(y - tmdbYear) <= 1; });
-    return same.length ? same : list;
+  const typeOf = x => String(x.type || x.format || "").toUpperCase();
+  // scored pick, never blind list[0]: exact title 2, containment 1, nothing
+  // 0 (skipped); year ±1 +1 / mismatch −2 / unknown 0; TV +1 / known-other
+  // −3 (movies/specials must not beat the series) / unknown 0. Score must
+  // clear 0 — a stranger with no title affinity is rejected, and the caller
+  // falls back to VidRift (right show, TMDB-direct).
+  const scorePick = (list, names) => {
+    let best = null, bestScore = -1;
+    (list || []).forEach(x => {
+      const ns = (names(x) || []).map(norm).filter(Boolean);
+      const affinity = ns.some(n => n === nt) ? 2 : (ns.some(n => n && (n.includes(nt) || nt.includes(n))) ? 1 : 0);
+      if (!affinity) return;
+      const y = yrOf(x);
+      const yearHit = (!tmdbYear || !y) ? 0 : (Math.abs(y - tmdbYear) <= 1 ? 1 : -2);
+      const t = typeOf(x);
+      const typeHit = (t === "TV") ? 1 : (t ? -3 : 0);
+      const s = affinity + yearHit + typeHit;
+      if (s > bestScore) { bestScore = s; best = x; }
+    });
+    return bestScore > 0 ? best : null;
   };
-  const exactIn = (list, names) => list.find(x => names(x).some(n => n && norm(n) === nt)) || list[0];
+  // same title, many years (remakes live here): score the TMDB-year pool
+  // first, retry the whole list when nothing clears (year data is spotty)
+  const pickYear = (list, names) => {
+    if (!tmdbYear || !list.length) return scorePick(list, names);
+    const same = list.filter(x => { const y = yrOf(x); return y && Math.abs(y - tmdbYear) <= 1; });
+    return scorePick(same.length ? same : list, names) || (same.length ? scorePick(list, names) : null);
+  };
   try {
-    const r = await fetch("https://api.jikan.moe/v4/anime?q=" + encodeURIComponent(title || "") + "&limit=5&sfw=true");
+    const r = await fetch("https://api.jikan.moe/v4/anime?q=" + encodeURIComponent(title || "") + "&limit=10&sfw=true");
     if (r.ok) {
       const d = await r.json();
       const list = (d && d.data) || [];
-      const pick = list.length ? exactIn(preferYear(list), x => [x.title_english, x.title]) : null;
+      const pick = list.length ? pickYear(list, x => [x.title_english, x.title]) : null;
       if (pick && pick.mal_id) {
         const out = { mal: pick.mal_id };
         try { localStorage.setItem(ck, JSON.stringify(out)); } catch(e){}
@@ -5351,7 +5379,7 @@ async function anipmIds(tmdbId, title, tmdbYear){
     if (r2.ok) {
       const d2 = await r2.json();
       const list2 = (d2 && d2.results) || [];
-      const pick2 = list2.length ? exactIn(preferYear(list2), x => [x.title && x.title.english, x.title && x.title.romaji, x.title && x.title.userPreferred]) : null;
+      const pick2 = list2.length ? pickYear(list2, x => [x.title && x.title.english, x.title && x.title.romaji, x.title && x.title.userPreferred]) : null;
       if (pick2 && pick2.id) {
         const out = { ani: pick2.id };
         try { localStorage.setItem(ck, JSON.stringify(out)); } catch(e){}
@@ -5365,12 +5393,12 @@ async function anipmIds(tmdbId, title, tmdbYear){
     const r3 = await fetch("https://graphql.anilist.co", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({ query: "query($q:String){Page(perPage:5){media(search:$q,type:ANIME){id seasonYear title{romaji english}}}}", variables: { q: title || "" } })
+      body: JSON.stringify({ query: "query($q:String){Page(perPage:8){media(search:$q,type:ANIME){id seasonYear format title{romaji english}}}}", variables: { q: title || "" } })
     });
     if (r3.ok) {
       const d3 = await r3.json();
       const list3 = (d3 && d3.data && d3.data.Page && d3.data.Page.media) || [];
-      const pick3 = list3.length ? exactIn(preferYear(list3), x => [x.title && x.title.english, x.title && x.title.romaji]) : null;
+      const pick3 = list3.length ? pickYear(list3, x => [x.title && x.title.english, x.title && x.title.romaji]) : null;
       if (pick3 && pick3.id) {
         const out = { ani: pick3.id };
         try { localStorage.setItem(ck, JSON.stringify(out)); } catch(e){}
