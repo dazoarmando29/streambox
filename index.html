@@ -152,14 +152,19 @@
     display: flex; flex-direction: column; gap: 6px;
   }
   .tv-mode #playerBox #ctlBar { left: 18px; right: 18px; bottom: 18px; padding: 10px 18px 12px !important; }
-  /* seek row: current time | full-width track | duration | remaining */
+  /* seek row: elapsed / total | track | remaining (YouTube-style grouping -
+     three bare numbers in a row read like a math problem) */
   #seekRow { display: flex; align-items: center; gap: 12px; width: 100%; }
   #ctlCur, #ctlDur, #ctlRemain { font-variant-numeric: tabular-nums; white-space: nowrap; }
-  #ctlCur { font-size: 12px; font-weight: 700; color: #fff; min-width: 44px; text-align: right; }
-  #ctlDur { font-size: 12px; font-weight: 700; color: #9fb0cc; min-width: 44px; }
-  #ctlRemain { font-size: 11px; font-weight: 700; color: #7dd3fc; min-width: 50px; }
-  .tv-mode #ctlCur, .tv-mode #ctlDur { font-size: 16px; min-width: 62px; }
-  .tv-mode #ctlRemain { font-size: 14px; min-width: 68px; }
+  .ctl-sep { color: #475569; font-size: 12px; font-weight: 700; }
+  #ctlCur { font-size: 12px; font-weight: 700; color: #fff; }
+  #ctlDur { font-size: 12px; font-weight: 700; color: #9fb0cc; }
+  #ctlRemain { font-size: 11px; font-weight: 700; color: #7dd3fc; min-width: 54px; text-align: right; }
+  .tv-mode #ctlCur, .tv-mode #ctlDur { font-size: 16px; }
+  .tv-mode .ctl-sep { font-size: 15px; }
+  .tv-mode #ctlRemain { font-size: 14px; min-width: 72px; }
+  /* phones: elapsed/total + track only - the row breathes */
+  @media (max-width: 640px) { #ctlRemain { display: none; } }
   /* custom track: played fill + glowing thumb; an invisible range on top
      keeps native drag/click semantics (TV remotes use -10s/+30s buttons) */
   #seekWrap { position: relative; flex: 1 1 auto; min-width: 80px; height: 44px; display: flex; align-items: center; }
@@ -515,7 +520,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 163; // bump every release alongside version.txt
+  const BUILD_NUM = 164; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -683,12 +688,13 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <div id="ctlBar" class="absolute left-0 right-0 bottom-0 px-3 py-2.5 flex flex-col gap-1.5">
           <div id="seekRow">
             <span id="ctlCur" class="text-xs text-gray-300 tabular-nums">0:00</span>
+            <span class="ctl-sep">/</span>
+            <span id="ctlDur" class="text-xs text-gray-500 tabular-nums">0:00</span>
             <div id="seekWrap">
               <div id="seekTrack"><div id="seekFill"></div></div>
               <div id="seekThumb"></div>
               <input id="ctlSeek" type="range" min="0" max="1000" value="0" step="1" tabindex="-1" aria-label="Seek (pointer drag; remote uses -10s/+30s)" title="Drag to seek (remote: use -10s/+30s buttons)">
             </div>
-            <span id="ctlDur" class="text-xs text-gray-500 tabular-nums">0:00</span>
             <span id="ctlRemain" class="text-[11px] text-gray-500 tabular-nums"></span>
           </div>
           <div id="btnRow">
@@ -3616,7 +3622,8 @@ function flushCmdQ(){
 function fmtT(s){
   s = Math.max(0, Math.floor(s || 0));
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  return (h ? h + ":" + String(m).padStart(2, "0") : m + ":") + String(sec).padStart(2, "0");
+  // hour branch used to skip the minutes/seconds colon: 2h09m13s read "2:0913"
+  return (h ? h + ":" + String(m).padStart(2, "0") : String(m)) + ":" + String(sec).padStart(2, "0");
 }
 function ctlPaint(){
   // dirty-checked: timeupdate floods this 4-10x/sec on weak TV WebViews -
