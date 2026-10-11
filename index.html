@@ -26,6 +26,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   * { scrollbar-width: thin; scrollbar-color: #14b8a6 #111; }
+  ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
   html { -webkit-text-size-adjust: 100%; }
   body.modal-open { overflow: hidden; }
   body {
@@ -266,6 +267,15 @@
   .tv-mode .upn-title { font-size: 19px; }
   .tv-mode .upn-kick { font-size: 12px; }
   .tv-mode .upn-meta, .tv-mode .upn-count { font-size: 14px; }
+  /* TV: Settings is a centered 10-foot dialog, not a phone side-sheet */
+  .tv-mode #setPanel > div, .tv-app #setPanel > div {
+    left: 6vw; right: 6vw; width: auto; max-width: none;
+    top: 5vh; bottom: 5vh; height: auto;
+    border: 1px solid rgba(255,255,255,.12); border-radius: 24px;
+    padding: 28px 34px; background: #131e35;
+    box-shadow: 0 30px 90px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08);
+  }
+  .tv-mode #wyzResults, .tv-app #wyzResults { max-height: 44vh; }
   /* mirror strip + toasts share the glass language */
   #mirrorBar {
     background: rgba(9, 15, 30, .72) !important;
@@ -531,7 +541,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 165; // bump every release alongside version.txt
+  const BUILD_NUM = 166; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -923,11 +933,11 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <div class="flex items-center gap-2 mb-5">
         <button onclick="volStep(-0.1)" aria-label="Volume down" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-xl">−</button>
         <button onclick="volStep(0.1)" aria-label="Volume up" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-xl">+</button>
-        <button onclick="ctlMuteToggle()" class="h-11 px-4 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">🔊 Mute</button>
+        <button onclick="ctlMuteToggle()" class="h-11 px-4 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Mute</button>
       </div>
       <p class="text-xs text-gray-400 font-bold mb-2">SLEEP TIMER <span id="sleepLabel" class="text-gray-200 ml-1">Off</span></p>
       <div id="sleepRow" class="flex flex-wrap gap-2 mb-3"></div>
-      <button id="sleepEndBtn" onclick="sleepEndToggle()" class="w-full py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm mb-1">😴 Sleep when video ends: Off</button>
+      <button id="sleepEndBtn" onclick="sleepEndToggle()" class="w-full py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm mb-1">Sleep when video ends: Off</button>
       <p class="text-[11px] text-gray-500">Timer pauses playback after the set time. TV-safe: survives channel surfing within this page.</p>
     </div>
 
@@ -963,7 +973,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       </div>
       <p class="text-[11px] text-gray-500 mt-2">Search Wyzie above (built-in key works instantly; your own key = guaranteed quota), load it once — it sticks to that title. Fixes missing subs, wrong language, and bad timing.</p>
       <p class="text-xs text-gray-400 font-bold mt-5 mb-2">PLAYER SUBTITLES</p>
-      <p class="text-sm text-gray-300 leading-relaxed">Our player is subtitles-safe: captions show automatically. To change language or toggle tracks, briefly show the video's own buttons, use its <b>CC / ⚙ → Subtitles</b> menu, then hide them again — position is kept.</p>
+      <p class="text-xs text-gray-400 leading-relaxed">Our player is subtitles-safe: captions show automatically. To change language or toggle tracks, briefly show the video's own buttons, use its <b>CC / ⚙ → Subtitles</b> menu, then hide them again — position is kept.</p>
       <button id="pctlBtnSubs" onclick="togglePControls()" class="mt-3 w-full py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Video buttons: Hidden</button>
       <button onclick="closePanels();focusPlayer(true)" class="mt-2 w-full py-2.5 rounded-full bg-teal-500 hover:bg-teal-400 font-bold text-sm">Open player menu</button>
       <p class="text-[11px] text-gray-500 mt-2">No languages listed? That server carries no subs — try ⇄ Source on the watch screen.</p>
@@ -4017,7 +4027,7 @@ function paintSleep(){
   if (l) l.textContent = sleep.endAt ? fmtRemain(sleep.endAt - Date.now()) : "Off";
   const e = document.getElementById("sleepEndBtn");
   if (e) {
-    e.textContent = "😴 Sleep when video ends: " + (sleepOnEnd ? "On" : "Off");
+    e.textContent = "Sleep when video ends: " + (sleepOnEnd ? "On" : "Off");
     e.className = "w-full py-2.5 rounded-full text-sm mb-1 " + (sleepOnEnd ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
   }
 }
@@ -4490,9 +4500,9 @@ function paintMirrors(){
   head("OUR PLAYERS · BAR + REMOTE DRIVE THESE");
   MAIN_PLAYERS.filter(id => mirrorAllowed(id) && srvVisible(id)).forEach(id =>
     mk(id, (MIRRORS.find(m => m.id === id) || {}).name || id, true, MAIN_HINTS[id]));
-  head("MORE SERVERS · THEIR OWN PLAYER (🎯/🖱 ON TV)");
+  head("MORE SERVERS \u00B7 THEIR OWN PLAYER (REMOTE CURSOR ON TV)");
   tvSafeList().filter(m => !MAIN_PLAYERS.includes(m.id)).forEach(m => mk(m.id, m.name, true));
-  mk("trailer", trailerKey ? "🎬 Trailer" : "🎬 …", !!trailerKey);
+  mk("trailer", trailerKey ? "\u25B6 Trailer" : "\u25B6 \u2026", !!trailerKey);
 }
 /* server tiers for the picker: OUR PLAYERS (our bar + remote drive the
    video) vs MORE SERVERS (their own player — cursor/🎯 on TV). VidRift rides
@@ -4605,19 +4615,22 @@ async function wyzSearch(){
     box.appendChild(scope);
     list.forEach(it => {
       const row = document.createElement("div");
-      row.className = "bg-white/5 border border-white/10 rounded-xl p-3";
+      row.className = "bg-white/5 border border-white/10 rounded-xl p-2.5 flex items-center gap-3";
+      const txt = document.createElement("div");
+      txt.className = "flex-1 min-w-0";
       const rel = document.createElement("p");
       rel.className = "text-sm font-bold truncate";
       rel.textContent = it.release || it.fileName || ("#" + it.id);
       const meta = document.createElement("p");
-      meta.className = "text-[11px] text-gray-500";
-      meta.textContent = `${it.display || wyzLang.toUpperCase()}${it.origin ? " • " + it.origin : ""}${it.downloadCount ? " • ⬇ " + it.downloadCount : ""}${it.isHearingImpaired ? " • CC" : ""}`;
+      meta.className = "text-[11px] text-gray-500 truncate";
+      meta.textContent = (it.display || wyzLang.toUpperCase()) + (it.origin ? " \u2022 " + it.origin : "") + (it.downloadCount ? " \u2B07 " + it.downloadCount : "") + (it.isHearingImpaired ? " \u2022 CC" : "");
+      txt.appendChild(rel);
+      txt.appendChild(meta);
       const b = document.createElement("button");
-      b.textContent = "⬇ Download";
-      b.className = "mt-2 px-4 h-9 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold";
+      b.textContent = "\u2B07 Download";
+      b.className = "shrink-0 px-4 h-10 rounded-full border border-teal-400/60 text-teal-300 hover:bg-teal-500 hover:text-[#0b1426] text-xs font-bold";
       b.onclick = () => wyzDownload(it.url, it);
-      row.appendChild(rel);
-      row.appendChild(meta);
+      row.appendChild(txt);
       row.appendChild(b);
       box.appendChild(row);
     });
@@ -4765,18 +4778,21 @@ async function bsFindSubs(){
 function bsRow(sub, tag){
   // normalized backup row: name + origin + quality + one-tap load
   const wrap = document.createElement("div");
-  wrap.className = "bg-white/5 border border-white/10 rounded-xl p-3";
+  wrap.className = "bg-white/5 border border-white/10 rounded-xl p-2.5 flex items-center gap-3";
+  const txt = document.createElement("div");
+  txt.className = "flex-1 min-w-0";
   const rel = document.createElement("p");
   rel.className = "text-sm font-bold truncate";
   rel.textContent = (sub.file || ("Backup #" + sub.id));
   const meta = document.createElement("p");
-  meta.className = "text-[11px] text-gray-500";
-  meta.textContent = `${tag}${sub.language ? " • " + sub.language : ""}${sub.source ? " • " + sub.source : ""}${sub.quality ? " • Q" + sub.quality + "/5" : ""}`;
+  meta.className = "text-[11px] text-gray-500 truncate";
+  meta.textContent = tag + (sub.language ? " \u2022 " + sub.language : "") + (sub.source ? " \u2022 " + sub.source : "") + (sub.quality ? " \u2022 Q" + sub.quality + "/5" : "");
+  txt.appendChild(rel); txt.appendChild(meta);
   const b = document.createElement("button");
-  b.textContent = "⬇ Download";
-  b.className = "mt-2 px-4 h-9 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold";
+  b.textContent = "\u2B07 Download";
+  b.className = "shrink-0 px-4 h-10 rounded-full border border-teal-400/60 text-teal-300 hover:bg-teal-500 hover:text-[#0b1426] text-xs font-bold";
   b.onclick = () => bsDownload(sub);
-  wrap.appendChild(rel); wrap.appendChild(meta); wrap.appendChild(b);
+  wrap.appendChild(txt); wrap.appendChild(b);
   return wrap;
 }
 /* Backup source #1 (TSDB — thesubtitledb.org): public, keyless, CORS-open,
