@@ -48,7 +48,7 @@
      TV SoCs. This list covers all our animated chrome and nothing else. */
   nav, nav *, #mobileNav, #mobileNav *, .card, .glass, button, input, select, a,
   #ctlBar, #ctlBar *, #mirrorBar, #mirrorBar *, #mirrorRow, #mirrorRow *,
-  #modal, #modal *, #searchPanel, #epDrawer, #setPanel, #tvGuide, #pinPad, #avSheet, #avSheet *,
+  #modal, #modal *, #searchPanel, #epDrawer, #setPanel, #tvGuide, #pinPad, #avSheet, #avSheet *, #vrSheet, #vrSheet *,
   #hero, #hero *, #rows, #continueRow, #cursorBtn, .skel-poster, .skel-line {
     transition-duration: calc(.05s + var(--mot) * .25s) !important;
     animation-duration: calc(.08s + var(--mot) * .32s) !important; }
@@ -406,7 +406,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 134; // bump every release alongside version.txt
+  const BUILD_NUM = 135; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -894,6 +894,21 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   </div>
 </div>
 
+<!-- VR SHEET: VidRift phone panels (Settings/Subtitles/Source) rendered in our
+     own chrome (?mobileSheets=true delegates them to us). Same shell as the
+     A/V sheet: bottom sheet on phone, centered card on TV/desktop. Big
+     targets, arrows walk it, Back/Esc closes (registered in topPopup +
+     closePanels like every other popup). -->
+<div id="vrSheet" class="hidden fixed inset-0 z-[67] bg-black/70" onclick="if(event.target===this)closePanels()">
+  <div class="absolute left-0 right-0 bottom-0 md:left-1/2 md:right-auto md:bottom-auto md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[440px] bg-[#131e35] border border-white/10 rounded-t-3xl md:rounded-3xl p-5 max-h-[82vh] overflow-y-auto" style="padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px))">
+    <div class="flex items-center justify-between mb-4">
+      <h2 id="vrTitle" class="text-xl font-black">Settings</h2>
+      <button onclick="closePanels()" aria-label="Close player settings" class="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-lg">✕</button>
+    </div>
+    <div id="vrBody"></div>
+  </div>
+</div>
+
 <!-- SEARCH WINDOW (TV-friendly overlay) -->
 <div id="searchPanel" class="hidden fixed inset-0 z-[68] bg-black/85 p-4" onclick="if(event.target===this)closeSearch()">
   <div class="max-w-4xl mx-auto mt-[6vh] bg-[#131e35] border border-white/10 rounded-2xl p-4 md:p-5 max-h-[86vh] flex flex-col">
@@ -981,7 +996,7 @@ function restoreFocus(el){
 }
 function topPopup(){
   // topmost visible popup wins (search sits above drawers, guide above all)
-  const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal,#pinPad,#avSheet")].filter(p => !p.classList.contains("hidden"));
+  const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal,#pinPad,#avSheet,#vrSheet")].filter(p => !p.classList.contains("hidden"));
   return ps.length ? ps[ps.length - 1] : null;
 }
 function dirOf(e){
@@ -2695,6 +2710,7 @@ function armStuckWatchdogs(){
 function loadPlayer(){
   preconnectCinesrc();  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
   // never strand playback on a hidden server.
+  closeVrSheet(); // fresh frame = fresh panel state (options may belong to another episode)
   if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
   ctlReset();
   window._stuckShown = false; // fresh video, fresh verdict (no stale hop advice)
@@ -3348,9 +3364,12 @@ function closePanels(){
   document.getElementById("setPanel").classList.add("hidden");
   document.getElementById("epDrawer").classList.add("hidden");
   document.getElementById("avSheet").classList.add("hidden");
+  document.getElementById("vrSheet").classList.add("hidden");
+  window._vrPanel = null; // dismissed with no pick: player keeps its previous value
   if (document.getElementById("modal").classList.contains("hidden")
       && document.getElementById("searchPanel").classList.contains("hidden")
       && document.getElementById("avSheet").classList.contains("hidden")
+      && document.getElementById("vrSheet").classList.contains("hidden")
       && document.getElementById("tvGuide").classList.contains("hidden"))
     document.body.classList.remove("modal-open");
   if (panelOpener && panelOpener.tagName !== "IFRAME" && panelOpener.focus) { try { panelOpener.focus({ preventScroll: true }); } catch(e){} }
@@ -3653,10 +3672,16 @@ function mirrorUrl(id){
       // anime-first mirror (TMDB-native, sub/dub + own 30-language subs,
       // auto-next + episode picker built in). Events drive our progress and
       // episode sync; resume-seek is inbound-capable (autoskip uses it).
-      // Bare URL only — their docs define the player surface, no invented params.
+      // mobileSheets=true is their documented delegation flag: on phones the
+      // Settings/Subtitles/Source panels arrive as vidrift:mobile-panel and
+      // render in our own sheet (openVrSheet) instead of theirs. TV/desktop
+      // are unaffected (their player keeps its own menus there), and in
+      // fullscreen their sheet wins by design (ours would open behind it).
+      const rp = new URLSearchParams({ mobileSheets: "true" });
+      const rq = rp.toString();
       return tv
-        ? `https://embed.vidrift.net/embed/tv/${tmdb}/${s}/${e}`
-        : `https://embed.vidrift.net/embed/movie/${tmdb}`;
+        ? `https://embed.vidrift.net/embed/tv/${tmdb}/${s}/${e}?${rq}`
+        : `https://embed.vidrift.net/embed/movie/${tmdb}?${rq}`;
     }
     case "vidbolt": {
       // docs shapes: /movie/{tmdb}, /tv/{tmdb}/{s}/{e} (+ /anime/{anilist} or
@@ -3849,7 +3874,7 @@ const MAIN_PLAYERS = ["cinesrc", "anipm", "vidrift", "vidzen"];
 const MAIN_HINTS = {
   cinesrc: "Our bar drives everything: play, seek, subs, speed",
   anipm: "Our bar drives it after one ▶ tap inside: sub/dub, quality, skip",
-  vidrift: "Remote seeks + auto-skip sync; Up Next + quality follow our UI; our bar drives seek/skip/subs",
+  vidrift: "Remote seeks + auto-skip sync; Up Next + quality follow our UI; our bar drives seek/skip/subs; phone panels open in our sheet",
   vidzen: "Our bar seeks + skips (reload-skims) and subs; play hands keys in",
 };
 /* Wyzie subtitles: search + download with built-in shared key (personal
@@ -4801,6 +4826,92 @@ function vidriftSeekRel(d){
   vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(t) });
   skipFlash(d);
 }
+function vidriftMobileOption(option, value){
+  // answers one delegated phone panel (?mobileSheets=true): echo the chosen
+  // option's OWN fields back, never the panel name (their rule).
+  if (mirror !== "vidrift") return;
+  vidriftSend({ type: "vidrift:mobile-option", option, value });
+}
+function closeVrSheet(){
+  // VidRift phone sheet only — never touches other panels. loadPlayer calls
+  // this on every fresh frame (panel options may belong to another episode),
+  // so it must not collapse Settings/an episode drawer the user is still in.
+  try { document.getElementById("vrSheet").classList.add("hidden"); } catch(e){}
+  window._vrPanel = null;
+  try { if (!topPopup()) document.body.classList.remove("modal-open"); } catch(e){}
+}
+function openVrSheet(panel, options, current){
+  // VidRift phone-panel pairing: their Settings / Subtitles / Source sheet
+  // arrives as data and renders in OUR chrome — same ≥48px pills + Back/Esc
+  // + D-pad walk as the A/V sheet. TV/desktop never receive it (their
+  // player keeps its own menus there); fullscreen never arrives either
+  // (their sheet wins there by design). A pick replies vidrift:mobile-option
+  // and closes; dismissing keeps their previous value. Garbage shapes get a
+  // graceful Close-only sheet, never a stranded dead button.
+  if (mirror !== "vidrift") return;
+  window._vrPanel = { panel, options, current };
+  const titles = { settings: "Settings", subtitles: "Subtitles", source: "Source" };
+  document.getElementById("vrTitle").textContent = titles[panel] || "Player";
+  const body = document.getElementById("vrBody"); body.innerHTML = "";
+  const list = Array.isArray(options) ? options : [];
+  if (!list.length) {
+    const p = document.createElement("p");
+    p.className = "text-sm text-gray-400";
+    p.textContent = "Nothing to choose here right now.";
+    body.appendChild(p);
+  } else {
+    let wrap = null, lastGroup = null, first = true;
+    list.forEach(o => {
+      // entries are {option, value, label, group, desc?} objects — anything
+      // else (or an entry with no identity at all) is skipped, never a
+      // broken pill that would reply garbage
+      if (!o || typeof o !== "object") return;
+      const val = o.value;
+      const rawLabel = (o.label != null && String(o.label) !== "") ? String(o.label) : (val != null && String(val) !== "" ? String(val) : null);
+      if (rawLabel == null || o.option == null) return;
+      const label = rawLabel;
+      const g = (o.group != null) ? String(o.group) : "";
+      if (!wrap || g !== lastGroup) {
+        lastGroup = g;
+        if (g) {
+          const h = document.createElement("p");
+          h.className = "text-[11px] font-bold text-gray-500 tracking-widest mb-2" + (first ? "" : " mt-5");
+          h.textContent = g.toUpperCase();
+          body.appendChild(h);
+        }
+        wrap = document.createElement("div");
+        wrap.className = "flex flex-wrap gap-2 mb-5";
+        body.appendChild(wrap);
+      }
+      first = false;
+      let active = false;
+      try {
+        const ck = o ? o.option : null;
+        if (current && ck != null && current[ck] != null)
+          active = String(current[ck]).toLowerCase() === String(val).toLowerCase();
+      } catch(e){}
+      wrap.appendChild(avPill((active ? "● " : "") + label, active, () => {
+        try { vidriftMobileOption(o.option, val); } catch(e){}
+        closePanels();
+      }));
+      if (o && o.desc) {
+        // their docs: show desc under the label when present (e.g. why a
+        // quality list is a single Auto entry)
+        const dp = document.createElement("p");
+        dp.className = "w-full text-xs text-gray-400 -mt-1 mb-1";
+        dp.textContent = String(o.desc);
+        wrap.appendChild(dp);
+      }
+    });
+  }
+  try { panelOpener = document.activeElement; } catch(e){}
+  document.getElementById("vrSheet").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  // TV landing: focus the first pill so arrows start somewhere sane
+  // (sheet is phone-born, but the sheet itself stays remote-walkable)
+  const btn = document.querySelector("#vrSheet button");
+  if (btn && document.body.classList.contains("tv-mode")) { try { btn.focus({ preventScroll: true }); } catch(e){} }
+}
 function undrivenSeekRel(d){
   // seeking players with no command API (VidZen): debounced startAt reload.
   // Mashes accumulate into ONE reload so slow boxes never thrash; position
@@ -4839,6 +4950,7 @@ window.addEventListener("message", (event)=>{
   if (d.type === "vidrift:unpaused") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
   if (d.type === "vidrift:episode") {
     // player advanced internally (Up Next / picker) — sync, don't reload
+    closeVrSheet(); // phone panel options may belong to the old episode
     if (d.season) watchState.s = d.season;
     if (d.episode) watchState.e = d.episode;
     try { gridS = watchState.s; } catch(e){}
@@ -4852,6 +4964,7 @@ window.addEventListener("message", (event)=>{
   if (d.type === "vidrift:nextup-play") {
     // their countdown/Next fired under OUR nextup-info — advance ourselves
     // (unaired can't arrive here: we advertised an aired ep or null)
+    closeVrSheet(); // phone panel options belong to the finished episode
     const ns = d.season || watchState.s;
     const ne = (d.episode || watchState.e) + 1;
     watchState.s = ns; watchState.e = ne;
@@ -4862,6 +4975,14 @@ window.addEventListener("message", (event)=>{
     const wsn = document.getElementById("watchStatus");
     if (wsn) wsn.textContent = `Now playing S${ns} E${ne}`;
     showTitleCard();
+  }
+  if (d.type === "vidrift:mobile-panel") {
+    // phone sheet delegation (?mobileSheets=true): render their panel in
+    // our chrome. Fullscreen never arrives here (their sheet wins there by
+    // design); garbage shapes get a graceful Close-only sheet, never a
+    // stranded dead button.
+    if (d && typeof d.panel === "string") openVrSheet(d.panel, d.options, d.current);
+    else openVrSheet("settings", [], null);
   }
   if (d.type === "vidrift:ended") {
     try { markWatched(); } catch(e){}
