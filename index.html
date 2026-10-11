@@ -433,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 155; // bump every release alongside version.txt
+  const BUILD_NUM = 156; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -4051,17 +4051,16 @@ function updateMirrorUI(){
   // used to pin over our bar (two bars piled at the bottom on TV). VidRift
   // keeps its 🎯 handoff + all paired keep ⇄ home as in-bar buttons.
   document.getElementById("mirrorBar").classList.toggle("hidden", isCS || isTrailer || isPaired);
-  // A/V sheet button: AniPM carries tracks; VidBolt carries the SERVERS shelf
-  // (mirror hops without leaving the player — its A/V lives in its own menus)
+  // A/V sheet button: AniPM carries tracks; VidBolt carries the full Player
+  // sheet (servers + quality + subtitles + audio from cached panels)
   const av = document.getElementById("avBtn");
   if (av) {
     av.classList.toggle("hidden", mirror !== "anipm" && mirror !== "vidbolt");
-    const srv = mirror === "vidbolt";
-    if (av.textContent !== (srv ? "⇄ Servers" : "A/V")) {
-      av.textContent = srv ? "⇄ Servers" : "A/V";
-      av.setAttribute("aria-label", srv ? "Servers — hop mirrors without leaving the player" : "Audio and subtitles");
-      av.title = srv ? "Servers — hop mirrors without leaving the player" : "Audio (sub/dub), subtitles and quality — no settings detour";
-    }
+    if (av.textContent !== "A/V") av.textContent = "A/V";
+    const at = mirror === "vidbolt" ? "Player options: servers, quality, audio, subtitles" : "Audio and subtitles";
+    const tt = mirror === "vidbolt" ? "Servers, quality, audio, subtitles — no settings detour" : "Audio (sub/dub), subtitles and quality — no settings detour";
+    if (av.getAttribute("aria-label") !== at) av.setAttribute("aria-label", at);
+    if (av.title !== tt) av.title = tt;
   }
   // paired in-bar extras: VidRift keeps its 🎯 handoff here (no play API),
   // every paired mirror keeps ⇄ home to the primary (the strip is hidden).
@@ -4074,8 +4073,8 @@ function updateMirrorUI(){
     if (ch.textContent !== hl) ch.textContent = hl;
   }
   // anime declutter: quality + settings live in the A/V sheet now. VidBolt
-  // quality lives in its own settings/sheet (no direct command), so its
-  // button hides too.
+  // quality lives in the A/V sheet too (fed by player panels), so its bar
+  // button hides as well.
   const q = document.getElementById("ctlQ");
   if (q) q.classList.toggle("hidden", mirror === "anipm" || mirror === "vidzen" || mirror === "vidbolt");
   const st = document.getElementById("ctlSettings");
@@ -4127,8 +4126,8 @@ function updateMirrorUI(){
     }
     if (mirror === "vidbolt") {
       document.getElementById("watchStatus").textContent = watchState.anime
-        ? "VidBolt: our bar drives play/seek/skip · A/V opens the SERVERS shelf · no Ad Shield (player refuses sandbox)"
-        : "VidBolt: our bar drives play/seek/skip · phone panels open in our sheet · no Ad Shield (player refuses sandbox)";
+        ? "VidBolt: our bar drives play/seek/skip · A/V holds servers, quality + subtitles · no Ad Shield (player refuses sandbox)"
+        : "VidBolt: our bar drives play/seek/skip · A/V holds servers, quality + subtitles · no Ad Shield (player refuses sandbox)";
       return;
     }
     document.getElementById("watchStatus").textContent = NO_SANDBOX.has(mirror)
@@ -4198,7 +4197,7 @@ const MAIN_HINTS = {
   anipm: "Our bar drives it after one ▶ tap inside: sub/dub, quality, skip",
   vidrift: "Remote seeks + auto-skip sync; Up Next + quality follow our UI; our bar drives seek/skip/subs; phone panels open in our sheet",
   vidzen: "Our bar drives play, seek, skip; server picker + subs in its player",
-  vidbolt: "Our bar drives play, seek, skip; servers shelf on A/V; phone panels open in our sheet",
+  vidbolt: "Our bar drives play, seek, skip; A/V holds servers, quality, subtitles; our CC overlay works too",
 };
 /* Wyzie subtitles: search + download with the built-in shared key (no key UI —
    it just works; a personal key saved on-device by older builds still wins
@@ -4354,11 +4353,11 @@ async function wyzDownload(url, it){
 /* Auto-subtitles: when a title has no remembered subs, silently fetch the
    best match in your language (English default) so captions just work.
    Costs 2 key requests per new title — skipped when offline, over quota,
-   or off the CineSrc player (our overlay only draws there). */
+   or off the overlay mirrors (CineSrc + VidBolt). */
 async function wyzAutoSubs(){
   try {
     if (subFile && subFile.cues && subFile.cues.length) return;
-    if (mirror !== "cinesrc") return;
+    if (mirror !== "cinesrc" && mirror !== "vidbolt") return;
     if (wyzQuota && Date.now() - wyzQuota.at < 3600000) {
       wyzCapNote(); // capped: one calm switch-note per session, then silence
       bsAuto(); // capped: silent backup attempt, once per title (movies via TSDB)
@@ -4399,7 +4398,7 @@ async function wyzAutoSubs(){
       pos: "bottom", offset: 0 });
     wyzQuotaClear();
     const ws = document.getElementById("watchStatus");
-    if (ws && mirror === "cinesrc") ws.textContent = `Subtitles auto-loaded (${cues.length} lines) ✓ — nudge sync anytime in ⚙ → Subs`;
+    if (ws && (mirror === "cinesrc" || mirror === "vidbolt")) ws.textContent = `Subtitles auto-loaded (${cues.length} lines) ✓ — nudge sync anytime in ⚙ → Subs`;
   } catch(e){}
 }
 /* Backup subtitles (BetaSeries): used ONLY when the Wyzie free key is capped.
@@ -4571,7 +4570,7 @@ async function bsAuto(){
     if (bsTriedKey === k) return;
     bsTriedKey = k;
     if (subFile && subFile.cues && subFile.cues.length) return;
-    if (mirror !== "cinesrc") return;
+    if (mirror !== "cinesrc" && mirror !== "vidbolt") return;
     let list = await tsdbFindSubs().catch(() => []);
     if (!list.length && watchState.type === "tv") { try { list = await bsFindSubs(); } catch(e){ list = []; } }
     if (!list.length) return;
@@ -4586,7 +4585,7 @@ async function bsAuto(){
     const ws = document.getElementById("watchStatus");
     // quiet-mode: the switch-note (if this session already noted it) stands —
     // later episodes load backups with no further messages
-    if (ws && mirror === "cinesrc" && !window._wyzCapNoted) {
+    if (ws && (mirror === "cinesrc" || mirror === "vidbolt") && !window._wyzCapNoted) {
       window._wyzCapNoted = true;
       ws.textContent = `Backup subtitles auto-loaded (${cues.length} lines) ✓`;
     }
@@ -4800,7 +4799,7 @@ function paintCaps(force){
   let html = "";
   if (subsOn && subFile && subFile.cues && subFile.cues.length
       && !document.getElementById("watchView").classList.contains("hidden")
-      && mirror === "cinesrc") {
+      && (mirror === "cinesrc" || mirror === "vidbolt")) {
     const t = (pState.cur || 0) + (subFile.offset || 0);
     for (let i = 0; i < subFile.cues.length; i++) {
       const c = subFile.cues[i];
@@ -5237,8 +5236,9 @@ function openVrSheet(panel, options, current, reply){
   // delegated phone-panel pairing (VidRift + VidBolt): their Settings /
   // Subtitles / Source (/Servers) sheet arrives as data and renders in OUR
   // chrome — same ≥48px pills + Back/Esc + D-pad walk as the A/V sheet.
-  // TV/desktop never receive it (their players keep their own menus there);
-  // fullscreen never arrives either (their sheet wins there by design). A
+  // VidRift never delegates on TV/desktop (its own menus stay); VidBolt
+  // emits whenever its settings opens — the 🖱 cursor can reach it there.
+  // Fullscreen never arrives either (their sheet wins there by design). A
   // pick replies through the mirror's own answer channel and closes;
   // dismissing keeps their previous value. Garbage shapes get a graceful
   // Close-only sheet, never a stranded dead button.
@@ -5496,7 +5496,8 @@ function boltSeekRel(d){
   skipFlash(d);
 }
 function boltMobileOption(option, value){
-  // answers one delegated phone panel: echo the chosen option's OWN fields
+  // answers a player panel (live sheet or cached A/V section): echo the
+  // option's OWN fields — their bundle applies it with no open-panel state
   if (mirror !== "vidbolt") return;
   boltSend({ type: "mobile-option", option, value });
 }
@@ -5508,6 +5509,16 @@ window.addEventListener("message", (event)=>{
     // phone sheet delegation (?mobileSheets=true): their Settings panel
     // (quality + subtitles + audio + servers + speed) renders in our chrome.
     // Entries carry their own `selected` flags; no `current` object exists.
+    // Cached per episode too: the A/V sheet's Quality/Subtitles/Audio
+    // sections ride this cache (their bundle applies mobile-option with no
+    // open-panel state needed — verified in their player bundle).
+    try {
+      window._boltPanels = window._boltPanels || {};
+      if (Array.isArray(d.options) && d.options.length) {
+        const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
+        window._boltPanels[bk] = d.options;
+      }
+    } catch(e){}
     if (d && typeof d.panel === "string") openVrSheet(d.panel, d.options, null, boltMobileOption);
     else openVrSheet("settings", [], null, boltMobileOption);
     return;
@@ -5706,7 +5717,7 @@ async function anipmIds(tmdbId, title, tmdbYear){
    this session, drop the cached mapping, reload the SAME mirror so it
    re-maps around the reject. No alternative clears the matcher → the normal
    no-match path escalates by itself (VidRift hop, or a named fallback in
-   manual mode). One tap, TV-reachable from the SERVERS shelf. */
+   manual mode). One tap, TV-reachable from the A/V sheet. */
 function animeRematch(){
   try {
     if (!watchState.anime) return;
@@ -5979,7 +5990,7 @@ function avPill(label, active, onclick){
   return b;
 }
 function openAV(){
-  // AniPM gets the full A/V sheet; VidBolt gets the servers shelf only
+    // AniPM gets the full A/V sheet; VidBolt gets servers + cached player sections
   // (its player owns audio/subs/quality — we only hop mirrors there)
   if (mirror !== "anipm" && mirror !== "vidbolt") return;
   try { panelOpener = document.activeElement; } catch(e){}
@@ -6008,16 +6019,58 @@ function paintAVServers(){
     }));
   });
 }
+function paintBoltAV(){
+  // VidBolt Quality/Subtitles/Audio sections ride the last delegated player
+  // panel, cached per episode (their bundle applies mobile-option answers
+  // with no open-panel state needed — verified in their player bundle).
+  // Quality values are HLS level indices ("-1" = Auto), subtitles are track
+  // indices ("-1" = Off) — echoed back verbatim, never invented. Empty cache
+  // means their settings menu never opened: tip instead of dead pills.
+  const key = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
+  const opts = (((window._boltPanels || {})[key]) || []).filter(o => o && typeof o === "object" && o.option != null);
+  [
+    ["avQuality", ["quality", "sourceQuality"]],
+    ["avSubs", ["subtitles"]],
+    ["avAudio", ["audio"]],
+  ].forEach(([id, kinds]) => {
+    const box = document.getElementById(id); if (!box) return;
+    box.innerHTML = "";
+    const list = opts.filter(o => kinds.includes(o.option));
+    if (!list.length) {
+      const p = document.createElement("p");
+      p.className = "text-xs text-gray-500";
+      p.textContent = id === "avSubs"
+        ? "No player tracks loaded yet — open the player's settings menu once (🖱 cursor can click it), or use CC for our subtitles."
+        : "Not loaded yet — open the player's settings menu once (🖱 cursor can click it).";
+      box.appendChild(p);
+      return;
+    }
+    list.forEach(o => {
+      const lbl = (o.label != null && String(o.label) !== "") ? String(o.label) : String(o.value);
+      box.appendChild(avPill((o.selected ? "● " : "") + lbl, !!o.selected, () => {
+        try { boltMobileOption(o.option, o.value); } catch(e){}
+        // optimistic selected mark (their bundle answers picks with no event)
+        try { opts.forEach(x => { if (x.option === o.option) x.selected = (x === o); }); } catch(e){}
+        if (o.option === "subtitles" && String(o.value) !== "-1") {
+          // native track on: our overlay would double it — stand it down
+          try { subsOn = false; localStorage.setItem("streambox_subs_on", "0"); } catch(e){}
+          paintSubsBtn(); paintCaps(true);
+        }
+        paintAV();
+      }));
+    });
+  });
+}
 function paintAV(){
   if (document.getElementById("avSheet").classList.contains("hidden")) return;
   if (mirror !== "anipm" && mirror !== "vidbolt") return;
-  const srvOnly = mirror === "vidbolt"; // servers shelf only, no A/V sections
-  document.getElementById("avTitle").textContent = srvOnly ? "Servers" : "Audio & Subtitles";
+  const isBolt = mirror === "vidbolt";
+  document.getElementById("avTitle").textContent = isBolt ? "Player" : "Audio & Subtitles";
   ["avHAudio", "avAudio", "avHSubs", "avSubs", "avHQuality", "avQuality"].forEach(id => {
-    const el = document.getElementById(id); if (el) el.style.display = srvOnly ? "none" : "";
+    const el = document.getElementById(id); if (el) el.style.display = "";
   });
   paintAVServers();
-  if (srvOnly) return;
+  if (isBolt) { paintBoltAV(); return; }
   const T = window._anipmTracks || {};
   const audio = document.getElementById("avAudio"); audio.innerHTML = "";
   const lang = (T.lang || "sub").toLowerCase();
