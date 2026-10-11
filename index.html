@@ -562,7 +562,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 169; // bump every release alongside version.txt
+  const BUILD_NUM = 170; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2986,8 +2986,28 @@ function motionOpts(){
     document.documentElement.style.setProperty("--mot", on ? String(0.1 + (v / 10) * 0.9) : "0");
   } catch(e){}
 })();
+/* 4K is availability-driven (house rule: never send unlisted values to
+   CineSrc - "2160" strands the player). Players that REPORT renditions get
+   a real 4K pick; the top quality state only reads "4K" when the loaded
+   stream actually carries one. 1080p-only source = "Auto", never "4K". */
+function streamHas4k(){
+  try {
+    if (mirror === "anipm") {
+      const q = (window._anipmTracks && window._anipmTracks.qualities) || [];
+      return q.some(x => x && (Number(x.height) >= 2160 || /4k|2160/i.test(String(x.label || x.name || x.value || ""))));
+    }
+    if (mirror === "vidbolt") {
+      const bk = watchState.type + "/" + watchState.id + "/" + (watchState.s || 0) + "/" + (watchState.e || 0);
+      const opts = ((window._boltPanels || {})[bk]) || [];
+      return opts.some(o => o && /4k|2160/i.test(String(o.label || "")));
+    }
+    if (mirror === "cinesrc") return !!window._cineHas4k; // getQualities probe
+    // vidrift reports no rendition list: 4K rides Auto silently there
+  } catch(e){}
+  return false;
+}
 function paintQuality(){
-  const t = QLEVELS[qIdx].l;
+  const t = (QLEVELS[qIdx].v === "" && streamHas4k()) ? "4K" : QLEVELS[qIdx].l;
   ["qualityLabel", "srvQLabel", "ctlQ"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = t;
@@ -2996,13 +3016,28 @@ function paintQuality(){
 function qualityStep(dir){
   // AniPM has no server to re-pick — cycle renditions live instead of reloading
   if (mirror === "anipm") {
-    const AQ = ["Auto", 1080, 720, 480];
+    const AQ = streamHas4k() ? ["Auto", 2160, 1080, 720, 480] : ["Auto", 1080, 720, 480];
     window._anipmQi = (((window._anipmQi == null ? 0 : window._anipmQi) + dir) + AQ.length * 10) % AQ.length;
     const h = AQ[window._anipmQi];
     const q = document.getElementById("ctlQ");
-    if (q) q.textContent = h === "Auto" ? "Auto" : h + "p";
+    if (q) q.textContent = h === "Auto" ? "Auto" : (h >= 2160 ? "4K" : h + "p");
     if (typeof h === "number") anipmSend("setQuality", { height: h });
     return;
+  }
+  // VidBolt: pin REAL HLS levels from its cached panel data - their labels
+  // carry 4K only when the stream actually has it
+  if (mirror === "vidbolt") {
+    const bk = watchState.type + "/" + watchState.id + "/" + (watchState.s || 0) + "/" + (watchState.e || 0);
+    const opts = (((window._boltPanels || {})[bk]) || []).filter(o => o && String(o.option) === "quality");
+    if (opts.length) {
+      window._boltQi = (((window._boltQi == null ? -1 : window._boltQi) + dir) + opts.length * 10) % opts.length;
+      const pick = opts[window._boltQi];
+      try { boltMobileOption("quality", pick.value); } catch(e){}
+      const q = document.getElementById("ctlQ");
+      const lbl = String(pick.label != null ? pick.label : pick.value);
+      if (q) q.textContent = /4k|2160/i.test(lbl) ? "4K" : lbl;
+      return;
+    }
   }
   if (mirror === "vidrift") {
     // VidRift pins renditions live (no reload): 4K has no pin, so it rides Auto
@@ -5903,6 +5938,7 @@ window.addEventListener("message", (event)=>{
       if (Array.isArray(d.options) && d.options.length) {
         const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
         window._boltPanels[bk] = d.options;
+        try { paintQuality(); } catch(e){}
       }
     } catch(e){}
     if (d && typeof d.panel === "string") openVrSheet(d.panel, d.options, null, boltMobileOption);
@@ -6338,7 +6374,7 @@ window.addEventListener("message", (event)=>{
     case "qualitychange":
       if (d.qualities && d.qualities.length) window._anipmTracks.qualities = d.qualities;
       if (d.quality != null) window._anipmTracks.quality = d.quality;
-      paintAV(); break;
+      paintAV(); paintQuality(); break;
     case "subtitlechange":
       if (d.tracks) window._anipmTracks.subTracks = d.tracks;
       paintAV(); break;
@@ -6508,7 +6544,7 @@ function paintAV(){
   const qual = document.getElementById("avQuality"); qual.innerHTML = "";
   const qs = (Array.isArray(T.qualities) && T.qualities.length ? T.qualities : [1080, 720, 480]).map(anipmQInfo);
   const curQ = anipmQInfo(T.quality);
-  const cur = String(window._anipmQi == null ? (curQ.label || "Auto") : (["Auto", 1080, 720, 480][window._anipmQi] ?? "Auto"));
+  const cur = String(window._anipmQi == null ? (curQ.label || "Auto") : ((streamHas4k() ? ["Auto", 2160, 1080, 720, 480] : ["Auto", 1080, 720, 480])[window._anipmQi] ?? "Auto"));
   qual.appendChild(avPill((cur === "Auto" ? "● " : "") + "Auto", cur === "Auto", () => {
     window._anipmQi = 0;
     const q = document.getElementById("ctlQ"); if (q) q.textContent = "Auto";
@@ -6588,6 +6624,10 @@ window.addEventListener("message", (event)=>{
     flushCmdQ();
     // pull initial state for the control bar
     sendCmd("getPaused"); sendCmd("getDuration"); sendCmd("getMuted"); sendCmd("getPlaybackRate"); sendCmd("getVolume");
+    // best-effort rendition probe (unlisted in their docs - silence just
+    // means no 4K label, and "Auto" keeps meaning best-available)
+    window._cineHas4k = false;
+    sendCmd("getQualities");
   }
   if(type === "cinesrc:play") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
   if(type === "cinesrc:pause") { pState.paused = true; ctlPaint(); }
@@ -6613,6 +6653,11 @@ window.addEventListener("message", (event)=>{
     if (data.command === "getMuted" && typeof data.result === "boolean") { pState.muted = data.result; ctlPaint(); }
     if (data.command === "getPlaybackRate" && typeof data.result === "number") { pState.rate = data.result; ctlPaint(); paintSpeed(); }
     if (data.command === "getVolume" && typeof data.result === "number") { pState.vol = data.result; ctlPaint(); paintVol(); }
+    if (data.command === "getQualities" && Array.isArray(data.result)) {
+      window._cineQuals = data.result;
+      window._cineHas4k = data.result.some(x => x && (Number(x.height || x) >= 2160 || /4k|2160/i.test(String(x.label || x.name || x.value || x || ""))));
+      try { paintQuality(); } catch(e){}
+    }
   }
   if(type === "cinesrc:nextepisode" && data.internalNavigation){
     // player advanced internally — sync our UI, do NOT reload iframe
