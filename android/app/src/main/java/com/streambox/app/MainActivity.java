@@ -267,6 +267,8 @@ public class MainActivity extends Activity {
             + "if(s&&!s.classList.contains('hidden')){closePanels();return 'panel';}"
             + "var m=document.getElementById('modal');"
             + "if(m&&!m.classList.contains('hidden')){closeModal();return 'modal';}"
+            + "var rd=document.getElementById('resumeDlg');"
+            + "if(rd&&!rd.classList.contains('hidden')){resumePick(true);return 'panel';}"
             + "var u=document.getElementById('upNextCard');"
             + "if(u&&!u.classList.contains('hidden')){hideUpNext();return 'panel';}"
             + "var w=document.getElementById('watchView');"
