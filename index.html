@@ -433,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 157; // bump every release alongside version.txt
+  const BUILD_NUM = 158; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2823,6 +2823,23 @@ function clearStuckTip(){
   window._stuckShown = false;
   try { document.getElementById("volToast").classList.add("hidden"); } catch(e){}
 }
+/* adaptive fallback: the last mirror with proven playback this session wins
+   over static guesses (CineSrc-first assumptions die on networks where only
+   VidBolt answers). Always TV-safe, anime-aware, never the stuck mirror, and
+   never the trailer. Callers pass their old static pick as the fallback. */
+function stuckFallback(staticFb){
+  try {
+    const g = window._lastGood;
+    if (g && g !== mirror && g !== "trailer" && typeof mirrorAllowed === "function" && mirrorAllowed(g)) {
+      if (g === "anipm" && !watchState.anime) return staticFb; // anime-only player
+      return g;
+    }
+  } catch(e){}
+  return staticFb;
+}
+function stuckFallbackName(id){
+  try { return (MIRRORS.find(x => x.id === id) || {}).name || id; } catch(e){ return id; }
+}
 /* Stuck-player clocks for the anime mirrors (AniPM + VidRift): armed at ask
    time AND re-armed on every frame load, so slow ID-mapping + slow networks
    can't eat the budget before loading even begins — only a frame that arrived
@@ -2854,12 +2871,14 @@ function armStuckWatchdogs(){
     window._watchdog2 = setTimeout(() => {
       if (window._cinePlaying || mirror !== "anipm") return;
       // stage 2: still dark (blocked hosts / dead title / robot-check a
-      // remote can't complete) — auto mode heals to VidRift (which arms its
-      // own stage 3); manual mode just names the fallback and waits for you
-      if (!autoSwitchOn()) { stuckRecommend("AniPM isn't starting here", "VidRift"); return; }
+      // remote can't complete) — auto mode heals (last-known-good first);
+      // manual mode just names the fallback and waits for you
+      const fbA = stuckFallback("vidrift");
+      const nmA = stuckFallbackName(fbA);
+      if (!autoSwitchOn()) { stuckRecommend("AniPM isn't starting here", nmA); return; }
       const wsa = document.getElementById("watchStatus");
-      if (wsa) wsa.textContent = "AniPM isn't starting here — moved you to VidRift. Robot-check on the new player? ⇄ Source hops mirrors";
-      setMirror("vidrift", true);
+      if (wsa) wsa.textContent = `AniPM isn't starting here — moved you to ${nmA}.` + (fbA === "vidrift" ? " Robot-check on the new player? ⇄ Source hops mirrors" : " ⇄ Source anytime to hop again");
+      setMirror(fbA, true);
     }, _aTV ? 60000 : 20000);
     return;
   }
@@ -2870,10 +2889,12 @@ function armStuckWatchdogs(){
   if (watchState.anime && _aTV && mirrorAllowed("yapgrid")) {
     window._watchdog2 = setTimeout(() => {
       if (window._cinePlaying || mirror !== "vidrift") return;
-      if (!autoSwitchOn()) { stuckRecommend("VidRift is showing a check this remote can't complete", "YapGrid"); return; }
+      const fb3 = stuckFallback("yapgrid");
+      const nm3 = stuckFallbackName(fb3);
+      if (!autoSwitchOn()) { stuckRecommend("VidRift is showing a check this remote can't complete", nm3); return; }
       const ws3 = document.getElementById("watchStatus");
-      if (ws3) ws3.textContent = "VidRift is showing a check this remote can't complete — moved you to YapGrid. ⇄ Source anytime to hop again";
-      setMirror("yapgrid", true);
+      if (ws3) ws3.textContent = `VidRift is showing a check this remote can't complete — moved you to ${nm3}. ⇄ Source anytime to hop again`;
+      setMirror(fb3, true);
     }, 60000);
   }
   // VidBolt/VidZen had NO clocks (a frame that never reports progress sat
@@ -2882,8 +2903,8 @@ function armStuckWatchdogs(){
   // the fallback and waits for ⇄ Source — never ping-pongs).
   if (mirror === "vidbolt" || mirror === "vidzen") {
     const nm = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
-    const fb = watchState.anime ? "anipm" : (_aTV ? "yapgrid" : "vidrift");
-    const fbn = (MIRRORS.find(x => x.id === fb) || {}).name || fb;
+    const fb = stuckFallback(watchState.anime ? "anipm" : (_aTV ? "yapgrid" : "vidrift"));
+    const fbn = stuckFallbackName(fb);
     window._watchdog = setTimeout(() => {
       if (window._cinePlaying || (mirror !== "vidbolt" && mirror !== "vidzen")) return;
       stuckRecommend(`${nm} is taking a while — slow boxes can need a full minute`, fbn);
@@ -2984,8 +3005,8 @@ function loadPlayer(){
     window._watchdog2 = setTimeout(() => {
       if (window._cinePlaying || mirror !== "cinesrc") return;
       // anime never belongs on the generic fallback — it lives on AniPM
-      const fb = watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi");
-      const nm = (MIRRORS.find(x => x.id === fb) || {}).name || fb;
+      const fb = stuckFallback(watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
+      const nm = stuckFallbackName(fb);
       if (!autoSwitchOn()) { stuckRecommend("CineSrc stayed stuck", nm); return; }
       setMirror(fb, true);
       const ws2 = document.getElementById("watchStatus");
@@ -3039,8 +3060,22 @@ function loadPlayer(){
 function reloadPlayer(){ loadPlayer(); }
 function otherSource(){
   // Context-aware ⇄ Source (one button, all 3 targets):
-  // on CineSrc → drop the pinned server and re-pick (keeps position);
-  // on any other mirror → cycle to the next mirror (starts at 0 there).
+  // nothing played on this title yet + a proven mirror exists → jump straight
+  // there (fleeing death, not exploring). Otherwise on CineSrc → drop the
+  // pinned server and re-pick (keeps position); on any other mirror → cycle
+  // to the next mirror (starts at 0 there).
+  if (!window._cinePlaying) {
+    try {
+      const g = window._lastGood;
+      if (g && g !== mirror && g !== "trailer" && typeof mirrorAllowed === "function" && mirrorAllowed(g)
+          && (g !== "anipm" || watchState.anime)) {
+        const nm = stuckFallbackName(g);
+        document.getElementById("watchStatus").textContent = `Trying ${nm} (worked before)…`;
+        setMirror(g);
+        return;
+      }
+    } catch(e){}
+  }
   if (mirror !== "cinesrc") {
     const ids = tvSafeList().map(x => x.id);
     const next = ids[(ids.indexOf(mirror) + 1) % ids.length];
@@ -3179,8 +3214,11 @@ function saveContinue(){
 let lastProgSave = 0;
 function saveProgress(cur, dur){
   // throttled resume-point saver (trailer mirror never writes playback position)
-  if (typeof mirror !== "undefined" && mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm") return;
+  if (typeof mirror !== "undefined" && mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt") return;
   if (!(dur > 60) || !(cur > 5)) return;
+  // proven playback (vidbolt included now): future stuck-hops prefer this
+  // mirror over static guesses — your working mirror may differ per network
+  window._lastGood = mirror;
   const now = Date.now();
   if (now - lastProgSave < 15000) return;
   lastProgSave = now;
@@ -3411,8 +3449,8 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
     // play pressed on a frame that never said hello (blocked embed, dead
     // source): parking the command would answer with silence — name the hop
     // instead. Same patience as the watchdog warn stage, never earlier.
-    const fb = watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi");
-    const nm = (MIRRORS.find(x => x.id === fb) || {}).name || fb;
+    const fb = stuckFallback(watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
+    const nm = stuckFallbackName(fb);
     stuckRecommend("CineSrc isn't answering", nm);
     return;
   }
@@ -6250,8 +6288,8 @@ window.addEventListener("message", (event)=>{
     try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
     try { window._cineErr = String((data && data.error) || "error").slice(0, 120); } catch(e){}
     if (mirror !== "cinesrc" || window._cinePlaying || (pState.dur || 0) > 0) return;
-    const fb = watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi");
-    const nm = (MIRRORS.find(x => x.id === fb) || {}).name || fb;
+    const fb = stuckFallback(watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
+    const nm = stuckFallbackName(fb);
     const age = window._loadT ? Date.now() - window._loadT : 0;
     const patient = document.body.classList.contains("tv-mode") ? 45000 : 18000;
     if (!window._autoHopped && autoSwitchOn() && age > patient) {
