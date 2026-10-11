@@ -160,9 +160,9 @@
   body.tv-app #playerBox #ctlBar::-webkit-scrollbar { display: none; }
   body.tv-app #playerBox #ctlBar > * { flex-shrink: 0; }
   body.tv-app #playerBox #ctlSeek { flex: 1 1 100px !important; min-width: 80px !important; }
-  /* floating Skip Intro (website/PC only): sits above the bar, bottom-right —
+  /* floating Skip Intro (all targets): sits above the bar, bottom-right —
      a bold white pill that's impossible to miss and never crowds the bar.
-     TV (tv-mode/tv-app) hides this and keeps the in-bar Skip for D-pad walk. */
+     TV positions it clear of its taller bar; D-pad ▲ climbs straight to it. */
   #skipFloat { position: absolute; right: 16px; bottom: 88px; z-index: 7;
     min-height: 44px; min-width: 44px; padding: 0 22px; border-radius: 99px;
     background: #fff; color: #0b1426; font-weight: 800; font-size: 15px;
@@ -175,7 +175,7 @@
     box-shadow: 0 0 0 6px rgba(45,212,191,.35), 0 8px 30px rgba(0,0,0,.55); }
   #skipFloat:active { transform: scale(.97); }
   @keyframes skipIn { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
-  body.tv-mode #skipFloat, body.tv-app #skipFloat { display: none !important; }
+  body.tv-mode #skipFloat, body.tv-app #skipFloat { bottom: 104px; right: 18px; }
   /* the ID rule above sets display:flex, which outranks Tailwind's .hidden —
      without this the pill could never hide and sat through the whole video */
   #skipFloat.hidden { display: none !important; }
@@ -191,8 +191,9 @@
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
   #toastMsg { font-weight: 700; font-size: 14px; color: #fff; flex: 1; min-width: 0; }
   #toast:focus-visible { outline: 3px solid #2dd4bf; outline-offset: 2px; }
-  /* in-bar Skip lives on TV only (D-pad walk); website/PC use the floating pill */
-  body:not(.tv-mode):not(.tv-app) #ctlSkipIntro { display: none !important; }
+  /* Skip lives as the floating pill on ALL targets now (TV included) —
+     in-bar Skip retired: one pill, above the bar, UP-reachable */
+  #ctlSkipIntro { display: none !important; }
   #ctlBar button {
     background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.1);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
@@ -295,10 +296,11 @@
     background: rgba(9,15,30,.94) !important; box-shadow: none !important;
   }
   body.calm #volToast, body.calm #toast,
-  body.calm #ctlPlay, body.calm #ctlSkipIntro,
+  body.calm #ctlPlay, body.calm #ctlSkipIntro, body.calm #skipFloat,
   body.calm #ctlSeek::-webkit-slider-thumb, body.calm #ctlSeek::-moz-range-thumb {
     box-shadow: none !important;
   }
+  body.calm #skipFloat { animation: none !important; }
   body.calm .card:hover .poster-frame, body.calm .card:focus-visible .poster-frame,
   body.calm .card:hover .glass, body.calm .card:focus-visible .glass,
   body.calm .card.tv-focus .glass { box-shadow: 0 0 0 2px #14b8a6 !important; }
@@ -431,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 146; // bump every release alongside version.txt
+  const BUILD_NUM = 147; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -581,7 +583,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
             <p id="tcArc" class="hidden mt-1.5 text-[11px] font-bold text-[#0b1426] bg-teal-400 rounded-full px-2.5 py-0.5 w-fit"></p>
           </div>
         </div>
-        <!-- floating Skip Intro (website/PC only — TV keeps the in-bar Skip for D-pad) -->
+        <!-- floating Skip Intro (all targets — TV: ▲ climbs to it from the bar) -->
         <button id="skipFloat" onclick="skipPillNow()" aria-label="Skip intro or credits" title="Skip intro / credits" class="hidden">⏭ Skip Intro</button>
         <!-- control bar floats over the video (auto-hides when idle) -->
         <div id="ctlBar" class="absolute left-0 right-0 bottom-0 px-3 py-2.5 flex flex-wrap items-center gap-2">
@@ -1574,25 +1576,36 @@ function purgeRetiredCaches(){
           else if (mirror === "vidbolt" && (dir === "left" || dir === "right")) { boltSeekRel(dir === "left" ? -10 : 30); }
           else if (mirror === "vidzen" && (dir === "left" || dir === "right")) { zenSeekRel(dir === "left" ? -10 : 30); }
           else if (mirror === "vidrift" || mirror === "vidzen" || mirror === "vidbolt") {
-            // TV asleep + U/D: wake and land on the visible bar (same row the
-            // waking bar shows); desktop keeps the volume hint (VidRift) or
-            // nothing (no blind commands there).
+            // TV asleep + U/D: wake and land — ▲ jumps straight to the
+            // floating Skip while it's showing, else the visible bar row;
+            // desktop keeps the volume hint (VidRift) or nothing.
             if (document.body.classList.contains("tv-mode")) {
-              const st = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
-              if (st.length) safeFocus(dir === "up" ? st[0] : st[st.length - 1]);
+              let skw = null;
+              try { const s = document.getElementById("skipFloat"); if (s && !s.classList.contains("hidden") && s.offsetParent && !s.disabled) skw = s; } catch(e){}
+              if (skw && dir === "up") { safeFocus(skw); }
+              else {
+                const st = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
+                if (st.length) safeFocus(dir === "up" ? st[0] : st[st.length - 1]);
+              }
             } else if (mirror === "vidrift") vidriftVolHint();
           }
           return;
         }
         if (dir === "left" || dir === "right") { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
         else {
-          // wake + land: bar is visible again (pokeHud above), so put
-          // focus on the row — further U/D can then climb to Got-it
-          const bb = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
-          if (bb.length) {
-            const go = dir === "up" ? bb[0] : bb[bb.length - 1];
-            safeFocus(go);
-            try { go.scrollIntoView({ inline: "nearest", block: "nearest" }); } catch(e){}
+          // wake + land: bar is visible again (pokeHud above). ▲ jumps to
+          // the floating Skip while it's showing, else the row — further
+          // U/D can then climb to Got-it
+          let skw2 = null;
+          try { const s2 = document.getElementById("skipFloat"); if (s2 && !s2.classList.contains("hidden") && s2.offsetParent && !s2.disabled) skw2 = s2; } catch(e){}
+          if (skw2 && dir === "up") { safeFocus(skw2); }
+          else {
+            const bb = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
+            if (bb.length) {
+              const go = dir === "up" ? bb[0] : bb[bb.length - 1];
+              safeFocus(go);
+              try { go.scrollIntoView({ inline: "nearest", block: "nearest" }); } catch(e){}
+            }
           }
         }
         return;
@@ -1657,11 +1670,16 @@ function purgeRetiredCaches(){
           }
           return;
         }
-        // U/D moves focus between the bar row and banners above it, so the
-        // health Got-it is always one press away — never volume (TV keys).
+        // U/D moves focus between the bar row and anything above it (health
+        // Got-it, floating Skip pill) — never volume (TV keys). ▲ from the
+        // bar lands on Skip while it's showing; ▼ from Skip drops back.
         const hb0 = document.getElementById("healthBar");
         const hg = hb0 && !hb0.classList.contains("hidden") ? hb0.querySelector("button") : null;
         const pool = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
+        try {
+          const skf = document.getElementById("skipFloat");
+          if (skf && !skf.classList.contains("hidden") && skf.offsetParent && !skf.disabled) pool.push(skf);
+        } catch(e){}
         if (hg) { try { const hr = hg.getBoundingClientRect(); if (hr.width > 0 && hr.height > 0) pool.push(hg); } catch(e){} }
         const cur0 = document.activeElement;
         let bx = 0, by = 0, hasOrigin = false;
@@ -4983,15 +5001,21 @@ function paintSkipPill(){
   const isTV = document.body.classList.contains("tv-mode") || document.body.classList.contains("tv-app");
   const sk = document.getElementById("ctlSkipIntro");
   if (sk) {
-    sk.classList.toggle("hidden", !((inHit || oHit) && isTV)); // TV remote walks the bar
+    sk.classList.add("hidden"); // retired: the floating pill owns Skip on every target
     if (inHit) { const t = "⏭ Skip " + fmtT(inHit.end); if (sk.textContent !== t) sk.textContent = t; }
     else if (oHit) { const t = hasNext ? "⏭ Next Ep" : "⏭ Credits"; if (sk.textContent !== t) sk.textContent = t; }
   }
   const fl = document.getElementById("skipFloat");
   if (fl) {
-    fl.classList.toggle("hidden", !((inHit || oHit) && !isTV)); // website/PC gets the floating pill
+    fl.classList.toggle("hidden", !(inHit || oHit)); // every target gets the floating pill
     if (inHit) { const t = "⏭ Skip Intro · " + fmtT(inHit.end); if (fl.textContent !== t) fl.textContent = t; }
     else if (oHit) { const t = hasNext ? "⏭ Skip Credits · Next Ep" : "⏭ Skip Credits"; if (fl.textContent !== t) fl.textContent = t; }
+    // focus rescue: the pill just left while a remote sat on it — park on ▶
+    // instead of stranding focus on a hidden pill
+    if (fl.classList.contains("hidden") && document.activeElement === fl && isTV) {
+      const p = document.getElementById("ctlPlay");
+      if (p && p.offsetParent) { try { p.focus({ preventScroll: true }); } catch(e){} }
+    }
   }
 }
 function autoSkipIntro(){
