@@ -431,7 +431,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 145; // bump every release alongside version.txt
+  const BUILD_NUM = 146; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2369,15 +2369,12 @@ async function openWatch(type, id, s=1, e=1, t=0){
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
   try { gridS = s; } catch(e){}
   try {
-    const pm = localStorage.getItem("streambox_mirror") || "cinesrc";
-    // anime defaults to AniPM (two-way player API, sub/dub, built-in skip;
-    // VidRift stays as fallback) — unless the user picked another mirror.
-    // Non-anime can never play on AniPM (no mapping exists), so a stale
-    // saved anipm pref falls back instead of hanging on an unmatchable load.
-    let def = (anime && (pm === "cinesrc")) ? "anipm" : pm;
-    if (!anime && def === "anipm") def = "cinesrc";
-    mirror = (def === "trailer" || !MIRRORS.some(x => x.id === def) || !mirrorAllowed(def)) ? "cinesrc" : def;
-    if (mirror === "cinesrc" && anime && mirrorAllowed("anipm")) mirror = "anipm";
+    // house route: movies/TV always open on CineSrc, anime always on AniPM.
+    // A saved pref from a previous title must never leak into the next one —
+    // mid-viewing ⇄ hops still work, they just don't stick past Back.
+    let def = anime ? "anipm" : "cinesrc";
+    if (!MIRRORS.some(x => x.id === def) || !mirrorAllowed(def)) def = "cinesrc";
+    mirror = def;
   } catch(e){ mirror = "cinesrc"; }
   trailerKey = null; // trailer is a per-viewing fallback, never default
   // no stale frames: blank the player NOW (modal-direct switches skip Back,
@@ -2410,11 +2407,11 @@ async function openWatch(type, id, s=1, e=1, t=0){
   }
   currentItem = d;
   // late anime catch (deep links / cold continue entries): metadata now proves
-  // it's JP animation but we started on CineSrc-by-default — reroute once.
+  // it's JP animation but we opened on CineSrc — reroute once (house route).
   if (type === "tv" && !watchState.anime && isAnimeData(d)) {
     watchState.anime = true;
     try {
-      if ((localStorage.getItem("streambox_mirror") || "cinesrc") === "cinesrc" && mirrorAllowed("anipm")) {
+      if (mirrorAllowed("anipm")) {
         mirror = "anipm";
         updateMirrorUI(); paintMirrors();
       }
