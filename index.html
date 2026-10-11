@@ -139,31 +139,51 @@
   #capOverlay.cap-bottom { bottom: 12%; }
   #capOverlay.cap-center { top: 44%; }
   #capOverlay.cap-top { top: 10%; }
-  /* the bar floats over the video (all modes): a glass pill, not a strip */
+  /* the bar floats over the video (all modes): glass panel in Netflix
+     anatomy - full-width seek row on top (times flank the glowing track),
+     controls in one scrollable row below. Two fixed rows, never soup. */
   #playerBox #ctlBar {
     position: absolute; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 6;
     background: rgba(9, 15, 30, .72) !important;
     -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3);
     border: 1px solid rgba(255,255,255,.12) !important; border-radius: 20px !important; margin: 0;
     box-shadow: 0 12px 40px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.08);
-    padding: 10px 14px !important; gap: 8px;
+    padding: 8px 14px 10px !important;
+    display: flex; flex-direction: column; gap: 6px;
   }
-  .tv-mode #playerBox #ctlBar { left: 18px; right: 18px; bottom: 18px; padding: 12px 18px !important; }
-  /* one row, everywhere: the wrapping bar spilled pills (🖱 alone on row two
-     on desktop) and looked broken, so every target scrolls a single row
-     instead, and focus pulls items into view */
-  #playerBox #ctlBar { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
-  #playerBox #ctlBar::-webkit-scrollbar { display: none; }
-  #playerBox #ctlBar > * { flex-shrink: 0; }
-  #playerBox #ctlSeek { flex: 1 1 100px !important; min-width: 80px !important; }
-  body.tv-app #playerBox #ctlBar { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; }
-  body.tv-app #playerBox #ctlBar::-webkit-scrollbar { display: none; }
-  body.tv-app #playerBox #ctlBar > * { flex-shrink: 0; }
-  body.tv-app #playerBox #ctlSeek { flex: 1 1 100px !important; min-width: 80px !important; }
+  .tv-mode #playerBox #ctlBar { left: 18px; right: 18px; bottom: 18px; padding: 10px 18px 12px !important; }
+  /* seek row: current time | full-width track | duration | remaining */
+  #seekRow { display: flex; align-items: center; gap: 12px; width: 100%; }
+  #ctlCur, #ctlDur, #ctlRemain { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #ctlCur { font-size: 12px; font-weight: 700; color: #fff; min-width: 44px; text-align: right; }
+  #ctlDur { font-size: 12px; font-weight: 700; color: #9fb0cc; min-width: 44px; }
+  #ctlRemain { font-size: 11px; font-weight: 700; color: #7dd3fc; min-width: 50px; }
+  .tv-mode #ctlCur, .tv-mode #ctlDur { font-size: 16px; min-width: 62px; }
+  .tv-mode #ctlRemain { font-size: 14px; min-width: 68px; }
+  /* custom track: played fill + glowing thumb; an invisible range on top
+     keeps native drag/click semantics (TV remotes use -10s/+30s buttons) */
+  #seekWrap { position: relative; flex: 1 1 auto; min-width: 80px; height: 44px; display: flex; align-items: center; }
+  #seekTrack { position: relative; width: 100%; height: 6px; border-radius: 99px;
+    background: rgba(255,255,255,.18); transition: height .15s ease-out; }
+  #seekWrap:hover #seekTrack, #seekWrap:focus-within #seekTrack { height: 10px; }
+  #seekFill { height: 100%; width: var(--fill, 0%); border-radius: 99px;
+    background: linear-gradient(90deg, #7dd3fc, #2dd4bf); }
+  #seekThumb { position: absolute; top: 50%; left: var(--fill, 0%); width: 16px; height: 16px;
+    margin: -8px 0 0 -8px; border-radius: 50%; background: #fff; border: 3px solid #2dd4bf;
+    box-shadow: 0 0 12px rgba(45,212,191,.8); pointer-events: none; }
+  .tv-mode #seekThumb { width: 20px; height: 20px; margin: -10px 0 0 -10px; }
+  #ctlSeek { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+    -webkit-appearance: none; appearance: none; background: transparent; opacity: 0; cursor: pointer; }
+  #seekWrap:focus-within { outline: 2px solid #2dd4bf; outline-offset: 4px; border-radius: 12px; }
+  /* controls row: one scrollable line, focus pulls items into view */
+  #btnRow { display: flex; align-items: center; gap: 8px; width: 100%; padding-bottom: 2px;
+    flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  #btnRow::-webkit-scrollbar { display: none; }
+  #btnRow > * { flex-shrink: 0; }
   /* floating Skip Intro (all targets): sits above the bar, bottom-right —
      a bold white pill that's impossible to miss and never crowds the bar.
      TV positions it clear of its taller bar; D-pad ▲ climbs straight to it. */
-  #skipFloat { position: absolute; right: 16px; bottom: 88px; z-index: 7;
+  #skipFloat { position: absolute; right: 16px; bottom: 148px; z-index: 7;
     min-height: 44px; min-width: 44px; padding: 0 22px; border-radius: 99px;
     background: #fff; color: #0b1426; font-weight: 800; font-size: 15px;
     border: 1px solid rgba(255,255,255,.6); white-space: nowrap;
@@ -175,7 +195,7 @@
     box-shadow: 0 0 0 6px rgba(45,212,191,.35), 0 8px 30px rgba(0,0,0,.55); }
   #skipFloat:active { transform: scale(.97); }
   @keyframes skipIn { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
-  body.tv-mode #skipFloat, body.tv-app #skipFloat { bottom: 104px; right: 18px; }
+  body.tv-mode #skipFloat, body.tv-app #skipFloat { bottom: 160px; right: 18px; }
   /* the ID rule above sets display:flex, which outranks Tailwind's .hidden —
      without this the pill could never hide and sat through the whole video */
   #skipFloat.hidden { display: none !important; }
@@ -215,18 +235,21 @@
     box-shadow: 0 4px 18px rgba(45,212,191,.45), inset 0 1px 0 rgba(255,255,255,.35) !important;
   }
   #ctlSkipIntro:hover { filter: brightness(1.12); }
-  /* gradient seek track with glowing thumb (webkit + firefox) */
-  #ctlSeek { -webkit-appearance: none; appearance: none; background: transparent; height: 28px; }
-  #ctlSeek::-webkit-slider-runnable-track { height: 6px; border-radius: 99px;
-    background: linear-gradient(to right, #2dd4bf var(--fill,0%), rgba(255,255,255,.18) var(--fill,0%)); }
-  #ctlSeek::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -5px;
-    border-radius: 50%; background: #fff; border: 3px solid #2dd4bf;
-    box-shadow: 0 0 12px rgba(45,212,191,.8); cursor: pointer; }
-  #ctlSeek::-moz-range-track { height: 6px; border-radius: 99px; background: rgba(255,255,255,.18); }
-  #ctlSeek::-moz-range-progress { height: 6px; border-radius: 99px; background: #2dd4bf; }
-  #ctlSeek::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%;
-    background: #fff; border: 3px solid #2dd4bf; box-shadow: 0 0 12px rgba(45,212,191,.8); }
-  #ctlSeek:focus-visible { outline: 2px solid #2dd4bf; outline-offset: 4px; border-radius: 99px; }
+  /* Up Next card: end-of-episode Netflix card, bottom-left (the Skip pill
+     owns bottom-right). Countdown only on mirrors that can't advance alone. */
+  #upNextCard { position: absolute; left: 16px; bottom: 148px; z-index: 8; width: min(330px, 88vw);
+    background: rgba(9, 15, 30, .82); border: 1px solid rgba(255,255,255,.14); border-radius: 18px;
+    -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2);
+    box-shadow: 0 16px 50px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.08);
+    padding: 14px 16px; animation: pop .22s ease-out; }
+  .tv-mode #upNextCard, .tv-app #upNextCard { left: 20px; bottom: 160px; width: 430px; padding: 18px 20px; }
+  .upn-kick { font-size: 10px; font-weight: 900; letter-spacing: .22em; color: #5eead4; }
+  .upn-title { margin-top: 6px; font-weight: 800; color: #fff; line-height: 1.35; font-size: 15px; }
+  .upn-meta { margin-top: 2px; font-size: 11px; color: #94a3b8; }
+  .upn-count { margin-top: 6px; font-size: 11px; font-weight: 700; color: #5eead4; }
+  .tv-mode .upn-title { font-size: 19px; }
+  .tv-mode .upn-kick { font-size: 12px; }
+  .tv-mode .upn-meta, .tv-mode .upn-count { font-size: 14px; }
   /* mirror strip + toasts share the glass language */
   #mirrorBar {
     background: rgba(9, 15, 30, .72) !important;
@@ -235,6 +258,7 @@
     box-shadow: 0 12px 40px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.08);
   }
   #volToast {
+    top: 16px; right: 16px; bottom: auto;
     background: rgba(9, 15, 30, .8) !important;
     -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
     border: 1px solid rgba(45,212,191,.4) !important;
@@ -342,7 +366,7 @@
      melt cheap GPUs (the bar's 18px blur sits over live video). Calm drops
      both, keeps the focus rings (navigation-critical) and identical layout —
      same pixels, none of the melt. */
-  body.calm #playerBox #ctlBar, body.calm #mirrorBar, body.calm #volToast,
+  body.calm #playerBox #ctlBar, body.calm #mirrorBar, body.calm #volToast, body.calm #upNextCard,
   body.calm #mobileNav, body.calm #cursorBtn, body.calm #titleCard > div {
     -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
   }
@@ -351,7 +375,7 @@
   }
   body.calm #volToast, body.calm #toast,
   body.calm #ctlPlay, body.calm #ctlSkipIntro, body.calm #skipFloat,
-  body.calm #ctlSeek::-webkit-slider-thumb, body.calm #ctlSeek::-moz-range-thumb {
+  body.calm #seekThumb {
     box-shadow: none !important;
   }
   body.calm #skipFloat { animation: none !important; }
@@ -491,7 +515,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 162; // bump every release alongside version.txt
+  const BUILD_NUM = 163; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -644,28 +668,46 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         </div>
         <!-- floating Skip Intro (all targets — TV: ▲ climbs to it from the bar) -->
         <button id="skipFloat" onclick="skipPillNow()" aria-label="Skip intro or credits" title="Skip intro / credits" class="hidden">⏭ Skip Intro</button>
+        <!-- Up Next: Netflix-style end-of-episode card (rides the player, cinema-visible) -->
+        <div id="upNextCard" class="hidden">
+          <p class="upn-kick">UP NEXT</p>
+          <p id="upNextCTitle" class="upn-title"></p>
+          <p id="upNextCMeta" class="upn-meta"></p>
+          <p id="upNextCount" class="upn-count"></p>
+          <div class="flex gap-2 mt-3">
+            <button id="upNextPlay2" onclick="upNextPlayNow()" class="bg-teal-500 hover:bg-teal-400 font-bold px-4 py-2 rounded-full text-[13px]">&#9654; Play Next</button>
+            <button onclick="hideUpNext()" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full text-[13px]">Dismiss</button>
+          </div>
+        </div>
         <!-- control bar floats over the video (auto-hides when idle) -->
-        <div id="ctlBar" class="absolute left-0 right-0 bottom-0 px-3 py-2.5 flex flex-wrap items-center gap-2">
-          <button id="ctlPlay" onclick="ctlToggle()" aria-label="Play or pause" title="Play/Pause (OK)" class="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-400 text-xl font-bold grid place-items-center">▶</button>
-          <button onclick="ctlSeekRel(-10)" aria-label="Back 10 seconds" title="Back 10s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">−10s</button>
-          <button onclick="ctlSeekRel(30)" aria-label="Forward 30 seconds" title="Forward 30s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">+30s</button>
-          <button id="ctlSkipIntro" onclick="skipPillNow()" aria-label="Skip intro or credits" title="Skip intro / credits" class="hidden h-11 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-sm font-bold">⏭ Skip</button>
-          <span id="ctlCur" class="text-xs text-gray-300 tabular-nums ml-1">0:00</span>
-          <input id="ctlSeek" type="range" min="0" max="1000" value="0" step="1" tabindex="-1" aria-label="Seek (pointer drag; remote uses −10s/+30s)" title="Drag to seek (remote: use −10s/+30s buttons)"
-            class="flex-1 min-w-[120px] h-11 accent-teal-500 cursor-pointer">
-          <span id="ctlDur" class="text-xs text-gray-500 tabular-nums">0:00</span>
-          <span id="ctlRemain" class="text-[11px] text-gray-500 tabular-nums"></span>
-          <button id="ctlMute" onclick="ctlMuteToggle()" aria-label="Mute or unmute" title="Mute" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🔊</button>
-          <button id="ctlRate" onclick="ctlRateCycle()" aria-label="Playback speed" title="Speed" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">1×</button>
-          <button id="ctlQ" onclick="qualityStep(1)" aria-label="Video quality" title="Quality: tap to cycle Auto → 1080p → 720p → 480p" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Auto</button>
-          <button onclick="ctlFullscreen()" aria-label="Fullscreen" title="Fullscreen" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⛶</button>
-          <button onclick="openSettings()" id="ctlSettings" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">⚙</button>
-          <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">☰ Episodes</button>
-          <button onclick="ctlSubsToggle()" id="ctlSubs" aria-label="Subtitles on or off" title="Subtitles on/off — opens Subs settings when nothing is loaded yet" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">CC</button>
-          <button id="avBtn" onclick="openAV()" aria-label="Audio and subtitles" title="Audio (sub/dub), subtitles and quality — no settings detour" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">A/V</button>
-          <button id="ctlControl" onclick="focusMirror()" aria-label="Send remote to mirror player" title="Control: send remote keys to this mirror's own player (VidRift has no play API)" class="hidden w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🎯</button>
-          <button id="ctlHome" onclick="mirrorHome()" aria-label="Back to primary player" title="Back to primary (CineSrc / AniPM)" class="hidden h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">⇄</button>
-          <button onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows glide a pointer, OK clicks — TV fallback for stubborn players" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🖱</button>
+        <div id="ctlBar" class="absolute left-0 right-0 bottom-0 px-3 py-2.5 flex flex-col gap-1.5">
+          <div id="seekRow">
+            <span id="ctlCur" class="text-xs text-gray-300 tabular-nums">0:00</span>
+            <div id="seekWrap">
+              <div id="seekTrack"><div id="seekFill"></div></div>
+              <div id="seekThumb"></div>
+              <input id="ctlSeek" type="range" min="0" max="1000" value="0" step="1" tabindex="-1" aria-label="Seek (pointer drag; remote uses -10s/+30s)" title="Drag to seek (remote: use -10s/+30s buttons)">
+            </div>
+            <span id="ctlDur" class="text-xs text-gray-500 tabular-nums">0:00</span>
+            <span id="ctlRemain" class="text-[11px] text-gray-500 tabular-nums"></span>
+          </div>
+          <div id="btnRow">
+            <button id="ctlPlay" onclick="ctlToggle()" aria-label="Play or pause" title="Play/Pause (OK)" class="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-400 text-xl font-bold grid place-items-center">&#9654;</button>
+            <button onclick="ctlSeekRel(-10)" aria-label="Back 10 seconds" title="Back 10s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">&#8722;10s</button>
+            <button onclick="ctlSeekRel(30)" aria-label="Forward 30 seconds" title="Forward 30s" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">+30s</button>
+            <button id="ctlSkipIntro" onclick="skipPillNow()" aria-label="Skip intro or credits" title="Skip intro / credits" class="hidden h-11 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-sm font-bold">&#9209; Skip</button>
+            <button id="ctlMute" onclick="ctlMuteToggle()" aria-label="Mute or unmute" title="Mute" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">&#128266;</button>
+            <button id="ctlRate" onclick="ctlRateCycle()" aria-label="Playback speed" title="Speed" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">1&#215;</button>
+            <button id="ctlQ" onclick="qualityStep(1)" aria-label="Video quality" title="Quality: tap to cycle Auto / 1080p / 720p / 480p" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Auto</button>
+            <button onclick="ctlFullscreen()" aria-label="Fullscreen" title="Fullscreen" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">&#9974;</button>
+            <button onclick="openSettings()" id="ctlSettings" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">&#9881;</button>
+            <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">&#9776; Episodes</button>
+            <button onclick="ctlSubsToggle()" id="ctlSubs" aria-label="Subtitles on or off" title="Subtitles on/off - opens Subs settings when nothing is loaded yet" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">CC</button>
+            <button id="avBtn" onclick="openAV()" aria-label="Audio and subtitles" title="Audio (sub/dub), subtitles and quality - no settings detour" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">A/V</button>
+            <button id="ctlControl" onclick="focusMirror()" aria-label="Send remote to mirror player" title="Control: send remote keys to this mirror own player (VidRift has no play API)" class="hidden w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">&#127919;</button>
+            <button id="ctlHome" onclick="mirrorHome()" aria-label="Back to primary player" title="Back to primary (CineSrc / AniPM)" class="hidden h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">&#8644;</button>
+            <button onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows glide a pointer, OK clicks - TV fallback for stubborn players" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">&#128433;</button>
+          </div>
         </div>
       </div>
       <!-- unpaired-mirror strip (paired mirrors ride our bar now — one bar, no overlap) -->
@@ -2699,6 +2741,50 @@ function paintUpNext(eps){
   document.getElementById("upNextMeta").textContent = "You're all caught up — no next episode";
   if (playBtn) playBtn.classList.add("hidden");
 }
+/* ---------- Up Next card (Netflix-style endgame): fires on ended wherever
+   the player cannot advance by itself. VidRift runs its own Up Next (our
+   nextup-info feeds it); CineSrc/AniPM self-advance while Auto-next is on;
+   VidZen/VidBolt (and any mirror with Auto-next off) get OUR card: a 10s
+   countdown or a plain Play Next. Sleep-timer ends never auto-advance. ---------- */
+function maybeUpNext(){
+  try {
+    if (watchState.type !== "tv") return;
+    if (document.getElementById("watchView").classList.contains("hidden")) return;
+    if (mirror === "vidrift") return; // their Up Next owns the endgame
+    let auto = true;
+    try { auto = document.getElementById("optAutonext").checked; } catch(e){}
+    if ((mirror === "cinesrc" || mirror === "anipm") && auto) return; // they self-advance
+    const nxt = nextAiredEp();
+    if (!nxt) return;
+    document.getElementById("upNextCTitle").textContent = "S" + watchState.s + " E" + nxt.episode_number + " \u2022 " + (nxt.name || "");
+    document.getElementById("upNextCMeta").textContent = nxt.runtime ? nxt.runtime + "m" : "";
+    const countdown = !!auto && (mirror === "vidzen" || mirror === "vidbolt");
+    window._upNextEnd = countdown ? Date.now() + 10000 : 0;
+    document.getElementById("upNextCard").classList.remove("hidden");
+    tickUpNext();
+    if (document.body.classList.contains("tv-mode") || document.body.classList.contains("tv-app")) {
+      setTimeout(() => safeFocus(document.getElementById("upNextPlay2")), 80);
+    }
+  } catch(e){}
+}
+function tickUpNext(){
+  clearTimeout(window._upNextT);
+  const cnt = document.getElementById("upNextCount");
+  if (!window._upNextEnd) {
+    if (cnt) cnt.textContent = "Auto-next is off \u2014 Play Next when you're ready";
+    return;
+  }
+  const left = Math.max(0, Math.ceil((window._upNextEnd - Date.now()) / 1000));
+  if (cnt) cnt.textContent = "Next episode in " + left + "\u2026";
+  if (left <= 0) { upNextPlayNow(); return; }
+  window._upNextT = setTimeout(tickUpNext, 400);
+}
+function upNextPlayNow(){ hideUpNext(); nextEpisode(1); }
+function hideUpNext(){
+  clearTimeout(window._upNextT);
+  window._upNextEnd = 0;
+  try { document.getElementById("upNextCard").classList.add("hidden"); } catch(e){}
+}
 let watchSeasons = [], gridS = 1; // gridS: watch-grid browse cursor (never autoplays)
 function updateSeasonLabel(){
   const arc = window._seasonArc || "";
@@ -3034,6 +3120,7 @@ function armStuckWatchdogs(){
   }
 }
 function loadPlayer(){
+  try { hideUpNext(); } catch(e){} // fresh video: no endgame card from the last one
   preconnectCinesrc();  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
   // never strand playback on a hidden server.
   closeVrSheet(); // fresh frame = fresh panel state (options may belong to another episode)
@@ -3250,6 +3337,7 @@ function applyPlayerOpts(){ reloadKeepPos(); }
 
 function goHome(ev){
   if(ev) ev.preventDefault();
+  try { hideUpNext(); } catch(e){}
   paintNav("navHome");
   ctlPollStop();
   clearTimeout(window._tipT);
@@ -3466,24 +3554,36 @@ function renderList(){
   });
 }
 
-/* ---------- Bar auto-hide: visible on interaction, gone after 4s idle ---------- */
-function inCinema(){
-  return document.body.classList.contains("video-fs");
-}
-function pokeHud(){
-  // any interaction while watching: show the bar, hide again after 4s idle
-  if (document.getElementById("watchView").classList.contains("hidden")) return;
-  document.getElementById("ctlBar").classList.remove("bar-hidden");
-  clearTimeout(window._idleT);
-  window._idleT = setTimeout(() => {
-    // never hide while a popup needs the bar visible underneath
+  /* ---------- Bar auto-hide: visible on interaction, gone after 4s idle.
+     Never hides while a remote has focus parked inside the bar or a seek
+     drag is mid-flight (Netflix keeps the chrome up while you use it). ---------- */
+  function inCinema(){
+    return document.body.classList.contains("video-fs");
+  }
+  function hideHud(){
     if (topPopup()) return;
-    document.getElementById("ctlBar").classList.add("bar-hidden");
+    const bar = document.getElementById("ctlBar");
+    try {
+      if (pState.seeking || (bar.contains && bar.contains(document.activeElement))) {
+        window._idleT = setTimeout(hideHud, 4000);
+        return;
+      }
+    } catch(e){}
+    bar.classList.add("bar-hidden");
     try { document.getElementById("titleCard").classList.add("hidden"); } catch(e){}
-  }, 4000);
-  // the title card rides with the bar: visible together, gone together
-  try { showTitleCard(true); } catch(e){}
-}
+  }
+  function pokeHud(){
+    // any interaction while watching: show the bar, hide again after 4s idle
+    if (document.getElementById("watchView").classList.contains("hidden")) return;
+    const bar = document.getElementById("ctlBar");
+    const wasHidden = bar.classList.contains("bar-hidden");
+    bar.classList.remove("bar-hidden");
+    clearTimeout(window._idleT);
+    window._idleT = setTimeout(hideHud, 4000);
+    // the title card rides with the bar: one render per reveal (mousemove
+    // floods pokeHud - rewriting the card per event was pure churn)
+    if (wasHidden) { try { showTitleCard(true); } catch(e){} }
+  }
 
 /* ---------- CineSrc remote controls (per https://cinesrc.st/docs player methods) ---------- */
 const pState = { paused: true, muted: false, rate: 1, cur: 0, dur: 0, seeking: false };
@@ -3519,18 +3619,45 @@ function fmtT(s){
   return (h ? h + ":" + String(m).padStart(2, "0") : m + ":") + String(sec).padStart(2, "0");
 }
 function ctlPaint(){
-  document.getElementById("ctlPlay").textContent = pState.paused ? "▶" : "⏸";
-  document.getElementById("ctlMute").textContent = pState.muted ? "🔇" : "🔊";
-  document.getElementById("ctlRate").textContent = (pState.rate || 1) + "×";
-  document.getElementById("ctlCur").textContent = fmtT(pState.cur);
-  document.getElementById("ctlDur").textContent = fmtT(pState.dur);
-  const _rem = Math.max(0, (pState.dur || 0) - (pState.cur || 0));
-  document.getElementById("ctlRemain").textContent = pState.dur > 0 ? "• ends in " + fmtT(_rem) : "";
+  // dirty-checked: timeupdate floods this 4-10x/sec on weak TV WebViews -
+  // only the fields that changed may touch the DOM
+  const L = window._pL || (window._pL = {});
+  const paused = !!pState.paused, muted = !!pState.muted;
+  const rate = pState.rate || 1;
+  const cur = Math.floor(pState.cur || 0), dur = Math.floor(pState.dur || 0);
+  if (L.paused !== paused) {
+    L.paused = paused;
+    const b = document.getElementById("ctlPlay");
+    if (b) b.textContent = paused ? "\u25B6" : "\u23F8";
+  }
+  if (L.muted !== muted) {
+    L.muted = muted;
+    const b = document.getElementById("ctlMute");
+    if (b) b.textContent = muted ? "\u{1F507}" : "\u{1F50A}";
+  }
+  if (L.rate !== rate) {
+    L.rate = rate;
+    const b = document.getElementById("ctlRate");
+    if (b) b.textContent = rate + "\u00D7";
+  }
+  if (L.cur !== cur || L.dur !== dur) {
+    L.cur = cur; L.dur = dur;
+    const cEl = document.getElementById("ctlCur");
+    if (cEl) cEl.textContent = fmtT(cur);
+    const dEl = document.getElementById("ctlDur");
+    if (dEl) dEl.textContent = fmtT(dur);
+    const rEl = document.getElementById("ctlRemain");
+    if (rEl) rEl.textContent = dur > 0 ? "\u2212" + fmtT(Math.max(0, dur - cur)) : "";
+  }
   paintCaps();
   paintSubsBtn();
-  if (!pState.seeking && pState.dur > 0) {
-    document.getElementById("ctlSeek").value = Math.round(pState.cur / pState.dur * 1000);
-    try { document.getElementById("ctlSeek").style.setProperty("--fill", (pState.cur / pState.dur * 100) + "%"); } catch(e){}
+  if (!pState.seeking && dur > 0) {
+    const pct = Math.min(100, Math.max(0, (pState.cur || 0) / dur * 100));
+    const wrap = document.getElementById("seekWrap");
+    if (wrap) wrap.style.setProperty("--fill", pct + "%");
+    const s = document.getElementById("ctlSeek");
+    const v = String(Math.round(pState.cur / dur * 1000));
+    if (s && s.value !== v) s.value = v;
   }
   try { paintSkipPill(); } catch(e){}
 }
@@ -3715,6 +3842,10 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
   const bar = document.getElementById("ctlSeek");
   if (!bar) return;
   bar.addEventListener("pointerdown", () => { pState.seeking = true; });
+  bar.addEventListener("input", () => { // live fill preview while dragging
+    pState.seeking = true;
+    try { document.getElementById("seekWrap").style.setProperty("--fill", (bar.value / 10) + "%"); } catch(e){}
+  });
   bar.addEventListener("focus", () => { pState.seeking = false; });
   bar.addEventListener("change", () => { // committed value (drag release, or −10s/+30s buttons)
     pState.seeking = false;
@@ -5553,7 +5684,7 @@ window.addEventListener("message", (event)=>{
     else openVrSheet("settings", [], null, vidriftMobileOption);
   }
   if (d.type === "vidrift:ended") {
-    try { markWatched(); } catch(e){}
+    try { markWatched(); } catch(e){} try { maybeUpNext(); } catch(e){}
     if (watchState.type === "movie") {
       try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
       if (document.body.classList.contains("video-fs")) exitVideoFs();
@@ -5612,7 +5743,7 @@ window.addEventListener("message", (event)=>{
   if (evn === "pause" || evn === "paused") { pState.paused = true; ctlPaint(); }
   if (evn === "status") { hideSpin(); ctlPaint(); }
   if (evn === "ended" || evn === "complete") {
-    try { markWatched(); } catch(e){}
+    try { markWatched(); } catch(e){} try { maybeUpNext(); } catch(e){}
     if (watchState.type === "movie") {
       try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
       if (document.body.classList.contains("video-fs")) exitVideoFs();
@@ -5707,7 +5838,7 @@ window.addEventListener("message", (event)=>{
   if (d.type === "play" || d.type === "playing") { pState.paused = false; window._cinePlaying = true; window._boltStarted = true; ctlPaint(); }
   if (d.type === "pause" || d.type === "paused") { pState.paused = true; ctlPaint(); }
   if (d.type === "ended") {
-    try { markWatched(); } catch(e){}
+    try { markWatched(); } catch(e){} try { maybeUpNext(); } catch(e){}
     if (watchState.type === "movie") {
       try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
       if (document.body.classList.contains("video-fs")) exitVideoFs();
@@ -6028,7 +6159,7 @@ function anipmProgress(cur, dur){
   autoSkipIntro();
 }
 function anipmEnded(){
-  try { markWatched(); } catch(e){}
+  try { markWatched(); } catch(e){} try { maybeUpNext(); } catch(e){}
   if (watchState.type === "movie") {
     try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
     if (document.body.classList.contains("video-fs")) exitVideoFs();
@@ -6304,30 +6435,40 @@ function paintAV(){
    5s on every fresh episode, all mirrors — pure overlay, never touches play */
 function showTitleCard(paired){
   try {
-    if (watchState.type !== "tv") return;
     if (document.getElementById("watchView").classList.contains("hidden")) return;
-    const key = `${watchState.id}/${watchState.s}/${watchState.e}`;
-    // episode starts respect the once-per-episode key; bar-pairing re-shows
-    // freely (it hides again with the bar)
-    if (!paired) {
-      if (window._tcKey === key) return;
+    const isTv = watchState.type === "tv";
+    const key = watchState.id + "/" + watchState.s + "/" + watchState.e;
+    const card = document.getElementById("titleCard");
+    if (paired) {
+      // rides the bar: one render per reveal, hides with the bar (no timer)
+      if (!card.classList.contains("hidden") && window._tcKey === key) return;
+      clearTimeout(window._tcT);
       window._tcKey = key;
     } else {
+      // episode/movie start: the Netflix reveal, gone in 5s
+      if (window._tcKey === key) return;
       window._tcKey = key;
+      clearTimeout(window._tcT);
+      window._tcT = setTimeout(function(){ card.classList.add("hidden"); }, 5000);
     }
-    const card = document.getElementById("titleCard");
-    document.getElementById("tcShow").textContent = (titleOf(currentItem || {}) || "").toUpperCase();
-    document.getElementById("tcMain").textContent = `S${watchState.s} E${watchState.e}`;
     const arcEl = document.getElementById("tcArc");
+    if (isTv) {
+      document.getElementById("tcShow").textContent = (titleOf(currentItem || {}) || "").toUpperCase();
+      document.getElementById("tcMain").textContent = "S" + watchState.s + " E" + watchState.e;
+    } else {
+      // movies wear the same top card: year kicker + title
+      const y = yearOf(currentItem || {});
+      document.getElementById("tcShow").textContent = y ? "MOVIE \u2022 " + y : "MOVIE";
+      document.getElementById("tcMain").textContent = titleOf(currentItem || {});
+    }
     arcEl.classList.add("hidden");
     card.classList.remove("hidden");
-    clearTimeout(window._tcT);
-    window._tcT = setTimeout(() => card.classList.add("hidden"), 5000);
+    if (!isTv) return;
     const s = watchState.s, e = watchState.e, id = watchState.id;
-    tmdb(`/tv/${id}/season/${s}`).then(d => {
+    tmdb("/tv/" + id + "/season/" + s).then(d => {
       if (!d || watchState.s !== s || watchState.e !== e || watchState.id !== id) return; // moved on
       const ep = (d.episodes || []).find(x => x.episode_number === e);
-      if (ep && ep.name) document.getElementById("tcMain").textContent = `S${s} E${e} · ${ep.name}`;
+      if (ep && ep.name) document.getElementById("tcMain").textContent = "S" + s + " E" + e + " \u2022 " + ep.name;
       const arc = seasonArc(titleOf(currentItem || {}), d.overview || "", s);
       if (arc) { arcEl.textContent = arc; arcEl.classList.remove("hidden"); }
     }).catch(() => {});
@@ -6436,6 +6577,7 @@ window.addEventListener("message", (event)=>{
       const ws = document.getElementById("watchStatus");
       if (ws) ws.textContent = "Playback ended — press ▶ to replay";
     }
+    if (!sleepOnEnd) { try { maybeUpNext(); } catch(e){} }
   }
 });
 
