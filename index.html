@@ -329,9 +329,12 @@
   }
   /* cinema shows ONLY video + bar: everything else would peek through */
   body.video-fs .no-cinema { display: none !important; }
-  /* popups float above cinema mode so settings/episodes/search open in place */
+  /* popups float above cinema mode so settings/episodes/search/sheets open in
+     place (EVERY popup lives here — a sheet left at z-67 opens UNDER the
+     fullscreen video and reads as "never opens" on TV) */
   body.video-fs #setPanel, body.video-fs #epDrawer, body.video-fs #searchPanel,
-  body.video-fs #tvGuide, body.video-fs #modal { z-index: 90; }
+  body.video-fs #tvGuide, body.video-fs #modal,
+  body.video-fs #avSheet, body.video-fs #vrSheet { z-index: 90; }
   /* mirror strip pins under cinema like the bar did */
   body.video-fs #mirrorBar {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 81;
@@ -406,7 +409,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 135; // bump every release alongside version.txt
+  const BUILD_NUM = 136; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -581,6 +584,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <button id="mirrorHomeBtn" onclick="mirrorHome()" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold">⇄ CineSrc</button>
         <button id="stripSubs" onclick="ctlSubsToggle()" aria-label="Subtitles on or off" title="Our subtitles on/off — Wyzie + your files, over any mirror" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">CC</button>
         <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">⚙</button>
+        <button id="srvBtn" onclick="openAV()" aria-label="Change server" title="Servers — hop mirrors without leaving the player" class="hidden h-11 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">⇄ Servers</button>
         <button onclick="cursorToggle()" title="Remote cursor: arrows glide a pointer, OK clicks" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🖱</button>
       </div>
       <!-- One-time subtitles coach tip (arrow points at the CC button) -->
@@ -882,15 +886,17 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 <div id="avSheet" class="hidden fixed inset-0 z-[67] bg-black/70" onclick="if(event.target===this)closePanels()">
   <div class="absolute left-0 right-0 bottom-0 md:left-1/2 md:right-auto md:bottom-auto md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[440px] bg-[#131e35] border border-white/10 rounded-t-3xl md:rounded-3xl p-5 max-h-[82vh] overflow-y-auto" style="padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px))">
     <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl font-black">Audio &amp; Subtitles</h2>
+      <h2 id="avTitle" class="text-xl font-black">Audio &amp; Subtitles</h2>
       <button onclick="closePanels()" aria-label="Close audio and subtitles" class="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-lg">✕</button>
     </div>
-    <p class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">AUDIO</p>
+    <p id="avHAudio" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">AUDIO</p>
     <div id="avAudio" class="flex gap-2 mb-5"></div>
-    <p class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">SUBTITLES</p>
+    <p id="avHSubs" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">SUBTITLES</p>
     <div id="avSubs" class="flex flex-wrap gap-2 mb-5"></div>
-    <p class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">QUALITY</p>
-    <div id="avQuality" class="flex flex-wrap gap-2"></div>
+    <p id="avHQuality" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">QUALITY</p>
+    <div id="avQuality" class="flex flex-wrap gap-2 mb-5"></div>
+    <p id="avHServers" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">SERVERS</p>
+    <div id="avServers" class="flex flex-wrap gap-2"></div>
   </div>
 </div>
 
@@ -3182,7 +3188,17 @@ function ctlReset(){
 function ctlToggle(){ // optimistic flip; corrected by play/pause events
   // un-gate muted-first desktop starts: our first real touch carries sound
   if (window._startMuted) { window._startMuted = false; sendCmd("setMuted", [false]); }
-  if (mirror === "anipm") { anipmSend(pState.paused ? "play" : "pause"); return; } // events correct us
+  if (mirror === "anipm") {
+    // muted-first TV kick: first OK restores sound — keep playing if it
+    // already is (unmute must not toggle-pause), else start with sound
+    if (window._anipmMutedFirst) {
+      window._anipmMutedFirst = false;
+      anipmSend("setMuted", { muted: false });
+      if (!pState.paused) { ctlPaint(); return; }
+      anipmSend("play"); return;
+    }
+    anipmSend(pState.paused ? "play" : "pause"); return;
+  } // events correct us
   // paired mirrors have no play API: hand keys into their player instead —
   // its own OK/space/arrows drive it, Back returns (TV app)
   if (mirror === "vidrift" || mirror === "vidzen") { focusMirror(); return; }
@@ -3500,11 +3516,12 @@ function forgetServer(){
   paintSettings();
   document.getElementById("watchStatus").textContent = "Server preference cleared — Auto mode";
 }
-/* source mirrors: CineSrc default + alternates. Only CineSrc speaks our
-   command API — other mirrors use their own player controls.
-   VidFast/VidLink refuse sandboxed iframes, so those two load UNSANDBOXED
-   (see NO_SANDBOX + applyMirrorSandbox): Ad Shield is off there by necessity,
-   use Brave/uBlock for in-stream ads. All other mirrors stay sandboxed. */
+/* source mirrors: CineSrc default + alternates. CineSrc/AniPM/VidRift speak a
+   two-way protocol (our bar drives them); VidZen/VidBolt pair progress-only
+   with the 🎯 handoff for control; the rest use their own player entirely.
+   NO_SANDBOX members load UNSANDBOXED (see applyMirrorSandbox): Ad Shield is
+   off there by necessity, use Brave/uBlock for in-stream ads. All other
+   mirrors stay sandboxed. */
 const MIRRORS = [
   { id: "cinesrc", name: "CineSrc" },
   { id: "vidlink", name: "VidLink" },
@@ -3522,8 +3539,9 @@ const MIRRORS = [
   { id: "anipm", name: "AniPM" }
 ];
 /* mirrors that break inside ANY sandboxed iframe: load without sandbox
-   (VidRift shows "remove sandboxing" otherwise — their demand, not ours) */
-const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm", "vidrift"]);
+   (VidRift shows "remove sandboxing" otherwise — their demand, not ours;
+   VidBolt's player likewise stays dark when sandboxed) */
+const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm", "vidrift", "vidbolt"]);
 /* TV-safe lineup helpers (TV_REMOTE_OK / IS_TV_DEVICE live in CONFIG above):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
@@ -3767,6 +3785,10 @@ function updateMirrorUI(){
   // A/V sheet button only exists where it works (AniPM carries tracks)
   const av = document.getElementById("avBtn");
   if (av) av.classList.toggle("hidden", mirror !== "anipm");
+  // VidBolt rides the same sheet for server hops (its player owns A/V, so the
+  // strip gets a Servers button instead of the bar's A/V one)
+  const sb = document.getElementById("srvBtn");
+  if (sb) sb.classList.toggle("hidden", mirror !== "vidbolt");
   // anime declutter: quality + settings live in the A/V sheet now
   const q = document.getElementById("ctlQ");
   if (q) q.classList.toggle("hidden", mirror === "anipm" || mirror === "vidzen");
@@ -3805,8 +3827,8 @@ function updateMirrorUI(){
     }
     if (mirror === "vidbolt") {
       document.getElementById("watchStatus").textContent = watchState.anime
-        ? "VidBolt: AniList/MAL anime — own player controls · 🎯/🖱 drive it on TV"
-        : "VidBolt: TMDB movies + shows — own player controls · 🎯/🖱 drive it on TV";
+        ? "VidBolt: AniList/MAL anime — own player controls · 🎯/🖱 drive it on TV · ⇄ Servers hops mirrors"
+        : "VidBolt: TMDB movies + shows — own player controls · 🎯/🖱 drive it on TV · ⇄ Servers hops mirrors";
       return;
     }
     document.getElementById("watchStatus").textContent = NO_SANDBOX.has(mirror)
@@ -5030,6 +5052,45 @@ window.addEventListener("message", (event)=>{
     }
   }
 });
+/* ---------- VidBolt: own-controls tier (no command API known — the 🎯
+    handoff + its own menus drive playback, like VidZen). Listens for the
+    common player-event shapes and folds progress in, so continue-watching,
+    resume position and position-aware UI pair up; seeks/skip stay inside
+    its player (no invented outbound commands, no dead buttons). */
+window.addEventListener("message", (event)=>{
+  if (event.origin !== "https://vidbolt.pro") return;
+  if (mirror !== "vidbolt") return; // stale frame from a switched-away mirror
+  let m = event.data || {};
+  // PLAYER_EVENT family (VidAPI/VidCore shape): fold it into the same fields
+  if (m.type === "PLAYER_EVENT" && m.data && typeof m.data === "object") {
+    const dd = m.data;
+    m = { event: dd.event || dd.player_status,
+      currentTime: dd.currentTime != null ? dd.currentTime : dd.player_progress,
+      duration: dd.duration != null ? dd.duration : dd.player_duration };
+  }
+  const inner = m.data && typeof m.data === "object" ? m.data : m;
+  const ev = m.event || m.type || inner.event || inner.type || "";
+  const cur = inner.currentTime != null ? inner.currentTime : m.currentTime;
+  const dur = inner.duration != null ? inner.duration : m.duration;
+  const evn = String(ev || "").toLowerCase();
+  if (evn === "timeupdate" || evn === "progress" || evn === "seeked" || evn === "seeking") {
+    if (typeof cur === "number") pState.cur = cur;
+    if (typeof dur === "number" && dur > 0) pState.dur = dur;
+    if (typeof cur === "number" && cur > 0.5) window._cinePlaying = true;
+    try { clearStuckTip(); } catch(e){}
+    hideSpin(); ctlPaint();
+    if (dur > 0) saveProgress(cur, dur);
+  }
+  if (evn === "play" || evn === "playing" || evn === "unpaused") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
+  if (evn === "pause" || evn === "paused") { pState.paused = true; ctlPaint(); }
+  if (evn === "ended" || evn === "complete") {
+    try { markWatched(); } catch(e){}
+    if (watchState.type === "movie") {
+      try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+      if (document.body.classList.contains("video-fs")) exitVideoFs();
+    }
+  }
+});
 /* ---------- AniPM: anime-native two-way player (like CineSrc, for anime)
    Embed by MAL id, driven over {ns:'anipm.player'} messages: play/pause/
    seek/volume/subs/quality/episodes in, full event set out. Keyless end to
@@ -5059,6 +5120,18 @@ function anipmHello(){
   } catch(e){}
   clearTimeout(window._anipmHelloTo);
   window._anipmHelloTo = setTimeout(anipmHello, 1000);
+}
+function anipmMutedKick(){
+  // TV autoplay policies (and strict WebViews) can leave the frame black
+  // with sound gated: start muted so the picture appears now, first OK
+  // restores sound (a key press is a real user gesture, so unmute is then
+  // allowed). Desktop never takes this path — it keeps the tap-inside hint.
+  if (mirror !== "anipm") return;
+  window._anipmMutedFirst = true;
+  anipmSend("setMuted", { muted: true });
+  anipmSend("play");
+  const ws = document.getElementById("watchStatus");
+  if (ws) ws.textContent = "Started muted for TV autoplay — press OK for sound";
 }
 /* live track state for the A/V sheet (filled by quality/subtitle/language
    events; defaults keep the sheet useful before the first event) */
@@ -5234,6 +5307,8 @@ async function loadAnipmPlayer(){
     : `https://ani.pm/embed/ani/${ids.ani}/${ep}/${lang0}`;
   f.src = as ? `${base}?${as}` : base;
   _anipmLive = false; _anipmHelloT = 0; _anipmQueue.length = 0;
+  window._anipmMutedFirst = false; window._anipmStarted = false;
+  clearTimeout(window._anipmKickT);
   if (!window._anipmTracks.lang) window._anipmTracks.lang = "sub";
   setTimeout(anipmHello, 800);
   if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e} — first ▶ tap goes inside, then our bar drives`;
@@ -5243,7 +5318,7 @@ async function loadAnipmPlayer(){
 function anipmProgress(cur, dur){
   if (typeof cur === "number") pState.cur = cur;
   if (typeof dur === "number" && dur > 0) pState.dur = dur;
-  if (typeof cur === "number" && cur > 0.5) window._cinePlaying = true;
+  if (typeof cur === "number" && cur > 0.5) { window._cinePlaying = true; window._anipmStarted = true; }
   try { clearStuckTip(); } catch(e){} // playing for real: hop advice served its purpose
   ctlPaint();
   if (dur > 0) saveProgress(cur, dur);
@@ -5297,6 +5372,18 @@ window.addEventListener("message", (event)=>{
     case "ready":
       hideSpin(); window._cinePlaying = true;
       _anipmLive = true;
+      // TV black-frame net: ready means the player EXISTS, not that it plays.
+      // If nothing actually starts in 8s (no autoplayblocked ever arrives on
+      // some WebViews), kick muted so the picture appears instead of black.
+      if (document.body.classList.contains("tv-mode")) {
+        clearTimeout(window._anipmKickT);
+        window._anipmKickT = setTimeout(() => {
+          // _cinePlaying is already true from ready above (it means "player
+          // exists", not "picture moving") — _anipmStarted is the real signal
+          if (mirror === "anipm" && !window._anipmStarted) anipmMutedKick();
+        }, 8000);
+      }
+      _anipmLive = true;
       try {
         anipmSend("setAutoNext", { on: !!document.getElementById("optAutonext").checked });
         anipmSend("setAutoSkip", { on: !!document.getElementById("optAutoskip").checked });
@@ -5304,7 +5391,7 @@ window.addEventListener("message", (event)=>{
       if (window._anipmResume > 0) { anipmSend("seek", { time: window._anipmResume }); window._anipmResume = 0; }
       ctlPaint();
       break;
-    case "play": case "playing": pState.paused = false; window._cinePlaying = true; ctlPaint(); break;
+    case "play": case "playing": pState.paused = false; window._cinePlaying = true; window._anipmStarted = true; ctlPaint(); break;
     case "pause": pState.paused = true; ctlPaint(); break;
     case "seeking": pState.seeking = true; break;
     case "seeked":
@@ -5316,6 +5403,7 @@ window.addEventListener("message", (event)=>{
     case "durationchange": if (typeof d.duration === "number") pState.dur = d.duration; ctlPaint(); break;
     case "volumechange":
       if (typeof d.muted === "boolean") pState.muted = d.muted;
+      if (d.muted === false) window._anipmMutedFirst = false; // sound back by any path: kick served its purpose
       if (typeof d.volume === "number") pState.vol = Math.min(1, Math.max(0, d.volume));
       ctlPaint(); paintVol();
       break;
@@ -5332,6 +5420,8 @@ window.addEventListener("message", (event)=>{
       else if (d.language) window._anipmTracks.lang = d.language;
       paintAV(); break;
     case "autoplayblocked": {
+      // TV gets a muted kick instead of sitting black; desktop keeps the tap hint
+      if (document.body.classList.contains("tv-mode")) { anipmMutedKick(); break; }
       const wsb = document.getElementById("watchStatus");
       if (wsb) wsb.textContent = "Tap ▶ inside once, then our bar drives";
       break;
@@ -5358,7 +5448,10 @@ function avPill(label, active, onclick){
   return b;
 }
 function openAV(){
-  if (mirror !== "anipm") return;
+  // AniPM gets the full A/V sheet; VidBolt gets the servers shelf only
+  // (its player owns audio/subs/quality — we only hop mirrors there)
+  if (mirror !== "anipm" && mirror !== "vidbolt") return;
+  try { panelOpener = document.activeElement; } catch(e){}
   document.getElementById("avSheet").classList.remove("hidden");
   document.body.classList.add("modal-open");
   paintAV(); // after unhide — it guards on visibility
@@ -5366,9 +5459,29 @@ function openAV(){
   const first = document.querySelector("#avSheet button");
   if (first && document.body.classList.contains("tv-mode")) { try { first.focus({ preventScroll: true }); } catch(e){} }
 }
+function paintAVServers(){
+  // every TV-safe server, current marked — one-tap hop without the ⚙ detour.
+  // tvSafeList hides anime-ineligible entries by itself (AniPM on movies).
+  const box = document.getElementById("avServers"); if (!box) return;
+  box.innerHTML = "";
+  tvSafeList().forEach(m => {
+    const cur = m.id === mirror;
+    box.appendChild(avPill((cur ? "● " : "") + m.name, cur, () => {
+      if (!cur) setMirror(m.id);
+      closePanels();
+    }));
+  });
+}
 function paintAV(){
   if (document.getElementById("avSheet").classList.contains("hidden")) return;
-  if (mirror !== "anipm") return;
+  if (mirror !== "anipm" && mirror !== "vidbolt") return;
+  const srvOnly = mirror === "vidbolt"; // servers shelf only, no A/V sections
+  document.getElementById("avTitle").textContent = srvOnly ? "Servers" : "Audio & Subtitles";
+  ["avHAudio", "avAudio", "avHSubs", "avSubs", "avHQuality", "avQuality"].forEach(id => {
+    const el = document.getElementById(id); if (el) el.style.display = srvOnly ? "none" : "";
+  });
+  paintAVServers();
+  if (srvOnly) return;
   const T = window._anipmTracks || {};
   const audio = document.getElementById("avAudio"); audio.innerHTML = "";
   const lang = (T.lang || "sub").toLowerCase();
