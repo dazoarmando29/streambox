@@ -431,7 +431,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 144; // bump every release alongside version.txt
+  const BUILD_NUM = 145; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -602,10 +602,12 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">☰ Episodes</button>
           <button onclick="ctlSubsToggle()" id="ctlSubs" aria-label="Subtitles on or off" title="Subtitles on/off — opens Subs settings when nothing is loaded yet" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">CC</button>
           <button id="avBtn" onclick="openAV()" aria-label="Audio and subtitles" title="Audio (sub/dub), subtitles and quality — no settings detour" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">A/V</button>
+          <button id="ctlControl" onclick="focusMirror()" aria-label="Send remote to mirror player" title="Control: send remote keys to this mirror's own player (VidRift has no play API)" class="hidden w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🎯</button>
+          <button id="ctlHome" onclick="mirrorHome()" aria-label="Back to primary player" title="Back to primary (CineSrc / AniPM)" class="hidden h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">⇄</button>
           <button onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows glide a pointer, OK clicks — TV fallback for stubborn players" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-lg grid place-items-center">🖱</button>
         </div>
       </div>
-      <!-- alternate-mirror strip (our bar only drives CineSrc) -->
+      <!-- unpaired-mirror strip (paired mirrors ride our bar now — one bar, no overlap) -->
       <div id="mirrorBar" class="hidden mt-3 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 flex flex-wrap items-center gap-2 text-sm">
         <span>Mirror: <b id="mirrorName">–</b> — use its own player controls</span>
         <button onclick="focusMirror()" title="Send remote keys to this mirror's own player (some answer OK/arrows, some need a pointer)" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🎯 Control</button>
@@ -1638,11 +1640,11 @@ function purgeRetiredCaches(){
         }
         if (!ownBar) {
           // VidRift U/D: ▲ climbs to the health banner, ▼ cycles the
-          // strip (Control / ⇄ / ⚙ / 🖱) — same split as our bar row, so
-          // L/R can stay pure seek and focus always has somewhere to go.
+          // in-bar handoff (🎯 Control / ⇄ home — same split as our bar row,
+          // so L/R can stay pure seek and focus always has somewhere to go).
           // Other mirrors: their own controls.
           if (mirror === "vidrift") {
-            const strip = [...document.querySelectorAll("#mirrorBar button")].filter(b => b.offsetParent !== null && !b.disabled);
+            const strip = [...document.querySelectorAll("#ctlControl, #ctlHome, #mirrorBar button")].filter(b => b.offsetParent !== null && !b.disabled);
             const hbv = document.getElementById("healthBar");
             const hbg = hbv && !hbv.classList.contains("hidden") ? hbv.querySelector("button") : null;
             let hasG = false;
@@ -2745,7 +2747,7 @@ function clearStuckTip(){
 function armStuckWatchdogs(){
   clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
   if (window._cinePlaying) return;
-  if (mirror !== "anipm" && mirror !== "vidrift") return;
+  if (mirror !== "anipm" && mirror !== "vidrift" && mirror !== "vidbolt" && mirror !== "vidzen") return;
   const _aTV = document.body.classList.contains("tv-mode");
   if (mirror === "anipm") {
     window._watchdog = setTimeout(() => {
@@ -2791,11 +2793,34 @@ function armStuckWatchdogs(){
       setMirror("yapgrid", true);
     }, 60000);
   }
+  // VidBolt/VidZen had NO clocks (a frame that never reports progress sat
+  // black forever with no guidance — exactly the TV report). Same patience
+  // scale as the rest: warn first, then heal once (manual mode just names
+  // the fallback and waits for ⇄ Source — never ping-pongs).
+  if (mirror === "vidbolt" || mirror === "vidzen") {
+    const nm = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
+    const fb = watchState.anime ? "anipm" : (_aTV ? "yapgrid" : "vidrift");
+    const fbn = (MIRRORS.find(x => x.id === fb) || {}).name || fb;
+    window._watchdog = setTimeout(() => {
+      if (window._cinePlaying || (mirror !== "vidbolt" && mirror !== "vidzen")) return;
+      stuckRecommend(`${nm} is taking a while — slow boxes can need a full minute`, fbn);
+    }, _aTV ? 45000 : 18000);
+    window._watchdog2 = setTimeout(() => {
+      if (window._cinePlaying || (mirror !== "vidbolt" && mirror !== "vidzen")) return;
+      if (window._autoHopped || !autoSwitchOn()) { stuckRecommend(`${nm} stayed stuck`, fbn); return; }
+      window._autoHopped = true;
+      const wsb = document.getElementById("watchStatus");
+      if (wsb) wsb.textContent = `${nm} stayed stuck — moved you to ${fbn}. ⇄ Source anytime to go back.`;
+      setMirror(fb, true);
+    }, _aTV ? 90000 : 35000);
+    return;
+  }
 }
 function loadPlayer(){
   preconnectCinesrc();  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
   // never strand playback on a hidden server.
   closeVrSheet(); // fresh frame = fresh panel state (options may belong to another episode)
+  clearTimeout(window._playKickT); // fresh video, fresh kick verdict
   if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
   ctlReset();
   window._stuckShown = false; // fresh video, fresh verdict (no stale hop advice)
@@ -2894,6 +2919,19 @@ function loadPlayer(){
     }
     vidriftQuality(); // pin the saved rendition (best effort, pre-ready safe)
     armStuckWatchdogs(); // stage 3 lives here (TV anime only)
+  }
+  if (mirror === "vidzen" || mirror === "vidbolt") {
+    // direct-drive mirrors finally get clocks too (warn → heal-once)
+    armStuckWatchdogs();
+    // TV WebViews often block autoplay-with-sound (PC allows it): one
+    // explicit play kick after the frame settles — a no-op if playing.
+    clearTimeout(window._playKickT);
+    window._playKickT = setTimeout(() => {
+      if (mirror !== "vidbolt" && mirror !== "vidzen") return;
+      if (window._cinePlaying || window._boltStarted || window._zenStarted) return;
+      if (mirror === "vidbolt") boltSend({ type: "play" });
+      else zenSend({ type: "play" });
+    }, document.body.classList.contains("tv-mode") ? 10000 : 6000);
   }
   // fallback: hide spinner even if the player never fires ready
   // (ad-blocked network etc.) — slow TV boxes get longer before we nudge
@@ -3893,6 +3931,8 @@ function setMirror(m, auto){  if (m === "trailer" && !trailerKey) {
   }
   const wasTrailer = mirror === "trailer";
   mirror = m;
+  // manual hops reset the one-heal guard (auto-heals must never ping-pong)
+  if (!auto) window._autoHopped = false;
   // auto-heals never rewrite the saved preference (or every movie after
   // would open on the fallback mirror)
   if (m !== "trailer" && !auto) { try { localStorage.setItem("streambox_mirror", m); } catch(e){} }
@@ -3914,7 +3954,10 @@ function updateMirrorUI(){
   const isPaired = mirror === "vidrift" || mirror === "vidzen" || mirror === "vidbolt";
   document.getElementById("trailerBar").classList.toggle("hidden", !isTrailer);
   document.getElementById("ctlBar").classList.toggle("hidden", !(isCS || isPaired));
-  document.getElementById("mirrorBar").classList.toggle("hidden", isCS || isTrailer);
+  // paired mirrors ride ctlBar now, so the strip stays away — in cinema it
+  // used to pin over our bar (two bars piled at the bottom on TV). VidRift
+  // keeps its 🎯 handoff + all paired keep ⇄ home as in-bar buttons.
+  document.getElementById("mirrorBar").classList.toggle("hidden", isCS || isTrailer || isPaired);
   // A/V sheet button: AniPM carries tracks; VidBolt carries the SERVERS shelf
   // (mirror hops without leaving the player — its A/V lives in its own menus)
   const av = document.getElementById("avBtn");
@@ -3926,6 +3969,16 @@ function updateMirrorUI(){
       av.setAttribute("aria-label", srv ? "Servers — hop mirrors without leaving the player" : "Audio and subtitles");
       av.title = srv ? "Servers — hop mirrors without leaving the player" : "Audio (sub/dub), subtitles and quality — no settings detour";
     }
+  }
+  // paired in-bar extras: VidRift keeps its 🎯 handoff here (no play API),
+  // every paired mirror keeps ⇄ home to the primary (the strip is hidden).
+  const cc = document.getElementById("ctlControl");
+  if (cc) cc.classList.toggle("hidden", mirror !== "vidrift");
+  const ch = document.getElementById("ctlHome");
+  if (ch) {
+    ch.classList.toggle("hidden", !isPaired);
+    const hl = watchState.anime ? "⇄ AniPM" : "⇄ CineSrc";
+    if (ch.textContent !== hl) ch.textContent = hl;
   }
   // anime declutter: quality + settings live in the A/V sheet now. VidBolt
   // quality lives in its own settings/sheet (no direct command), so its
@@ -5568,6 +5621,14 @@ async function loadVidboltAnime(){
   if ((watchState.t || 0) > 0) { ap.set("startAt", String(Math.floor(watchState.t))); watchState.t = 0; }
   window._boltDur = 0; window._boltStarted = false; window._boltSeekQ = null; // fresh frame, fresh duration
   f.src = vu + "?" + ap.toString() + "&_=" + Date.now();
+  armStuckWatchdogs(); // anime path returns early — needs its own clocks
+  // same autoplay-kick as the generic path (TV WebViews block audible autoplay)
+  clearTimeout(window._playKickT);
+  window._playKickT = setTimeout(() => {
+    if (mirror !== "vidbolt" || watchState.id !== id) return;
+    if (window._cinePlaying || window._boltStarted) return;
+    boltSend({ type: "play" });
+  }, document.body.classList.contains("tv-mode") ? 10000 : 6000);
 }
 async function loadAnipmPlayer(){
   const id = watchState.id;  const f = document.getElementById("player");
