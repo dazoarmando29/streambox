@@ -433,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 156; // bump every release alongside version.txt
+  const BUILD_NUM = 157; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2154,13 +2154,14 @@ let browse = { type: "movie", genre: 0, studio: 0, page: 0, totalPages: 1, loadi
 /* ---------- STUDIO FILTER (Movies + TV Shows) ----------
    Production-company chips with real TMDB logos. Every id + logo path below
    was verified against the live TMDB API (company + discover probes) — never
-   hand-typed from memory. Anime tab excluded (studio data thin there). */
+   hand-typed from memory. DC rides the broad 429 tag (107 movies; the
+   10576 "DC Films" entry tags zero). Anime tab excluded (studio data thin there). */
 const STUDIOS = [
   { id: 2, name: "Disney", logo: "/wdrCwmRnLFJhEoH8GSfymY85KHT.png" },
   { id: 3, name: "Pixar", logo: "/1TjvGVDMYsj6JBxOAkUHpPEwLf7.png" },
   { id: 420, name: "Marvel", logo: "/hUzeosd33nzE5MCNsZxCGEKTXaQ.png" },
   { id: 1, name: "Lucasfilm", logo: "/tlVSws0RvvtPBwViUyOFAO0vcQS.png" },
-  { id: 10576, name: "DC", logo: "/hiaURo2NrE4Pq2EjafK9BGhbcaK.png" },
+  { id: 429, name: "DC", logo: "/4Y00XuSMuP1gimd0jP6JT57QbCI.png" },
   { id: 174, name: "Warner Bros", logo: "/zhD3hhtKB5qyv7ZeL4uLpNxgMVU.png" },
   { id: 4, name: "Paramount", logo: "/jay6WcMgagAklUt7i9Euwj1pzTF.png" },
   { id: 33, name: "Universal", logo: "/8lvHyhjr8oUKOOy2dKXoALWKdp0.png" },
