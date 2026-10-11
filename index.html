@@ -433,7 +433,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 154; // bump every release alongside version.txt
+  const BUILD_NUM = 155; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -519,6 +519,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <button id="adultLockBtn" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" class="shrink-0 px-4 h-11 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-sm font-bold">🔒 18+ Hidden</button>
     </div>
     <div id="genreRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
+    <div id="studioRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
     <button id="loadMoreBtn" onclick="browseMore()" class="hidden mx-auto mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 font-bold text-sm">Load more ↓</button>
   </main>
@@ -1975,6 +1976,7 @@ function showGrid(title, items){
   document.getElementById("hero").classList.add("hidden");
   document.getElementById("continueRow").classList.add("hidden");
   document.getElementById("genreRow").classList.add("hidden");
+  document.getElementById("studioRow").classList.add("hidden");
   document.getElementById("loadMoreBtn").classList.add("hidden");
   const gv = document.getElementById("gridView");
   gv.classList.remove("hidden");
@@ -2148,7 +2150,24 @@ function refreshAfterLock(){
   else { try { init(); } catch(e){} }
 }
 /* ---------- GENRE BROWSING (Movies + TV Shows categories) ---------- */
-let browse = { type: "movie", genre: 0, page: 0, totalPages: 1, loading: false };
+let browse = { type: "movie", genre: 0, studio: 0, page: 0, totalPages: 1, loading: false };
+/* ---------- STUDIO FILTER (Movies + TV Shows) ----------
+   Production-company chips with real TMDB logos. Every id + logo path below
+   was verified against the live TMDB API (company + discover probes) — never
+   hand-typed from memory. Anime tab excluded (studio data thin there). */
+const STUDIOS = [
+  { id: 2, name: "Disney", logo: "/wdrCwmRnLFJhEoH8GSfymY85KHT.png" },
+  { id: 3, name: "Pixar", logo: "/1TjvGVDMYsj6JBxOAkUHpPEwLf7.png" },
+  { id: 420, name: "Marvel", logo: "/hUzeosd33nzE5MCNsZxCGEKTXaQ.png" },
+  { id: 1, name: "Lucasfilm", logo: "/tlVSws0RvvtPBwViUyOFAO0vcQS.png" },
+  { id: 10576, name: "DC", logo: "/hiaURo2NrE4Pq2EjafK9BGhbcaK.png" },
+  { id: 174, name: "Warner Bros", logo: "/zhD3hhtKB5qyv7ZeL4uLpNxgMVU.png" },
+  { id: 4, name: "Paramount", logo: "/jay6WcMgagAklUt7i9Euwj1pzTF.png" },
+  { id: 33, name: "Universal", logo: "/8lvHyhjr8oUKOOy2dKXoALWKdp0.png" },
+  { id: 5, name: "Columbia", logo: "/71BqEFAF4V3qjjMPCpLuyJFB9A.png" },
+  { id: 521, name: "DreamWorks", logo: "/3BPX5VGBov8SDqTV7wC1L1xShAS.png" },
+  { id: 10342, name: "Ghibli", logo: "/uFuxPEZRUcBTEiYIxjHJq62Vr77.png" },
+];
 let genreCache = {};
 async function getGenres(type){
   if (genreCache[type]) return genreCache[type];
@@ -2159,7 +2178,7 @@ async function getGenres(type){
 async function openBrowse(type, ev){
   if (ev) ev.preventDefault();
   if (!document.getElementById("watchView").classList.contains("hidden")) goHome();
-  browse = { type, genre: 0, page: 0, totalPages: 1, loading: false };
+  browse = { type, genre: 0, studio: 0, page: 0, totalPages: 1, loading: false };
   document.getElementById("rows").classList.add("hidden");
   document.getElementById("hero").classList.add("hidden");
   document.getElementById("continueRow").classList.add("hidden");
@@ -2189,6 +2208,7 @@ async function openBrowse(type, ev){
       row.appendChild(b);
     });
     paintChips();
+    paintStudios();
   } catch(e){
     row.innerHTML = `<p class="text-xs text-gray-500 py-2">Categories unavailable — showing popular.</p>`;
   }
@@ -2207,6 +2227,57 @@ async function setGenre(id){
   browse.totalPages = 1;
   document.getElementById("grid").innerHTML = "";
   paintChips();
+  browseMore(true);
+}
+function paintStudios(){
+  // studio chip row (Movies + TV only): logo badge on white so dark marks
+  // stay visible, name text always alongside, h-11 for TV remotes
+  const srow = document.getElementById("studioRow");
+  srow.classList.toggle("hidden", browse.type === "anime");
+  if (browse.type === "anime") return;
+  srow.innerHTML = "";
+  const all = document.createElement("button");
+  all.textContent = "All studios";
+  all.dataset.studio = "0";
+  all.onclick = () => setStudio(0);
+  srow.appendChild(all);
+  STUDIOS.forEach(st => {
+    const b = document.createElement("button");
+    b.dataset.studio = String(st.id);
+    b.onclick = () => setStudio(st.id);
+    b.setAttribute("aria-label", st.name + " studio filter");
+    const badge = document.createElement("span");
+    badge.className = "grid place-items-center bg-white rounded-full h-7 w-7 overflow-hidden shrink-0";
+    const img = document.createElement("img");
+    img.src = IMG(st.logo, "w92");
+    img.alt = "";
+    img.loading = "lazy";
+    img.className = "h-5 w-5 object-contain";
+    img.onerror = () => badge.remove();
+    badge.appendChild(img);
+    b.appendChild(badge);
+    const t = document.createElement("span");
+    t.textContent = st.name;
+    b.appendChild(t);
+    srow.appendChild(b);
+  });
+  paintStudioChips();
+}
+function paintStudioChips(){
+  document.querySelectorAll("#studioRow button").forEach(b => {
+    const active = Number(b.dataset.studio) === browse.studio;
+    b.className = "shrink-0 pl-1.5 pr-4 h-11 rounded-full text-sm font-bold flex items-center gap-2 " + (active ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
+  });
+  const base = browse.type === "movie" ? "Movies" : "TV Shows";
+  const st = STUDIOS.find(x => x.id === browse.studio);
+  document.getElementById("gridTitle").textContent = st ? `${base} • ${st.name}` : base;
+}
+function setStudio(id){
+  browse.studio = Number(id) || 0;
+  browse.page = 0;
+  browse.totalPages = 1;
+  document.getElementById("grid").innerHTML = "";
+  paintStudioChips();
   browseMore(true);
 }
 async function browseMore(focusFirst){
@@ -2228,7 +2299,9 @@ async function browseMore(focusFirst){
         if (kw.length) path += `&without_keywords=${kw.join("|")}`;
       }
     } else {
-      path = `/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}&page=${next}`;
+      // studio stacks with genre (TMDB ANDs them); anime never carries one
+      const sc = browse.studio ? `&with_companies=${browse.studio}` : "";
+      path = `/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}${sc}&page=${next}`;
     }
     const d = await tmdb(path);
     browse.page = next;
