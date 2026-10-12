@@ -562,7 +562,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 174; // bump every release alongside version.txt
+  const BUILD_NUM = 175; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2659,6 +2659,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   const anime = detectAnime(type, id);
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
   window._autoHopped = false; // one self-heal per title, never one per app session
+  window._anipmRetryKey = ""; window._anipmStartAt = 0;
   try { gridS = s; } catch(e){}
   try {
     // house route: movies/TV always open on CineSrc, anime always on AniPM.
@@ -3373,11 +3374,13 @@ function armStuckWatchdogs(){
 function loadPlayer(){
   try { hideUpNext(); } catch(e){} // fresh video: no endgame card from the last one
   window._cineErrBurst = []; window._pauseBurst = []; window._lastProgAt = 0; // fresh frame, fresh strikes
-  window._unexpectedPauseAt = 0; window._userPauseHold = false;
+  window._unexpectedPauseAt = 0; window._userPauseHold = false; window._anipmFocusAfterLoad = false; window._anipmKickHintShown = false;
   preconnectCinesrc();  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
   // never strand playback on a hidden server.
   closeVrSheet(); // fresh frame = fresh panel state (options may belong to another episode)
   clearTimeout(window._playKickT); // fresh video, fresh kick verdict
+  clearTimeout(window._anipmKickT);
+  clearTimeout(window._anipmRetryT); window._anipmRetryT = 0;
   clearTapHint(); // fresh video, fresh tap verdict
   if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
   ctlReset();
@@ -3393,11 +3396,6 @@ function loadPlayer(){
     clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
     ctlReset(); ctlPollStop();
     fetchIntroRanges();
-    try {
-      // first press must land INSIDE their player (their rule) — TV app hands
-      // the remote straight there; everyone else gets 🎯/🖱 on the strip
-      if (document.body.classList.contains("tv-mode") && /\bwv\b/.test(navigator.userAgent || "")) focusPlayer();
-    } catch(e){}
     loadAnipmPlayer();
     pokeHud();
     // a title that already earned its unsandboxed retry keeps it across
@@ -4598,6 +4596,7 @@ function setMirror(m, auto){  if (m === "trailer" && !trailerKey) {
   }
   const wasTrailer = mirror === "trailer";
   mirror = m;
+  if (m === "anipm" && !auto) window._anipmRetryKey = "";
   // manual hops reset the one-heal guard (auto-heals must never ping-pong)
   if (!auto) window._autoHopped = false;
   // auto-heals never rewrite the saved preference (or every movie after
@@ -6171,14 +6170,15 @@ function anipmHello(){
   clearTimeout(window._anipmHelloTo);
   window._anipmHelloTo = setTimeout(anipmHello, 1000);
 }
-function anipmMutedKick(){
+function anipmPlayKick(){
   // auto-mute retired (house rule): never start a video silent. Try a plain
   // play; if THIS browser blocks audible autoplay, say so - OK starts it
   // with sound (a real gesture).
   try { anipmSend("play"); } catch(e){}
   try {
     const ws = document.getElementById("watchStatus");
-    if (ws) ws.textContent = "Press OK to play (this browser blocks auto-start)";
+    window._anipmKickHintShown = true;
+    if (ws) ws.textContent = "Press OK if anime playback stays black";
   } catch(e){}
 }
 /* live track state for the A/V sheet (filled by quality/subtitle/language
@@ -6425,10 +6425,13 @@ async function loadAnipmPlayer(){
     aq.set("autonext", document.getElementById("optAutonext").checked ? "1" : "0");
     aq.set("autoskip", document.getElementById("optAutoskip").checked ? "1" : "0");
   } catch(e){}
-  if ((watchState.t || 0) > 0) { aq.set("start", String(Math.floor(watchState.t))); watchState.t = 0; }
+  window._anipmStartAt = Math.max(0, Math.floor(watchState.t || 0));
+  if (window._anipmStartAt > 0) { aq.set("start", String(window._anipmStartAt)); watchState.t = 0; }
   const as = aq.toString();
   const base = ids.mal ? `https://ani.pm/embed/mal/${ids.mal}/${ep}/${lang0}`
     : `https://ani.pm/embed/ani/${ids.ani}/${ep}/${lang0}`;
+  window._anipmFocusAfterLoad = document.body.classList.contains("tv-app")
+    && /\bwv\b/.test(navigator.userAgent || "");
   f.src = as ? `${base}?${as}` : base;
   _anipmLive = false; _anipmHelloT = 0; _anipmQueue.length = 0;
   window._anipmStarted = false;
@@ -6438,14 +6441,27 @@ async function loadAnipmPlayer(){
   // mapped-id transparency (see loadVidboltAnime): the id on screen names
   // exactly what the player was asked for
   window._aniPlayId = ids.mal ? ("MAL " + ids.mal) : ("AniList " + ids.ani);
-  if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e} · ${window._aniPlayId} — first ▶ tap goes inside, then our bar drives`;
+  const aniHint = document.body.classList.contains("tv-mode")
+    ? "TV auto-starts; our bar drives playback"
+    : "first ▶ tap goes inside, then our bar drives";
+  if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e} · ${window._aniPlayId} — ${aniHint}`;
   if ((watchState.t || 0) > 0) { window._anipmResume = Math.floor(watchState.t); watchState.t = 0; }
   else window._anipmResume = 0;
 }
 function anipmProgress(cur, dur){
   if (typeof cur === "number") pState.cur = cur;
   if (typeof dur === "number" && dur > 0) pState.dur = dur;
-  if (typeof cur === "number" && cur > 0.5) { window._cinePlaying = true; window._anipmStarted = true; }
+  if (typeof cur === "number" && cur > 0.5) {
+    window._cinePlaying = true; window._anipmStarted = true;
+    window._anipmStartAt = Math.floor(cur);
+    if (window._anipmKickHintShown) {
+      window._anipmKickHintShown = false;
+      const ws = document.getElementById("watchStatus");
+      if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e} · ${window._aniPlayId || "AniPM"}`;
+    }
+    clearTimeout(window._anipmKickT);
+    clearTimeout(window._anipmRetryT); window._anipmRetryT = 0;
+  }
   try { clearStuckTip(); } catch(e){} try { clearTapHint(); } catch(e){} // playing for real: hop advice served its purpose
   ctlPaint();
   if (dur > 0) saveProgress(cur, dur);
@@ -6497,18 +6513,32 @@ window.addEventListener("message", (event)=>{
   switch (m.event) {
     case "loaded": hideSpin(); break;
     case "ready":
-      hideSpin(); window._cinePlaying = true;
+      hideSpin(); // ready means a player exists, not that playback has started
       _anipmLive = true;
-      // TV black-frame net: ready means the player EXISTS, not that it plays.
-      // If nothing actually starts in 8s (no autoplayblocked ever arrives on
-      // some WebViews), kick muted so the picture appears instead of black.
+      // Ready means the player EXISTS, not that it plays. Ask it to play now
+      // on TV (audible; never muted), then retry once shortly if no frames flow.
       if (document.body.classList.contains("tv-mode")) {
         clearTimeout(window._anipmKickT);
+        anipmSend("play");
         window._anipmKickT = setTimeout(() => {
-          // _cinePlaying is already true from ready above (it means "player
-          // exists", not "picture moving") — _anipmStarted is the real signal
-          if (mirror === "anipm" && !window._anipmStarted) anipmMutedKick();
-        }, 8000);
+          // A ready event only means the player exists; _anipmStarted means
+          // play/timeupdate arrived and the picture is actually moving.
+          if (mirror === "anipm" && !window._anipmStarted) anipmPlayKick();
+        }, 2500);
+        const retryKey = watchState.id + ":" + watchState.s + ":" + watchState.e;
+        if (window._anipmRetryKey !== retryKey && !window._anipmRetryT) {
+          window._anipmRetryT = setTimeout(() => {
+            window._anipmRetryT = 0;
+            if (mirror !== "anipm" || window._anipmStarted
+                || watchState.id + ":" + watchState.s + ":" + watchState.e !== retryKey
+                || window._anipmRetryKey === retryKey) return;
+            window._anipmRetryKey = retryKey;
+            watchState.t = Math.max(0, Math.floor(pState.cur || window._anipmStartAt || 0));
+            const retryStatus = document.getElementById("watchStatus");
+            if (retryStatus) retryStatus.textContent = "AniPM did not start on the first load - retrying once.";
+            loadPlayer();
+          }, 15000);
+        }
       }
       _anipmLive = true;
       try {
@@ -6518,7 +6548,9 @@ window.addEventListener("message", (event)=>{
       if (window._anipmResume > 0) { anipmSend("seek", { time: window._anipmResume }); window._anipmResume = 0; }
       ctlPaint();
       break;
-    case "play": case "playing": pState.paused = false; window._cinePlaying = true; window._anipmStarted = true; ctlPaint(); break;
+    case "play": case "playing":
+      pState.paused = false; window._cinePlaying = true;
+      clearTimeout(window._anipmKickT); ctlPaint(); break;
     case "pause": pState.paused = true; ctlPaint(); break;
     case "seeking": pState.seeking = true; break;
     case "seeked":
@@ -6546,8 +6578,8 @@ window.addEventListener("message", (event)=>{
       else if (d.language) window._anipmTracks.lang = d.language;
       paintAV(); break;
     case "autoplayblocked": {
-      // TV gets a muted kick instead of sitting black; desktop keeps the tap hint
-      if (document.body.classList.contains("tv-mode")) { anipmMutedKick(); break; }
+      // TV gets an audible play kick instead of sitting black; desktop keeps the tap hint
+      if (document.body.classList.contains("tv-mode")) { anipmPlayKick(); break; }
       const wsb = document.getElementById("watchStatus");
       if (wsb) wsb.textContent = "Tap ▶ inside once, then our bar drives";
       break;
@@ -6770,6 +6802,15 @@ function showTitleCard(paired){
 function hideSpin(){ const s = document.getElementById("playerSpin"); if (s) s.style.display = "none"; }
 document.getElementById("player").addEventListener("load", ()=>{
   setTimeout(hideSpin, 800);
+  // The AniPM iframe is assigned only after asynchronous anime-ID mapping.
+  // Focus must follow that real navigation, not the earlier about:blank frame.
+  if (mirror === "anipm" && window._anipmFocusAfterLoad) {
+    window._anipmFocusAfterLoad = false;
+    setTimeout(() => {
+      if (mirror === "anipm" && document.body.classList.contains("tv-app")
+          && !document.getElementById("watchView").classList.contains("hidden")) focusPlayer(true);
+    }, 120);
+  }
   // fresh frame = fresh patience: the ask-time clocks started before ID
   // mapping + network fetch, so restart them from arrival — a slow loader
   // may no longer burn the whole budget before its first byte
