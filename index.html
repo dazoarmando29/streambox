@@ -240,9 +240,11 @@
   #ctlPlay svg { width: 20px; height: 20px; display: block; }
   .tv-mode #ctlPlay { width: 56px; height: 56px; }
   .tv-mode #ctlPlay svg { width: 26px; height: 26px; }
-  /* transport stays left, chrome splits right - the row stops reading as a
-     lonely cluster on TV's wide bar (collapses to one scroll row on phones) */
+  /* transport stays left; the first utility control anchors the right group
+     when CineSrc is a movie and Episodes isn't available. */
   #epDrawerBtn { margin-left: auto; }
+  #ctlBar #ctlMute.ctl-group-start { margin-left: auto; }
+  #ctlBar #epDrawerBtn.ctl-group-joined { margin-left: 0; }
   /* during playback the in-bar cursor button owns this; the floating one
      used to park ON the bar's right end */
   body.watch-on #cursorBtn { display: none !important; }
@@ -562,7 +564,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 177; // bump every release alongside version.txt
+  const BUILD_NUM = 178; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2729,6 +2731,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
     document.getElementById("epNav").classList.add("hidden");
     document.getElementById("epDrawerBtn").classList.add("hidden");
   }
+  paintBarGroups();
   if (!maybeResumePrompt()) { loadPlayer(); saveContinue(); }
   paintTwinTip();
   hideSplash();
@@ -4620,6 +4623,13 @@ function setMirror(m, auto){  if (m === "trailer" && !trailerKey) {
   if (m === "cinesrc" && !wasTrailer) reloadKeepPos();
   else loadPlayer();
 }
+function paintBarGroups(){
+  const ep = document.getElementById("epDrawerBtn");
+  const mute = document.getElementById("ctlMute");
+  const splitCineSrc = mirror === "cinesrc" && mute && !mute.classList.contains("hidden");
+  if (mute) mute.classList.toggle("ctl-group-start", !!splitCineSrc);
+  if (ep) ep.classList.toggle("ctl-group-joined", !!splitCineSrc);
+}
 function updateMirrorUI(){
   const isTrailer = mirror === "trailer";
   const isCS = mirror === "cinesrc" || mirror === "anipm";
@@ -4669,6 +4679,7 @@ function updateMirrorUI(){
   if (mu) mu.classList.toggle("hidden", isPaired);
   const ra = document.getElementById("ctlRate");
   if (ra) ra.classList.toggle("hidden", isPaired);
+  paintBarGroups();
   // sheet hygiene (audit): a mirror hop with the sheet open (auto-heal while
   // picking) must never strand ineligible sections — repaint it for the new
   // mirror, or hide it. closePanels() is NOT used here: setMirror fires from
