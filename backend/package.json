@@ -1,0 +1,11 @@
+{
+  "name": "streambox-api",
+  "private": true,
+  "type": "module",
+  "description": "StreamBox backend (Cloudflare Worker): server-side catalog mapping + provider-key proxy. Provider keys live in Wrangler secrets, never in code or the front end.",
+  "scripts": {
+    "dev": "npx wrangler@4 dev",
+    "deploy": "npx wrangler@4 deploy",
+    "check": "node --check src/index.js"
+  }
+}

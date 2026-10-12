@@ -1,0 +1,46 @@
+name: StreamBox backend (native track)
+
+on:
+  push:
+    branches: [native]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "21"
+
+      - name: Syntax check worker
+        run: node --check backend/src/index.js
+
+      - name: Site QA gate (branch carries the site too)
+        run: node tools/qa.js
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "21"
+
+      - name: Deploy worker (skips cleanly until the secret exists)
+        working-directory: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "CLOUDFLARE_API_TOKEN secret not configured yet - deploy skipped."
+            echo "Add it under repo Settings > Secrets > Variables > Actions to enable."
+            exit 0
+          fi
+          npx wrangler@4 deploy
