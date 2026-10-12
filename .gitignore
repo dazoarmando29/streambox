@@ -6,3 +6,7 @@ android/local.properties
 node_modules/
 .wrangler/
 backend/dist/
+android-native/.gradle/
+android-native/build/
+android-native/app/build/
+android-native/local.properties
