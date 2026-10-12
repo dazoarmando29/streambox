@@ -562,7 +562,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 171; // bump every release alongside version.txt
+  const BUILD_NUM = 172; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -3054,6 +3054,81 @@ function qualityStep(dir){
   clearTimeout(window._qT);
   window._qT = setTimeout(reloadKeepPos, 500);
 }
+/* ---------- Server memory: a source that broke a title never haunts it
+   again. Proven playback pins the server FOR THAT TITLE; failures earn a
+   7-day cooldown for that title only (other titles may love the server).
+   forgetServer / Try-another-source clear the book (your call wins). ---------- */
+function srvKeyGood(type, id){ return "sb:srvgood:" + type + ":" + id; }
+function srvKeyBad(type, id, srv){ return "sb:srvbad:" + type + ":" + id + ":" + srv; }
+function srvMarkGood(srv){
+  try {
+    if (!srv) return;
+    if (window._srvMk === srv) return;
+    window._srvMk = srv;
+    localStorage.setItem(srvKeyGood(watchState.type, watchState.id), String(srv));
+    localStorage.removeItem(srvKeyBad(watchState.type, watchState.id, srv));
+  } catch(e){}
+}
+function srvMarkBad(srv){
+  try {
+    if (!srv) return;
+    localStorage.setItem(srvKeyBad(watchState.type, watchState.id, srv), String(Date.now()));
+    const g = srvKeyGood(watchState.type, watchState.id);
+    if ((localStorage.getItem(g) || "") === String(srv)) localStorage.removeItem(g);
+  } catch(e){}
+}
+function srvIsBad(srv){
+  try {
+    const t = parseInt(localStorage.getItem(srvKeyBad(watchState.type, watchState.id, srv)) || "0", 10);
+    return t > 0 && (Date.now() - t) < 7 * 24 * 3600 * 1000;
+  } catch(e){ return false; }
+}
+function srvPick(){
+  // per-title proven server first, then the global pin - never one that is
+  // in THIS title's bad book
+  try {
+    const g = localStorage.getItem(srvKeyGood(watchState.type, watchState.id));
+    if (g && !srvIsBad(g)) return g;
+    const ls = localStorage.getItem("streambox_lastserver");
+    if (ls && !srvIsBad(ls)) return ls;
+  } catch(e){}
+  return "";
+}
+function srvClearBad(){
+  try {
+    const pre = "sb:srvbad:" + watchState.type + ":" + watchState.id + ":";
+    const drop = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf(pre) === 0) drop.push(k);
+    }
+    drop.forEach(k => localStorage.removeItem(k));
+  } catch(e){}
+}
+/* Self-optimizing quality ladder: a frozen stream gets one step down + a
+   resumed reload (weak boxes and struggling sources BOTH recover here).
+   Once per 10 min; the 480 floor is where the mirror-hop rescue takes over. */
+function qDropAuto(){
+  try {
+    if (window._qDropT && Date.now() - window._qDropT < 600000) return false;
+    window._qDropT = Date.now();
+    if (mirror === "anipm") {
+      anipmSend("setQuality", { height: 480 });
+      const qA = document.getElementById("ctlQ");
+      if (qA) qA.textContent = "480p";
+      return true;
+    }
+    const order = ["", "1080", "720", "480"];
+    const cur = QLEVELS[qIdx].v;
+    const i = order.indexOf(cur);
+    const nxt = order[Math.min(order.length - 1, i < 0 ? 1 : i + 1)];
+    if (nxt === cur) return false; // already at the floor
+    qIdx = Math.max(0, QLEVELS.findIndex(x => x.v === nxt));
+    paintQuality();
+    try { localStorage.setItem("streambox_quality", nxt); } catch(e){}
+    return true;
+  } catch(e){ return false; }
+}
 function buildEmbedUrlClean(){
   // trailer mirror: official YouTube trailer, no player params apply
   if (mirror === "trailer" && trailerKey) {
@@ -3081,8 +3156,8 @@ function buildEmbedUrlClean(){
   }
   // remember the last working server so repeat watches start faster
   try {
-    const ls = localStorage.getItem("streambox_lastserver");
-    if (ls) p += `&prioritize=true&lastserver=${encodeURIComponent(ls)}`;
+    const ls = srvPick();
+    if (ls) p += "&prioritize=true&lastserver=" + encodeURIComponent(ls);
   } catch(e){}
   // (auto-mute retired: the player never starts silent. Plain browsers that
   // block audible autoplay get the tap hint instead - armTapHint covers us.)
@@ -3181,6 +3256,7 @@ function armTapHint(){
 function midPlayRescue(reason){
   try {
     if (document.getElementById("watchView").classList.contains("hidden")) return;
+    try { srvMarkBad(pState.server); } catch(e){} // whatever carried us here is booked
     const at = Math.max(0, Math.floor(pState.cur || 0));
     const fb = stuckFallback(watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
     const nm = stuckFallbackName(fb);
@@ -3436,11 +3512,11 @@ function otherSource(){
     const next = ids[(ids.indexOf(mirror) + 1) % ids.length];
     document.getElementById("watchStatus").textContent = "Trying next mirror…";
     setMirror(next === "cinesrc" ? "cinesrc" : next);
-    if (next === "cinesrc") { try { localStorage.removeItem("streambox_lastserver"); } catch(e){} }
+    if (next === "cinesrc") { try { localStorage.removeItem("streambox_lastserver"); } catch(e){} try { srvMarkBad(pState.server); } catch(e){} }
     return;
   }
   // wrong film / broken stream? forget the pinned server and re-pick (keeps position)
-  try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
+  try { localStorage.removeItem("streambox_lastserver"); } catch(e){} try { srvMarkBad(pState.server); } catch(e){}
   document.getElementById("watchStatus").textContent = "Trying another source…";
   reloadKeepPos();
 }
@@ -3448,7 +3524,7 @@ function wrongVersion(){
   // Wrong cut playing (remake serves the original, cartoon serves live-action)?
   // Different upstreams carry different files — hop to the NEXT mirror and drop
   // any pinned server, so you land on a genuinely different copy.
-  try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
+  try { localStorage.removeItem("streambox_lastserver"); } catch(e){} try { srvMarkBad(pState.server); } catch(e){}
   pState.server = null;
   if (mirror === "trailer") { setMirror("cinesrc"); return; }
   const ids = tvSafeList().map(x => x.id);
@@ -3576,6 +3652,7 @@ function saveProgress(cur, dur){
   // proven playback (vidbolt included now): future stuck-hops prefer this
   // mirror over static guesses — your working mirror may differ per network
   window._lastGood = mirror;
+  try { srvMarkGood(pState.server); } catch(e){} // proven: pin for THIS title
   const now = Date.now();
   if (now - lastProgSave < 15000) return;
   lastProgSave = now;
@@ -3985,6 +4062,15 @@ setInterval(() => {
     const lp = window._lastProgAt || 0;
     if (!lp || Date.now() - lp < 25000) return;
     window._lastProgAt = Date.now(); // one rescue per window
+    // self-optimize first: drop quality a step and resume (weak boxes and
+    // struggling sources both recover here); at the floor = real rescue
+    if (qDropAuto()) {
+      resumeAt = Math.max(0, Math.floor(pState.cur || 0));
+      loadPlayer();
+      const wsx = document.getElementById("watchStatus");
+      if (wsx) wsx.textContent = "Playback froze - dropped quality a step to keep it smooth.";
+      return;
+    }
     midPlayRescue("Playback froze on this source");
   } catch(e){}
 }, 8000);
@@ -4182,11 +4268,11 @@ function paintSettings(){
   paintSpeed(); paintVol(); paintSleep(); paintPControls(); paintQuality(); paintMirrors();
   try {
     document.getElementById("srvCur").textContent = pState.server || "auto";
-    document.getElementById("srvPin").textContent = localStorage.getItem("streambox_lastserver") || "none";
+    document.getElementById("srvPin").textContent = srvPick() || "none";
   } catch(e){}
 }
 function forgetServer(){
-  try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
+  try { localStorage.removeItem("streambox_lastserver"); } catch(e){} srvClearBad(); try { localStorage.removeItem(srvKeyGood(watchState.type, watchState.id)); } catch(e){}
   pState.server = null;
   paintSettings();
   document.getElementById("watchStatus").textContent = "Server preference cleared — Auto mode";
@@ -6728,7 +6814,7 @@ window.addEventListener("message", (event)=>{
   if(type === "cinesrc:sourceused" && data.sourceId){
     // remember working server for faster repeat loads (used as lastserver)
     pState.server = String(data.sourceId);
-    try { localStorage.setItem("streambox_lastserver", pState.server); } catch(e){}
+    try { localStorage.setItem("streambox_lastserver", pState.server); } catch(e){} try { srvMarkGood(pState.server); } catch(e){}
     if (!document.getElementById("setPanel").classList.contains("hidden")) paintSettings();
   }
   if(type === "cinesrc:error"){
@@ -6738,7 +6824,7 @@ window.addEventListener("message", (event)=>{
     // warn patience, so a source-cycling player is never yanked early),
     // else name the hop. Mid-playback blips are ignored (recovery wins).
     hideSpin();
-    try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
+    try { localStorage.removeItem("streambox_lastserver"); } catch(e){} try { srvMarkBad(pState.server); } catch(e){}
     try { window._cineErr = String((data && data.error) || "error").slice(0, 120); } catch(e){}
     if (mirror !== "cinesrc" || window._cinePlaying || (pState.dur || 0) > 0) {
       // mid-playback blips: recovery wins ONCE. A BURST of them means the
