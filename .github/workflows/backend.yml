@@ -14,7 +14,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "21"
+          node-version: "22"
 
       - name: Syntax check worker
         run: node --check backend/src/index.js
@@ -31,7 +31,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "21"
+          node-version: "22"
 
       - name: Deploy worker (skips cleanly until the secret exists)
         working-directory: backend
@@ -43,4 +43,4 @@ jobs:
             echo "Add it under repo Settings > Secrets > Variables > Actions to enable."
             exit 0
           fi
-          npx wrangler@4 deploy
+          npx wrangler@3 deploy

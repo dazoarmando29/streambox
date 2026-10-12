@@ -1,7 +1,7 @@
 # StreamBox API - Cloudflare Worker (native track backend).
 # No bindings: everything is stateless + Workers Cache API, so `wrangler
 # deploy` is the only provisioning step. Secrets (set once per account):
-#   npx wrangler secret put TMDB_API_KEY
+#   npx wrangler@3 secret put TMDB_API_KEY
 name = "streambox-api"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
