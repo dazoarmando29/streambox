@@ -11,6 +11,7 @@ data class Title(
     val type: String, // "movie" | "tv" | "anime"
     val name: String,
     val poster: String?,
+    val backdrop: String?,
     val year: Int,
     val overview: String,
     val vote: Double,
@@ -23,6 +24,7 @@ data class AnimeIds(val mal: Int?, val ani: Int?)
 object Api {
     private const val BASE = BuildConfig.API_BASE
     private const val IMG = "https://image.tmdb.org/t/p/w342"
+    private const val IMG_W780 = "https://image.tmdb.org/t/p/w780"
 
     private fun get(path: String): JSONObject {
         val conn = URL(BASE + path).openConnection() as HttpURLConnection
@@ -40,9 +42,9 @@ object Api {
         }
     }
 
-    private fun posterOf(o: JSONObject): String? {
-        val p = o.optString("poster_path", "")
-        return if (p.isNullOrEmpty() || p == "null") null else IMG + p
+    private fun img(o: JSONObject, key: String, base: String): String? {
+        val p = o.optString(key, "")
+        return if (p.isNullOrEmpty() || p == "null") null else base + p
     }
 
     private fun yearOf(o: JSONObject): Int {
@@ -68,7 +70,8 @@ object Api {
                     id = id,
                     type = type,
                     name = titleOf(o),
-                    poster = posterOf(o),
+                    poster = img(o, "poster_path", IMG),
+                    backdrop = img(o, "backdrop_path", IMG_W780),
                     year = yearOf(o),
                     overview = o.optString("overview", ""),
                     vote = o.optDouble("vote_average", 0.0),
@@ -78,15 +81,31 @@ object Api {
         return out
     }
 
+    fun trending(): List<Title> =
+        titlesFrom(get("/api/tmdb/3/trending/all/week").getJSONArray("results"), null)
+
     fun popularMovies(): List<Title> =
         titlesFrom(get("/api/tmdb/3/movie/popular").getJSONArray("results"), "movie")
+
+    fun topRatedMovies(): List<Title> =
+        titlesFrom(get("/api/tmdb/3/movie/top_rated").getJSONArray("results"), "movie")
 
     fun popularTv(): List<Title> =
         titlesFrom(get("/api/tmdb/3/tv/popular").getJSONArray("results"), "tv")
 
+    fun topRatedTv(): List<Title> =
+        titlesFrom(get("/api/tmdb/3/tv/top_rated").getJSONArray("results"), "tv")
+
     fun anime(): List<Title> =
         titlesFrom(
             get("/api/tmdb/3/discover/tv?with_genres=16&with_original_language=ja&sort_by=popularity.desc")
+                .getJSONArray("results"),
+            "anime"
+        )
+
+    fun animeTop(): List<Title> =
+        titlesFrom(
+            get("/api/tmdb/3/discover/tv?with_genres=16&with_original_language=ja&sort_by=vote_average.desc&vote_count.gte=80")
                 .getJSONArray("results"),
             "anime"
         )
