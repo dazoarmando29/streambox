@@ -562,7 +562,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 170; // bump every release alongside version.txt
+  const BUILD_NUM = 171; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -3174,6 +3174,27 @@ function armTapHint(){
    time AND re-armed on every frame load, so slow ID-mapping + slow networks
    can't eat the budget before loading even begins — only a frame that arrived
    and still shows zero playback may trigger a retry or heal. */
+/* Mid-playback rescue: the SOURCE is actually broken (error bursts, frozen
+   clock, self-pause loops) - not a blip. Manual mode names the hop (press
+   the Source button); auto mode TAKES it once (heal-once guard, no
+   ping-pong) and resumes where playback died. */
+function midPlayRescue(reason){
+  try {
+    if (document.getElementById("watchView").classList.contains("hidden")) return;
+    const at = Math.max(0, Math.floor(pState.cur || 0));
+    const fb = stuckFallback(watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
+    const nm = stuckFallbackName(fb);
+    if (autoSwitchOn() && !window._autoHopped) {
+      window._autoHopped = true;
+      if (at > 5) watchState.t = at; // resume where it died
+      setMirror(fb, true);
+      const ws = document.getElementById("watchStatus");
+      if (ws) ws.textContent = reason + " \u2014 moved you to " + nm + ", resuming at " + fmtT(at) + ".";
+      return;
+    }
+    stuckRecommend(reason, nm);
+  } catch(e){}
+}
 function armStuckWatchdogs(){
   clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
   if (window._cinePlaying) return;
@@ -3252,6 +3273,7 @@ function armStuckWatchdogs(){
 }
 function loadPlayer(){
   try { hideUpNext(); } catch(e){} // fresh video: no endgame card from the last one
+  window._cineErrBurst = []; window._pauseBurst = []; window._lastProgAt = 0; // fresh frame, fresh strikes
   preconnectCinesrc();  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
   // never strand playback on a hidden server.
   closeVrSheet(); // fresh frame = fresh panel state (options may belong to another episode)
@@ -3775,6 +3797,7 @@ function ctlPaint(){
     if (b) b.textContent = rate + "\u00D7";
   }
   if (L.cur !== cur || L.dur !== dur) {
+    if (L.cur !== cur) window._lastProgAt = Date.now(); // stall watchdog feeds
     L.cur = cur; L.dur = dur;
     const cEl = document.getElementById("ctlCur");
     if (cEl) cEl.textContent = fmtT(cur);
@@ -3821,6 +3844,7 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
     return;
   }
   pState.paused = !pState.paused;
+  if (pState.paused) window._userPauseAt = Date.now();
   sendCmd(pState.paused ? "pause" : "play");
   ctlPaint();
 }
@@ -3949,6 +3973,21 @@ function hideSubTip(forever){
   if (b) b.classList.remove("tip-glow");
   if (forever) { try { localStorage.setItem("streambox_subtip_off", "1"); } catch(e){} }
 }
+/* Mid-playback stall watchdog: 25s of frozen clock while "playing", past
+   the last 15s of the film, = a rebuffer loop the player never escapes.
+   Self-pauses we did not command count into the same rescue. */
+setInterval(() => {
+  try {
+    if (document.getElementById("watchView").classList.contains("hidden")) return;
+    if (mirror === "trailer" || pState.paused) return;
+    if (!(pState.dur > 0) || (pState.cur || 0) < 5) return;
+    if (pState.cur > pState.dur - 15) return; // tail/credits: frozen is normal
+    const lp = window._lastProgAt || 0;
+    if (!lp || Date.now() - lp < 25000) return;
+    window._lastProgAt = Date.now(); // one rescue per window
+    midPlayRescue("Playback froze on this source");
+  } catch(e){}
+}, 8000);
 function ctlPollStart(){
   ctlPollStop();
   if (mirror !== "cinesrc") return; // our command API only answers on CineSrc
@@ -6630,7 +6669,20 @@ window.addEventListener("message", (event)=>{
     sendCmd("getQualities");
   }
   if(type === "cinesrc:play") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
-  if(type === "cinesrc:pause") { pState.paused = true; ctlPaint(); }
+  if(type === "cinesrc:pause") {
+    pState.paused = true; ctlPaint();
+    // pauses WE did not command (buffer-stall loops, flaky embeds): a burst
+    // of them is the source struggling, not the viewer
+    try {
+      if (Date.now() - (window._userPauseAt || 0) > 4000) {
+        const nowP = Date.now();
+        const P = window._pauseBurst || (window._pauseBurst = []);
+        while (P.length && nowP - P[0] > 120000) P.shift();
+        P.push(nowP);
+        if (P.length >= 3) { P.length = 0; midPlayRescue("This source keeps pausing itself"); }
+      }
+    } catch(e){}
+  }
   if(type === "cinesrc:timeupdate" || type === "cinesrc:seeked" || type === "cinesrc:seeking") {
     if (typeof data.currentTime === "number") pState.cur = data.currentTime;
     if (typeof data.duration === "number" && data.duration > 0) pState.dur = data.duration;
@@ -6688,7 +6740,19 @@ window.addEventListener("message", (event)=>{
     hideSpin();
     try { localStorage.removeItem("streambox_lastserver"); } catch(e){}
     try { window._cineErr = String((data && data.error) || "error").slice(0, 120); } catch(e){}
-    if (mirror !== "cinesrc" || window._cinePlaying || (pState.dur || 0) > 0) return;
+    if (mirror !== "cinesrc" || window._cinePlaying || (pState.dur || 0) > 0) {
+      // mid-playback blips: recovery wins ONCE. A BURST of them means the
+      // source is actually broken (bad encode, dying CDN) - three strikes
+      // in 2 minutes get a rescue. The pin above is already dropped.
+      try {
+        const nowB = Date.now();
+        const B = window._cineErrBurst || (window._cineErrBurst = []);
+        while (B.length && nowB - B[0] > 120000) B.shift();
+        B.push(nowB);
+        if (B.length >= 3) { B.length = 0; midPlayRescue("This source keeps failing"); }
+      } catch(e){}
+      return;
+    }
     const fb = stuckFallback(watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
     const nm = stuckFallbackName(fb);
     const age = window._loadT ? Date.now() - window._loadT : 0;
@@ -6705,6 +6769,7 @@ window.addEventListener("message", (event)=>{
   if(type === "cinesrc:ended"){
     markWatched();
     if (sleepOnEnd) {
+      window._userPauseAt = Date.now();
       sendCmd("pause");
       pState.paused = true; ctlPaint();
       const ws = document.getElementById("watchStatus");
