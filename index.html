@@ -562,7 +562,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 172; // bump every release alongside version.txt
+  const BUILD_NUM = 173; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1247,9 +1247,10 @@ function cursorLoop(now){
   // weak TV GPUs drop frames while video decodes — clamp at 100ms (not 50)
   // so the pointer keeps real-time speed instead of slow-motioning judder
   const dt = Math.min(0.1, Math.max(0, ((now || performance.now()) - c.last) / 1000)); c.last = (now || performance.now());
-  // big TV screens need a faster pointer: higher top speed + harder ramp
+  // tuned for AIMING, not racing: hold briefly = precise creep, hold longer
+  // = cruise (old 2300px/s + instant 24px-per-repeat jumped past every button)
   const tvBoost = document.body.classList.contains("tv-mode");
-  const top = tvBoost ? 2300 : 1500, acc = tvBoost ? 10000 : 6000;
+  const top = tvBoost ? 850 : 1400, acc = tvBoost ? 2600 : 5600;
   let dx = 0, dy = 0;
   if (c.dirs.has("left")) dx -= 1; if (c.dirs.has("right")) dx += 1;
   if (c.dirs.has("up")) dy -= 1; if (c.dirs.has("down")) dy += 1;
@@ -1263,7 +1264,7 @@ function cursorLoop(now){
   } else if (c.speed > 0) {
     // genuine ease-out: keep gliding along the last heading while braking
     // (before, release just froze the pointer mid-screen)
-    c.speed = Math.max(0, c.speed - 9000 * dt);
+    c.speed = Math.max(0, c.speed - 6500 * dt);
     if (c.gx || c.gy) {
       c.x += c.gx * c.speed * dt; c.y += c.gy * c.speed * dt;
       c.x = Math.max(6, Math.min(window.innerWidth - 6, c.x));
@@ -1280,10 +1281,27 @@ window.addEventListener("keyup", (e) => {
 });
 function cursorClick(){
   const c = window._cursor;
-  const el = document.elementFromPoint(c.x, c.y);
-  if (el) {
-    try { el.click(); } catch(e){}
-    try { if (el.focus) el.focus({ preventScroll: true }); } catch(e){}
+  let el = null;
+  try { el = document.elementFromPoint(c.x, c.y); } catch(e){}
+  // what is under the point, if anything, is actually clickable?
+  let target = (el && el.closest) ? el.closest("button, a, [role='button'], select, .card, .mnav-btn") : null;
+  if (!target) {
+    // snap-assist: empty space (or a dead overlay) = take the nearest
+    // clickable within 60px, so a near-miss still presses the button
+    let best = null, bestD = 61;
+    document.querySelectorAll("button, a, [role='button'], select, .card, .mnav-btn").forEach(b => {
+      const r = b.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      const cx = Math.max(r.left, Math.min(c.x, r.right));
+      const cy = Math.max(r.top, Math.min(c.y, r.bottom));
+      const d = Math.hypot(c.x - cx, c.y - cy);
+      if (d < bestD) { bestD = d; best = b; }
+    });
+    target = best;
+  }
+  if (target) {
+    try { target.click(); } catch(e){}
+    try { if (target.focus) target.focus({ preventScroll: true }); } catch(e){}
   }
 }
 function okPressed(e){
@@ -1635,8 +1653,9 @@ function purgeRetiredCaches(){
         c.dirs.add(dir);
         // belt-and-suspenders: an instant 24px nudge per press (so a dead or
         // throttled rAF on weak TV WebViews still moves it) plus a loop restart
-        if (dir === "left") c.x -= 24; else if (dir === "right") c.x += 24;
-        else if (dir === "up") c.y -= 24; else if (dir === "down") c.y += 24;
+        const step = e.repeat ? 6 : 14;
+        if (dir === "left") c.x -= step; else if (dir === "right") c.x += step;
+        else if (dir === "up") c.y -= step; else if (dir === "down") c.y += step;
         c.x = Math.max(6, Math.min(window.innerWidth - 6, c.x));
         c.y = Math.max(6, Math.min(window.innerHeight - 6, c.y));
         cursorPaint();
