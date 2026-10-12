@@ -562,7 +562,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 176; // bump every release alongside version.txt
+  const BUILD_NUM = 177; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2659,7 +2659,8 @@ async function openWatch(type, id, s=1, e=1, t=0){
   const anime = detectAnime(type, id);
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
   window._autoHopped = false; // one self-heal per title, never one per app session
-  window._anipmRetryKey = ""; window._anipmRetryCount = 0; window._anipmStartAt = 0;
+  window._anipmRetryKey = ""; window._anipmRetryCount = 0; window._anipmStartAt = 0; window._anipmGestureBlocked = false;
+  window._boltRetryKey = ""; window._boltRetryCount = 0; window._boltStartAt = 0;
   try { gridS = s; } catch(e){}
   try {
     // house route: movies/TV always open on CineSrc, anime always on AniPM.
@@ -3297,7 +3298,9 @@ function midPlayRescue(reason){
 }
 function armStuckWatchdogs(){
   clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
-  const hasPlayback = () => mirror === "anipm" ? !!window._anipmStarted : !!window._cinePlaying;
+  const hasPlayback = () => mirror === "anipm" ? !!window._anipmStarted
+    : mirror === "vidbolt" ? !!window._boltProgress
+    : mirror === "vidzen" ? !!window._zenStarted : !!window._cinePlaying;
   if (hasPlayback()) return;
   if (mirror !== "anipm" && mirror !== "vidrift" && mirror !== "vidbolt" && mirror !== "vidzen") return;
   const _aTV = document.body.classList.contains("tv-mode");
@@ -3358,11 +3361,13 @@ function armStuckWatchdogs(){
     const fb = stuckFallback(watchState.anime ? "anipm" : (_aTV ? "yapgrid" : "vidrift"));
     const fbn = stuckFallbackName(fb);
     window._watchdog = setTimeout(() => {
-      if (window._cinePlaying || (mirror !== "vidbolt" && mirror !== "vidzen")) return;
+      if ((mirror === "vidbolt" ? window._boltProgress : window._zenStarted)
+          || (mirror !== "vidbolt" && mirror !== "vidzen")) return;
       stuckRecommend(`${nm} is taking a while — slow boxes can need a full minute`, fbn);
     }, _aTV ? 45000 : 18000);
     window._watchdog2 = setTimeout(() => {
-      if (window._cinePlaying || (mirror !== "vidbolt" && mirror !== "vidzen")) return;
+      if ((mirror === "vidbolt" ? window._boltProgress : window._zenStarted)
+          || (mirror !== "vidbolt" && mirror !== "vidzen")) return;
       if (window._autoHopped || !autoSwitchOn()) { stuckRecommend(`${nm} stayed stuck`, fbn); return; }
       window._autoHopped = true;
       const wsb = document.getElementById("watchStatus");
@@ -3375,13 +3380,15 @@ function armStuckWatchdogs(){
 function loadPlayer(){
   try { hideUpNext(); } catch(e){} // fresh video: no endgame card from the last one
   window._cineErrBurst = []; window._pauseBurst = []; window._lastProgAt = 0; // fresh frame, fresh strikes
-  window._unexpectedPauseAt = 0; window._userPauseHold = false; window._anipmFocusAfterLoad = false; window._anipmKickHintShown = false;
+  window._unexpectedPauseAt = 0; window._userPauseHold = false; window._anipmFocusAfterLoad = false; window._anipmKickHintShown = false; window._anipmGestureBlocked = false;
   preconnectCinesrc();  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
   // never strand playback on a hidden server.
   closeVrSheet(); // fresh frame = fresh panel state (options may belong to another episode)
   clearTimeout(window._playKickT); // fresh video, fresh kick verdict
   clearTimeout(window._anipmKickT);
   clearTimeout(window._anipmRetryT); window._anipmRetryT = 0;
+  clearTimeout(window._boltRetryT); window._boltRetryT = 0;
+  window._boltProgress = false;
   clearTapHint(); // fresh video, fresh tap verdict
   if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
   ctlReset();
@@ -3423,6 +3430,7 @@ function loadPlayer(){
   // cache-bust so back-to-back reloads always refresh (keeps position via &t=)
   const _u = buildEmbedUrlClean();
   f.src = _u + (_u.includes("?") ? "&" : "?") + "_=" + Date.now();
+  if (mirror === "vidbolt") boltArmStartRetry(document.body.classList.contains("tv-mode") ? 45000 : 25000);
   window._loadT = Date.now(); // frame birth: dead-press guidance measures from here
   const { type, s, e } = watchState;
   window._cinePlaying = false;
@@ -4537,8 +4545,9 @@ function mirrorUrl(id){
       let _bt = -1;
       if (resumeAt >= 0) { _bt = resumeAt; resumeAt = -1; }
       else if ((watchState.t || 0) > 0) { _bt = Math.floor(watchState.t); watchState.t = 0; }
+      window._boltStartAt = Math.max(0, Math.floor(_bt));
       if (_bt > 0) bp.set("startAt", String(Math.floor(_bt)));
-      window._boltDur = 0; window._boltStarted = false; window._boltSeekQ = null; // fresh frame, fresh duration
+      window._boltDur = 0; window._boltStarted = false; window._boltProgress = false; window._boltSeekQ = null; // fresh frame, fresh duration
       const bq = bp.toString();
       return tv
         ? `https://vidbolt.pro/tv/${tmdb}/${s}/${e}?${bq}`
@@ -4597,7 +4606,8 @@ function setMirror(m, auto){  if (m === "trailer" && !trailerKey) {
   }
   const wasTrailer = mirror === "trailer";
   mirror = m;
-  if (m === "anipm" && !auto) { window._anipmRetryKey = ""; window._anipmRetryCount = 0; }
+  if (m === "anipm" && !auto) { window._anipmRetryKey = ""; window._anipmRetryCount = 0; window._anipmGestureBlocked = false; }
+  if (m === "vidbolt" && !auto) { window._boltRetryKey = ""; window._boltRetryCount = 0; }
   // manual hops reset the one-heal guard (auto-heals must never ping-pong)
   if (!auto) window._autoHopped = false;
   // auto-heals never rewrite the saved preference (or every movie after
@@ -5621,7 +5631,7 @@ function skipIntroNow(){
   _skipT = Date.now();
   if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
-  else if (mirror === "vidbolt") boltSeekTo(hit.end);
+  else if (mirror === "vidbolt") boltSkipTo(hit.end);
   else if (mirror === "vidzen") zenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
@@ -5642,7 +5652,7 @@ function skipRecapNow(){
   _skipT = Date.now();
   if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
-  else if (mirror === "vidbolt") boltSeekTo(hit.end);
+  else if (mirror === "vidbolt") boltSkipTo(hit.end);
   else if (mirror === "vidzen") zenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
@@ -5699,7 +5709,7 @@ function skipOutroNow(){
   if (!end) return;
   if (mirror === "cinesrc") sendCmd("seek", [end]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: end });
-  else if (mirror === "vidbolt") boltSeekTo(end);
+  else if (mirror === "vidbolt") boltSkipTo(end);
   else if (mirror === "vidzen") zenSeekTo(end);
   else if (mirror === "anipm") anipmSend("seek", { time: end });
   const ws = document.getElementById("watchStatus");
@@ -5759,7 +5769,7 @@ function autoSkipIntro(){
   _skipT = now;
   if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
-  else if (mirror === "vidbolt") boltSeekTo(hit.end);
+  else if (mirror === "vidbolt") boltSkipTo(hit.end);
   else if (mirror === "vidzen") zenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
@@ -6057,6 +6067,38 @@ window.addEventListener("message", (event)=>{
     Volume has a command but no volume events (blind toggles desync) and TV
     keys own volume anyway, so mute/rate stay hidden: no dead buttons. */
 const BOLT_ORIGIN = "https://vidbolt.pro";
+function boltArmStartRetry(delay){
+  const key = [watchState.type, watchState.id, watchState.s, watchState.e].join(":");
+  if (window._boltRetryKey !== key) {
+    window._boltRetryKey = key;
+    window._boltRetryCount = 0;
+  }
+  if (mirror !== "vidbolt" || !document.body.classList.contains("tv-mode")
+      || window._boltProgress) return;
+  clearTimeout(window._boltRetryT);
+  window._boltRetryT = setTimeout(() => {
+    window._boltRetryT = 0;
+    if (mirror !== "vidbolt" || window._boltProgress
+        || [watchState.type, watchState.id, watchState.s, watchState.e].join(":") !== key) return;
+    const used = window._boltRetryCount || 0;
+    if (used < 2) {
+      window._boltRetryCount = used + 1;
+      const at = Math.max(0, Math.floor(pState.cur || window._boltStartAt || 0));
+      if (watchState.anime) watchState.t = at;
+      else resumeAt = at;
+      const ws = document.getElementById("watchStatus");
+      if (ws) ws.textContent = `VidBolt startup retry ${window._boltRetryCount}/2...`;
+      loadPlayer();
+      return;
+    }
+    const fb = stuckFallback(watchState.anime ? "anipm" : "yapgrid");
+    const nm = stuckFallbackName(fb);
+    if (!autoSwitchOn()) { stuckRecommend("VidBolt stayed loading after two retries", nm); return; }
+    const ws = document.getElementById("watchStatus");
+    if (ws) ws.textContent = `VidBolt stayed loading after two retries — moving to ${nm}.`;
+    setMirror(fb, true);
+  }, delay);
+}
 function boltSend(msg){
   try {
     document.getElementById("player").contentWindow.postMessage(msg, BOLT_ORIGIN);
@@ -6072,6 +6114,20 @@ function boltSeekTo(t){
   if (!window._boltStarted && !(pState.dur > 0)) { window._boltSeekQ = cl; return; }
   window._boltSeekQ = null;
   boltSend({ type: "seek", time: cl });
+}
+function boltSkipTo(t){
+  // VidBolt can keep reporting time after an in-place intro seek while its
+  // video surface stays black. Reopen at the marker through its supported
+  // startAt parameter instead of leaving the viewer on a dead decode path.
+  if (mirror !== "vidbolt") return;
+  const at = Math.max(0, Math.floor(t || 0));
+  window._boltRetryKey = [watchState.type, watchState.id, watchState.s, watchState.e].join(":");
+  window._boltRetryCount = 0; window._boltStartAt = at;
+  if (watchState.anime) { watchState.t = at; resumeAt = -1; }
+  else { resumeAt = at; watchState.t = 0; }
+  const ws = document.getElementById("watchStatus");
+  if (ws) ws.textContent = "Skipping ahead - restarting the VidBolt stream at " + fmtT(at) + ".";
+  loadPlayer();
 }
 function boltSeekRel(d){
   // TV remote L/R: skip from OUR side using last progress (same as VidRift)
@@ -6111,6 +6167,10 @@ window.addEventListener("message", (event)=>{
   if (d.type === "ready") {
     hideSpin(); ctlPaint();
     showTitleCard();
+    if (document.body.classList.contains("tv-mode")) {
+      boltSend({ type: "play" });
+      boltArmStartRetry(15000);
+    }
     return;
   }
   if (d.type === "durationchange") {
@@ -6122,7 +6182,11 @@ window.addEventListener("message", (event)=>{
     // timeupdate carries time only — duration rides the earlier durationchange
     if (typeof d.time === "number") pState.cur = d.time;
     if ((window._boltDur || 0) > 0) pState.dur = window._boltDur;
-    if (typeof d.time === "number" && d.time > 0.5) { window._cinePlaying = true; window._boltStarted = true; }
+    if (typeof d.time === "number" && d.time > 0.5) {
+      window._cinePlaying = true; window._boltStarted = true; window._boltProgress = true;
+      window._boltStartAt = Math.floor(d.time);
+      clearTimeout(window._boltRetryT); window._boltRetryT = 0;
+    }
     try { clearStuckTip(); } catch(e){} try { clearTapHint(); } catch(e){}
     hideSpin(); ctlPaint();
     // flush any seek that queued before the frame announced itself
@@ -6381,9 +6445,11 @@ async function loadVidboltAnime(){
     const c = String(document.getElementById("optColor").value || "#14b8a6").replace("#", "");
     if (/^[0-9a-fA-F]{6}$/.test(c)) ap.set("theme", c);
   } catch(e){}
-  if ((watchState.t || 0) > 0) { ap.set("startAt", String(Math.floor(watchState.t))); watchState.t = 0; }
-  window._boltDur = 0; window._boltStarted = false; window._boltSeekQ = null; // fresh frame, fresh duration
+  window._boltStartAt = Math.max(0, Math.floor(watchState.t || 0));
+  if (window._boltStartAt > 0) { ap.set("startAt", String(window._boltStartAt)); watchState.t = 0; }
+  window._boltDur = 0; window._boltStarted = false; window._boltProgress = false; window._boltSeekQ = null; // fresh frame, fresh duration
   f.src = vu + "?" + ap.toString() + "&_=" + Date.now();
+  boltArmStartRetry(45000);
   armStuckWatchdogs(); // anime path returns early — needs its own clocks
   // same autoplay-kick as the generic path (TV WebViews block audible autoplay)
   clearTimeout(window._playKickT);
@@ -6401,12 +6467,13 @@ function anipmArmStartRetry(delay){
     window._anipmRetryKey = key;
     window._anipmRetryCount = 0;
   }
-  if (mirror !== "anipm" || !document.body.classList.contains("tv-mode")
-      || window._anipmStarted) return;
+  if (mirror !== "anipm" || window._anipmStarted
+      || (window._anipmGestureBlocked && !document.body.classList.contains("tv-mode"))) return;
   clearTimeout(window._anipmRetryT);
   window._anipmRetryT = setTimeout(() => {
     window._anipmRetryT = 0;
     if (mirror !== "anipm" || window._anipmStarted
+        || (window._anipmGestureBlocked && !document.body.classList.contains("tv-mode"))
         || [watchState.type, watchState.id, watchState.s, watchState.e].join(":") !== key) return;
     const used = window._anipmRetryCount || 0;
     if (used < 2) {
@@ -6467,7 +6534,8 @@ async function loadAnipmPlayer(){
   window._anipmStarted = false;
   clearTimeout(window._anipmKickT);
   f.src = as ? `${base}?${as}` : base;
-  anipmArmStartRetry(45000); // allow slow TV loads; still retry if AniPM never sends ready
+  anipmArmStartRetry(document.body.classList.contains("tv-mode") ? 45000 : 25000);
+  armTapHint(); // browsers may need a real in-player gesture; never silently wait
   if (!window._anipmTracks.lang) window._anipmTracks.lang = "sub";
   setTimeout(anipmHello, 800);
   // mapped-id transparency (see loadVidboltAnime): the id on screen names
@@ -6485,6 +6553,7 @@ function anipmProgress(cur, dur){
   if (typeof dur === "number" && dur > 0) pState.dur = dur;
   if (typeof cur === "number" && cur > 0.5) {
     window._cinePlaying = true; window._anipmStarted = true;
+    window._anipmGestureBlocked = false;
     window._anipmStartAt = Math.floor(cur);
     if (window._anipmKickHintShown) {
       window._anipmKickHintShown = false;
@@ -6547,18 +6616,15 @@ window.addEventListener("message", (event)=>{
     case "ready":
       hideSpin(); // ready means a player exists, not that playback has started
       _anipmLive = true;
-      // Ready means the player EXISTS, not that it plays. Ask it to play now
-      // on TV (audible; never muted), then retry the startup if no frames flow.
-      if (document.body.classList.contains("tv-mode")) {
-        clearTimeout(window._anipmKickT);
-        anipmSend("play");
-        window._anipmKickT = setTimeout(() => {
-          // A ready event only means the player exists; _anipmStarted means
-          // play/timeupdate arrived and the picture is actually moving.
-          if (mirror === "anipm" && !window._anipmStarted) anipmPlayKick();
-        }, 2500);
-        anipmArmStartRetry(15000);
-      }
+      // Ready means the player EXISTS, not that it plays. Try an audible play
+      // on every target, then retry if no actual timeupdate reaches our bar.
+      clearTimeout(window._anipmKickT);
+      anipmSend("play");
+      window._anipmKickT = setTimeout(() => {
+        if (mirror === "anipm" && !window._anipmStarted
+            && (!window._anipmGestureBlocked || document.body.classList.contains("tv-mode"))) anipmPlayKick();
+      }, 2500);
+      anipmArmStartRetry(15000);
       _anipmLive = true;
       try {
         anipmSend("setAutoNext", { on: !!document.getElementById("optAutonext").checked });
@@ -6569,6 +6635,7 @@ window.addEventListener("message", (event)=>{
       break;
     case "play": case "playing":
       pState.paused = false; window._cinePlaying = true;
+      window._anipmGestureBlocked = false;
       clearTimeout(window._anipmKickT); ctlPaint(); break;
     case "pause": pState.paused = true; ctlPaint(); break;
     case "seeking": pState.seeking = true; break;
@@ -6599,8 +6666,19 @@ window.addEventListener("message", (event)=>{
     case "autoplayblocked": {
       // TV gets an audible play kick instead of sitting black; desktop keeps the tap hint
       if (document.body.classList.contains("tv-mode")) { anipmPlayKick(); break; }
+      window._anipmGestureBlocked = true;
+      clearTimeout(window._anipmRetryT); window._anipmRetryT = 0;
       const wsb = document.getElementById("watchStatus");
-      if (wsb) wsb.textContent = "Tap ▶ inside once, then our bar drives";
+      if (wsb) wsb.textContent = "Click once inside the video to start; then our bar drives it";
+      try {
+        const t = document.getElementById("volToast");
+        if (t) {
+          t.textContent = "Click once inside the anime video to allow playback";
+          t.classList.remove("hidden");
+          clearTimeout(window._anipmTapHintT);
+          window._anipmTapHintT = setTimeout(() => { try { t.classList.add("hidden"); } catch(e){} }, 9000);
+        }
+      } catch(e){}
       break;
     }
     case "ended": anipmEnded(); break;
