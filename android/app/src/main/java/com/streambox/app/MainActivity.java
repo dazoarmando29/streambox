@@ -22,6 +22,10 @@ public class MainActivity extends Activity {
     private View fullscreenView;
     private WebChromeClient.CustomViewCallback fullscreenCallback;
 
+    private static boolean isHostOrSubdomain(String host, String domain) {
+        return host.equals(domain) || host.endsWith("." + domain);
+    }
+
     /** TV boxes (Leanback / television UI mode) get the ?tv=1 remote layout;
         phones and tablets get the touch-first UI (?tv=1 would force giant
         TV chrome and break touch navigation). */
@@ -117,25 +121,23 @@ public class MainActivity extends Activity {
                 String host = "";
                 try { host = request.getUrl().getHost(); if (host == null) host = ""; }
                 catch (Exception ignored) { host = ""; }
-                host = host.toLowerCase();
+                host = host.toLowerCase(java.util.Locale.US);
                 // Allowlist: our site + TMDB + CineSrc + all mirror players + trailer.
                 // Everything else (ad popups, hijacks, non-http schemes) is cancelled
                 // so a bad mirror can never navigate the app away.
                 boolean allowed =
                         url.startsWith("https://dazoarmando29.github.io/")
-                        || host.equals("cinesrc.st") || host.endsWith(".cinesrc.st")
-                        || host.endsWith("themoviedb.org") || host.endsWith("image.tmdb.org")
-                        || host.endsWith("vidlink.pro") || host.endsWith("vidfast.pro") || host.endsWith("vidfast.vc")
-                        || host.endsWith("vidsrc.to") || host.endsWith("vsembed.su")
-                        || host.endsWith("autoembed.co") || host.endsWith("2embed.cc")
-                        || host.endsWith("yapgrid.com") || host.endsWith("vaplayer.ru")
-                        || host.endsWith("vidcore.org")
-                         || host.endsWith("vidrift.net") || host.endsWith("embed.vidrift.net")
-                         || host.equals("vidzen.fun") || host.endsWith(".vidzen.fun")
-                         || host.equals("vidbolt.pro") || host.endsWith(".vidbolt.pro")
-                        || host.endsWith("ani.pm")
-                        || host.endsWith("youtube-nocookie.com") || host.endsWith("youtube.com")
-                        || host.endsWith("youtu.be");
+                        || isHostOrSubdomain(host, "cinesrc.st")
+                        || isHostOrSubdomain(host, "themoviedb.org") || isHostOrSubdomain(host, "image.tmdb.org")
+                        || isHostOrSubdomain(host, "vidlink.pro") || isHostOrSubdomain(host, "vidfast.pro") || isHostOrSubdomain(host, "vidfast.vc")
+                        || isHostOrSubdomain(host, "vidsrc.to") || isHostOrSubdomain(host, "vsembed.su")
+                        || isHostOrSubdomain(host, "autoembed.co") || isHostOrSubdomain(host, "2embed.cc")
+                        || isHostOrSubdomain(host, "yapgrid.com") || isHostOrSubdomain(host, "vaplayer.ru")
+                        || isHostOrSubdomain(host, "vidcore.org") || isHostOrSubdomain(host, "vidrift.net")
+                        || isHostOrSubdomain(host, "vidzen.fun") || isHostOrSubdomain(host, "vidbolt.pro")
+                        || isHostOrSubdomain(host, "ani.pm")
+                        || isHostOrSubdomain(host, "youtube-nocookie.com") || isHostOrSubdomain(host, "youtube.com")
+                        || isHostOrSubdomain(host, "youtu.be");
                 if (allowed) return false;
                 return true;
             }
@@ -186,7 +188,7 @@ public class MainActivity extends Activity {
                         java.net.URI u = new java.net.URI(error.getUrl() == null ? "" : error.getUrl());
                         if (u.getHost() != null) h = u.getHost().toLowerCase(java.util.Locale.US);
                     } catch (Exception ignored) {}
-                    if (h.endsWith("vidcore.org")
+                    if (isHostOrSubdomain(h, "vidcore.org")
                             && error.getPrimaryError() == android.net.http.SslError.SSL_UNTRUSTED) {
                         handler.proceed();
                         return;
@@ -298,12 +300,12 @@ public class MainActivity extends Activity {
             + "if(v&&!v.classList.contains('hidden')){closePanels();return 'panel';}"
             + "var s=document.getElementById('setPanel');"
             + "if(s&&!s.classList.contains('hidden')){closePanels();return 'panel';}"
-            + "var m=document.getElementById('modal');"
-            + "if(m&&!m.classList.contains('hidden')){closeModal();return 'modal';}"
-            + "var rd=document.getElementById('resumeDlg');"
-            + "if(rd&&!rd.classList.contains('hidden')){resumePick(true);return 'panel';}"
             + "var u=document.getElementById('upNextCard');"
             + "if(u&&!u.classList.contains('hidden')){hideUpNext();return 'panel';}"
+            + "var rd=document.getElementById('resumeDlg');"
+            + "if(rd&&!rd.classList.contains('hidden')){resumePick(true);return 'panel';}"
+            + "var m=document.getElementById('modal');"
+            + "if(m&&!m.classList.contains('hidden')){closeModal();return 'modal';}"
             + "var w=document.getElementById('watchView');"
             + "if(w&&!w.classList.contains('hidden')){goHome();return 'home';}"
             + "return 'exit';})();",

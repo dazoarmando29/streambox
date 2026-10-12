@@ -562,7 +562,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 173; // bump every release alongside version.txt
+  const BUILD_NUM = 174; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2658,6 +2658,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   document.body.classList.add("watch-on");
   const anime = detectAnime(type, id);
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
+  window._autoHopped = false; // one self-heal per title, never one per app session
   try { gridS = s; } catch(e){}
   try {
     // house route: movies/TV always open on CineSrc, anime always on AniPM.
@@ -3126,10 +3127,13 @@ function srvClearBad(){
 }
 /* Self-optimizing quality ladder: a frozen stream gets one step down + a
    resumed reload (weak boxes and struggling sources BOTH recover here).
-   Once per 10 min; the 480 floor is where the mirror-hop rescue takes over. */
+   Repeated stalls may step down again after 90s; 480 is the floor where the
+   mirror-hop rescue takes over. */
 function qDropAuto(){
   try {
-    if (window._qDropT && Date.now() - window._qDropT < 600000) return false;
+    const key = watchState.type + ":" + watchState.id + (watchState.type === "tv" ? ":" + watchState.s + ":" + watchState.e : "");
+    if (window._qDropKey !== key) { window._qDropKey = key; window._qDropT = 0; }
+    if (window._qDropT && Date.now() - window._qDropT < 90000) return false;
     window._qDropT = Date.now();
     if (mirror === "anipm") {
       anipmSend("setQuality", { height: 480 });
@@ -3369,6 +3373,7 @@ function armStuckWatchdogs(){
 function loadPlayer(){
   try { hideUpNext(); } catch(e){} // fresh video: no endgame card from the last one
   window._cineErrBurst = []; window._pauseBurst = []; window._lastProgAt = 0; // fresh frame, fresh strikes
+  window._unexpectedPauseAt = 0; window._userPauseHold = false;
   preconnectCinesrc();  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
   // never strand playback on a hidden server.
   closeVrSheet(); // fresh frame = fresh panel state (options may belong to another episode)
@@ -3940,7 +3945,9 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
     return;
   }
   pState.paused = !pState.paused;
+  window._userPauseHold = pState.paused;
   if (pState.paused) window._userPauseAt = Date.now();
+  else window._unexpectedPauseAt = 0;
   sendCmd(pState.paused ? "pause" : "play");
   ctlPaint();
 }
@@ -4069,28 +4076,40 @@ function hideSubTip(forever){
   if (b) b.classList.remove("tip-glow");
   if (forever) { try { localStorage.setItem("streambox_subtip_off", "1"); } catch(e){} }
 }
-/* Mid-playback stall watchdog: 25s of frozen clock while "playing", past
-   the last 15s of the film, = a rebuffer loop the player never escapes.
-   Self-pauses we did not command count into the same rescue. */
+/* Shared mid-playback recovery: first lower quality and resume in-place;
+   after the 480p floor, retire the stalled source and offer/hop to a mirror. */
+function recoverMidPlayStall(reason){
+  if (qDropAuto()) {
+    resumeAt = Math.max(0, Math.floor(pState.cur || 0));
+    loadPlayer();
+    const ws = document.getElementById("watchStatus");
+    if (ws) ws.textContent = "Playback stalled - retrying at lower quality.";
+    return;
+  }
+  midPlayRescue(reason);
+}
+/* Mid-playback watchdog: a frozen clock while "playing", or an unexplained
+   CineSrc pause that stays stuck, means a rebuffer loop the player won't
+   escape. Bar-requested pauses are held until the viewer presses play. */
 setInterval(() => {
   try {
     if (document.getElementById("watchView").classList.contains("hidden")) return;
-    if (mirror === "trailer" || pState.paused) return;
+    if (mirror === "trailer") return;
     if (!(pState.dur > 0) || (pState.cur || 0) < 5) return;
     if (pState.cur > pState.dur - 15) return; // tail/credits: frozen is normal
+    if (pState.paused) {
+      if (mirror !== "cinesrc" || window._userPauseHold) return;
+      const stoppedAt = window._unexpectedPauseAt || 0;
+      if (!stoppedAt || Date.now() - stoppedAt < 15000) return;
+      window._unexpectedPauseAt = 0;
+      window._lastProgAt = Date.now();
+      recoverMidPlayStall("This source stopped playback");
+      return;
+    }
     const lp = window._lastProgAt || 0;
     if (!lp || Date.now() - lp < 25000) return;
     window._lastProgAt = Date.now(); // one rescue per window
-    // self-optimize first: drop quality a step and resume (weak boxes and
-    // struggling sources both recover here); at the floor = real rescue
-    if (qDropAuto()) {
-      resumeAt = Math.max(0, Math.floor(pState.cur || 0));
-      loadPlayer();
-      const wsx = document.getElementById("watchStatus");
-      if (wsx) wsx.textContent = "Playback froze - dropped quality a step to keep it smooth.";
-      return;
-    }
-    midPlayRescue("Playback froze on this source");
+    recoverMidPlayStall("Playback froze on this source");
   } catch(e){}
 }, 8000);
 function ctlPollStart(){
@@ -6773,7 +6792,7 @@ window.addEventListener("message", (event)=>{
     window._cineHas4k = false;
     sendCmd("getQualities");
   }
-  if(type === "cinesrc:play") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
+  if(type === "cinesrc:play") { pState.paused = false; window._userPauseHold = false; window._unexpectedPauseAt = 0; window._cinePlaying = true; ctlPaint(); }
   if(type === "cinesrc:pause") {
     pState.paused = true; ctlPaint();
     // pauses WE did not command (buffer-stall loops, flaky embeds): a burst
@@ -6781,15 +6800,20 @@ window.addEventListener("message", (event)=>{
     try {
       if (Date.now() - (window._userPauseAt || 0) > 4000) {
         const nowP = Date.now();
+        if (!window._userPauseHold && !window._unexpectedPauseAt) window._unexpectedPauseAt = nowP;
         const P = window._pauseBurst || (window._pauseBurst = []);
         while (P.length && nowP - P[0] > 120000) P.shift();
         P.push(nowP);
-        if (P.length >= 3) { P.length = 0; midPlayRescue("This source keeps pausing itself"); }
+        if (P.length >= 3) { P.length = 0; recoverMidPlayStall("This source keeps pausing itself"); }
       }
     } catch(e){}
   }
   if(type === "cinesrc:timeupdate" || type === "cinesrc:seeked" || type === "cinesrc:seeking") {
-    if (typeof data.currentTime === "number") pState.cur = data.currentTime;
+    if (typeof data.currentTime === "number") {
+      const prevCur = pState.cur || 0;
+      pState.cur = data.currentTime;
+      if (data.currentTime > prevCur + 0.25) window._unexpectedPauseAt = 0;
+    }
     if (typeof data.duration === "number" && data.duration > 0) pState.dur = data.duration;
     if (typeof data.currentTime === "number" && data.currentTime > 0.5) window._cinePlaying = true;
     try { clearStuckTip(); } catch(e){} try { clearTapHint(); } catch(e){}
@@ -6875,6 +6899,7 @@ window.addEventListener("message", (event)=>{
     markWatched();
     if (sleepOnEnd) {
       window._userPauseAt = Date.now();
+      window._userPauseHold = true;
       sendCmd("pause");
       pState.paused = true; ctlPaint();
       const ws = document.getElementById("watchStatus");
