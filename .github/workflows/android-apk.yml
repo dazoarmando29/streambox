@@ -13,22 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate site JavaScript syntax
-        run: |
-          python3 - <<'PYEOF'
-          import re, subprocess, sys, pathlib
-          html = pathlib.Path("index.html").read_text(encoding="utf-8")
-          blocks = re.findall(r"<script(?![^>]*src=)[^>]*>(.*?)</script>", html, re.S)
-          assert blocks, "no inline scripts found"
-          for i, b in enumerate(blocks):
-              p = pathlib.Path(f"/tmp/sb{i}.js")
-              p.write_text(b, encoding="utf-8")
-              r = subprocess.run(["node", "--check", str(p)], capture_output=True, text=True)
-              if r.returncode != 0:
-                  print(f"BLOCK {i} SYNTAX ERROR:\n{r.stderr}")
-                  sys.exit(1)
-          print(f"OK: {len(blocks)} inline script blocks valid")
-          PYEOF
+      - name: Run StreamBox QA gate (syntax + invariants)
+        run: node tools/qa.js
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -68,7 +54,7 @@ jobs:
               streambox.apk streambox-lite.apk; then
               break
             fi
-            echo "release publish attempt $i failed, retrying…"
+            echo "release publish attempt $i failed, retrying..."
             sleep 10
           done
           gh release view latest --json tagName,publishedAt,url

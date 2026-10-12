@@ -188,7 +188,7 @@
   #btnRow > * { flex-shrink: 0; }
   /* floating Skip Intro (all targets): sits above the bar, bottom-right —
      a bold white pill that's impossible to miss and never crowds the bar.
-     TV positions it clear of its taller bar; D-pad ▲ climbs straight to it. */
+     TV positions it clear of its taller bar; D-pad \25B2  climbs straight to it. */
   #skipFloat { position: absolute; right: 16px; bottom: 148px; z-index: 7;
     min-height: 44px; min-width: 44px; padding: 0 22px; border-radius: 99px;
     background: #fff; color: #0b1426; font-weight: 800; font-size: 15px;
@@ -315,7 +315,7 @@
   }
   .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   /* touch targets: no button under 44px (fingers + TV remotes).
-     Lifts the small steppers/chips/✕ to full size without touching markup. */
+     Lifts the small steppers/chips/\2715  to full size without touching markup. */
   button { min-height: 44px; min-width: 44px;
     transition: transform .12s ease-out, background-color .15s ease-out; }
   button:active { transform: scale(.95); }
@@ -399,7 +399,7 @@
   .tv-mode #toast { padding: 14px 14px 14px 22px; border-radius: 22px; }
   .tv-mode #skipFloat { font-size: 18px; min-height: 54px; padding: 0 28px; }
   /* TV nav: keep every link on ONE line — wrapped two-line buttons made the
-     row two-storey tall, which is what hid the 🔒/title row and crowded the
+     row two-storey tall, which is what hid the \1F512 /title row and crowded the
      hero badge on Google TV. */
   .tv-mode nav { gap: 0.5rem !important; padding-left: 12px; padding-right: 12px; }
   .tv-mode .navlink { font-size: 15px; padding: 6px 10px; }
@@ -437,7 +437,7 @@
   .tv-mode .skel-poster, .tv-mode .skel-line { animation: none !important; }
   /* cards/zoom/ring/popups all run from the base rules (TV shares desktop motion) */
   #modal .tv-focus { outline-width: 4px; }
-  /* subtitles coach-tip arrow + highlight on the 🎯 button */
+  /* subtitles coach-tip arrow + highlight on the \1F3AF  button */
   .tip-arrow {
     position: absolute; bottom: -8px; right: 110px; width: 16px; height: 16px;
     background: #1a2745; border-right: 1px solid rgba(45,212,191,.4); border-bottom: 1px solid rgba(45,212,191,.4);
@@ -541,8 +541,8 @@
 
 <!-- UPDATE BANNER: shown when this copy is older than the live site -->
 <div id="updateBar" class="hidden fixed top-0 left-0 right-0 z-[95] bg-teal-500 text-[#0b1426] text-sm font-bold px-4 py-2.5 flex items-center gap-3">
-  <span class="flex-1">⬆ New StreamBox version available — refresh the page (TV app: reinstall / clear data) to get it.</span>
-  <button onclick="document.getElementById('updateBar').classList.add('hidden')" aria-label="Dismiss" class="shrink-0 w-8 h-8 rounded-full bg-black/20 font-black">✕</button>
+  <span class="flex-1">&#x2B06; New StreamBox version available — refresh the page (TV app: reinstall / clear data) to get it.</span>
+  <button onclick="document.getElementById('updateBar').classList.add('hidden')" aria-label="Dismiss" class="shrink-0 w-8 h-8 rounded-full bg-black/20 font-black">&#x2715;</button>
 </div>
 
 <!-- REMOTE CURSOR: TV-box fallback pointer for players that ignore arrows -->
@@ -551,12 +551,12 @@
 
 <!-- HEALTH BANNER: shown when CineSrc can't be reached from this network -->
 <div id="healthBar" class="hidden fixed left-0 right-0 z-[94] bg-amber-500 text-[#0b1426] text-sm font-bold px-4 py-2.5 flex items-center gap-3">
-  <span class="flex-1">⚠ CineSrc isn't reachable (down or blocked on this network) — mirrors still play. Try mobile data, VPN, or DNS 1.1.1.1.</span>
+  <span class="flex-1">&#x26A0; CineSrc isn't reachable (down or blocked on this network) — mirrors still play. Try mobile data, VPN, or DNS 1.1.1.1.</span>
   <button onclick="document.getElementById('healthBar').classList.add('hidden')" class="shrink-0 h-11 px-5 rounded-full bg-black/20 font-black">Got it</button>
 </div>
 
 <!-- TOAST: site-styled popup (replaces every native alert) — message plus
-  optional action buttons (Continue / My List →). Transform-only motion. -->
+  optional action buttons (Continue / My List &#x2192;). Transform-only motion. -->
 <div id="toast" role="status" aria-live="polite">
   <span id="toastMsg"></span>
   <span id="toastBtns" class="flex gap-2 shrink-0"></span>
@@ -564,14 +564,14 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 178; // bump every release alongside version.txt
+  const BUILD_NUM = 179; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
-   appears in page source (inspect → Sources shows only these blobs) */
+   appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
 const TMDB_API_KEY = atob(_sbk.map(s => s.split("").reverse().join("")).join(""));
 const TMDB_BASE = "https://api.themoviedb.org/3";
 /* weak-SoC image diet: calm boxes decode ~3.4x fewer pixels per poster
-   (w342→w185 still covers every card at display size); hero/stills keep
+   (w342\u{2192}w185 still covers every card at display size); hero/stills keep
    their resolution since they're one image each */
 const IMG = (p, size="w500") => {
   if (size === "w342" && document.body.classList.contains("calm")) size = "w185";
@@ -600,28 +600,28 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <button id="navTv" onclick="filterType('tv',event)" class="navlink">TV Shows</button>
     <button id="navAnime" onclick="filterType('anime',event)" class="navlink">Anime</button>
     <button id="navList" onclick="showList(event)" class="navlink">My List</button>
-    <button onclick="openTvGuide(event)" class="navlink" title="How to install & use on TV">📺 TV Setup</button>
+    <button onclick="openTvGuide(event)" class="navlink" title="How to install & use on TV">&#x1F4FA; TV Setup</button>
   </div>
   <div class="ml-auto flex gap-2 w-full md:w-auto justify-end">
-    <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-4 md:min-w-[190px] md:justify-start rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm text-gray-300">🔍 Search</button>
-    <button id="adultLockNav" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" aria-label="Adults-only gate" class="shrink-0 h-10 px-4 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-bold">🔒</button>
+    <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-4 md:min-w-[190px] md:justify-start rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm text-gray-300">&#x1F50D; Search</button>
+    <button id="adultLockNav" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" aria-label="Adults-only gate" class="shrink-0 h-10 px-4 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-bold">&#x1F512;</button>
   </div>
 </nav>
 
 <!-- MOBILE TAB BAR: the desktop links hide below md — phones get this instead -->
 <nav id="mobileNav" aria-label="Sections" class="md:hidden fixed bottom-0 left-0 right-0 z-50">
   <div class="flex bg-[#0b1426]/92 backdrop-blur-md border-t border-white/10 px-1 pt-1.5" style="padding-bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px))">
-    <button id="mnavHome" onclick="goHome(event)" class="mnav-btn mnav-active"><span class="text-xl leading-none">🏠</span><span>Home</span></button>
-    <button id="mnavMovies" onclick="filterType('movie',event)" class="mnav-btn"><span class="text-xl leading-none">🎬</span><span>Movies</span></button>
-    <button id="mnavTv" onclick="filterType('tv',event)" class="mnav-btn"><span class="text-xl leading-none">📺</span><span>TV</span></button>
-    <button id="mnavAnime" onclick="filterType('anime',event)" class="mnav-btn"><span class="text-xl leading-none">✨</span><span>Anime</span></button>
-    <button id="mnavList" onclick="showList(event)" class="mnav-btn"><span class="text-xl leading-none">📌</span><span>My List</span></button>
+    <button id="mnavHome" onclick="goHome(event)" class="mnav-btn mnav-active"><span class="text-xl leading-none">&#x1F3E0;</span><span>Home</span></button>
+    <button id="mnavMovies" onclick="filterType('movie',event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F3AC;</span><span>Movies</span></button>
+    <button id="mnavTv" onclick="filterType('tv',event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F4FA;</span><span>TV</span></button>
+    <button id="mnavAnime" onclick="filterType('anime',event)" class="mnav-btn"><span class="text-xl leading-none">&#x2728;</span><span>Anime</span></button>
+    <button id="mnavList" onclick="showList(event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F4CC;</span><span>My List</span></button>
   </div>
 </nav>
 
 <!-- Floating TV-help button (phones / small screens where the nav link is hidden) -->
 <button onclick="openTvGuide(event)" aria-label="TV setup guide" title="TV setup guide"
-  class="md:hidden fixed bottom-24 right-4 z-50 w-12 h-12 rounded-full bg-teal-500 text-xl shadow-lg shadow-teal-900/50">📺</button>
+  class="md:hidden fixed bottom-24 right-4 z-50 w-12 h-12 rounded-full bg-teal-500 text-xl shadow-lg shadow-teal-900/50">&#x1F4FA;</button>
 
 <!-- HOME VIEW -->
 <div id="homeView">
@@ -647,12 +647,12 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   <main id="gridView" class="hidden px-4 md:px-10 pt-28 md:pt-32 pb-20">
     <div class="flex items-center gap-3 mb-4">
       <h2 id="gridTitle" class="row-title text-xl font-bold flex-1"></h2>
-      <button id="adultLockBtn" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" class="shrink-0 px-4 h-11 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-sm font-bold">🔒 18+ Hidden</button>
+      <button id="adultLockBtn" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" class="shrink-0 px-4 h-11 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-sm font-bold">&#x1F512; 18+ Hidden</button>
     </div>
     <div id="genreRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="studioRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
-    <button id="loadMoreBtn" onclick="browseMore()" class="hidden mx-auto mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 font-bold text-sm">Load more ↓</button>
+    <button id="loadMoreBtn" onclick="browseMore()" class="hidden mx-auto mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 font-bold text-sm">Load more &#x2193;</button>
   </main>
 
   <!-- MY LIST -->
@@ -662,7 +662,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <span id="listCount" class="text-xs text-gray-500 font-bold"></span>
     </div>
     <div id="listEmpty" class="hidden text-center py-16 px-6">
-      <p class="text-4xl">📌</p>
+      <p class="text-4xl">&#x1F4CC;</p>
       <p class="font-black text-xl mt-4">Your list is empty</p>
       <p class="text-sm text-gray-400 mt-2 max-w-sm mx-auto">Save movies, shows and anime with <b>+ My List</b> — they land here for one-tap watching on every device.</p>
       <button onclick="goHome(event)" class="mt-6 bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full text-sm">Browse titles</button>
@@ -678,14 +678,14 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 
 <!-- WATCH VIEW -->
 <div id="watchView" class="hidden min-h-screen pt-20 px-4 md:px-10 pb-16">
-  <button id="backBtn" onclick="goHome(event)" class="no-cinema mb-4 text-sm bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full">← Back to Browse</button>
+  <button id="backBtn" onclick="goHome(event)" class="no-cinema mb-4 text-sm bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full">&#x2190; Back to Browse</button>
   <div class="grid lg:grid-cols-3 gap-6">
     <div class="lg:col-span-2">
       <!-- twin-cut warning: shown only for known remake/original pairs -->
       <div id="twinTip" class="no-cinema hidden mb-3 bg-[#2a1a10] border border-amber-500/40 rounded-xl px-4 py-3 text-sm flex flex-wrap items-center gap-2">
         <span id="twinText" class="flex-1 min-w-[200px]"></span>
-        <button onclick="wrongVersion()" class="bg-teal-500 hover:bg-teal-400 font-bold px-4 py-2 rounded-full text-[13px]">🎬 Wrong version?</button>
-        <button onclick="hideTwinTip()" aria-label="Dismiss" class="w-8 h-8 rounded-full bg-black/50 hover:bg-black/80 shrink-0">✕</button>
+        <button onclick="wrongVersion()" class="bg-teal-500 hover:bg-teal-400 font-bold px-4 py-2 rounded-full text-[13px]">&#x1F3AC; Wrong version?</button>
+        <button onclick="hideTwinTip()" aria-label="Dismiss" class="w-8 h-8 rounded-full bg-black/50 hover:bg-black/80 shrink-0">&#x2715;</button>
       </div>
       <div id="playerBox" class="player-wrap relative w-full rounded-2xl overflow-hidden border border-white/10">
         <div id="playerSpin" class="absolute inset-0 grid place-items-center bg-black">
@@ -702,8 +702,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <div id="capOverlay" class="cap-bottom"></div>
         <!-- trailer mode chip (control bar hides; trailers need no controls) -->
         <div id="trailerBar" class="hidden absolute top-3 left-3 z-[7] flex items-center gap-2 bg-black/70 rounded-full pl-4 pr-1.5 py-1.5 text-xs">
-          <span>🎬 Trailer</span>
-          <button onclick="mirrorHome()" class="bg-teal-500 hover:bg-teal-400 font-bold px-3 py-1.5 rounded-full">▶ Watch feature</button>
+          <span>&#x1F3AC; Trailer</span>
+          <button onclick="mirrorHome()" class="bg-teal-500 hover:bg-teal-400 font-bold px-3 py-1.5 rounded-full">&#x25B6; Watch feature</button>
         </div>
         <!-- volume readout for TV remotes (bar buttons stay focused underneath) -->
         <div id="volToast" class="hidden absolute bottom-24 right-4 z-[7] bg-black/70 rounded-full px-4 py-2 text-sm font-bold pointer-events-none"></div>
@@ -715,8 +715,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
             <p id="tcArc" class="hidden mt-1.5 text-[11px] font-bold text-[#0b1426] bg-teal-400 rounded-full px-2.5 py-0.5 w-fit"></p>
           </div>
         </div>
-        <!-- floating Skip Intro (all targets — TV: ▲ climbs to it from the bar) -->
-        <button id="skipFloat" onclick="skipPillNow()" aria-label="Skip intro or credits" title="Skip intro / credits" class="hidden">⏭ Skip Intro</button>
+        <!-- floating Skip Intro (all targets — TV: &#x25B2; climbs to it from the bar) -->
+        <button id="skipFloat" onclick="skipPillNow()" aria-label="Skip intro or credits" title="Skip intro / credits" class="hidden">&#x23ED; Skip Intro</button>
         <!-- Up Next: Netflix-style end-of-episode card (rides the player, cinema-visible) -->
         <div id="upNextCard" class="hidden">
           <p class="upn-kick">UP NEXT</p>
@@ -763,20 +763,20 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <!-- unpaired-mirror strip (paired mirrors ride our bar now — one bar, no overlap) -->
       <div id="mirrorBar" class="hidden mt-3 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 flex flex-wrap items-center gap-2 text-sm">
         <span>Mirror: <b id="mirrorName">–</b> — use its own player controls</span>
-        <button onclick="focusMirror()" title="Send remote keys to this mirror's own player (some answer OK/arrows, some need a pointer)" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🎯 Control</button>
-        <button id="mirrorHomeBtn" onclick="mirrorHome()" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold">⇄ CineSrc</button>
+        <button onclick="focusMirror()" title="Send remote keys to this mirror's own player (some answer OK/arrows, some need a pointer)" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">&#x1F3AF; Control</button>
+        <button id="mirrorHomeBtn" onclick="mirrorHome()" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-400 text-xs font-bold">&#x21C4; CineSrc</button>
         <button id="stripSubs" onclick="ctlSubsToggle()" aria-label="Subtitles on or off" title="Our subtitles on/off — Wyzie + your files, over any mirror" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">CC</button>
-        <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">⚙</button>
-        <button onclick="cursorToggle()" title="Remote cursor: arrows glide a pointer, OK clicks" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🖱</button>
+        <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">&#x2699;</button>
+        <button onclick="cursorToggle()" title="Remote cursor: arrows glide a pointer, OK clicks" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">&#x1F5B1;</button>
       </div>
       <!-- One-time subtitles coach tip (arrow points at the CC button) -->
       <div id="subTip" class="no-cinema hidden relative mt-3 bg-[#1a2745] border border-teal-500/40 rounded-xl p-4 pr-12 text-sm">
-        <button onclick="hideSubTip(false)" aria-label="Dismiss tip" class="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/80">✕</button>
-        <p class="font-bold">💬 Want subtitles?</p>
+        <button onclick="hideSubTip(false)" aria-label="Dismiss tip" class="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/80">&#x2715;</button>
+        <p class="font-bold">&#x1F4AC; Want subtitles?</p>
         <ol class="text-gray-300 mt-1 space-y-1 list-decimal ml-5 text-[13px]">
           <li>Press <b>CC</b> on the player bar — captions turn on instantly.</li>
           <li>Nothing loaded yet? The <b>Subs settings</b> open so you can search &amp; download.</li>
-          <li>Wrong timing? Fix it in <b>⚙ → Subs</b> with Position + Sync.</li>
+          <li>Wrong timing? Fix it in <b>&#x2699; &#x2192; Subs</b> with Position + Sync.</li>
         </ol>
         <div class="flex flex-wrap gap-2 mt-3">
           <button onclick="hideSubTip(true)" class="bg-teal-500 hover:bg-teal-400 font-bold px-4 py-2 rounded-full text-[13px]">Got it — don't show again</button>
@@ -784,7 +784,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         </div>
         <div class="tip-arrow"></div>
       </div>
-      <p class="no-cinema text-[11px] text-gray-600 mt-2">Cinema remote (TV): <b>◀</b> = −10s • <b>▶</b> = +30s • <b>▲</b> = banner/Got-it • <b>▼</b> = next button • <b>OK</b> = press / play-pause. Volume: your TV remote's own keys. Desktop: same. <b>CC</b> toggles our subtitles on/off (opens Subs settings when empty). <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
+      <p class="no-cinema text-[11px] text-gray-600 mt-2">Cinema remote (TV): <b>&#x25C0;</b> = −10s • <b>&#x25B6;</b> = +30s • <b>&#x25B2;</b> = banner/Got-it • <b>&#x25BC;</b> = next button • <b>OK</b> = press / play-pause. Volume: your TV remote's own keys. Desktop: same. <b>CC</b> toggles our subtitles on/off (opens Subs settings when empty). <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
       <!-- player options -->
       <div class="no-cinema glass mt-3 p-4">
         <p class="font-bold text-sm">Playback Settings</p>
@@ -795,9 +795,9 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <label class="flex items-center gap-2"><input type="checkbox" id="optAutoplay" checked class="switch"> Autoplay</label>
         <label class="flex items-center gap-2"><input type="checkbox" id="optAutonext" checked class="switch"> Auto-next</label>
         <label class="flex items-center gap-2"><input type="checkbox" id="optAutoskip" class="switch"> Auto-skip intro</label>
-        <label class="flex items-center gap-2" title="Stuck player hops mirrors by itself. Off = we just name the server to try, and you hop with ⇄ Source."><input type="checkbox" id="optAutoswitch" class="switch" onchange="autoSwitchSave()"> Auto-switch server</label>
+        <label class="flex items-center gap-2" title="Stuck player hops mirrors by itself. Off = we just name the server to try, and you hop with &#x21C4; Source."><input type="checkbox" id="optAutoswitch" class="switch" onchange="autoSwitchSave()"> Auto-switch server</label>
         <label class="flex items-center gap-1">Accent <input type="color" id="optColor" value="#14b8a6" class="w-8 h-6 bg-transparent"></label>
-        <label class="flex items-center gap-1" title="Smoothness of StreamBox's own UI motion (your TV's Motion setting handles the film itself)">🎞 Motion
+        <label class="flex items-center gap-1" title="Smoothness of StreamBox's own UI motion (your TV's Motion setting handles the film itself)">&#x1F39E; Motion
           <input type="checkbox" id="optMotion" checked class="switch" onchange="motionOpts()"></label>
         <label class="flex items-center gap-1" title="How fluid UI transitions feel on your box (0 = sharp, 10 = silky)">Judder
           <input type="range" id="optJudder" min="0" max="10" value="10" step="1" class="w-24 h-6 accent-teal-400" aria-label="Judder reduction" oninput="motionOpts()"></label>
@@ -807,9 +807,9 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <button onclick="qualityStep(1)" aria-label="Higher quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
         </div>
         <button onclick="applyPlayerOpts()" class="ml-2 bg-teal-500 px-3 py-1.5 rounded-full font-semibold hover:bg-teal-400">Apply</button>
-        <button onclick="reloadPlayer()" class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">↻ Reload</button>
-        <button onclick="otherSource()" title="Wrong film or broken stream? Drop this server and try another source." class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">⇄ Source</button>
-        <button onclick="wrongVersion()" title="Right title, wrong cut (remake plays the original or vice versa)? Jump to the next mirror." class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">🎬 Wrong version?</button>
+        <button onclick="reloadPlayer()" class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">&#x21BB; Reload</button>
+        <button onclick="otherSource()" title="Wrong film or broken stream? Drop this server and try another source." class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">&#x21C4; Source</button>
+        <button onclick="wrongVersion()" title="Right title, wrong cut (remake plays the original or vice versa)? Jump to the next mirror." class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">&#x1F3AC; Wrong version?</button>
         <span id="watchStatus" class="ml-auto text-gray-500"></span>
         </div>
       </div>
@@ -822,7 +822,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
             <span id="seasonLabel" class="text-sm font-semibold min-w-[86px] text-center">Season 1</span>
             <button onclick="watchSeasonStep(1)" aria-label="Next season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
           </div>
-          <button onclick="nextEpisode(1)" class="text-xs bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">Next Ep →</button>
+          <button onclick="nextEpisode(1)" class="text-xs bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">Next Ep &#x2192;</button>
         </div>
         <div id="epGrid" class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 max-h-56 overflow-y-auto p-4"></div>
       </div>
@@ -866,14 +866,14 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <div class="relative h-64 md:h-80">
       <img id="mBackdrop" class="w-full h-full object-cover" src="" onerror="this.style.display='none'">
       <div class="absolute inset-0 bg-gradient-to-t from-[#131e35] to-transparent"></div>
-      <button onclick="closeModal()" class="absolute top-3 right-3 bg-black/60 w-9 h-9 rounded-full">✕</button>
+      <button onclick="closeModal()" class="absolute top-3 right-3 bg-black/60 w-9 h-9 rounded-full">&#x2715;</button>
     </div>
     <div class="p-6 -mt-10 relative">
       <h2 id="mTitle" class="text-2xl font-bold"></h2>
       <p id="mMeta" class="text-sm text-gray-400 mt-1"></p>
       <p id="mOverview" class="text-sm text-gray-300 mt-3 leading-relaxed"></p>
       <div class="flex flex-wrap gap-3 mt-5 items-center">
-        <button id="mWatch" class="bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">▶ Watch Now</button>
+        <button id="mWatch" class="bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">&#x25B6; Watch Now</button>
         <button id="mListBtn" onclick="addToList()" class="bg-white/10 hover:bg-white/20 px-5 py-2.5 rounded-full text-sm">+ My List</button>
       </div>
       <div id="mSeasons" class="mt-5 hidden">
@@ -900,51 +900,51 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 <!-- TV SETUP GUIDE -->
 <div id="tvGuide" class="hidden fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-4" onclick="if(event.target===this)closeTvGuide()">
   <div class="bg-[#131e35] max-w-2xl w-full rounded-2xl overflow-hidden border border-white/10 max-h-[90vh] overflow-y-auto p-6 md:p-8 relative">
-    <button onclick="closeTvGuide()" aria-label="Close guide" class="absolute top-3 right-3 bg-black/60 w-9 h-9 rounded-full">✕</button>
-    <h2 class="text-2xl font-black">📺 StreamBox on your TV</h2>
+    <button onclick="closeTvGuide()" aria-label="Close guide" class="absolute top-3 right-3 bg-black/60 w-9 h-9 rounded-full">&#x2715;</button>
+    <h2 class="text-2xl font-black">&#x1F4FA; StreamBox on your TV</h2>
     <p class="text-sm text-gray-400 mt-1">Get the app on Android TV / Fire TV and drive it with your remote.</p>
 
     <h3 class="font-bold mt-6 mb-2">1 · Install the APK (one time)</h3>
     <ol class="text-sm text-gray-300 space-y-1.5 list-decimal ml-5">
-      <li>On GitHub, open <b>Actions → Build StreamBox APK</b> → download the <b>streambox-apk</b> file and unzip it — pick <b>full</b> (all animations) or <b>lite</b> (calm, max smoothness). Easier: grab them at <b>Releases → latest</b>.</li>
+      <li>On GitHub, open <b>Actions &#x2192; Build StreamBox APK</b> &#x2192; download the <b>streambox-apk</b> file and unzip it — pick <b>full</b> (all animations) or <b>lite</b> (calm, max smoothness). Easier: grab them at <b>Releases &#x2192; latest</b>.</li>
       <li>Send the APK to your TV: use the <b>Send Files to TV</b> app (phone + TV), a USB stick, or the <b>Downloader</b> app.</li>
-      <li>On the TV, open the file with a file manager and choose <b>Install</b>. If asked, allow <b>Install unknown apps</b> for that app (Settings → Apps → Special access).</li>
+      <li>On the TV, open the file with a file manager and choose <b>Install</b>. If asked, allow <b>Install unknown apps</b> for that app (Settings &#x2192; Apps &#x2192; Special access).</li>
       <li>Find <b>StreamBox</b> in your app list / Leanback launcher and open it.</li>
     </ol>
 
     <h3 class="font-bold mt-6 mb-2">2 · Remote controls</h3>
     <ul class="text-sm text-gray-300 space-y-1.5 ml-1">
-      <li>⬅️ ➡️ ⬆️ ⬇️ — move between posters, buttons and episodes</li>
-      <li>✅ <b>OK</b> — open details / press ▶ Watch Now / start an episode</li>
-      <li>🔙 <b>Back</b> — close popup → straight home → exit app</li>
-      <li>On a movie popup, focus starts on <b>▶ Watch Now</b> — one OK press plays.</li>
+      <li>&#x2B05;&#xFE0F; &#x27A1;&#xFE0F; &#x2B06;&#xFE0F; &#x2B07;&#xFE0F; — move between posters, buttons and episodes</li>
+      <li>&#x2705; <b>OK</b> — open details / press &#x25B6; Watch Now / start an episode</li>
+      <li>&#x1F519; <b>Back</b> — close popup &#x2192; straight home &#x2192; exit app</li>
+      <li>On a movie popup, focus starts on <b>&#x25B6; Watch Now</b> — one OK press plays.</li>
       <li>Change season/episode with the <b>‹ ›</b> steppers, never a dropdown.</li>
     </ul>
 
     <h3 class="font-bold mt-6 mb-2">3 · Smooth-playback tips</h3>
     <ul class="text-sm text-gray-300 space-y-1.5 ml-1">
-      <li>📶 Use <b>5 GHz Wi-Fi or Ethernet</b> — 2.4 GHz stutters on HD streams.</li>
-      <li>🛡️ Keep <b>Ad Shield ON</b> (blocks popup ads and tab hijacks).</li>
-      <li>↻ If a video stalls, press <b>Reload</b> under the player, or try another episode/server.</li>
-      <li>⇄ <b>Wrong film playing?</b> Some free servers mislabel titles — press <b>⇄ Source</b> under the player to switch to another source. <b>Right title, wrong cut (remake plays the original)?</b> Press <b>🎬 Wrong version?</b> to jump to the next mirror.</li>
-      <li>🖥️ <b>Edges cut off in fullscreen?</b> Set your TV Picture mode to <b>Just Scan / Screen Fit / 16:9</b> (not Zoom) — TVs crop the picture by default (overscan).</li>
-      <li>🔌 Close other apps on cheap TV sticks to free RAM.</li>
+      <li>&#x1F4F6; Use <b>5 GHz Wi-Fi or Ethernet</b> — 2.4 GHz stutters on HD streams.</li>
+      <li>&#x1F6E1;&#xFE0F; Keep <b>Ad Shield ON</b> (blocks popup ads and tab hijacks).</li>
+      <li>&#x21BB; If a video stalls, press <b>Reload</b> under the player, or try another episode/server.</li>
+      <li>&#x21C4; <b>Wrong film playing?</b> Some free servers mislabel titles — press <b>&#x21C4; Source</b> under the player to switch to another source. <b>Right title, wrong cut (remake plays the original)?</b> Press <b>&#x1F3AC; Wrong version?</b> to jump to the next mirror.</li>
+      <li>&#x1F5A5;&#xFE0F; <b>Edges cut off in fullscreen?</b> Set your TV Picture mode to <b>Just Scan / Screen Fit / 16:9</b> (not Zoom) — TVs crop the picture by default (overscan).</li>
+      <li>&#x1F50C; Close other apps on cheap TV sticks to free RAM.</li>
     </ul>
 
     <h3 class="font-bold mt-6 mb-2">4 · Phone & tablet</h3>
-    <p class="text-sm text-gray-300">Open the website in Chrome/Safari → menu → <b>Add to Home Screen / Install</b>. No APK needed.</p>
+    <p class="text-sm text-gray-300">Open the website in Chrome/Safari &#x2192; menu &#x2192; <b>Add to Home Screen / Install</b>. No APK needed.</p>
 
     <h3 class="font-bold mt-6 mb-2">Troubleshooting</h3>
     <ul class="text-sm text-gray-300 space-y-1.5 ml-1">
       <li><b>Site looks old after an update?</b> — hard-refresh once (browser) or clear the app's data (TV app). Updates then arrive automatically.</li>
       <li><b>New APK looks identical?</b> — the app auto-wipes its cache on the first launch of each new version. If it still looks old, <b>uninstall first</b>, then install the new APK.</li>
-      <li><b>App not in launcher?</b> — check Settings → Apps → StreamBox, or reboot the TV.</li>
+      <li><b>App not in launcher?</b> — check Settings &#x2192; Apps &#x2192; StreamBox, or reboot the TV.</li>
       <li><b>Can't press Install?</b> — enable “Install unknown apps” for your file manager first.</li>
       <li><b>Black player?</b> — press Reload; if it persists the stream server is down, try later.</li>
       <li><b>Remote does nothing?</b> — press any arrow once to wake focus, then navigate.</li>
     </ul>
 
-    <button onclick="closeTvGuide()" class="mt-7 bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">Got it ✓</button>
+    <button onclick="closeTvGuide()" class="mt-7 bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">Got it &#x2713;</button>
   </div>
 </div>
 
@@ -952,8 +952,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 <div id="setPanel" class="hidden fixed inset-0 z-[66] bg-black/70" onclick="if(event.target===this)closePanels()">
   <div class="absolute right-0 top-0 h-full w-full max-w-md bg-[#131e35] border-l border-white/10 overflow-y-auto p-5">
     <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl font-black">⚙ Settings</h2>
-      <button onclick="closePanels()" aria-label="Close settings" class="w-9 h-9 rounded-full bg-black/50 hover:bg-black/80">✕</button>
+      <h2 class="text-xl font-black">&#x2699; Settings</h2>
+      <button onclick="closePanels()" aria-label="Close settings" class="w-9 h-9 rounded-full bg-black/50 hover:bg-black/80">&#x2715;</button>
     </div>
     <div class="flex gap-2 mb-5 text-sm" role="tablist">
       <button id="tabPlayback" onclick="setTab('playback')" class="flex-1 py-2 rounded-full font-bold">Playback</button>
@@ -983,8 +983,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <p class="text-xs text-gray-400 font-bold mt-5 mb-2">MY SUBTITLES (YOUR FILE)</p>
       <p id="subFileChip" class="text-sm text-gray-300 bg-white/5 border border-white/10 rounded-xl px-3 py-2">None loaded</p>
       <div class="flex flex-wrap gap-2 mt-2">
-        <button onclick="document.getElementById('subFileInput').click()" class="px-4 h-10 rounded-full bg-teal-500 hover:bg-teal-400 text-sm font-bold">📁 Load .srt / .vtt</button>
-        <button onclick="toggleSubPaste()" class="px-4 h-10 rounded-full bg-white/10 hover:bg-white/20 text-sm">✏ Paste text</button>
+        <button onclick="document.getElementById('subFileInput').click()" class="px-4 h-10 rounded-full bg-teal-500 hover:bg-teal-400 text-sm font-bold">&#x1F4C1; Load .srt / .vtt</button>
+        <button onclick="toggleSubPaste()" class="px-4 h-10 rounded-full bg-white/10 hover:bg-white/20 text-sm">&#x270F; Paste text</button>
         <button onclick="clearSubs()" class="px-4 h-10 rounded-full bg-white/10 hover:bg-white/20 text-sm">Clear</button>
       </div>
       <input type="file" id="subFileInput" accept=".srt,.vtt,.txt" class="hidden" onchange="loadSubFile(this)">
@@ -1008,10 +1008,10 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       </div>
       <p class="text-[11px] text-gray-500 mt-2">Search Wyzie above (built-in key works instantly; your own key = guaranteed quota), load it once — it sticks to that title. Fixes missing subs, wrong language, and bad timing.</p>
       <p class="text-xs text-gray-400 font-bold mt-5 mb-2">PLAYER SUBTITLES</p>
-      <p class="text-xs text-gray-400 leading-relaxed">Our player is subtitles-safe: captions show automatically. To change language or toggle tracks, briefly show the video's own buttons, use its <b>CC / ⚙ → Subtitles</b> menu, then hide them again — position is kept.</p>
+      <p class="text-xs text-gray-400 leading-relaxed">Our player is subtitles-safe: captions show automatically. To change language or toggle tracks, briefly show the video's own buttons, use its <b>CC / &#x2699; &#x2192; Subtitles</b> menu, then hide them again — position is kept.</p>
       <button id="pctlBtnSubs" onclick="togglePControls()" class="mt-3 w-full py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Video buttons: Hidden</button>
       <button onclick="closePanels();focusPlayer(true)" class="mt-2 w-full py-2.5 rounded-full bg-teal-500 hover:bg-teal-400 font-bold text-sm">Open player menu</button>
-      <p class="text-[11px] text-gray-500 mt-2">No languages listed? That server carries no subs — try ⇄ Source on the watch screen.</p>
+      <p class="text-[11px] text-gray-500 mt-2">No languages listed? That server carries no subs — try &#x21C4; Source on the watch screen.</p>
     </div>
 
     <div id="paneServers" class="hidden">
@@ -1031,12 +1031,12 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         </div>
       </div>
       <div class="flex flex-col gap-2 mt-4">
-        <button onclick="otherSource()" class="py-2.5 rounded-full bg-teal-500 hover:bg-teal-400 font-bold text-sm">⇄ Try another source</button>
+        <button onclick="otherSource()" class="py-2.5 rounded-full bg-teal-500 hover:bg-teal-400 font-bold text-sm">&#x21C4; Try another source</button>
         <button id="pctlBtn" onclick="togglePControls()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Video buttons: Hidden</button>
         <button onclick="forgetServer()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Forget preferred server (Auto)</button>
-        <button onclick="reloadPlayer()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">↻ Reload player</button>
+        <button onclick="reloadPlayer()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">&#x21BB; Reload player</button>
       </div>
-      <p class="text-[11px] text-gray-500 mt-3">One player only: ours. The video's own buttons stay hidden unless you need its ⚙/CC menus.</p>
+      <p class="text-[11px] text-gray-500 mt-3">One player only: ours. The video's own buttons stay hidden unless you need its &#x2699;/CC menus.</p>
       <p class="text-[11px] text-gray-500 mt-3">Mirrors are independent players with their own controls — only CineSrc answers our remote bar. Stuck? Switch mirrors.</p>
     </div>
   </div>
@@ -1048,8 +1048,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <div class="flex items-center justify-between mb-3">
       <h2 class="text-xl font-black">Episodes</h2>
       <div class="flex gap-2">
-        <button id="spoilerBtn" onclick="spoilerToggle()" title="Hide episode details to avoid spoilers" class="h-9 px-3 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">🙈 Spoilers: Off</button>
-        <button onclick="closePanels()" aria-label="Close episodes" class="w-9 h-9 rounded-full bg-black/50 hover:bg-black/80">✕</button>
+        <button id="spoilerBtn" onclick="spoilerToggle()" title="Hide episode details to avoid spoilers" class="h-9 px-3 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">&#x1F648; Spoilers: Off</button>
+        <button onclick="closePanels()" aria-label="Close episodes" class="w-9 h-9 rounded-full bg-black/50 hover:bg-black/80">&#x2715;</button>
       </div>
     </div>
     <div class="flex items-center gap-2 mb-3">
@@ -1072,7 +1072,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   <div class="absolute left-0 right-0 bottom-0 md:left-1/2 md:right-auto md:bottom-auto md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[440px] bg-[#131e35] border border-white/10 rounded-t-3xl md:rounded-3xl p-5 max-h-[82vh] overflow-y-auto" style="padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px))">
     <div class="flex items-center justify-between mb-4">
       <h2 id="avTitle" class="text-xl font-black">Audio &amp; Subtitles</h2>
-      <button onclick="closePanels()" aria-label="Close audio and subtitles" class="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-lg">✕</button>
+      <button onclick="closePanels()" aria-label="Close audio and subtitles" class="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-lg">&#x2715;</button>
     </div>
     <p id="avHAudio" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">AUDIO</p>
     <div id="avAudio" class="flex gap-2 mb-5"></div>
@@ -1094,7 +1094,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   <div class="absolute left-0 right-0 bottom-0 md:left-1/2 md:right-auto md:bottom-auto md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[440px] bg-[#131e35] border border-white/10 rounded-t-3xl md:rounded-3xl p-5 max-h-[82vh] overflow-y-auto" style="padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px))">
     <div class="flex items-center justify-between mb-4">
       <h2 id="vrTitle" class="text-xl font-black">Settings</h2>
-      <button onclick="closePanels()" aria-label="Close player settings" class="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-lg">✕</button>
+      <button onclick="closePanels()" aria-label="Close player settings" class="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-lg">&#x2715;</button>
     </div>
     <div id="vrBody"></div>
   </div>
@@ -1104,11 +1104,11 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 <div id="searchPanel" class="hidden fixed inset-0 z-[68] bg-black/85 p-4" onclick="if(event.target===this)closeSearch()">
   <div class="max-w-4xl mx-auto mt-[6vh] bg-[#131e35] border border-white/10 rounded-2xl p-4 md:p-5 max-h-[86vh] flex flex-col">
     <div class="flex gap-2 items-center">
-      <span class="text-xl pl-1">🔍</span>
+      <span class="text-xl pl-1">&#x1F50D;</span>
       <input id="searchBox" enterkeyhint="search" inputmode="search" autocomplete="off" placeholder="Titles, shows…"
         oninput="onOverlaySearch(this.value)"
         class="flex-1 min-w-0 px-4 py-3 rounded-full bg-white/10 border border-white/20 outline-none text-base focus:border-teal-500">
-      <button onclick="closeSearch()" aria-label="Close search" class="w-11 h-11 shrink-0 rounded-full bg-black/50 hover:bg-black/80">✕</button>
+      <button onclick="closeSearch()" aria-label="Close search" class="w-11 h-11 shrink-0 rounded-full bg-black/50 hover:bg-black/80">&#x2715;</button>
     </div>
     <div id="recentWrap" class="mt-3">
       <div class="flex items-center justify-between mb-1.5">
@@ -1117,7 +1117,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       </div>
       <div id="recentRow" class="flex flex-wrap gap-2"></div>
     </div>
-    <p id="searchHint" class="text-xs text-gray-500 mt-3">Type to search — use ↓ to jump into results, OK to open, Back to close.</p>
+    <p id="searchHint" class="text-xs text-gray-500 mt-3">Type to search — use &#x2193; to jump into results, OK to open, Back to close.</p>
     <div id="searchResults" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mt-2 overflow-y-auto p-5"></div>
   </div>
 </div>
@@ -1127,7 +1127,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   <div class="bg-[#131e35] border border-white/10 rounded-2xl p-5 w-full max-w-[300px]">
     <p id="pinTitle" class="font-black text-lg">Enter PIN</p>
     <p id="pinMsg" class="text-xs text-gray-400 mt-1">4 digits • Back cancels</p>
-    <p id="pinDots" class="text-3xl font-black tracking-[.35em] text-center my-4 text-teal-300">○○○○○○</p>
+    <p id="pinDots" class="text-3xl font-black tracking-[.35em] text-center my-4 text-teal-300">&#x25CB;&#x25CB;&#x25CB;&#x25CB;&#x25CB;&#x25CB;</p>
     <div id="pinKeys" class="grid grid-cols-3 gap-2"></div>
   </div>
 </div>
@@ -1201,9 +1201,9 @@ function dirOf(e){
 }
 /* Virtual cursor for TV boxes: drives a real pointer when a mirror's player
    won't answer arrows. Arrows nudge it, OK clicks whatever is under it —
-   our own buttons (⛶, ▶, CC, Episodes, mirror pills) always work. NOTE: it
+   our own buttons (\u{26F6}, \u{25B6}, CC, Episodes, mirror pills) always work. NOTE: it
    cannot click INSIDE a cross-origin player (browser rule) — for actually
-   driving the player use the 🎯 handoff instead. Pointer-events:none, so it
+   driving the player use the \u{1F3AF} handoff instead. Pointer-events:none, so it
    never blocks a real tap on phone/desktop. */
 window._cursor = { on: false, x: 0, y: 0, gx: 0, gy: 0, el: null, dirs: new Set(), speed: 0, raf: 0, last: 0 };
 function cursorToggle(){
@@ -1227,7 +1227,7 @@ function cursorToggle(){
     if (!c.raf) c.raf = requestAnimationFrame(cursorLoop);
     if (btn) btn.classList.add("!bg-teal-500");
     const ws = document.getElementById("watchStatus");
-    if (ws) ws.textContent = "🖱 Cursor ON — hold arrows to glide, OK clicks. 🖱 again (or Esc) to exit.";
+    if (ws) ws.textContent = "\u{1F5B1} Cursor ON — hold arrows to glide, OK clicks. \u{1F5B1} again (or Esc) to exit.";
   } else {
     if (c.el) c.el.style.display = "none";
     c.dirs.clear(); c.speed = 0;
@@ -1455,7 +1455,7 @@ async function init(){
     rows.innerHTML = `<div class="bg-white/5 border border-white/10 rounded-xl p-8 text-center max-w-lg mx-auto">
       <p class="font-bold text-lg">Couldn't load the catalog</p>
       <p class="text-sm text-gray-400 mt-1">Check your connection, then try again.</p>
-      <button onclick="init()" class="mt-4 bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">↻ Retry</button>
+      <button onclick="init()" class="mt-4 bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">\u{21BB} Retry</button>
     </div>`;
     hideSplash();
     markReady();
@@ -1523,7 +1523,7 @@ function cardEl(x, type){
   d.setAttribute("data-focusable", "1");
   d.innerHTML = `
     <div class="relative poster-frame">
-      <span class="rate-badge">★ ${Number(x.vote_average || 0).toFixed(1)}</span>
+      <span class="rate-badge">\u{2605} ${Number(x.vote_average || 0).toFixed(1)}</span>
       ${posterTag(x.poster_path, "rounded-lg w-full aspect-[2/3] object-cover bg-white/5")}
     </div>
     <p class="card-title text-xs mt-1.5 font-semibold truncate">${titleOf(x)}</p>
@@ -1627,7 +1627,7 @@ function purgeRetiredCaches(){
     if (hl) {
       const m = (navigator.userAgent || "").match(/Chrome\/(\d+)/);
       const v = m ? Number(m[1]) : 0;
-      hl.textContent = v >= 100 ? `Playback engine: Chrome ${v} ✓ modern.`
+      hl.textContent = v >= 100 ? `Playback engine: Chrome ${v} \u{2713} modern.`
         : v > 0 ? `Playback engine: Chrome ${v} — update Android System WebView (Play Store) for smoother video.`
         : "Playback engine: unknown — update Android System WebView (Play Store) if video stutters.";
     }
@@ -1760,7 +1760,7 @@ function purgeRetiredCaches(){
           else if (mirror === "vidbolt" && (dir === "left" || dir === "right")) { boltSeekRel(dir === "left" ? -10 : 30); }
           else if (mirror === "vidzen" && (dir === "left" || dir === "right")) { zenSeekRel(dir === "left" ? -10 : 30); }
           else if (mirror === "vidrift" || mirror === "vidzen" || mirror === "vidbolt") {
-            // TV asleep + U/D: wake and land — ▲ jumps straight to the
+            // TV asleep + U/D: wake and land — \u{25B2} jumps straight to the
             // floating Skip while it's showing, else the visible bar row;
             // desktop keeps the volume hint (VidRift) or nothing.
             if (document.body.classList.contains("tv-mode")) {
@@ -1777,7 +1777,7 @@ function purgeRetiredCaches(){
         }
         if (dir === "left" || dir === "right") { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); }
         else {
-          // wake + land: bar is visible again (pokeHud above). ▲ jumps to
+          // wake + land: bar is visible again (pokeHud above). \u{25B2} jumps to
           // the floating Skip while it's showing, else the row — further
           // U/D can then climb to Got-it
           let skw2 = null;
@@ -1814,7 +1814,7 @@ function purgeRetiredCaches(){
         }
         // TV remote scheme, bar VISIBLE: L/R ALWAYS seek (YouTube-style) —
         // mashing can never degrade into button-walking, so ff/bw answers
-        // every press. Row buttons stay reachable: ▼ cycles them, ▲ climbs
+        // every press. Row buttons stay reachable: \u{25BC} cycles them, \u{25B2} climbs
         // to banners above (health Got-it). OK = press focused / play-pause
         // when none is. Volume lives on the TV remote's own keys, never arrows.
         e.preventDefault(); pokeHud();
@@ -1826,7 +1826,7 @@ function purgeRetiredCaches(){
           if (ownBar) { ctlSeekRel(dir === "left" ? -10 : 30); window._lrT = Date.now(); return; }
           // VidRift: same deal — L/R always skims from our side. (Walking the
           // strip used to eat seeks here too, stranding focus on it forever
-          // since nothing could move focus off.) Strip buttons ride ▼ now.
+          // since nothing could move focus off.) Strip buttons ride \u{25BC} now.
           if (mirror === "vidrift") { vidriftSeekRel(dir === "left" ? -10 : 30); return; }
           if (!btns.length) return;
           const bi = btns.indexOf(document.activeElement);
@@ -1836,8 +1836,8 @@ function purgeRetiredCaches(){
           return;
         }
         if (!ownBar) {
-          // VidRift U/D: ▲ climbs to the health banner, ▼ cycles the
-          // in-bar handoff (🎯 Control / ⇄ home — same split as our bar row,
+          // VidRift U/D: \u{25B2} climbs to the health banner, \u{25BC} cycles the
+          // in-bar handoff (\u{1F3AF} Control / \u{21C4} home — same split as our bar row,
           // so L/R can stay pure seek and focus always has somewhere to go).
           // Other mirrors: their own controls.
           if (mirror === "vidrift") {
@@ -1855,8 +1855,8 @@ function purgeRetiredCaches(){
           return;
         }
         // U/D moves focus between the bar row and anything above it (health
-        // Got-it, floating Skip pill) — never volume (TV keys). ▲ from the
-        // bar lands on Skip while it's showing; ▼ from Skip drops back.
+        // Got-it, floating Skip pill) — never volume (TV keys). \u{25B2} from the
+        // bar lands on Skip while it's showing; \u{25BC} from Skip drops back.
         const hb0 = document.getElementById("healthBar");
         const hg = hb0 && !hb0.classList.contains("hidden") ? hb0.querySelector("button") : null;
         const pool = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
@@ -1890,7 +1890,7 @@ function purgeRetiredCaches(){
           safeFocus(best);
           try { best.scrollIntoView({ inline: "nearest", block: "nearest" }); } catch(e){}
         } else if (dir === "down" && cur0 && bar.contains(cur0)) {
-          // nothing below the bottom-anchored row: ▼ cycles to the next
+          // nothing below the bottom-anchored row: \u{25BC} cycles to the next
           // button instead, so every pill stays reachable now L/R seeks
           const row = [...bar.querySelectorAll("button")].filter(b => b.offsetParent !== null && !b.disabled);
           if (row.length) {
@@ -2079,10 +2079,10 @@ function setHero(i){
     <div class="relative px-4 md:px-10 pb-16 max-w-2xl">
       <span class="text-xs bg-teal-500 px-3 py-1 rounded-full font-bold">#${i+1} TRENDING • ${type.toUpperCase()}</span>
       <h1 class="text-3xl md:text-5xl font-black mt-3">${titleOf(x)}</h1>
-      <p class="text-xs text-teal-300/90 font-bold mt-2 tracking-wide">★ ${Number(x.vote_average || 0).toFixed(1)} • ${(x.release_date || x.first_air_date || "").slice(0, 4)} • ${type.toUpperCase()}</p>
+      <p class="text-xs text-teal-300/90 font-bold mt-2 tracking-wide">\u{2605} ${Number(x.vote_average || 0).toFixed(1)} • ${(x.release_date || x.first_air_date || "").slice(0, 4)} • ${type.toUpperCase()}</p>
       <p class="text-sm text-gray-300 mt-2 line-clamp-3">${x.overview||""}</p>
       <div class="flex gap-3 mt-5">
-        <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="bg-teal-500 hover:bg-teal-400 font-bold px-7 h-12 text-base rounded-full">▶ Watch</button>
+        <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="bg-teal-500 hover:bg-teal-400 font-bold px-7 h-12 text-base rounded-full">\u{25B6} Watch</button>
         <button onclick='openDetail("${type}",${x.id})' class="bg-white/20 hover:bg-white/30 font-bold px-7 h-12 text-base rounded-full">ⓘ Details</button>
       </div>
     </div>`;
@@ -2106,7 +2106,7 @@ function openSearch(ev){
   document.body.classList.add("modal-open");
   renderRecent();
   document.getElementById("searchResults").innerHTML = "";
-  document.getElementById("searchHint").textContent = "Type to search — use ↓ to jump into results, OK to open, Back to close.";
+  document.getElementById("searchHint").textContent = "Type to search — use \u{2193} to jump into results, OK to open, Back to close.";
   const box = document.getElementById("searchBox");
   box.value = "";
   setTimeout(() => safeFocus(box), 60);
@@ -2130,7 +2130,7 @@ function onOverlaySearch(q){
 async function runOverlaySearch(q){
   const grid = document.getElementById("searchResults");
   const hint = document.getElementById("searchHint");
-  if (!q) { grid.innerHTML = ""; hint.textContent = "Type to search — use ↓ to jump into results, OK to open, Back to close."; return; }
+  if (!q) { grid.innerHTML = ""; hint.textContent = "Type to search — use \u{2193} to jump into results, OK to open, Back to close."; return; }
   try { if (overlayCtrl) overlayCtrl.abort(); } catch(e){}
   overlayCtrl = new AbortController();
   grid.innerHTML = `<p class="text-sm text-gray-500 col-span-full">Searching…</p>`;
@@ -2140,7 +2140,7 @@ async function runOverlaySearch(q){
     const lockedSr = adultLocked();
     const items = (data.results || []).filter(x => (x.media_type === "movie" || x.media_type === "tv") && x.poster_path && (!lockedSr || !isAdult(x)));
     grid.innerHTML = "";
-    hint.textContent = items.length ? `${items.length} result${items.length > 1 ? "s" : ""} — ↓ to browse, OK to open` : "No results found.";
+    hint.textContent = items.length ? `${items.length} result${items.length > 1 ? "s" : ""} — \u{2193} to browse, OK to open` : "No results found.";
     items.slice(0, 30).forEach(x => {
       const type = x.media_type === "tv" ? "tv" : "movie";
       const card = cardEl(x, type);
@@ -2271,9 +2271,55 @@ async function pinHash(pin){
       return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
     }
   } catch(e){}
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
-  return "djb2-" + h.toString(16);
+  return _sbSha256Hex(s);
+}
+/* Pure-JS SHA-256 fallback (same output as WebCrypto) so the PIN is a
+   SHA-256 hash on EVERY context — including insecure ones where
+   crypto.subtle is missing. No weak-hash shortcuts ever. */
+function _sbSha256Hex(str){
+  const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const utf8 = unescape(encodeURIComponent(str));
+  const l = utf8.length;
+  const blocks = Math.ceil((l + 9) / 64);
+  const total = blocks * 64;
+  const m = new Uint8Array(total);
+  for (let i = 0; i < l; i++) m[i] = utf8.charCodeAt(i);
+  m[l] = 0x80;
+  const dv = new DataView(m.buffer);
+  dv.setUint32(total - 8, Math.floor((l * 8) / 4294967296));
+  dv.setUint32(total - 4, (l * 8) >>> 0);
+  const w = new Uint32Array(64);
+  for (let bi = 0; bi < blocks; bi++) {
+    const off = bi * 64;
+    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const x = w[i-15], y = w[i-2];
+      const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
+      const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+      w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0;
+    }
+    let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+    for (let i = 0; i < 64; i++) {
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0; H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0;
+    H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0; H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;
+  }
+  return H.map(x => (x >>> 0).toString(16).padStart(8, "0")).join("");
 }
 let pinMode = "", pinEntry = "", pinFirst = "";
 /* Owner PIN ships as a HASH ONLY (SHA-256, same recipe as pinHash) — the
@@ -2287,11 +2333,11 @@ function openPin(mode, keepFirst){
   document.getElementById("pinMsg").textContent = mode === "set" ? "Adults only — kids stay locked out." : "6 digits • Back cancels";
   const keys = document.getElementById("pinKeys");
   keys.innerHTML = "";
-  ["1","2","3","4","5","6","7","8","9","C","0","⌫"].forEach(k => {
+  ["1","2","3","4","5","6","7","8","9","C","0","\u{232B}"].forEach(k => {
     const b = document.createElement("button");
     b.textContent = k;
     b.className = "py-3 rounded-xl bg-white/10 hover:bg-teal-500 text-xl font-black";
-    b.setAttribute("aria-label", k === "⌫" ? "Delete digit" : k === "C" ? "Clear" : "Digit " + k);
+    b.setAttribute("aria-label", k === "\u{232B}" ? "Delete digit" : k === "C" ? "Clear" : "Digit " + k);
     b.onclick = () => pinPress(k);
     keys.appendChild(b);
   });
@@ -2301,11 +2347,11 @@ function openPin(mode, keepFirst){
   setTimeout(() => { const f = keys.querySelector("button"); if (f) safeFocus(f); }, 60);
 }
 function paintPinDots(){
-  document.getElementById("pinDots").textContent = "●".repeat(pinEntry.length) + "○".repeat(Math.max(0, 6 - pinEntry.length));
+  document.getElementById("pinDots").textContent = "\u{25CF}".repeat(pinEntry.length) + "\u{25CB}".repeat(Math.max(0, 6 - pinEntry.length));
 }
 function pinPress(k){
   if (k === "C") { pinEntry = ""; paintPinDots(); return; }
-  if (k === "⌫") { pinEntry = pinEntry.slice(0, -1); paintPinDots(); return; }
+  if (k === "\u{232B}") { pinEntry = pinEntry.slice(0, -1); paintPinDots(); return; }
   if (pinEntry.length >= 6) return;
   pinEntry += k; paintPinDots();
   if (pinEntry.length === 6) setTimeout(pinSubmit, 150);
@@ -2340,9 +2386,9 @@ function pinClose(){
 }
 function paintAdultLock(){
   const b = document.getElementById("adultLockBtn");
-  if (b) b.textContent = adultLocked() ? "🔒 18+ Hidden" : "🔓 18+ Shown";
+  if (b) b.textContent = adultLocked() ? "\u{1F512} 18+ Hidden" : "\u{1F513} 18+ Shown";
   const nb = document.getElementById("adultLockNav");
-  if (nb) nb.textContent = adultLocked() ? "🔒" : "🔓";
+  if (nb) nb.textContent = adultLocked() ? "\u{1F512}" : "\u{1F513}";
 }
 function adultLockTap(){
   if (!adultLocked()) {
@@ -2564,10 +2610,10 @@ async function openDetail(type, id){
   if (!mb.src) mb.style.display = "none";
   document.getElementById("mBackdrop").loading = "eager";
   document.getElementById("mTitle").textContent = titleOf(d);
-  document.getElementById("mMeta").textContent = `★ ${Number(d.vote_average||0).toFixed(1)} • ${(d.release_date||d.first_air_date||"").slice(0,4)} • ${(d.genres||[]).map(g=>g.name).join(", ")}`;
+  document.getElementById("mMeta").textContent = `\u{2605} ${Number(d.vote_average||0).toFixed(1)} • ${(d.release_date||d.first_air_date||"").slice(0,4)} • ${(d.genres||[]).map(g=>g.name).join(", ")}`;
   document.getElementById("mOverview").textContent = d.overview || "No overview.";
   try {
-    document.getElementById("mListBtn").textContent = inList(type, id) ? "✓ In My List" : "+ My List";
+    document.getElementById("mListBtn").textContent = inList(type, id) ? "\u{2713} In My List" : "+ My List";
   } catch(e){}
   document.getElementById("mWatch").onclick = () => {
     if(type==="tv"){
@@ -2601,7 +2647,7 @@ function updateModalEpLabel(){
   if (!e) { document.getElementById("mEpisodeLabel").textContent = "E1"; return; }
   const un = epUnaired(e);
   document.getElementById("mEpisodeLabel").textContent = un
-    ? `E${e.episode_number} 📅 airs ${epAirPretty(un)}`
+    ? `E${e.episode_number} \u{1F4C5} airs ${epAirPretty(un)}`
     : `E${e.episode_number} — ${(e.name||"").slice(0,18)}`;
 }
 async function loadModalEpisodes(){
@@ -2627,7 +2673,7 @@ function modalSeasonStep(dir){
 function modalEpStep(dir){
   if (!modalEpisodes.length) return;
   // step past unaired episodes so the stepper never parks on one (loop-guarded:
-  // an all-unaired season just lands back where it started, label shows 📅)
+  // an all-unaired season just lands back where it started, label shows \u{1F4C5})
   for (let i = 0; i < modalEpisodes.length; i++) {
     modalEpIdx = (modalEpIdx + dir + modalEpisodes.length) % modalEpisodes.length;
     if (!epUnaired(modalEpisodes[modalEpIdx])) break;
@@ -2667,7 +2713,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   try {
     // house route: movies/TV always open on CineSrc, anime always on AniPM.
     // A saved pref from a previous title must never leak into the next one —
-    // mid-viewing ⇄ hops still work, they just don't stick past Back.
+    // mid-viewing \u{21C4} hops still work, they just don't stick past Back.
     let def = anime ? "anipm" : "cinesrc";
     if (!MIRRORS.some(x => x.id === def) || !mirrorAllowed(def)) def = "cinesrc";
     mirror = def;
@@ -2684,8 +2730,8 @@ async function openWatch(type, id, s=1, e=1, t=0){
   document.getElementById("watchView").classList.remove("hidden");
   syncMobileNav();
   window.scrollTo(0,0);
-  // viewing modes: TV goes straight into cinema view (video first, no ⛶ needed);
-  // desktop/phone just zoom-scrolls to the video, ⛶ gives true fullscreen
+  // viewing modes: TV goes straight into cinema view (video first, no \u{26F6} needed);
+  // desktop/phone just zoom-scrolls to the video, \u{26F6} gives true fullscreen
   if (document.body.classList.contains("tv-mode")) enterVideoFs();
   else { try { document.getElementById("playerBox").scrollIntoView({ block: "center", behavior: "smooth" }); } catch(e){} }
   paintNav(null); // watching: no browse tab is active
@@ -2717,7 +2763,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   document.getElementById("wPoster").loading = "eager";
   document.getElementById("wTitle").textContent = titleOf(d);
   document.getElementById("wMeta").textContent = `${type.toUpperCase()} • ${(d.release_date||d.first_air_date||"").slice(0,4)} • ${(d.genres||[]).map(g=>g.name).join(", ")}`;
-  document.getElementById("wRating").textContent = `★ ${Number(d.vote_average||0).toFixed(1)} (${d.vote_count||0} votes)`;
+  document.getElementById("wRating").textContent = `\u{2605} ${Number(d.vote_average||0).toFixed(1)} (${d.vote_count||0} votes)`;
   document.getElementById("wOverview").textContent = d.overview || "";
   document.getElementById("wCast").textContent = "Cast: " + ((d.credits&&d.credits.cast||[]).slice(0,6).map(c=>c.name).join(", ") || "");
   // TV episode UI
@@ -2763,7 +2809,7 @@ async function loadEpisodes(s){
   const grid = document.getElementById("epGrid"); grid.innerHTML = "";
   window._seasonArc = seasonDisplayName(d, seasonArc(titleOf(currentItem || {}), d.overview || "", sv));
   updateSeasonLabel();
-  // finale flags for this season: last aired ep gets 🏁 (series 👑 when this
+  // finale flags for this season: last aired ep gets \u{1F3C1} (series \u{1F451} when this
   // is also the show's last season) — same data TV + anime both ride on
   const _airNums = (d.episodes || []).filter(x => !epUnaired(x)).map(x => x.episode_number);
   const _maxEp = _airNums.length ? Math.max(..._airNums) : -1;
@@ -2777,7 +2823,7 @@ async function loadEpisodes(s){
     const isFin = !unaired && ep.episode_number === _maxEp;
     const finTag = isFin ? (_lastSeason ? "Series finale" : "Season finale") : "";
     const b = document.createElement("button");
-    b.textContent = unaired ? "E" + ep.episode_number + " 📅" : "E" + ep.episode_number + (isFin ? " 🏁" : "");
+    b.textContent = unaired ? "E" + ep.episode_number + " \u{1F4C5}" : "E" + ep.episode_number + (isFin ? " \u{1F3C1}" : "");
     b.title = unaired ? `Airs ${epAirPretty(unaired)} — not out yet` : (finTag || ep.name || "");
     const isCur = sv === watchState.s && ep.episode_number == e;
     if (unaired) {
@@ -2814,12 +2860,12 @@ function paintUpNext(eps){
     if (playBtn) playBtn.classList.remove("hidden");
     return;
   }
-  if (nxt) { box.classList.add("hidden"); return; } // announced but not out — grid shows its 📅
+  if (nxt) { box.classList.add("hidden"); return; } // announced but not out — grid shows its \u{1F4C5}
   // season over: announce the finale instead of an Up Next (TV + anime alike)
   const fin = finaleInfo();
   if (!fin) { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
-  if (kick) kick.textContent = fin.series ? "👑 SERIES FINALE" : "🏁 SEASON FINALE";
+  if (kick) kick.textContent = fin.series ? "\u{1F451} SERIES FINALE" : "\u{1F3C1} SEASON FINALE";
   document.getElementById("upNextTitle").textContent = fin.series
     ? `Final episode of ${titleOf(currentItem || {}) || "this series"}`
     : `Final episode of Season ${watchState.s}`;
@@ -2915,7 +2961,7 @@ function resumePick(cont){
 let watchSeasons = [], gridS = 1; // gridS: watch-grid browse cursor (never autoplays)
 function updateSeasonLabel(){
   const arc = window._seasonArc || "";
-  document.getElementById("seasonLabel").textContent = `Season ${gridS}${arc ? " · " + arc : ""}${gridS === watchState.s ? " ✓" : ""}`;
+  document.getElementById("seasonLabel").textContent = `Season ${gridS}${arc ? " · " + arc : ""}${gridS === watchState.s ? " \u{2713}" : ""}`;
 }
 function watchSeasonStep(dir){
   if (!watchSeasons.length) return;
@@ -2935,7 +2981,7 @@ function nextEpisode(dir){
     const un = t && epUnaired(t);
     if (un) {
       const ws = document.getElementById("watchStatus");
-      if (ws) ws.textContent = `S${watchState.s} E${target} airs ${epAirPretty(un)} — not out yet 📅`;
+      if (ws) ws.textContent = `S${watchState.s} E${target} airs ${epAirPretty(un)} — not out yet \u{1F4C5}`;
       return;
     }
   }
@@ -2967,7 +3013,7 @@ try {
   }
 } catch(e){}
 /* single-player mode: hide the video's own button bar, ours is the player.
-   (Its ⚙/CC menus go with it — re-show below any time for subtitles.) */
+   (Its \u{2699}/CC menus go with it — re-show below any time for subtitles.) */
 let pControls = false;
 try { pControls = localStorage.getItem("streambox_pcontrols") === "1"; } catch(e){}
 let resumeAt = -1; // reload (quality/server/buttons) resumes where you left off
@@ -3193,8 +3239,8 @@ function buildEmbedUrlClean(){
   return `https://cinesrc.st/embed/tv/${watchState.id}?s=${watchState.s}&e=${watchState.e}&${p}`;
 }
 /* Server hopping: automatic by nobody's default — a stuck player NAMES its
-   fallback and you hop with ⇄ Source (strip ⇄ button or ⚙ → ⇄ Source).
-   Tick Playback Settings → Auto-switch server to restore the old self-heal. */
+   fallback and you hop with \u{21C4} Source (strip \u{21C4} button or \u{2699} \u{2192} \u{21C4} Source).
+   Tick Playback Settings \u{2192} Auto-switch server to restore the old self-heal. */
 function autoSwitchOn(){
   try { return !!document.getElementById("optAutoswitch").checked; }
   catch(e){ return false; }
@@ -3213,11 +3259,11 @@ function autoSwitchRestore(){
 function stuckRecommend(msg, fbName){
   window._stuckShown = true;
   const ws = document.getElementById("watchStatus");
-  if (ws) ws.textContent = msg + ` — press ⇄ Source to try ${fbName}`;
+  if (ws) ws.textContent = msg + ` — press \u{21C4} Source to try ${fbName}`;
   try {
     const t = document.getElementById("volToast");
     if (t) {
-      t.textContent = `⚠ Stuck — ⇄ Source tries ${fbName}`;
+      t.textContent = `\u{26A0} Stuck — \u{21C4} Source tries ${fbName}`;
       t.classList.remove("hidden");
       clearTimeout(window._stuckT);
       window._stuckT = setTimeout(() => { try { t.classList.add("hidden"); } catch(e){} }, 8000);
@@ -3265,7 +3311,7 @@ function armTapHint(){
     try {
       const t = document.getElementById("volToast");
       if (t) {
-        t.textContent = "▶ Click the video once — your browser blocks auto-start. Our bar drives it after that.";
+        t.textContent = "\u{25B6} Click the video once — your browser blocks auto-start. Our bar drives it after that.";
         t.classList.remove("hidden");
         clearTimeout(window._tapMsgT);
         window._tapMsgT = setTimeout(() => { try { t.classList.add("hidden"); } catch(e){} }, 9000);
@@ -3335,7 +3381,7 @@ function armStuckWatchdogs(){
       const nmA = stuckFallbackName(fbA);
       if (!autoSwitchOn()) { stuckRecommend("AniPM isn't starting here", nmA); return; }
       const wsa = document.getElementById("watchStatus");
-      if (wsa) wsa.textContent = `AniPM isn't starting here — moved you to ${nmA}.` + (fbA === "vidrift" ? " Robot-check on the new player? ⇄ Source hops mirrors" : " ⇄ Source anytime to hop again");
+      if (wsa) wsa.textContent = `AniPM isn't starting here — moved you to ${nmA}.` + (fbA === "vidrift" ? " Robot-check on the new player? \u{21C4} Source hops mirrors" : " \u{21C4} Source anytime to hop again");
       setMirror(fbA, true);
     }, _aTV ? 60000 : 20000);
     return;
@@ -3351,14 +3397,14 @@ function armStuckWatchdogs(){
       const nm3 = stuckFallbackName(fb3);
       if (!autoSwitchOn()) { stuckRecommend("VidRift is showing a check this remote can't complete", nm3); return; }
       const ws3 = document.getElementById("watchStatus");
-      if (ws3) ws3.textContent = `VidRift is showing a check this remote can't complete — moved you to ${nm3}. ⇄ Source anytime to hop again`;
+      if (ws3) ws3.textContent = `VidRift is showing a check this remote can't complete — moved you to ${nm3}. \u{21C4} Source anytime to hop again`;
       setMirror(fb3, true);
     }, 60000);
   }
   // VidBolt/VidZen had NO clocks (a frame that never reports progress sat
   // black forever with no guidance — exactly the TV report). Same patience
   // scale as the rest: warn first, then heal once (manual mode just names
-  // the fallback and waits for ⇄ Source — never ping-pongs).
+  // the fallback and waits for \u{21C4} Source — never ping-pongs).
   if (mirror === "vidbolt" || mirror === "vidzen") {
     const nm = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
     const fb = stuckFallback(watchState.anime ? "anipm" : (_aTV ? "yapgrid" : "vidrift"));
@@ -3374,7 +3420,7 @@ function armStuckWatchdogs(){
       if (window._autoHopped || !autoSwitchOn()) { stuckRecommend(`${nm} stayed stuck`, fbn); return; }
       window._autoHopped = true;
       const wsb = document.getElementById("watchStatus");
-      if (wsb) wsb.textContent = `${nm} stayed stuck — moved you to ${fbn}. ⇄ Source anytime to go back.`;
+      if (wsb) wsb.textContent = `${nm} stayed stuck — moved you to ${fbn}. \u{21C4} Source anytime to go back.`;
       setMirror(fb, true);
     }, _aTV ? 90000 : 35000);
     return;
@@ -3456,13 +3502,13 @@ function loadPlayer(){
       if (window._cinePlaying || mirror !== "cinesrc") return;
       const ws = document.getElementById("watchStatus");
       if (ws) ws.textContent = _isTV
-        ? "CineSrc is taking a while — slow boxes can need a full minute. If it never starts, press ⇄ Source"
+        ? "CineSrc is taking a while — slow boxes can need a full minute. If it never starts, press \u{21C4} Source"
         : "CineSrc found the title but playback is stuck — desktop ad-blocker? Allow this site + cinesrc.st (Brave: Shields down), or switch Source";
       const hb = document.getElementById("healthBar");
       if (hb) {
         hb.querySelector("span").textContent = _isTV
-          ? "⚠ CineSrc is still loading — slow boxes can need a full minute. Wait a little, or use ⇄ Source. Mirrors still play."
-          : "⚠ CineSrc won't start here — desktop ad-blockers (Brave Shields etc.) break its player even while video loads. Allow this site + cinesrc.st, or use ⇄ Source. Mirrors still play.";
+          ? "\u{26A0} CineSrc is still loading — slow boxes can need a full minute. Wait a little, or use \u{21C4} Source. Mirrors still play."
+          : "\u{26A0} CineSrc won't start here — desktop ad-blockers (Brave Shields etc.) break its player even while video loads. Allow this site + cinesrc.st, or use \u{21C4} Source. Mirrors still play.";
         hb.classList.remove("hidden");
       }
     }, _isTV ? 45000 : 18000);
@@ -3474,7 +3520,7 @@ function loadPlayer(){
       if (!autoSwitchOn()) { stuckRecommend("CineSrc stayed stuck", nm); return; }
       setMirror(fb, true);
       const ws2 = document.getElementById("watchStatus");
-      if (ws2) ws2.textContent = `CineSrc stayed stuck — moved you to ${nm}. ⇄ Source anytime to go back.`;
+      if (ws2) ws2.textContent = `CineSrc stayed stuck — moved you to ${nm}. \u{21C4} Source anytime to go back.`;
     }, _isTV ? 90000 : 35000);
   }
   if (mirror === "vidrift" || mirror === "vidzen") {
@@ -3490,7 +3536,7 @@ function loadPlayer(){
     armStuckWatchdogs(); // stage 3 lives here (TV anime only)
   }
   if (mirror === "vidzen" || mirror === "vidbolt") {
-    // direct-drive mirrors finally get clocks too (warn → heal-once)
+    // direct-drive mirrors finally get clocks too (warn \u{2192} heal-once)
     armStuckWatchdogs();
     armTapHint(); // gesture-gated browsers may need one in-frame click
     // TV WebViews often block autoplay-with-sound (PC allows it): one
@@ -3510,24 +3556,24 @@ function loadPlayer(){
     if (spin) spin.style.display = "none";
     const ws = document.getElementById("watchStatus");
     if (ws && mirror === "cinesrc" && /Now playing|Loading/.test(ws.textContent || ""))
-      ws.textContent = "Still loading? Press ↻ Reload, or ⇄ Source to try another server.";
+      ws.textContent = "Still loading? Press \u{21BB} Reload, or \u{21C4} Source to try another server.";
   }, document.body.classList.contains("tv-mode") ? 25000 : 8000);
   if (mirror === "cinesrc") ctlPollStart();
   else ctlPollStop();
   // No auto-handoff into alt-mirror frames: a robot/phone check page swallows
   // every key and traps the remote (only system Back escapes). Focus stays on
-  // OUR strip — arrows/OK keep working, ⇄ hops away. AniPM keeps its own
+  // OUR strip — arrows/OK keep working, \u{21C4} hops away. AniPM keeps its own
   // load-time handoff above (their player demands first press inside);
-  // every other mirror is manual 🎯 only. TV *browsers* never had auto-handoff.
+  // every other mirror is manual \u{1F3AF} only. TV *browsers* never had auto-handoff.
   pokeHud(); // reveal HUD + bar briefly on every (re)load
   showTitleCard();
 }
 function reloadPlayer(){ loadPlayer(); }
 function otherSource(){
-  // Context-aware ⇄ Source (one button, all 3 targets):
-  // nothing played on this title yet + a proven mirror exists → jump straight
-  // there (fleeing death, not exploring). Otherwise on CineSrc → drop the
-  // pinned server and re-pick (keeps position); on any other mirror → cycle
+  // Context-aware \u{21C4} Source (one button, all 3 targets):
+  // nothing played on this title yet + a proven mirror exists \u{2192} jump straight
+  // there (fleeing death, not exploring). Otherwise on CineSrc \u{2192} drop the
+  // pinned server and re-pick (keeps position); on any other mirror \u{2192} cycle
   // to the next mirror (starts at 0 there).
   if (!window._cinePlaying) {
     try {
@@ -3578,7 +3624,7 @@ function paintTwinTip(){
   if (!twin) { bar.classList.add("hidden"); return; }
   const yr = (currentItem && (currentItem.release_date || "").slice(0, 4)) || "";
   document.getElementById("twinText").textContent =
-    `⚠ Two cuts exist — servers often shelve the ${twin} under this ${yr ? yr + " " : ""}title. Wrong one playing?`;
+    `\u{26A0} Two cuts exist — servers often shelve the ${twin} under this ${yr ? yr + " " : ""}title. Wrong one playing?`;
   bar.classList.remove("hidden");
 }
 function hideTwinTip(){
@@ -3649,7 +3695,7 @@ function hideToast(){ try { document.getElementById("toast").classList.remove("s
 function toastSaveActions(){
   return [
     { label: "Continue", fn: null },
-    { label: "My List →", fn: () => showList() },
+    { label: "My List \u{2192}", fn: () => showList() },
   ];
 }
 try {
@@ -3725,11 +3771,11 @@ function renderContinue(){
       d.setAttribute("data-focusable", "1");
       d.setAttribute("aria-label", `${x.title||""} (${x.type})`);
       const pct = (x.dur > 60 && x.pos > 5) ? Math.min(99, Math.round(x.pos / x.dur * 100)) : 0;
-      d.innerHTML = `<div class="glass flex items-center gap-3 p-3"><img loading="lazy" decoding="async" src="${IMG(x.poster,"w185")}" onerror="this.onerror=null;this.style.display='none'" class="w-14 aspect-[2/3] object-cover rounded-lg shrink-0"><div class="flex-1 min-w-0"><p class="card-title text-sm font-bold truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p>${pct ? `<div class="h-1.5 rounded bg-white/15 mt-2 overflow-hidden"><div class="h-1.5 rounded bg-teal-400" style="width:${pct}%"></div></div><p class="text-[11px] text-teal-300 font-bold mt-1">${pct}% watched</p>` : `<p class="text-[11px] text-gray-600 mt-2">Not started</p>`}</div><button class="w-9 h-9 shrink-0 rounded-full bg-black/50 hover:bg-black/80 text-sm" aria-label="Remove">✕</button></div>`;
+      d.innerHTML = `<div class="glass flex items-center gap-3 p-3"><img loading="lazy" decoding="async" src="${IMG(x.poster,"w185")}" onerror="this.onerror=null;this.style.display='none'" class="w-14 aspect-[2/3] object-cover rounded-lg shrink-0"><div class="flex-1 min-w-0"><p class="card-title text-sm font-bold truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p>${pct ? `<div class="h-1.5 rounded bg-white/15 mt-2 overflow-hidden"><div class="h-1.5 rounded bg-teal-400" style="width:${pct}%"></div></div><p class="text-[11px] text-teal-300 font-bold mt-1">${pct}% watched</p>` : `<p class="text-[11px] text-gray-600 mt-2">Not started</p>`}</div><button class="w-9 h-9 shrink-0 rounded-full bg-black/50 hover:bg-black/80 text-sm" aria-label="Remove">\u{2715}</button></div>`;
       const resumeAt = (x.dur > 60 && x.pos > 10) ? x.pos : 0;
       d.onclick = activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt));
       // remote/keyboard: OK plays ONLY when the card itself has focus — the inner
-      // ✕ button handles its own keypress, otherwise Back/OK on ✕ replays the title
+      // \u{2715} button handles its own keypress, otherwise Back/OK on \u{2715} replays the title
       d.onkeydown = (ev)=>{ if (ev.target !== d) return; if(okPressed(ev)){ ev.preventDefault(); activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt))(); } };
       d.querySelector("button").onclick = (ev)=>{ ev.stopPropagation(); removeContinue(x.type,x.id); };
       grid.appendChild(d);
@@ -3766,8 +3812,8 @@ function addToList(){
       poster: d.poster_path, rating: d.vote_average,
       year: (d.release_date || d.first_air_date || "").slice(0, 4), at: Date.now() };
     saveList([item, ...getList()]);
-    if (btn) btn.textContent = "✓ In My List";
-    toast("✓ Saved to My List", toastSaveActions());
+    if (btn) btn.textContent = "\u{2713} In My List";
+    toast("\u{2713} Saved to My List", toastSaveActions());
   }
   try {
     if (!document.getElementById("listView").classList.contains("hidden")) renderList();
@@ -3811,7 +3857,7 @@ function renderList(){
     const rm = document.createElement("button");
     rm.className = "absolute top-1 right-1 z-[2] w-9 h-9 rounded-full bg-black/60 hover:bg-black/90 text-sm";
     rm.setAttribute("aria-label", `Remove ${x.title} from My List`);
-    rm.textContent = "✕";
+    rm.textContent = "\u{2715}";
     rm.onclick = (ev) => { ev.stopPropagation(); removeFromList(x.type, x.id); };
     rm.onkeydown = (ev) => { if (okPressed(ev)) { ev.preventDefault(); ev.stopPropagation(); removeFromList(x.type, x.id); } };
     c.appendChild(rm);
@@ -3821,7 +3867,7 @@ function renderList(){
 
   /* ---------- Bar auto-hide: visible on interaction, gone after 4s idle.
      (A focus-parked guard was tried and REVERTED: on TV the remote parks on
-     ▶ forever, so "never hide under focus" meant "never hide".) ---------- */
+     \u{25B6} forever, so "never hide under focus" meant "never hide".) ---------- */
   function inCinema(){
     return document.body.classList.contains("video-fs");
   }
@@ -3940,7 +3986,7 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
   } // events correct us
   // VidRift has no play API: hand keys into its player instead — its own
   // OK/space/arrows drive it, Back returns (TV app). VidBolt + VidZen HAVE
-  // play APIs, so ▶ talks straight to them (events correct us).
+  // play APIs, so \u{25B6} talks straight to them (events correct us).
   if (mirror === "vidrift") { focusMirror(); return; }
   if (mirror === "vidbolt") { boltSend(pState.paused ? { type: "play" } : { type: "pause" }); return; }
   if (mirror === "vidzen") { zenSend(pState.paused ? { type: "play" } : { type: "pause" }); return; }
@@ -3986,7 +4032,7 @@ function skipFlash(d){
   // visible proof the skim landed (watchStatus sits below, hidden in cinema)
   const t = document.getElementById("volToast");
   if (!t) return;
-  t.textContent = d < 0 ? "⏪ −10s" : "⏩ +30s";
+  t.textContent = d < 0 ? "\u{23EA} −10s" : "\u{23E9} +30s";
   t.classList.remove("hidden");
   clearTimeout(window._volT);
   window._volT = setTimeout(() => t.classList.add("hidden"), 900);
@@ -4042,7 +4088,7 @@ function nudgePlayerSize(){
   } catch(e){}
 }
 function focusPlayer(fromFs){
-  // give the remote to the player itself ONLY on explicit request (🎯):
+  // give the remote to the player itself ONLY on explicit request (\u{1F3AF}):
   // its own buttons/menu become drivable, but ONLY its own keys work there.
   const f = document.getElementById("player");
   if (!fromFs) { try { f.scrollIntoView({ block: "center", behavior: "auto" }); } catch(e){} }
@@ -4062,7 +4108,7 @@ function focusMirror(){
   try {
     const t = document.getElementById("volToast");
     if (t) {
-      t.textContent = `🎯 Inside ${label}: OK plays/pauses · ◀ ▶ seek · Back returns`;
+      t.textContent = `\u{1F3AF} Inside ${label}: OK plays/pauses · \u{25C0} \u{25B6} seek · Back returns`;
       t.classList.remove("hidden");
       clearTimeout(window._volT);
       window._volT = setTimeout(() => { try { t.classList.add("hidden"); } catch(e){} }, 3000);
@@ -4248,7 +4294,7 @@ function volFlash(){
   const t = document.getElementById("volToast");
   if (!t) return;
   const v = Math.round((pState.vol == null ? 1 : pState.vol) * 100);
-  t.textContent = (pState.muted ? "🔇 " : "🔊 ") + v + "%";
+  t.textContent = (pState.muted ? "\u{1F507} " : "\u{1F50A} ") + v + "%";
   t.classList.remove("hidden");
   clearTimeout(window._volT);
   window._volT = setTimeout(() => t.classList.add("hidden"), 1200);
@@ -4305,7 +4351,7 @@ function sleepTick(){
     else sendCmd("pause");
     pState.paused = true; ctlPaint(); paintSleep();
     const ws = document.getElementById("watchStatus");
-    if (ws) ws.textContent = "😴 Sleep timer — playback paused";
+    if (ws) ws.textContent = "\u{1F634} Sleep timer — playback paused";
   }
   const l = document.getElementById("sleepLabel");
   if (l && sleep.endAt && !document.getElementById("setPanel").classList.contains("hidden"))
@@ -4327,7 +4373,7 @@ function forgetServer(){
 }
 /* source mirrors: CineSrc default + alternates. CineSrc/AniPM/VidRift/VidBolt/
    VidZen speak a two-way protocol (our bar drives them — VidRift play/pause
-   excepted: their published surface has no play command, so ▶ hands keys in
+   excepted: their published surface has no play command, so \u{25B6} hands keys in
    there); the rest use their own player entirely.
    NO_SANDBOX members load UNSANDBOXED (see applyMirrorSandbox): Ad Shield is
    off there by necessity, use Brave/uBlock for in-stream ads. All other
@@ -4473,7 +4519,7 @@ function mirrorUrl(id){
       // ad-free player with its OWN auto subs + in-player translation:
       // movies keep captions here even when Wyzie is capped.
       // lang = its UI + preferred subs follow your Subs language;
-      // autoplay saves one OK press (blocked-with-sound just shows ▶).
+      // autoplay saves one OK press (blocked-with-sound just shows \u{25B6}).
       // Bonus: a Wyzie-loaded track rides along as its default subtitles
       // (their file host is CORS-open, so the player can fetch it) — pick
       // the language in OUR Subs UI, no in-player menu needed on TV.
@@ -4643,7 +4689,7 @@ function updateMirrorUI(){
   document.getElementById("ctlBar").classList.toggle("hidden", !(isCS || isPaired));
   // paired mirrors ride ctlBar now, so the strip stays away — in cinema it
   // used to pin over our bar (two bars piled at the bottom on TV). VidRift
-  // keeps its 🎯 handoff + all paired keep ⇄ home as in-bar buttons.
+  // keeps its \u{1F3AF} handoff + all paired keep \u{21C4} home as in-bar buttons.
   document.getElementById("mirrorBar").classList.toggle("hidden", isCS || isTrailer || isPaired);
   // A/V sheet button: AniPM carries tracks; VidBolt carries the full Player
   // sheet (servers + quality + subtitles + audio from cached panels)
@@ -4656,14 +4702,14 @@ function updateMirrorUI(){
     if (av.getAttribute("aria-label") !== at) av.setAttribute("aria-label", at);
     if (av.title !== tt) av.title = tt;
   }
-  // paired in-bar extras: VidRift keeps its 🎯 handoff here (no play API),
-  // every paired mirror keeps ⇄ home to the primary (the strip is hidden).
+  // paired in-bar extras: VidRift keeps its \u{1F3AF} handoff here (no play API),
+  // every paired mirror keeps \u{21C4} home to the primary (the strip is hidden).
   const cc = document.getElementById("ctlControl");
   if (cc) cc.classList.toggle("hidden", mirror !== "vidrift");
   const ch = document.getElementById("ctlHome");
   if (ch) {
     ch.classList.toggle("hidden", !isPaired);
-    const hl = watchState.anime ? "⇄ AniPM" : "⇄ CineSrc";
+    const hl = watchState.anime ? "\u{21C4} AniPM" : "\u{21C4} CineSrc";
     if (ch.textContent !== hl) ch.textContent = hl;
   }
   // anime declutter: quality + settings live in the A/V sheet now. VidBolt
@@ -4698,21 +4744,21 @@ function updateMirrorUI(){
     const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
     document.getElementById("mirrorName").textContent = label;
     const home = document.getElementById("mirrorHomeBtn");
-    if (home) home.textContent = watchState.anime ? "⇄ AniPM" : "⇄ CineSrc";
+    if (home) home.textContent = watchState.anime ? "\u{21C4} AniPM" : "\u{21C4} CineSrc";
     if (mirror === "yapgrid" && typeof subFile !== "undefined" && subFile && subFile.corsUrl) {
-      document.getElementById("watchStatus").textContent = `YapGrid: showing your ${subFile.lang || "loaded"} subs ✓ — change language in ⚙ → Subs · no Ad Shield here, use Brave/uBlock`;
+      document.getElementById("watchStatus").textContent = `YapGrid: showing your ${subFile.lang || "loaded"} subs \u{2713} — change language in \u{2699} \u{2192} Subs · no Ad Shield here, use Brave/uBlock`;
       return;
     }
     if (mirror === "anipm") {
       document.getElementById("watchStatus").textContent = watchState.anime
-        ? "AniPM: our bar drives it after one ▶ tap inside · sub/dub + skip-intro built in"
-        : "AniPM: our bar drives it after one ▶ tap inside · ⇄ Source anytime";
+        ? "AniPM: our bar drives it after one \u{25B6} tap inside · sub/dub + skip-intro built in"
+        : "AniPM: our bar drives it after one \u{25B6} tap inside · \u{21C4} Source anytime";
       return;
     }
     if (mirror === "vidrift") {
       document.getElementById("watchStatus").textContent = watchState.anime
-        ? "VidRift: anime home — sub/dub, 30-language subs and auto-next live in its player · 🎯/🖱 drive it on TV · no Ad Shield (player refuses sandbox)"
-        : "VidRift: sub/dub, auto-next and its own subs live in its player · 🎯/🖱 drive it on TV · no Ad Shield (player refuses sandbox)";
+        ? "VidRift: anime home — sub/dub, 30-language subs and auto-next live in its player · \u{1F3AF}/\u{1F5B1} drive it on TV · no Ad Shield (player refuses sandbox)"
+        : "VidRift: sub/dub, auto-next and its own subs live in its player · \u{1F3AF}/\u{1F5B1} drive it on TV · no Ad Shield (player refuses sandbox)";
       return;
     }
     if (mirror === "vidzen") {
@@ -4729,7 +4775,7 @@ function updateMirrorUI(){
       ? `Mirror: ${label} — no Ad Shield here (it blocks sandboxed players). Use Brave/uBlock.`
       : `Mirror: ${label} — use its own player controls` + ((typeof subFile !== "undefined" && subFile && subFile.cues && subFile.cues.length) ? " · your Wyzie subs return on CineSrc" : "");
   } else if (isTrailer) {
-    document.getElementById("watchStatus").textContent = "🎬 Playing official trailer";
+    document.getElementById("watchStatus").textContent = "\u{1F3AC} Playing official trailer";
   }
 }
 /* Per-mirror sandbox: these refuse ANY sandboxed iframe, so drop
@@ -4784,12 +4830,12 @@ function paintMirrors(){
   mk("trailer", trailerKey ? "\u25B6 Trailer" : "\u25B6 \u2026", !!trailerKey);
 }
 /* server tiers for the picker: OUR PLAYERS (our bar + remote drive the
-   video) vs MORE SERVERS (their own player — cursor/🎯 on TV). VidRift rides
+   video) vs MORE SERVERS (their own player — cursor/\u{1F3AF} on TV). VidRift rides
    with ours: remote seeks + auto-skip sync + progress feed our UI. */
 const MAIN_PLAYERS = ["cinesrc", "anipm", "vidrift", "vidzen", "vidbolt"];
 const MAIN_HINTS = {
   cinesrc: "Our bar drives everything: play, seek, subs, speed",
-  anipm: "Our bar drives it after one ▶ tap inside: sub/dub, quality, skip",
+  anipm: "Our bar drives it after one \u{25B6} tap inside: sub/dub, quality, skip",
   vidrift: "Remote seeks + auto-skip sync; Up Next + quality follow our UI; our bar drives seek/skip/subs; phone panels open in our sheet",
   vidzen: "Our bar drives play, seek, skip; server picker + subs in its player",
   vidbolt: "Our bar drives play, seek, skip; A/V holds servers, quality, subtitles; our CC overlay works too",
@@ -4832,21 +4878,19 @@ async function wyzQuotaMsg(res){
     ? `Daily limit reached (1,000 free/day) — resets ${reset}.`
     : "Daily limit reached (1,000 free/day) — try again later.";
 }
-/* quota quiet-mode: the cap gets ONE calm switch-note per session, never a ⚠
+/* quota quiet-mode: the cap gets ONE calm switch-note per session, never a \u{26A0}
    on every episode/season — backups still load silently underneath. */
 function wyzCapNote(){
   if (window._wyzCapNoted) return;
   window._wyzCapNoted = true;
   try {
     const wq = document.getElementById("watchStatus");
-    if (wq) wq.textContent = "Subtitles: switched to backup source ✓";
+    if (wq) wq.textContent = "Subtitles: switched to backup source \u{2713}";
   } catch(e){}
 }
 function paintWyzKey(){
   // key UI retired (built-in key + backups just work) — null-safe no-op kept
   // for the quota path that still reports through it.
-  const st = document.getElementById("wyzKeyState");
-  if (!st) return; // UI gone — quota feedback rides watchStatus + backup headers
 }
 function paintWyzLang(){
   const row = document.getElementById("wyzLangRow");
@@ -4916,7 +4960,7 @@ async function wyzSearch(){
     // Wyzie delivered — backups stay one tap away (same list, appended below)
     const ab = document.createElement("button");
     ab.id = "wyzBackupBtn";
-    ab.textContent = "⇄ Also try backups (TSDB + BetaSeries)";
+    ab.textContent = "\u{21C4} Also try backups (TSDB + BetaSeries)";
     ab.className = "mt-2 px-4 h-11 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold";
     ab.onclick = () => bsSearch(true);
     box.appendChild(ab);
@@ -5000,12 +5044,12 @@ async function wyzAutoSubs(){
       pos: "bottom", offset: 0 });
     wyzQuotaClear();
     const ws = document.getElementById("watchStatus");
-    if (ws && (mirror === "cinesrc" || mirror === "vidbolt")) ws.textContent = `Subtitles auto-loaded (${cues.length} lines) ✓ — nudge sync anytime in ⚙ → Subs`;
+    if (ws && (mirror === "cinesrc" || mirror === "vidbolt")) ws.textContent = `Subtitles auto-loaded (${cues.length} lines) \u{2713} — nudge sync anytime in \u{2699} \u{2192} Subs`;
   } catch(e){}
 }
 /* Backup subtitles (BetaSeries): used ONLY when the Wyzie free key is capped.
-   TV shows only (BetaSeries lists no movie subs). Chain: TMDB tvdb id →
-   BetaSeries show → season episodes → subtitles → file text via a CORS
+   TV shows only (BetaSeries lists no movie subs). Chain: TMDB tvdb id \u{2192}
+   BetaSeries show \u{2192} season episodes \u{2192} subtitles \u{2192} file text via a CORS
    relay (their file host sends no CORS headers, so browsers can't fetch it
    directly; if the relay dies the message tells you the manual copy-paste).
    Key sharded like the others; the OAuth secret is never needed for reads. */
@@ -5136,7 +5180,7 @@ async function bsSearch(append){
     list.forEach(s => box.appendChild(bsRow(s, "Backup")));
   } catch(err) {
     if (append) {
-      if (busy) { busy.disabled = false; busy.textContent = "⇄ Also try backups (TSDB + BetaSeries)"; }
+      if (busy) { busy.disabled = false; busy.textContent = "\u{21C4} Also try backups (TSDB + BetaSeries)"; }
       const p = document.createElement("p");
       p.className = "text-xs text-red-400";
       p.textContent = (err && err.message) || "Backup failed.";
@@ -5162,10 +5206,10 @@ async function bsDownload(sub){
     const gl = guessLang(sub.file);
     setSubs({ name: (sub.file || "backup.srt"), lang: gl !== "Custom" ? gl : (sub.language || wyzLang.toUpperCase()), cues, src: sub.tsdbUrl ? "tsdb" : "betaseries", corsUrl: (sub.tsdbUrl || ""),
       pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
-    subStatus(`Loaded ${cues.length} lines (backup ✓).`);
+    subStatus(`Loaded ${cues.length} lines (backup \u{2713}).`);
   } catch(err) {
-    // last resort: TSDB files open as plain text; BetaSeries ones too — copy into ✏ Paste text
-    subStatus(`Auto-load failed — open ${sub.tsdbUrl || ("betaseries.com/srt/" + sub.id)} in your browser, copy the text, paste it under ✏ Paste text.`);
+    // last resort: TSDB files open as plain text; BetaSeries ones too — copy into \u{270F} Paste text
+    subStatus(`Auto-load failed — open ${sub.tsdbUrl || ("betaseries.com/srt/" + sub.id)} in your browser, copy the text, paste it under \u{270F} Paste text.`);
   }
 }
 async function bsAuto(){
@@ -5192,7 +5236,7 @@ async function bsAuto(){
     // later episodes load backups with no further messages
     if (ws && (mirror === "cinesrc" || mirror === "vidbolt") && !window._wyzCapNoted) {
       window._wyzCapNoted = true;
-      ws.textContent = `Backup subtitles auto-loaded (${cues.length} lines) ✓`;
+      ws.textContent = `Backup subtitles auto-loaded (${cues.length} lines) \u{2713}`;
     }
   } catch(e){}
 }
@@ -5222,7 +5266,7 @@ function paintSubsBtn(){
     // AniPM's own tracks (default on) — our overlay file stays out of it
     const on = window._anipmSubs !== false;
     b.dataset.s = on ? "1" : "0";
-    b.textContent = on ? "CC ✓" : "CC";
+    b.textContent = on ? "CC \u{2713}" : "CC";
     b.className = "h-11 px-3 rounded-full text-sm font-bold " + (on ? "bg-teal-500 hover:bg-teal-400" : "bg-white/10 hover:bg-white/20");
     return;
   }
@@ -5230,12 +5274,12 @@ function paintSubsBtn(){
   const key = on ? "1" : "0";
   if (b.dataset.s === key) return;
   b.dataset.s = key;
-  b.textContent = on ? "CC ✓" : "CC";
+  b.textContent = on ? "CC \u{2713}" : "CC";
   b.className = "h-11 px-3 rounded-full text-sm font-bold " + (on ? "bg-teal-500 hover:bg-teal-400" : "bg-white/10 hover:bg-white/20");
   // mirror strip carries the same toggle (our bar is hidden over alt mirrors)
   try {
     const sb = document.getElementById("stripSubs");
-    if (sb) sb.textContent = on ? "CC ✓" : "CC";
+    if (sb) sb.textContent = on ? "CC \u{2713}" : "CC";
   } catch(e){}
 }
 function escapeHtml(s){
@@ -5450,7 +5494,7 @@ const ARC_S1 = [
   [/dragon ball z/i, "Saiyan Saga"],
   [/^dragon ball$/i, "Emperor Pilaf Saga"],
 ];
-/* Pinned season→saga tables (fan-verified beats sniffing every time).
+/* Pinned season\u{2192}saga tables (fan-verified beats sniffing every time).
    Checked FIRST; keyword sniffing only fills seasons with no pin. */
 const SEASON_ARC_OVERRIDES = [
   // { match: /show title/i, arcs: { 1: "Saga", 2: "Saga" } },
@@ -5478,7 +5522,7 @@ function seasonSub(seasonDetail, fallbackCount){
   return tail;
 }
 /* Season display name: TMDB's own season title when it's real
-   ("The Final Season"), else the saga (pins → sniffing), else nothing.
+   ("The Final Season"), else the saga (pins \u{2192} sniffing), else nothing.
    Never a guessed name — generic "Season N"/"Specials" titles are skipped. */
 function seasonDisplayName(seasonDetail, arc){
   try {
@@ -5489,12 +5533,12 @@ function seasonDisplayName(seasonDetail, arc){
 }
 function updateDrawerSeasonLabel(arc, seasonName){
   const watching = drawerS === watchState.s;
-  document.getElementById("drawerSeasonLabel").textContent = `Season ${drawerS}${arc ? " · " + arc : ""}${watching ? " ✓" : ""}`;
+  document.getElementById("drawerSeasonLabel").textContent = `Season ${drawerS}${arc ? " · " + arc : ""}${watching ? " \u{2713}" : ""}`;
   paintSpoilerBtn();
 }
 function paintSpoilerBtn(){
   const b = document.getElementById("spoilerBtn");
-  if (b) b.textContent = spoilerOn ? "🙈 Spoilers: On" : "🙈 Spoilers: Off";
+  if (b) b.textContent = spoilerOn ? "\u{1F648} Spoilers: On" : "\u{1F648} Spoilers: Off";
 }
 function spoilerToggle(){
   spoilerOn = !spoilerOn;
@@ -5546,7 +5590,7 @@ async function renderEpDrawer(){
   shown.forEach(ep => {
     const unaired = epUnaired(ep);
     const isFin = !unaired && ep.episode_number === _dMax;
-    const finBadge = isFin ? (_dLast ? "👑 SERIES FINALE" : "🏁 SEASON FINALE") : "";
+    const finBadge = isFin ? (_dLast ? "\u{1F451} SERIES FINALE" : "\u{1F3C1} SEASON FINALE") : "";
     const isCur = drawerS === watchState.s && ep.episode_number === watchState.e;
     if (unaired) {
       // greyed + dead: out of tab/D-pad order, no handlers — visible so
@@ -5558,7 +5602,7 @@ async function renderEpDrawer(){
       const still = ep.still_path ? IMG(ep.still_path, "w300") : "";
       card.innerHTML = `
         ${still ? `<img loading="lazy" decoding="async" src="${still}" class="w-full aspect-video object-cover" onerror="this.style.display='none'">` : ""}
-        <span class="absolute top-2 right-2 text-[11px] font-bold bg-white/10 text-gray-300 px-2 py-0.5 rounded-full">📅 NOT OUT YET</span>
+        <span class="absolute top-2 right-2 text-[11px] font-bold bg-white/10 text-gray-300 px-2 py-0.5 rounded-full">\u{1F4C5} NOT OUT YET</span>
         <div class="p-3">
           <p class="font-bold text-sm text-gray-400">E${ep.episode_number} — ${ep.name || ""}</p>
           <p class="text-[11px] text-gray-500 mt-1">Airs ${epAirPretty(unaired)} — check back then</p>
@@ -5578,7 +5622,7 @@ async function renderEpDrawer(){
       ${isCur ? `<span class="absolute top-2 right-2 text-[11px] font-bold bg-teal-500 px-2 py-0.5 rounded-full">WATCHING</span>`
         : isFin ? `<span class="absolute top-2 right-2 text-[11px] font-bold bg-white/10 text-gray-200 px-2 py-0.5 rounded-full">${finBadge}</span>` : ""}
       <div class="p-3">
-        <p class="font-bold text-sm">E${ep.episode_number} — ${ep.name || ""}${isFin && !isCur ? " 🏁" : ""}</p>
+        <p class="font-bold text-sm">E${ep.episode_number} — ${ep.name || ""}${isFin && !isCur ? " \u{1F3C1}" : ""}</p>
         <p class="text-[11px] text-gray-500">${ep.runtime ? ep.runtime + "m" : ""}</p>
         <p class="text-xs text-gray-400 mt-1 ${hidden ? "blur-sm select-none" : ""}">${ep.overview || "No synopsis."}</p>
         ${hidden ? `<button class="mt-2 text-xs font-bold bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full">Click to reveal</button>` : ""}
@@ -5627,7 +5671,7 @@ async function fetchIntroRanges(){
       .filter(x => x.start >= 0 && (x.end == null || x.end > x.start));
   } catch(e){}
 }
-/* manual skip: the bar's own ⏭ Skip pill — same ranges as auto-skip but
+/* manual skip: the bar's own \u{23ED} Skip pill — same ranges as auto-skip but
    fires on demand (no setting needed). The pill only appears while the
    playhead sits inside a known intro, on mirrors we can drive. */
 function introHit(){
@@ -5646,7 +5690,7 @@ function skipIntroNow(){
   else if (mirror === "vidzen") zenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
-  if (ws) ws.textContent = "Intro skipped ✓";
+  if (ws) ws.textContent = "Intro skipped \u{2713}";
   paintSkipPill();
 }
 /* recap check: same gates as intros (TV + anime, drivable mirrors) — the
@@ -5667,7 +5711,7 @@ function skipRecapNow(){
   else if (mirror === "vidzen") zenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
-  if (ws) ws.textContent = "Recap skipped ✓";
+  if (ws) ws.textContent = "Recap skipped \u{2713}";
   paintSkipPill();
 }
 /* next aired episode in THIS season (from the cached season list) — outro
@@ -5708,10 +5752,10 @@ function skipOutroNow(){
   _skipT = Date.now();
   const nxt = nextAiredEp();
   if (nxt) {
-    // credits → straight into the next episode (unaired/finale never reach here)
+    // credits \u{2192} straight into the next episode (unaired/finale never reach here)
     nextEpisode(1);
     const ws = document.getElementById("watchStatus");
-    if (ws) ws.textContent = "Credits skipped — next episode ▶";
+    if (ws) ws.textContent = "Credits skipped — next episode \u{25B6}";
     paintSkipPill();
     return;
   }
@@ -5724,7 +5768,7 @@ function skipOutroNow(){
   else if (mirror === "vidzen") zenSeekTo(end);
   else if (mirror === "anipm") anipmSend("seek", { time: end });
   const ws = document.getElementById("watchStatus");
-  if (ws) ws.textContent = "Credits skipped ✓";
+  if (ws) ws.textContent = "Credits skipped \u{2713}";
   paintSkipPill();
 }
 /* shared pill router: recap first (it precedes the intro), then intro, else
@@ -5751,17 +5795,17 @@ function paintSkipPill(){
   const sk = document.getElementById("ctlSkipIntro");
   if (sk) {
     sk.classList.add("hidden"); // retired: the floating pill owns Skip on every target
-    if (cHit) { const t = "⏭ Skip Recap"; if (sk.textContent !== t) sk.textContent = t; }
-    else if (inHit) { const t = "⏭ Skip " + fmtT(inHit.end); if (sk.textContent !== t) sk.textContent = t; }
-    else if (oHit) { const t = hasNext ? "⏭ Next Ep" : "⏭ Credits"; if (sk.textContent !== t) sk.textContent = t; }
+    if (cHit) { const t = "\u{23ED} Skip Recap"; if (sk.textContent !== t) sk.textContent = t; }
+    else if (inHit) { const t = "\u{23ED} Skip " + fmtT(inHit.end); if (sk.textContent !== t) sk.textContent = t; }
+    else if (oHit) { const t = hasNext ? "\u{23ED} Next Ep" : "\u{23ED} Credits"; if (sk.textContent !== t) sk.textContent = t; }
   }
   const fl = document.getElementById("skipFloat");
   if (fl) {
     fl.classList.toggle("hidden", !(cHit || inHit || oHit)); // every target gets the floating pill
-    if (cHit) { const t = "⏭ Skip Recap · " + fmtT(cHit.end); if (fl.textContent !== t) fl.textContent = t; }
-    else if (inHit) { const t = "⏭ Skip Intro · " + fmtT(inHit.end); if (fl.textContent !== t) fl.textContent = t; }
-    else if (oHit) { const t = hasNext ? "⏭ Skip Credits · Next Ep" : "⏭ Skip Credits"; if (fl.textContent !== t) fl.textContent = t; }
-    // focus rescue: the pill just left while a remote sat on it — park on ▶
+    if (cHit) { const t = "\u{23ED} Skip Recap · " + fmtT(cHit.end); if (fl.textContent !== t) fl.textContent = t; }
+    else if (inHit) { const t = "\u{23ED} Skip Intro · " + fmtT(inHit.end); if (fl.textContent !== t) fl.textContent = t; }
+    else if (oHit) { const t = hasNext ? "\u{23ED} Skip Credits · Next Ep" : "\u{23ED} Skip Credits"; if (fl.textContent !== t) fl.textContent = t; }
+    // focus rescue: the pill just left while a remote sat on it — park on \u{25B6}
     // instead of stranding focus on a hidden pill
     if (fl.classList.contains("hidden") && document.activeElement === fl && isTV) {
       const p = document.getElementById("ctlPlay");
@@ -5784,7 +5828,7 @@ function autoSkipIntro(){
   else if (mirror === "vidzen") zenSeekTo(hit.end);
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
-  if (ws) ws.textContent = "Intro skipped ✓";
+  if (ws) ws.textContent = "Intro skipped \u{2713}";
 }
 /* VidRift two-way messages (per their docs): progress/pause/ended/episode
    out, resume-seek in. Feeds the same pState our bar reads, so continue
@@ -5842,7 +5886,7 @@ function openVrSheet(panel, options, current, reply){
   // Subtitles / Source (/Servers) sheet arrives as data and renders in OUR
   // chrome — same ≥48px pills + Back/Esc + D-pad walk as the A/V sheet.
   // VidRift never delegates on TV/desktop (its own menus stay); VidBolt
-  // emits whenever its settings opens — the 🖱 cursor can reach it there.
+  // emits whenever its settings opens — the \u{1F5B1} cursor can reach it there.
   // Fullscreen never arrives either (their sheet wins there by design). A
   // pick replies through the mirror's own answer channel and closes;
   // dismissing keeps their previous value. Garbage shapes get a graceful
@@ -5892,7 +5936,7 @@ function openVrSheet(panel, options, current, reply){
         if (!active && current && ck != null && current[ck] != null)
           active = String(current[ck]).toLowerCase() === String(val).toLowerCase();
       } catch(e){}
-      wrap.appendChild(avPill((active ? "● " : "") + label, active, () => {
+      wrap.appendChild(avPill((active ? "\u{25CF} " : "") + label, active, () => {
         try {
           const r = (window._vrPanel || {}).reply;
           if (typeof r === "function") r(o.option, val);
@@ -6219,7 +6263,7 @@ window.addEventListener("message", (event)=>{
 /* ---------- AniPM: anime-native two-way player (like CineSrc, for anime)
    Embed by MAL id, driven over {ns:'anipm.player'} messages: play/pause/
    seek/volume/subs/quality/episodes in, full event set out. Keyless end to
-   end: TMDB→MAL mapping rides the keyless Jikan API, cached per title. */
+   end: TMDB\u{2192}MAL mapping rides the keyless Jikan API, cached per title. */
 const ANIPM_ORIGIN = "https://ani.pm";
 let _anipmSeq = 0, _anipmLive = false, _anipmHelloT = 0;
 const _anipmQueue = [];
@@ -6277,7 +6321,7 @@ function anipmQInfo(h){
   return { height: 0, label: String(h) };
 }
 async function anipmIds(tmdbId, title, tmdbYear){
-  // TMDB→player-ID mapping, three hosts: Jikan (MAL id) first, Consumet
+  // TMDB\u{2192}player-ID mapping, three hosts: Jikan (MAL id) first, Consumet
   // (AniList id) as backup on a different network path, AniList GraphQL
   // third — one blocked API no longer means a black player. Cached per title.
   // Cache v3: v2 could lock onto the WRONG show (Doraemon movie instead of
@@ -6374,7 +6418,7 @@ async function anipmIds(tmdbId, title, tmdbYear){
 }
 /* wrong show playing (mapped to a stranger): blacklist the current pick for
    this session, drop the cached mapping, reload the SAME mirror so it
-   re-maps around the reject. No alternative clears the matcher → the normal
+   re-maps around the reject. No alternative clears the matcher \u{2192} the normal
    no-match path escalates by itself (VidRift hop, or a named fallback in
    manual mode). One tap, TV-reachable from the A/V sheet. */
 function animeRematch(){
@@ -6524,7 +6568,7 @@ async function loadAnipmPlayer(){
     return;
   }
   const ep = watchState.anime ? animeAbsEp() : Math.max(1, watchState.e || 1);
-  // house-rule dub (Dragon Ball → Faulconer English) or sub default
+  // house-rule dub (Dragon Ball \u{2192} Faulconer English) or sub default
   const lang0 = animeLangDefault(titleOf(currentItem || {}));
   window._anipmTracks.lang = lang0;
   // first-class embed options (per their SDK): our accent, auto-next/episode
@@ -6554,7 +6598,7 @@ async function loadAnipmPlayer(){
   window._aniPlayId = ids.mal ? ("MAL " + ids.mal) : ("AniList " + ids.ani);
   const aniHint = document.body.classList.contains("tv-mode")
     ? "TV auto-starts; our bar drives playback"
-    : "first ▶ tap goes inside, then our bar drives";
+    : "first \u{25B6} tap goes inside, then our bar drives";
   if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e} · ${window._aniPlayId} — ${aniHint}`;
   if ((watchState.t || 0) > 0) { window._anipmResume = Math.floor(watchState.t); watchState.t = 0; }
   else window._anipmResume = 0;
@@ -6704,7 +6748,7 @@ window.addEventListener("message", (event)=>{
       break;
   }
 });
-/* A/V sheet: modern in-player picker (no more ⚙ detour). Anime/AniPM only —
+/* A/V sheet: modern in-player picker (no more \u{2699} detour). Anime/AniPM only —
    other mirrors keep their own menus. Every pill ≥48px, arrows walk them. */
 function avPill(label, active, onclick){
   const b = document.createElement("button");
@@ -6726,18 +6770,18 @@ function openAV(){
   if (first && document.body.classList.contains("tv-mode")) { try { first.focus({ preventScroll: true }); } catch(e){} }
 }
 function paintAVServers(){
-  // every TV-safe server, current marked — one-tap hop without the ⚙ detour.
+  // every TV-safe server, current marked — one-tap hop without the \u{2699} detour.
   // tvSafeList hides anime-ineligible entries by itself (AniPM on movies).
   const box = document.getElementById("avServers"); if (!box) return;
   box.innerHTML = "";
   // anime on a mapped mirror: wrong show playing gets a one-tap rematch
   // (blacklists the stranger, re-maps the title) before any mirror hop
   if (watchState.anime && (mirror === "anipm" || mirror === "vidbolt")) {
-    box.appendChild(avPill("↻ Rematch show", false, () => { animeRematch(); }));
+    box.appendChild(avPill("\u{21BB} Rematch show", false, () => { animeRematch(); }));
   }
   tvSafeList().forEach(m => {
     const cur = m.id === mirror;
-    box.appendChild(avPill((cur ? "● " : "") + m.name, cur, () => {
+    box.appendChild(avPill((cur ? "\u{25CF} " : "") + m.name, cur, () => {
       if (!cur) setMirror(m.id);
       closePanels();
     }));
@@ -6764,14 +6808,14 @@ function paintBoltAV(){
       const p = document.createElement("p");
       p.className = "text-xs text-gray-500";
       p.textContent = id === "avSubs"
-        ? "No player tracks loaded yet — open the player's settings menu once (🖱 cursor can click it), or use CC for our subtitles."
-        : "Not loaded yet — open the player's settings menu once (🖱 cursor can click it).";
+        ? "No player tracks loaded yet — open the player's settings menu once (\u{1F5B1} cursor can click it), or use CC for our subtitles."
+        : "Not loaded yet — open the player's settings menu once (\u{1F5B1} cursor can click it).";
       box.appendChild(p);
       return;
     }
     list.forEach(o => {
       const lbl = (o.label != null && String(o.label) !== "") ? String(o.label) : String(o.value);
-      box.appendChild(avPill((o.selected ? "● " : "") + lbl, !!o.selected, () => {
+      box.appendChild(avPill((o.selected ? "\u{25CF} " : "") + lbl, !!o.selected, () => {
         try { boltMobileOption(o.option, o.value); } catch(e){}
         // optimistic selected mark (their bundle answers picks with no event)
         try { opts.forEach(x => { if (x.option === o.option) x.selected = (x === o); }); } catch(e){}
@@ -6799,7 +6843,7 @@ function paintAV(){
   const audio = document.getElementById("avAudio"); audio.innerHTML = "";
   const lang = (T.lang || "sub").toLowerCase();
   [["Sub", "sub"], ["Dub", "dub"]].forEach(([label, v]) => {
-    audio.appendChild(avPill((lang === v ? "● " : "") + label, lang === v, () => {
+    audio.appendChild(avPill((lang === v ? "\u{25CF} " : "") + label, lang === v, () => {
       window._anipmTracks.lang = v;
       anipmSend("setLanguage", { lang: v });
       paintAV();
@@ -6811,7 +6855,7 @@ function paintAV(){
       const label = (t && (t.label || t.language || t.name)) || null;
       if (!label || /^(sub|dub)$/i.test(label)) return;
       const isCur = lang === String(label).toLowerCase();
-      audio.appendChild(avPill((isCur ? "● " : "") + label, isCur, () => {
+      audio.appendChild(avPill((isCur ? "\u{25CF} " : "") + label, isCur, () => {
         anipmSend("setLanguage", { lang: label });
         paintAV();
       }));
@@ -6820,7 +6864,7 @@ function paintAV(){
   const subs = document.getElementById("avSubs"); subs.innerHTML = "";
   const sel = window._anipmSubs;
   const off = sel === false;
-  subs.appendChild(avPill((off ? "● " : "") + "Off", off, () => {
+  subs.appendChild(avPill((off ? "\u{25CF} " : "") + "Off", off, () => {
     window._anipmSubs = false; anipmSend("setSubtitles", { enabled: false }); paintAV(); paintSubsBtn();
   }));
   const tracks = Array.isArray(T.subTracks) ? T.subTracks : null;
@@ -6831,7 +6875,7 @@ function paintAV(){
       if (seen[label] != null) { seen[label]++; label = label + " " + seen[label]; }
       else seen[label] = 1;
       const isOn = !off && (sel === true || sel === label);
-      subs.appendChild(avPill((isOn && sel === label ? "● " : "") + label, sel === label, () => {
+      subs.appendChild(avPill((isOn && sel === label ? "\u{25CF} " : "") + label, sel === label, () => {
         window._anipmSubs = label;
         const m = { enabled: true };
         if (t && t.language) m.language = t.language;
@@ -6840,7 +6884,7 @@ function paintAV(){
       }));
     });
   } else {
-    subs.appendChild(avPill((!off ? "● " : "") + "On", !off, () => {
+    subs.appendChild(avPill((!off ? "\u{25CF} " : "") + "On", !off, () => {
       window._anipmSubs = true; anipmSend("setSubtitles", { enabled: true }); paintAV(); paintSubsBtn();
     }));
   }
@@ -6848,14 +6892,14 @@ function paintAV(){
   const qs = (Array.isArray(T.qualities) && T.qualities.length ? T.qualities : [1080, 720, 480]).map(anipmQInfo);
   const curQ = anipmQInfo(T.quality);
   const cur = String(window._anipmQi == null ? (curQ.label || "Auto") : ((streamHas4k() ? ["Auto", 2160, 1080, 720, 480] : ["Auto", 1080, 720, 480])[window._anipmQi] ?? "Auto"));
-  qual.appendChild(avPill((cur === "Auto" ? "● " : "") + "Auto", cur === "Auto", () => {
+  qual.appendChild(avPill((cur === "Auto" ? "\u{25CF} " : "") + "Auto", cur === "Auto", () => {
     window._anipmQi = 0;
     const q = document.getElementById("ctlQ"); if (q) q.textContent = "Auto";
     paintAV();
   }));
   qs.slice(0, 5).forEach(info => {
     const isCur = cur === info.label;
-    qual.appendChild(avPill((isCur ? "● " : "") + info.label, isCur, () => {
+    qual.appendChild(avPill((isCur ? "\u{25CF} " : "") + info.label, isCur, () => {
       if (info.height > 0) anipmSend("setQuality", { height: info.height });
       const q = document.getElementById("ctlQ"); if (q) q.textContent = info.label;
       window._anipmQi = null;
@@ -7001,7 +7045,7 @@ window.addEventListener("message", (event)=>{
   }
   if(type === "cinesrc:skipintro" && typeof data.time === "number"){
     pState.cur = data.time; ctlPaint();
-    document.getElementById("watchStatus").textContent = "Intro skipped ✓";
+    document.getElementById("watchStatus").textContent = "Intro skipped \u{2713}";
   }
   if(type === "cinesrc:sourceused" && data.sourceId){
     // remember working server for faster repeat loads (used as lastserver)
@@ -7039,7 +7083,7 @@ window.addEventListener("message", (event)=>{
       window._autoHopped = true;
       setMirror(fb, true);
       const wse = document.getElementById("watchStatus");
-      if (wse) wse.textContent = `CineSrc hit an error — moved you to ${nm}. ⇄ Source anytime to go back.`;
+      if (wse) wse.textContent = `CineSrc hit an error — moved you to ${nm}. \u{21C4} Source anytime to go back.`;
       return;
     }
     stuckRecommend("CineSrc hit an error", nm);
@@ -7052,13 +7096,13 @@ window.addEventListener("message", (event)=>{
       sendCmd("pause");
       pState.paused = true; ctlPaint();
       const ws = document.getElementById("watchStatus");
-      if (ws) ws.textContent = "😴 Sleep when video ends — playback paused";
+      if (ws) ws.textContent = "\u{1F634} Sleep when video ends — playback paused";
     } else if (watchState.type === "movie") {
       // film over: drop out of fullscreen back to the page (episodes keep flowing)
       try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
       if (document.body.classList.contains("video-fs")) exitVideoFs();
       const ws = document.getElementById("watchStatus");
-      if (ws) ws.textContent = "Playback ended — press ▶ to replay";
+      if (ws) ws.textContent = "Playback ended — press \u{25B6} to replay";
     }
     if (!sleepOnEnd) { try { maybeUpNext(); } catch(e){} }
   }
