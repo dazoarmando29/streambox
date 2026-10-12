@@ -2,8 +2,9 @@
    Jobs:
      1. anime-map: TMDB->MAL/AniList mapping, computed SERVER-SIDE so user
         networks that cannot reach Jikan/Consumet still resolve (the site's
-        #1 mapping pain). Jikan first, AniList GraphQL fallback — same chain
-        and the same year-aware scoring the site uses (scorePick/pickYear).
+        #1 mapping pain). Chain: AniList GraphQL -> Kitsu (explicit
+        MAL/AniList mappings) -> Jikan, with the same year-aware scoring
+        validated against Doraemon 2005 = 8687 and FMA:B = 5114.
      2. tmdb proxy: api.themoviedb.org with the key coming from a Wrangler
         SECRET — the front end stops shipping key shards entirely.
    Provider keys are NEVER in this file and never returned in responses.
@@ -24,6 +25,9 @@ const ALLOWED = [
   "http://localhost:8788",
   "http://127.0.0.1:8788",
 ];
+// Some mapping hosts (AniList) 403 the default Workers fetch signature;
+// identify as the app and speak browser-ish accept headers.
+const UA = "StreamBox/1.0 (+https://github.com/dazoarmando29/streambox)";
 
 function corsHeaders(origin) {
   const allow = origin && ALLOWED.includes(origin) ? origin : ALLOWED[0];
@@ -99,17 +103,34 @@ async function animeMap(url, env, origin) {
 
   let best = null;
   let source = "";
+  const errs = {};
+  // Chain: AniList first (reliable carrier), then Kitsu (explicit
+  // MAL/AniList mappings), then Jikan last (often unreachable). Each host
+  // that fails is recorded so callers see exactly what happened.
   try {
-    best = pickAnime(await jikanSearch(title), title, year);
-    source = "jikan";
-  } catch (e) {}
+    best = pickAnime(await anilistSearch(title), title, year);
+    source = "anilist";
+  } catch (e) {
+    errs.anilist = String((e && e.message) || e);
+  }
   if (!best) {
     try {
-      best = pickAnime(await anilistSearch(title), title, year);
-      source = "anilist";
-    } catch (e) {}
+      best = pickAnime(await kitsuSearch(title), title, year);
+      if (best) best = await kitsuMapIds(best);
+      source = "kitsu";
+    } catch (e) {
+      errs.kitsu = String((e && e.message) || e);
+    }
   }
-  if (!best) return json({ error: "unmapped", title }, 502, origin);
+  if (!best) {
+    try {
+      best = pickAnime(await jikanSearch(title), title, year);
+      source = "jikan";
+    } catch (e) {
+      errs.jikan = String((e && e.message) || e);
+    }
+  }
+  if (!best) return json({ error: "unmapped", title, sources: errs }, 502, origin);
 
   const out = {
     tmdb: tmdb || null,
@@ -123,9 +144,52 @@ async function animeMap(url, env, origin) {
   return json(out, 200, origin);
 }
 
+/* Kitsu: JSON:API catalog with explicit MAL/AniList mappings per anime. */
+async function kitsuSearch(title) {
+  const u = "https://kitsu.io/api/edge/anime?filter[text]=" + encodeURIComponent(title) + "&page[limit]=10";
+  const res = await fetch(u, {
+    headers: { accept: "application/vnd.api+json", "user-agent": UA },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error("kitsu_http_" + res.status);
+  const data = await res.json();
+  return (data.data || [])
+    .filter((x) => x && x.id)
+    .map((x) => ({
+      kitsuId: x.id,
+      mal: null,
+      ani: null,
+      title: String((x.attributes && (x.attributes.canonicalTitle || (x.attributes.titles && x.attributes.titles.en_jp))) || "").trim(),
+      year: (x.attributes && x.attributes.startDate && parseInt(String(x.attributes.startDate).slice(0, 4), 10)) || 0,
+    }));
+}
+
+async function kitsuMapIds(row) {
+  if (!row || !row.kitsuId) return row;
+  try {
+    const res = await fetch("https://kitsu.io/api/edge/anime/" + encodeURIComponent(row.kitsuId) + "/mappings?limit=20", {
+      headers: { accept: "application/vnd.api+json", "user-agent": UA },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return row;
+    const data = await res.json();
+    for (const m of (data.data || [])) {
+      const site = String((m.attributes && m.attributes.externalSite) || "").toLowerCase();
+      const ext = m.attributes && m.attributes.externalId;
+      if (!ext) continue;
+      if (!row.mal && site.includes("myanimelist")) row.mal = ext;
+      else if (!row.ani && site.includes("anilist")) row.ani = ext;
+    }
+  } catch (e) {}
+  return row;
+}
+
 async function jikanSearch(title) {
   const u = "https://api.jikan.moe/v4/anime?q=" + encodeURIComponent(title) + "&limit=10&sfw=true";
-  const res = await fetch(u, { signal: AbortSignal.timeout(6000) });
+  const res = await fetch(u, {
+    headers: { accept: "application/json", "user-agent": UA },
+    signal: AbortSignal.timeout(10000),
+  });
   if (!res.ok) throw new Error("jikan_http_" + res.status);
   const data = await res.json();
   return (data.data || [])
@@ -139,8 +203,8 @@ async function jikanSearch(title) {
 }
 
 async function anilistSearch(title) {
-  const query = `query ($s: String) {
-    Page(perPage: 10) {
+  const query = `query ($s: String, $n: Int) {
+    Page(perPage: $n) {
       media(search: $s, type: ANIME) {
         id idMal
         title { romaji english }
@@ -150,9 +214,14 @@ async function anilistSearch(title) {
   }`;
   const res = await fetch("https://graphql.anilist.co", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ query, variables: { s: title } }),
-    signal: AbortSignal.timeout(6000),
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "user-agent": UA,
+      "accept-language": "en-US,en;q=0.9",
+    },
+    body: JSON.stringify({ query, variables: { s: title, n: 25 } }),
+    signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error("anilist_http_" + res.status);
   const data = await res.json();
@@ -167,22 +236,15 @@ async function anilistSearch(title) {
     }));
 }
 
-/* Year-aware scoring: same philosophy as the site's scorePick/pickYear —
-   exact/contained title match first, then nearest year, then first entry. */
+/* Year-aware scoring: the YEAR gates first (it separates same-named
+   entries like Doraemon 1979 vs 2005), then title match breaks ties --
+   exact, then contained, then first. Validated: Doraemon 2005 -> 8687,
+   FMA:B -> 5114, Dragon Ball -> 223, Dragon Ball Z -> 813. */
 function pickAnime(list, title, year) {
   if (!list || !list.length) return null;
   const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const want = norm(title);
   let pool = list;
-  const exact = pool.filter((x) => norm(x.title) === want);
-  if (exact.length) pool = exact;
-  else {
-    const contains = pool.filter((x) => {
-      const t = norm(x.title);
-      return t && (t.includes(want) || want.includes(t));
-    });
-    if (contains.length) pool = contains;
-  }
   if (year) {
     const same = pool.filter((x) => x.year === year);
     if (same.length) pool = same;
@@ -193,7 +255,13 @@ function pickAnime(list, title, year) {
       if (near.length && Math.abs((near[0].year || 9999) - year) <= 2) pool = near;
     }
   }
-  return pool[0] || null;
+  const exact = pool.filter((x) => norm(x.title) === want);
+  if (exact.length) return exact[0];
+  const contains = pool.filter((x) => {
+    const t = norm(x.title);
+    return t && (t.includes(want) || want.includes(t));
+  });
+  return (contains.length ? contains[0] : pool[0]) || null;
 }
 
 /* ---------- TMDB proxy: key stays in a Wrangler secret ---------- */
