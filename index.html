@@ -562,7 +562,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 175; // bump every release alongside version.txt
+  const BUILD_NUM = 176; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect → Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2659,7 +2659,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   const anime = detectAnime(type, id);
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
   window._autoHopped = false; // one self-heal per title, never one per app session
-  window._anipmRetryKey = ""; window._anipmStartAt = 0;
+  window._anipmRetryKey = ""; window._anipmRetryCount = 0; window._anipmStartAt = 0;
   try { gridS = s; } catch(e){}
   try {
     // house route: movies/TV always open on CineSrc, anime always on AniPM.
@@ -3297,12 +3297,13 @@ function midPlayRescue(reason){
 }
 function armStuckWatchdogs(){
   clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
-  if (window._cinePlaying) return;
+  const hasPlayback = () => mirror === "anipm" ? !!window._anipmStarted : !!window._cinePlaying;
+  if (hasPlayback()) return;
   if (mirror !== "anipm" && mirror !== "vidrift" && mirror !== "vidbolt" && mirror !== "vidzen") return;
   const _aTV = document.body.classList.contains("tv-mode");
   if (mirror === "anipm") {
     window._watchdog = setTimeout(() => {
-      if (window._cinePlaying || mirror !== "anipm") return;
+      if (window._anipmStarted || mirror !== "anipm") return;
       // stage 1: no sign of life — drop a sandbox if one is still on
       // (normally AniPM ships unsandboxed via NO_SANDBOX; this is the net).
       try {
@@ -3320,7 +3321,7 @@ function armStuckWatchdogs(){
       } catch(e){}
     }, _aTV ? 30000 : 8000);
     window._watchdog2 = setTimeout(() => {
-      if (window._cinePlaying || mirror !== "anipm") return;
+      if (window._anipmStarted || mirror !== "anipm") return;
       // stage 2: still dark (blocked hosts / dead title / robot-check a
       // remote can't complete) — auto mode heals (last-known-good first);
       // manual mode just names the fallback and waits for you
@@ -4596,7 +4597,7 @@ function setMirror(m, auto){  if (m === "trailer" && !trailerKey) {
   }
   const wasTrailer = mirror === "trailer";
   mirror = m;
-  if (m === "anipm" && !auto) window._anipmRetryKey = "";
+  if (m === "anipm" && !auto) { window._anipmRetryKey = ""; window._anipmRetryCount = 0; }
   // manual hops reset the one-heal guard (auto-heals must never ping-pong)
   if (!auto) window._autoHopped = false;
   // auto-heals never rewrite the saved preference (or every movie after
@@ -6394,6 +6395,36 @@ async function loadVidboltAnime(){
   }, document.body.classList.contains("tv-mode") ? 10000 : 6000);
   armTapHint();
 }
+function anipmArmStartRetry(delay){
+  const key = [watchState.type, watchState.id, watchState.s, watchState.e].join(":");
+  if (window._anipmRetryKey !== key) {
+    window._anipmRetryKey = key;
+    window._anipmRetryCount = 0;
+  }
+  if (mirror !== "anipm" || !document.body.classList.contains("tv-mode")
+      || window._anipmStarted) return;
+  clearTimeout(window._anipmRetryT);
+  window._anipmRetryT = setTimeout(() => {
+    window._anipmRetryT = 0;
+    if (mirror !== "anipm" || window._anipmStarted
+        || [watchState.type, watchState.id, watchState.s, watchState.e].join(":") !== key) return;
+    const used = window._anipmRetryCount || 0;
+    if (used < 2) {
+      window._anipmRetryCount = used + 1;
+      watchState.t = Math.max(0, Math.floor(pState.cur || window._anipmStartAt || 0));
+      const retryStatus = document.getElementById("watchStatus");
+      if (retryStatus) retryStatus.textContent = `AniPM startup retry ${window._anipmRetryCount}/2...`;
+      loadPlayer();
+      return;
+    }
+    const fb = stuckFallback("vidrift");
+    const nm = stuckFallbackName(fb);
+    if (!autoSwitchOn()) { stuckRecommend("AniPM stayed black after two retries", nm); return; }
+    const retryStatus = document.getElementById("watchStatus");
+    if (retryStatus) retryStatus.textContent = `AniPM stayed black after two retries — moving to ${nm}.`;
+    setMirror(fb, true);
+  }, delay);
+}
 async function loadAnipmPlayer(){
   const id = watchState.id;  const f = document.getElementById("player");
   const spin = document.getElementById("playerSpin");
@@ -6432,10 +6463,11 @@ async function loadAnipmPlayer(){
     : `https://ani.pm/embed/ani/${ids.ani}/${ep}/${lang0}`;
   window._anipmFocusAfterLoad = document.body.classList.contains("tv-app")
     && /\bwv\b/.test(navigator.userAgent || "");
-  f.src = as ? `${base}?${as}` : base;
   _anipmLive = false; _anipmHelloT = 0; _anipmQueue.length = 0;
   window._anipmStarted = false;
   clearTimeout(window._anipmKickT);
+  f.src = as ? `${base}?${as}` : base;
+  anipmArmStartRetry(45000); // allow slow TV loads; still retry if AniPM never sends ready
   if (!window._anipmTracks.lang) window._anipmTracks.lang = "sub";
   setTimeout(anipmHello, 800);
   // mapped-id transparency (see loadVidboltAnime): the id on screen names
@@ -6516,7 +6548,7 @@ window.addEventListener("message", (event)=>{
       hideSpin(); // ready means a player exists, not that playback has started
       _anipmLive = true;
       // Ready means the player EXISTS, not that it plays. Ask it to play now
-      // on TV (audible; never muted), then retry once shortly if no frames flow.
+      // on TV (audible; never muted), then retry the startup if no frames flow.
       if (document.body.classList.contains("tv-mode")) {
         clearTimeout(window._anipmKickT);
         anipmSend("play");
@@ -6525,20 +6557,7 @@ window.addEventListener("message", (event)=>{
           // play/timeupdate arrived and the picture is actually moving.
           if (mirror === "anipm" && !window._anipmStarted) anipmPlayKick();
         }, 2500);
-        const retryKey = watchState.id + ":" + watchState.s + ":" + watchState.e;
-        if (window._anipmRetryKey !== retryKey && !window._anipmRetryT) {
-          window._anipmRetryT = setTimeout(() => {
-            window._anipmRetryT = 0;
-            if (mirror !== "anipm" || window._anipmStarted
-                || watchState.id + ":" + watchState.s + ":" + watchState.e !== retryKey
-                || window._anipmRetryKey === retryKey) return;
-            window._anipmRetryKey = retryKey;
-            watchState.t = Math.max(0, Math.floor(pState.cur || window._anipmStartAt || 0));
-            const retryStatus = document.getElementById("watchStatus");
-            if (retryStatus) retryStatus.textContent = "AniPM did not start on the first load - retrying once.";
-            loadPlayer();
-          }, 15000);
-        }
+        anipmArmStartRetry(15000);
       }
       _anipmLive = true;
       try {
