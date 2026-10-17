@@ -44,12 +44,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -484,6 +487,19 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
 
 @Composable
 private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress) -> Unit, onRemove: (Progress) -> Unit) {
+    val frs = remember { HashMap<String, FocusRequester>() }
+    var prevCount by remember { mutableIntStateOf(cont.size) }
+    // A removed card takes its focus with it - land on a remaining card so
+    // the TV remote is never dead after clearing one (sheet-lesson rule).
+    LaunchedEffect(cont.size) {
+        if (big && cont.size < prevCount && cont.isNotEmpty()) {
+            for (p in cont) {
+                val fr = frs[p.type + "-" + p.id] ?: continue
+                if (runCatching { fr.requestFocus(); true }.getOrDefault(false)) break
+            }
+        }
+        prevCount = cont.size
+    }
     Column {
         SectionHeader("Continue Watching")
         LazyRow(
@@ -495,55 +511,71 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .width(if (big) 320.dp else 250.dp)
-                        .focusRing(RoundedCornerShape(12.dp))
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Card)
-                        .clickable { onResume(p) }
-                        .padding(8.dp),
+                        .background(Card),
                 ) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current).data(p.poster).crossfade(true).build(),
-                        contentDescription = p.name,
-                        contentScale = ContentScale.Crop,
+                    // The resume area and the clear X are SIBLING focus
+                    // targets. Nesting the X inside the card's clickable made
+                    // it unreachable by D-pad (bug report 0.21).
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .width(64.dp)
-                            .height(90.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Pill),
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            p.name,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            .weight(1f)
+                            .focusRequester(frs.getOrPut(p.type + "-" + p.id) { FocusRequester() })
+                            .focusRing(RoundedCornerShape(12.dp))
+                            .clickable { onResume(p) }
+                            .padding(8.dp),
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current).data(p.poster).crossfade(true).build(),
+                            contentDescription = p.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .width(64.dp)
+                                .height(90.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Pill),
                         )
-                        Text(
-                            p.type.uppercase() + "  S" + p.season + " E" + p.episode,
-                            color = Dim,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                        )
-                        Text(
-                            if (p.dur > 0 && p.cur > 5) (p.cur / p.dur * 100).toInt().toString() + "% watched"
-                            else "Not started",
-                            color = Accent,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                p.name,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                p.type.uppercase() + "  S" + p.season + " E" + p.episode,
+                                color = Dim,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                            )
+                            Text(
+                                if (p.dur > 0 && p.cur > 5) (p.cur / p.dur * 100).toInt().toString() + "% watched"
+                                else "Not started",
+                                color = Accent,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                     }
                     Box(
                         modifier = Modifier
-                            .size(30.dp)
+                            .padding(end = if (big) 10.dp else 8.dp)
+                            .size(if (big) 44.dp else 34.dp)
                             .focusRing(CircleShape)
                             .background(Pill, CircleShape)
                             .clickable { onRemove(p) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(14.dp))
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Remove",
+                            tint = Color.White,
+                            modifier = Modifier.size(if (big) 18.dp else 14.dp),
+                        )
                     }
                 }
             }
