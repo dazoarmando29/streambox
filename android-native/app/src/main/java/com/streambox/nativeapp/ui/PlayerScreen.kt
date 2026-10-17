@@ -122,6 +122,18 @@ private fun defaultMirror(title: Title, mal: Int?, ani: Int?): String = when (ti
     else -> "cinesrc"
 }
 
+/** One auto-hop chain when a mirror stalls or serves its own WEBSITE instead
+    of the player (AniPM's "Watch now" page is undrivable on TV) - website
+    stuckFallback spirit, first entry allowed for this title wins. */
+private fun fallbackChain(m: String): List<String> = when (m) {
+    "anipm" -> listOf("vidrift", "vidbolt", "cinesrc")
+    "cinesrc" -> listOf("vidrift", "vidzen", "vidbolt")
+    "vidrift" -> listOf("vidzen", "vidbolt", "cinesrc", "anipm")
+    "vidzen" -> listOf("vidbolt", "vidrift", "cinesrc")
+    "vidbolt" -> listOf("vidrift", "vidzen", "cinesrc")
+    else -> listOf()
+}
+
 /** Builds the provider embed URL. Contracts (verified against the live
     players): CineSrc /embed/movie/:id and /embed/tv/:id?s=&e= with
     &controls=false hiding ITS bar (ours is the player, house rule); AniPM
@@ -484,6 +496,10 @@ fun PlayerScreen(
     var mirror by remember { mutableStateOf(defaultMirror(title, mal, ani)) }
     var showServers by remember { mutableStateOf(false) }
     val serverList = remember(title.id, title.type, mal, ani) { mirrorsFor(title, mal, ani) }
+    // Auto-recovery: bad route / website page / dead embed gets ONE hop to
+    // the next allowed mirror (never loops - one hop per title).
+    var gotMedia by remember { mutableStateOf(false) }
+    var hopped by remember { mutableStateOf(false) }
     // Netflix behavior: chrome fades while playing after idle; any touch/key
     // wakes it; it STAYS up while paused or while you are using it.
     var chromeVisible by remember { mutableStateOf(true) }
@@ -597,6 +613,24 @@ fun PlayerScreen(
             } catch (e: Exception) {
             }
         }
+    }
+
+    fun hopMirror() {
+        if (hopped) return
+        val fb = fallbackChain(mirror).firstOrNull { it != mirror && serverList.contains(it) } ?: return
+        hopped = true
+        mirror = fb
+        cur = 0f
+        playing = true
+        load()
+    }
+
+    // Startup watchdog: no media in 30s (bad route, website page, dead
+    // embed, weak-box stall) -> hop once so the TV is never stuck.
+    LaunchedEffect(mirror, epSeason, epNumber) {
+        gotMedia = false
+        delay(30000)
+        if (!gotMedia) hopMirror()
     }
 
     fun seekTo(t: Float) {
@@ -888,6 +922,25 @@ fun PlayerScreen(
                             }
                         }
 
+                        // AniPM sometimes drops the embed onto its own WEBSITE
+                        // ("Watch now" page) - undrivable on TV. Any main-frame
+                        // exit from /embed is treated as broken and hops.
+                        override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                            super.doUpdateVisitedHistory(view, url, isReload)
+                            try {
+                                val u = android.net.Uri.parse(url ?: "")
+                                val host = (u.host ?: "").lowercase(java.util.Locale.US)
+                                val path = u.path ?: ""
+                                if (mirror == "anipm" &&
+                                    (host == "ani.pm" || host.endsWith(".ani.pm")) &&
+                                    !path.startsWith("/embed") && !hopped
+                                ) {
+                                    hopMirror()
+                                }
+                            } catch (e: Exception) {
+                            }
+                        }
+
                         // Ad Shield: ad/tracker hosts return empty - every
                         // frame, so in-embed popunders die before loading.
                         override fun shouldInterceptRequest(
@@ -957,6 +1010,9 @@ fun PlayerScreen(
                         main.post {
                             try {
                                 val o = org.json.JSONObject(j)
+                                if (t == "ready" || t == "play" || t == "timeupdate" || t == "loadedmetadata") {
+                                    gotMedia = true
+                                }
                                 when (t) {
                                     "play" -> playing = true
                                     "pause" -> playing = false
