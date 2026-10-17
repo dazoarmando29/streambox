@@ -10,6 +10,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,14 +24,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,6 +55,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.streambox.nativeapp.AppEnv
 import com.streambox.nativeapp.api.Title
+import com.streambox.nativeapp.data.Progress
+import com.streambox.nativeapp.data.Store
 
 /** Builds the provider embed URL. Contracts (verified against the live
     players): CineSrc /embed/movie/:id and /embed/tv/:id?s=&e= with
@@ -104,7 +115,8 @@ private val SB_HOOK = """
     play: function(){ var v=document.querySelector('video'); if(v) v.play(); try{window.postMessage({type:'cinesrc:command',command:'play',args:[]},'*');}catch(e){} },
     pause: function(){ var v=document.querySelector('video'); if(v) v.pause(); try{window.postMessage({type:'cinesrc:command',command:'pause',args:[]},'*');}catch(e){} },
     seek: function(t){ var v=document.querySelector('video'); if(v) v.currentTime=t; try{window.postMessage({type:'cinesrc:command',command:'seek',args:[t]},'*');}catch(e){} },
-    mute: function(m){ var v=document.querySelector('video'); if(v) v.muted=!!m; try{window.postMessage({type:'cinesrc:command',command:'setMuted',args:[!!m]},'*');}catch(e){} }
+    mute: function(m){ var v=document.querySelector('video'); if(v) v.muted=!!m; try{window.postMessage({type:'cinesrc:command',command:'setMuted',args:[!!m]},'*');}catch(e){} },
+    rate: function(r){ var v=document.querySelector('video'); if(v) v.playbackRate=r; try{window.postMessage({type:'cinesrc:command',command:'setPlaybackRate',args:[r]},'*');}catch(e){} }
   };
 })();
 """
@@ -116,6 +128,8 @@ class SBBridge(private val on: (String, String) -> Unit) {
         on(type, json)
     }
 }
+
+private val RATES = listOf(1f, 1.25f, 1.5f, 2f, 0.5f)
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -130,19 +144,34 @@ fun PlayerScreen(
     // House rule: Back from the player goes straight home (Netflix-style).
     BackHandler { onHome() }
 
+    val ctx = LocalContext.current
+    val big = AppEnv.isTv
+
     var playing by remember { mutableStateOf(true) }
     var cur by remember { mutableFloatStateOf(0f) }
     var dur by remember { mutableFloatStateOf(0f) }
     var muted by remember { mutableStateOf(false) }
+    var rateIdx by remember { mutableIntStateOf(0) }
     var scrub by remember { mutableFloatStateOf(-1f) }
+    var showEps by remember { mutableStateOf(false) }
+    var epSeason by remember { mutableIntStateOf(season) }
+    var epNumber by remember { mutableIntStateOf(episode) }
     var web by remember { mutableStateOf<WebView?>(null) }
     val main = remember { Handler(Looper.getMainLooper()) }
+    var lastSave by remember { mutableStateOf(0L) }
 
-    val url = remember(title, season, episode, mal, ani) {
-        playerUrl(title, season, episode, mal, ani)
+    fun save(c: Float, d: Float) {
+        Store.saveProgress(
+            ctx,
+            Progress(title.type, title.id, title.name, title.poster, epSeason, epNumber, c, d, System.currentTimeMillis(), mal, ani),
+        )
     }
-    val big = AppEnv.isTv
-    val btn = if (big) 56.dp else 48.dp
+
+    fun load() {
+        main.post {
+            web?.loadUrl(playerUrl(title, epSeason, epNumber, mal, ani))
+        }
+    }
 
     fun cmd(js: String) {
         main.post { web?.evaluateJavascript(js, null) }
@@ -151,8 +180,8 @@ fun PlayerScreen(
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                WebView(ctx).apply {
+            factory = { ctxWeb ->
+                WebView(ctxWeb).apply {
                     // House rule: NEVER auto-mute. Volume stays exactly as the
                     // user left it; the remote controls volume (TV keys).
                     settings.javaScriptEnabled = true
@@ -178,15 +207,19 @@ fun PlayerScreen(
                                 when (t) {
                                     "play" -> playing = true
                                     "pause" -> playing = false
-                                    "ready" -> {}
                                     "ended" -> playing = false
-                                    "error" -> {}
                                     "loadedmetadata" -> dur = o.optDouble("duration", 0.0).toFloat()
                                     "timeupdate" -> {
                                         cur = o.optDouble("currentTime", 0.0).toFloat()
                                         val d = o.optDouble("duration", 0.0).toFloat()
                                         if (d > 0) dur = d
+                                        val now = System.currentTimeMillis()
+                                        if (now - lastSave > 5000) {
+                                            lastSave = now
+                                            save(cur, dur)
+                                        }
                                     }
+                                    else -> {}
                                 }
                             } catch (e: Exception) {
                             }
@@ -195,33 +228,84 @@ fun PlayerScreen(
                     // TV: keep D-pad on OUR bar, never trapped in the embed
                     isFocusable = !AppEnv.isTv
                     isFocusableInTouchMode = !AppEnv.isTv
-                    loadUrl(url)
+                    loadUrl(playerUrl(title, epSeason, epNumber, mal, ani))
                     web = this
                 }
             },
         )
 
-        // Our bar (house rule: ours is the player). Bottom scrim + controls.
+        // Top-left title card (website style).
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(12.dp)
+                .background(Color(0xCC0B1426), RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Text(
+                title.name.uppercase(),
+                color = Accent,
+                fontWeight = FontWeight.Black,
+                fontSize = if (big) 15.sp else 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (title.type == "movie") "MOVIE" else "S" + epSeason + " E" + epNumber,
+                color = Color.White,
+                fontWeight = FontWeight.Black,
+                fontSize = if (big) 18.sp else 15.sp,
+            )
+        }
+
+        // Center overlay while paused (website style).
+        if (!playing && !showEps) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(22.dp),
+                modifier = Modifier.align(Alignment.Center),
+            ) {
+                CircleBtn("-10s", big) {
+                    val t = (cur - 10f).coerceAtLeast(0f)
+                    cmd("window.__sb && window.__sb.seek(" + t.toInt() + ")")
+                    cur = t
+                }
+                Box(
+                    modifier = Modifier
+                        .size(if (big) 92.dp else 76.dp)
+                        .focusRing()
+                        .background(Accent, CircleShape)
+                        .clickable {
+                            playing = true
+                            cmd("window.__sb && window.__sb.play()")
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = "Play", tint = Ink, modifier = Modifier.size(40.dp))
+                }
+                CircleBtn("+30s", big) {
+                    val t = (cur + 30f).coerceAtMost(if (dur > 0) dur else Float.MAX_VALUE)
+                    cmd("window.__sb && window.__sb.seek(" + t.toInt() + ")")
+                    cur = t
+                }
+            }
+        }
+
+        // Bottom control bar (website style): time row + button row.
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(listOf(Color(0x000B1426), Color(0xE60B1426)))
-                )
+                .background(Brush.verticalGradient(listOf(Color(0x000B1426), Color(0xE60B1426))))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
-            Text(
-                title.name,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = if (big) 18.sp else 15.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(modifier = Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(fmt(if (scrub >= 0) scrub else cur), color = Color(0xFFB9C7DA), fontSize = 12.sp)
+                Text(
+                    fmt(if (scrub >= 0) scrub else cur) + " / " + fmt(dur),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (big) 15.sp else 12.sp,
+                )
                 Slider(
                     value = if (scrub >= 0) scrub else cur,
                     onValueChange = { scrub = it },
@@ -233,55 +317,159 @@ fun PlayerScreen(
                         }
                     },
                     valueRange = 0f..(if (dur > 0) dur else 1f),
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                    modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
                     colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFF14B8A6),
-                        activeTrackColor = Color(0xFF14B8A6),
+                        thumbColor = Accent,
+                        activeTrackColor = Accent,
                         inactiveTrackColor = Color(0xFF24374F),
                     ),
                 )
-                Text(fmt(dur), color = Color(0xFFB9C7DA), fontSize = 12.sp)
+                Text(
+                    "-" + fmt(if (dur > 0) (dur - (if (scrub >= 0) scrub else cur)).coerceAtLeast(0f) else 0f),
+                    color = Accent,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (big) 15.sp else 12.sp,
+                )
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                BarBtn(label = if (playing) "Pause" else "Play", big = big, h = btn) {
-                    playing = !playing
-                    cmd(if (playing) "window.__sb && window.__sb.play()" else "window.__sb && window.__sb.pause()")
+                Box(
+                    modifier = Modifier
+                        .size(if (big) 56.dp else 48.dp)
+                        .focusRing()
+                        .background(Accent, CircleShape)
+                        .clickable {
+                            playing = !playing
+                            cmd(if (playing) "window.__sb && window.__sb.play()" else "window.__sb && window.__sb.pause()")
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (playing) "Pause" else "Play",
+                        tint = Ink,
+                        modifier = Modifier.size(if (playing) 22.dp else 28.dp),
+                    )
                 }
-                BarBtn(label = "-10s", big = big, h = btn) {
+                BarPill("-10s", big) {
                     val t = ((if (scrub >= 0) scrub else cur) - 10f).coerceAtLeast(0f)
                     cmd("window.__sb && window.__sb.seek(" + t.toInt() + ")")
                     cur = t
                 }
-                BarBtn(label = "+30s", big = big, h = btn) {
+                BarPill("+30s", big) {
                     val t = ((if (scrub >= 0) scrub else cur) + 30f).coerceAtMost(if (dur > 0) dur else Float.MAX_VALUE)
                     cmd("window.__sb && window.__sb.seek(" + t.toInt() + ")")
                     cur = t
                 }
-                BarBtn(label = if (muted) "Unmute" else "Mute", big = big, h = btn) {
-                    muted = !muted
-                    cmd("window.__sb && window.__sb.mute(" + muted + ")")
+                Box(
+                    modifier = Modifier
+                        .size(if (big) 56.dp else 48.dp)
+                        .focusRing()
+                        .background(Pill, CircleShape)
+                        .clickable {
+                            muted = !muted
+                            cmd("window.__sb && window.__sb.mute(" + muted + ")")
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
+                        contentDescription = "Mute",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                BarPill(RATES[rateIdx].let { if (it == it.toInt().toFloat()) it.toInt().toString() + "x" else it.toString() + "x" }, big) {
+                    rateIdx = (rateIdx + 1) % RATES.size
+                    cmd("window.__sb && window.__sb.rate(" + RATES[rateIdx] + ")")
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                BarBtn(label = "Home", big = big, h = btn, accent = true) { onHome() }
+                BarPill("Episodes", big, icon = Icons.Filled.Menu) { showEps = true }
+                BarPill("Home", big) {
+                    save(if (scrub >= 0) scrub else cur, dur)
+                    onHome()
+                }
+            }
+        }
+
+        // Episodes sheet (website-style episode switcher).
+        if (showEps) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0x99000000))
+                    .clickable { showEps = false },
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .padding(24.dp)
+                        .background(Card, RoundedCornerShape(18.dp))
+                        .padding(20.dp),
+                ) {
+                    Text("Go to episode", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    if (title.type != "movie") {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            BarPill("S -", big) { epSeason = (epSeason - 1).coerceAtLeast(1) }
+                            Text("Season " + epSeason, color = Color.White, fontWeight = FontWeight.Bold)
+                            BarPill("S +", big) { epSeason += 1 }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            BarPill("E -", big) { epNumber = (epNumber - 1).coerceAtLeast(1) }
+                            Text("Episode " + epNumber, color = Color.White, fontWeight = FontWeight.Bold)
+                            BarPill("E +", big) { epNumber += 1 }
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        PillButton("Load", big, accent = true) {
+                            showEps = false
+                            save(0f, dur)
+                            cur = 0f
+                            load()
+                        }
+                        PillButton("Close", big) { showEps = false }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun BarBtn(label: String, big: Boolean, h: androidx.compose.ui.unit.Dp, accent: Boolean = false, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (accent) Color(0xFF14B8A6) else Color(0xFF1D2C44),
-            contentColor = if (accent) Color(0xFF0B1426) else Color.White,
-        ),
-        modifier = Modifier.focusRing().height(h),
+private fun CircleBtn(label: String, big: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(if (big) 68.dp else 58.dp)
+            .focusRing()
+            .background(Color(0x990B1426), CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontWeight = FontWeight.Bold, fontSize = if (big) 16.sp else 13.sp)
+        Text(label, color = Color.White, fontWeight = FontWeight.Black, fontSize = if (big) 16.sp else 13.sp)
+    }
+}
+
+@Composable
+private fun BarPill(label: String, big: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .height(if (big) 52.dp else 44.dp)
+            .focusRing()
+            .background(Pill, RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = if (big) 16.dp else 13.dp),
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+        Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = if (big) 15.sp else 12.sp)
     }
 }

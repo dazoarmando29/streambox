@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -21,12 +22,21 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -42,59 +52,79 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.streambox.nativeapp.AppEnv
 import com.streambox.nativeapp.api.Api
 import com.streambox.nativeapp.api.Title
+import com.streambox.nativeapp.data.Progress
+import com.streambox.nativeapp.data.Store
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private enum class Tab(val label: String) {
-    MOVIES("Movies"), TV("TV"), ANIME("Anime")
-}
-
-private val DimText = Color(0xFF8FA3BF)
-
 @Composable
-fun HomeScreen(onOpen: (Title) -> Unit) {
-    var tab by remember { mutableStateOf(Tab.MOVIES) }
+fun BrowseScreen(
+    section: Section,
+    onOpen: (Title) -> Unit,
+    onPlay: (Title) -> Unit,
+    onResume: (Progress) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = LocalContext.current
+    val big = AppEnv.isTv
+
+    var searchMode by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
     var submitted by remember { mutableStateOf("") }
     var rows by remember { mutableStateOf(listOf<Pair<String, List<Title>>>()) }
     var results by remember { mutableStateOf(listOf<Title>()) }
+    var cont by remember { mutableStateOf(listOf<Progress>()) }
+    var myList by remember { mutableStateOf(listOf<Title>()) }
+    var adultOpen by remember { mutableStateOf(Store.adultOpen(ctx)) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
 
-    LaunchedEffect(tab, submitted) {
+    LaunchedEffect(section, submitted, searchMode) {
+        cont = Store.progressList(ctx)
+        myList = Store.listItems(ctx)
         loading = true
         error = null
         try {
             withContext(Dispatchers.IO) {
-                if (submitted.isNotBlank()) {
-                    results = Api.search(submitted, if (tab == Tab.ANIME) "anime" else null)
+                if (searchMode && submitted.isNotBlank()) {
+                    results = Api.search(submitted, if (section == Section.ANIME) "anime" else null)
                     rows = listOf()
                 } else {
                     results = listOf()
-                    rows = when (tab) {
-                        Tab.MOVIES -> listOf(
-                            "Trending Now" to Api.trending().filter { it.type == "movie" },
+                    rows = when (section) {
+                        Section.HOME -> listOf(
+                            "Trending Now" to Api.trending(),
+                            "Popular Movies" to Api.popularMovies(),
+                            "Popular Shows" to Api.popularTv(),
+                            "Top Rated Movies" to Api.topRatedMovies(),
+                            "Top Rated Shows" to Api.topRatedTv(),
+                        )
+                        Section.MOVIES -> listOf(
+                            "Trending Movies" to Api.trending().filter { it.type == "movie" },
                             "Popular Movies" to Api.popularMovies(),
                             "Top Rated Movies" to Api.topRatedMovies(),
                         )
-                        Tab.TV -> listOf(
-                            "Trending Now" to Api.trending().filter { it.type != "movie" },
+                        Section.TV -> listOf(
+                            "Trending Shows" to Api.trending().filter { it.type != "movie" },
                             "Popular Shows" to Api.popularTv(),
                             "Top Rated Shows" to Api.topRatedTv(),
                         )
-                        Tab.ANIME -> listOf(
+                        Section.ANIME -> listOf(
                             "Popular Anime" to Api.anime(),
                             "Top Rated Anime" to Api.animeTop(),
                         )
+                        Section.MYLIST -> listOf()
                     }
                 }
             }
@@ -106,119 +136,159 @@ fun HomeScreen(onOpen: (Title) -> Unit) {
         loading = false
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        TopStrip(
-            tab = tab,
-            onTab = { tab = it; submitted = ""; input = "" },
-            input = input,
-            onInput = { input = it },
-            onSubmit = { submitted = input },
+    Column(modifier = modifier.fillMaxSize()) {
+        TopBar(
+            searchMode = searchMode,
+            onSearchToggle = { searchMode = !searchMode; submitted = ""; input = "" },
+            adultOpen = adultOpen,
+            onAdultToggle = {
+                adultOpen = !adultOpen
+                Store.setAdultOpen(ctx, adultOpen)
+            },
         )
+
+        if (searchMode) {
+            SearchField(
+                input = input,
+                onInput = { input = it },
+                onSubmit = { submitted = input },
+            )
+        }
 
         when {
             loading -> Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
-            ) { CircularProgressIndicator(color = Color(0xFF14B8A6)) }
+            ) { CircularProgressIndicator(color = Accent) }
             error != null -> Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
-            ) { Text("Could not load: " + error, color = DimText) }
-            submitted.isNotBlank() -> SearchResults(results, onOpen)
-            else -> Binge(rows, onOpen)
+            ) { Text("Could not load: " + error, color = Dim) }
+            searchMode && submitted.isNotBlank() -> SearchGrid(results, adultOpen, onOpen)
+            section == Section.MYLIST -> MyListGrid(myList, adultOpen, onOpen)
+            else -> Feed(rows, cont, adultOpen, big, onOpen, onPlay, onResume,
+                onRemoveCont = { p ->
+                    Store.removeProgress(ctx, p.type, p.id)
+                    cont = Store.progressList(ctx)
+                })
         }
     }
 }
 
 @Composable
-private fun TopStrip(
-    tab: Tab,
-    onTab: (Tab) -> Unit,
-    input: String,
-    onInput: (String) -> Unit,
-    onSubmit: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("StreamBox", fontSize = 22.sp, fontWeight = FontWeight.Black)
-            Spacer(modifier = Modifier.width(18.dp))
-            Tab.values().forEach { t ->
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .focusRing()
-                        .heightIn(min = 48.dp)
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                        .clickable { onTab(t) },
-                ) {
-                    Text(
-                        t.label,
-                        fontSize = 15.sp,
-                        fontWeight = if (t == tab) FontWeight.Black else FontWeight.Medium,
-                        color = if (t == tab) Color.White else DimText,
-                    )
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Box(
-                        modifier = Modifier
-                            .width(22.dp)
-                            .height(3.dp)
-                            .background(
-                                if (t == tab) Color(0xFF14B8A6) else Color.Transparent,
-                                RoundedCornerShape(2.dp),
-                            )
-                    )
-                }
+private fun TopBar(searchMode: Boolean, onSearchToggle: () -> Unit, adultOpen: Boolean, onAdultToggle: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(if (AppEnv.isTv) 42.dp else 36.dp)
+                .background(Accent, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Text("Stream", color = Color.White, fontWeight = FontWeight.Black, fontSize = 22.sp)
+        Text("Box", color = Accent, fontWeight = FontWeight.Black, fontSize = 22.sp)
+        Spacer(modifier = Modifier.weight(1f))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .height(42.dp)
+                .focusRing()
+                .background(Pill, RoundedCornerShape(50))
+                .clickable { onSearchToggle() }
+                .padding(horizontal = 14.dp),
+        ) {
+            Icon(Icons.Filled.Search, contentDescription = "Search", tint = Color.White, modifier = Modifier.size(18.dp))
+            if (!searchMode) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Search", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
-        Spacer(modifier = Modifier.height(6.dp))
-        OutlinedTextField(
-            value = input,
-            onValueChange = onInput,
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Search titles", color = DimText) },
-            singleLine = true,
-            shape = RoundedCornerShape(24.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFF14B8A6),
-                unfocusedBorderColor = Color(0xFF24374F),
-                focusedContainerColor = Color(0xFF132138),
-                unfocusedContainerColor = Color(0xFF132138),
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-            ),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
-        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .focusRing()
+                .background(Pill, CircleShape)
+                .clickable { onAdultToggle() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Lock,
+                contentDescription = "Adults-only gate",
+                tint = if (adultOpen) Accent else Color(0xFFF6C177),
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 
-/** Netflix bones: billboard hero on top, then horizontal poster rows. */
 @Composable
-private fun Binge(rows: List<Pair<String, List<Title>>>, onOpen: (Title) -> Unit) {
-    val hero = rows.firstOrNull()?.second?.firstOrNull { it.backdrop != null }
+private fun SearchField(input: String, onInput: (String) -> Unit, onSubmit: () -> Unit) {
+    OutlinedTextField(
+        value = input,
+        onValueChange = onInput,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+        placeholder = { Text("Search titles", color = Dim) },
+        singleLine = true,
+        shape = RoundedCornerShape(24.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Accent,
+            unfocusedBorderColor = Color(0xFF24374F),
+            focusedContainerColor = Card,
+            unfocusedContainerColor = Card,
+            focusedTextColor = Color.White,
+            unfocusedTextColor = Color.White,
+        ),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
+    )
+}
+
+@Composable
+private fun Feed(
+    rows: List<Pair<String, List<Title>>>,
+    cont: List<Progress>,
+    adultOpen: Boolean,
+    big: Boolean,
+    onOpen: (Title) -> Unit,
+    onPlay: (Title) -> Unit,
+    onResume: (Progress) -> Unit,
+    onRemoveCont: (Progress) -> Unit,
+) {
+    val hero = rows.firstOrNull()?.second?.firstOrNull { !it.adult || adultOpen }
         ?: rows.firstOrNull()?.second?.firstOrNull()
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
+        contentPadding = PaddingValues(bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         if (hero != null) {
-            item { Hero(hero, onOpen) }
+            item { Hero(hero, rows.firstOrNull()?.first, big, onPlay, onOpen) }
+        }
+        if (cont.isNotEmpty()) {
+            item {
+                ContinueRow(cont, big, onResume, onRemoveCont)
+            }
         }
         items(rows, key = { it.first }) { (label, titles) ->
-            if (titles.isNotEmpty()) {
-                Row(label, titles, onOpen)
+            val shown = titles.filter { !it.adult || adultOpen }
+            if (shown.isNotEmpty()) {
+                PosterRow(label, shown, onOpen)
             }
         }
     }
 }
 
 @Composable
-private fun Hero(t: Title, onOpen: (Title) -> Unit) {
-    Box(modifier = Modifier.fillMaxWidth().height(if (AppEnv.isTv) 300.dp else 220.dp)) {
+private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> Unit, onOpen: (Title) -> Unit) {
+    Box(modifier = Modifier.fillMaxWidth().height(if (big) 320.dp else 240.dp)) {
         AsyncImage(
-            model = t.backdrop ?: t.poster,
+            model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(true).build(),
             contentDescription = t.name,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
@@ -227,48 +297,155 @@ private fun Hero(t: Title, onOpen: (Title) -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.verticalGradient(
-                        listOf(Color(0x000B1426), Color(0x990B1426), Color(0xFF0B1426)),
-                    )
+                    Brush.verticalGradient(listOf(Color(0x330B1426), Color(0xCC0B1426), Ink)),
                 )
         )
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .background(Accent, RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    "#1 " + (rowLabel?.uppercase() ?: "FEATURED") + " - " + t.type.uppercase(),
+                    color = Ink,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 11.sp,
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 t.name,
-                fontSize = 26.sp,
+                fontSize = if (big) 32.sp else 26.sp,
                 fontWeight = FontWeight.Black,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(modifier = Modifier.height(10.dp))
-            Button(
-                onClick = { onOpen(t) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF14B8A6),
-                    contentColor = Color(0xFF0B1426),
-                ),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.focusRing().height(48.dp),
-            ) {
-                Text("Play", fontWeight = FontWeight.Black, fontSize = 16.sp)
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Star, contentDescription = null, tint = Accent, modifier = Modifier.size(14.dp))
+                Text(
+                    "  " + String.format("%.1f", t.vote) + "  -  " +
+                        (if (t.year > 0) t.year.toString() + "  -  " else "") + t.type.uppercase(),
+                    color = Soft,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                )
+            }
+            if (t.overview.isNotBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    t.overview,
+                    color = Soft,
+                    fontSize = 13.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                PillButton("Watch", big, accent = true, icon = Icons.Filled.PlayArrow) { onPlay(t) }
+                PillButton("Details", big, icon = Icons.Filled.Info) { onOpen(t) }
             }
         }
     }
 }
 
 @Composable
-private fun Row(label: String, titles: List<Title>, onOpen: (Title) -> Unit) {
+private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress) -> Unit, onRemove: (Progress) -> Unit) {
     Column {
-        Text(
-            label,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 16.dp, bottom = 8.dp),
+        SectionHeader("Continue Watching")
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(cont, key = { it.type + "-" + it.id }) { p ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .width(if (big) 300.dp else 240.dp)
+                        .focusRing()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Card)
+                        .clickable { onResume(p) }
+                        .padding(8.dp),
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current).data(p.poster).crossfade(true).build(),
+                        contentDescription = p.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .width(64.dp)
+                            .height(90.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Pill),
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            p.name,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            p.type.uppercase() + "  S" + p.season + " E" + p.episode,
+                            color = Dim,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                        )
+                        Text(
+                            if (p.dur > 0 && p.cur > 5) (p.cur / p.dur * 100).toInt().toString() + "% watched"
+                            else "Not started",
+                            color = Accent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .focusRing()
+                            .background(Pill, CircleShape)
+                            .clickable { onRemove(p) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(start = 16.dp, bottom = 8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(4.dp)
+                .height(18.dp)
+                .background(Accent, RoundedCornerShape(2.dp)),
         )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(label, fontSize = 17.sp, fontWeight = FontWeight.Black, color = Color.White)
+    }
+}
+
+@Composable
+private fun PosterRow(label: String, titles: List<Title>, onOpen: (Title) -> Unit) {
+    Column {
+        SectionHeader(label)
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -290,18 +467,18 @@ private fun PosterCard(t: Title, onOpen: (Title) -> Unit) {
             .clickable { onOpen(t) },
     ) {
         AsyncImage(
-            model = t.poster,
+            model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(true).build(),
             contentDescription = t.name,
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .background(Color(0xFF132138)),
+                .background(Card),
         )
         Text(
             t.name,
             fontSize = 12.sp,
-            color = DimText,
+            color = Dim,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp),
@@ -310,10 +487,11 @@ private fun PosterCard(t: Title, onOpen: (Title) -> Unit) {
 }
 
 @Composable
-private fun SearchResults(titles: List<Title>, onOpen: (Title) -> Unit) {
-    if (titles.isEmpty()) {
+private fun SearchGrid(titles: List<Title>, adultOpen: Boolean, onOpen: (Title) -> Unit) {
+    val shown = titles.filter { !it.adult || adultOpen }
+    if (shown.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Nothing found", color = DimText)
+            Text("Nothing found", color = Dim)
         }
         return
     }
@@ -324,8 +502,26 @@ private fun SearchResults(titles: List<Title>, onOpen: (Title) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        items(titles, key = { it.type + "-" + it.id }) { t ->
-            PosterCard(t, onOpen)
+        items(shown, key = { it.type + "-" + it.id }) { t -> PosterCard(t, onOpen) }
+    }
+}
+
+@Composable
+private fun MyListGrid(titles: List<Title>, adultOpen: Boolean, onOpen: (Title) -> Unit) {
+    val shown = titles.filter { !it.adult || adultOpen }
+    if (shown.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("My List is empty - add titles from any Details screen", color = Dim)
         }
+        return
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(if (AppEnv.isTv) 150.dp else 118.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        items(shown, key = { it.type + "-" + it.id }) { t -> PosterCard(t, onOpen) }
     }
 }

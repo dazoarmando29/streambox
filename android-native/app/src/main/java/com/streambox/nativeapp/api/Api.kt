@@ -15,6 +15,7 @@ data class Title(
     val year: Int,
     val overview: String,
     val vote: Double,
+    val adult: Boolean = false,
 )
 
 data class AnimeIds(val mal: Int?, val ani: Int?)
@@ -75,6 +76,7 @@ object Api {
                     year = yearOf(o),
                     overview = o.optString("overview", ""),
                     vote = o.optDouble("vote_average", 0.0),
+                    adult = o.optBoolean("adult", false),
                 )
             )
         }
