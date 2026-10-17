@@ -1,8 +1,10 @@
 package com.streambox.nativeapp.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,10 +37,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -161,7 +168,7 @@ private fun BottomNav(current: Section, onPick: (Section) -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .weight(1f)
-                        .focusRing(RoundedCornerShape(18.dp))
+                        .focusRing(RoundedCornerShape(18.dp), pop = false)
                         .background(
                             if (on) Color(0x2E14B8A6) else Color.Transparent,
                             RoundedCornerShape(18.dp),
@@ -189,21 +196,45 @@ private fun BottomNav(current: Section, onPick: (Section) -> Unit) {
     }
 }
 
-/** D-pad comfort: a bright teal ring on whatever the remote is on. The ring
-    exists ONLY while focused - a 0.dp border still paints a Skia hairline,
-    which outlined every button in the app (TV screenshots lesson). */
-fun Modifier.focusRing(shape: Shape = RoundedCornerShape(16.dp)): Modifier = composed {
+/** D-pad comfort: a teal ring + a gentle pop on whatever the remote is on.
+    Both ANIMATE (the old 0.dp border was a Skia hairline AND the scale
+    snapped instantly - both felt broken on TV). The ring is stroked along
+    the node's own shape so it hugs pills, circles and posters exactly. */
+fun Modifier.focusRing(
+    shape: Shape = RoundedCornerShape(16.dp),
+    pop: Boolean = true,
+): Modifier = composed {
     var focused by remember { mutableStateOf(false) }
+    val ring by animateFloatAsState(
+        targetValue = if (focused) 1f else 0f,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "focusRing",
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (focused && pop) 1.06f else 1f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "focusPop",
+    )
     onFocusChanged { focused = it.isFocused }
-        .then(
-            if (focused) {
-                Modifier
-                    .border(3.dp, Accent, shape)
-                    .scale(1.05f)
-            } else {
-                Modifier
+        .scale(scale)
+        .drawWithContent {
+            drawContent()
+            if (ring > 0f) {
+                val stroke = Stroke(width = 3.dp.toPx())
+                val c = Accent.copy(alpha = ring)
+                when (val o = shape.createOutline(size, layoutDirection, this)) {
+                    is Outline.Rectangle -> drawRect(color = c, style = stroke)
+                    is Outline.Rounded -> drawRoundRect(
+                        color = c,
+                        topLeft = Offset(o.roundRect.left, o.roundRect.top),
+                        size = Size(o.roundRect.width, o.roundRect.height),
+                        cornerRadius = o.roundRect.topLeftCornerRadius,
+                        style = stroke,
+                    )
+                    is Outline.Generic -> drawPath(o.path, color = c, style = stroke)
+                }
             }
-        )
+        }
 }
 
 /** Pill button in the website's style. */

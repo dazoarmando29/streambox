@@ -315,7 +315,7 @@ private fun NavTab(label: String, on: Boolean, onClick: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .height(52.dp)
-            .focusRing(RoundedCornerShape(12.dp))
+            .focusRing(RoundedCornerShape(12.dp), pop = false)
             .background(
                 if (on) Color(0x2214B8A6) else Color.Transparent,
                 RoundedCornerShape(12.dp),
@@ -591,28 +591,34 @@ private fun PosterRow(label: String, titles: List<Title>, onOpen: (Title) -> Uni
 @Composable
 private fun PosterCard(t: Title, onOpen: (Title) -> Unit) {
     Column(
-        modifier = Modifier
-            .width(if (AppEnv.isTv) 170.dp else 128.dp)
-            .focusRing(RoundedCornerShape(12.dp))
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onOpen(t) },
+        modifier = Modifier.width(if (AppEnv.isTv) 170.dp else 128.dp),
     ) {
-        AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(true).build(),
-            contentDescription = t.name,
-            contentScale = ContentScale.Crop,
+        // The ARTWORK is the button: ring, pop and click all hug the poster.
+        // The caption below is decoration, never part of the target (the old
+        // whole-column box is what made picking feel like a square box).
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .background(Card),
-        )
+                .focusRing(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(12.dp))
+                .background(Card)
+                .clickable { onOpen(t) },
+        ) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(true).build(),
+                contentDescription = t.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         Text(
             t.name,
-            fontSize = 12.sp,
+            fontSize = if (AppEnv.isTv) 13.sp else 12.sp,
             color = Dim,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp),
+            modifier = Modifier.padding(top = 6.dp),
         )
     }
 }
