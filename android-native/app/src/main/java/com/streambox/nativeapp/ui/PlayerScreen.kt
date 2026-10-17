@@ -11,6 +11,7 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -656,11 +657,19 @@ fun PlayerScreen(
                     // TV: keep D-pad on OUR bar, never trapped in the embed
                     isFocusable = !big
                     isFocusableInTouchMode = !big
-                    // Any tap wakes the chrome (Netflix-style) without eating
-                    // the touch - the embed still gets it.
+                    // Phone: a tap MINIMIZES the chrome and a tap brings it
+                    // back (toggle). TV has no touch - any key wakes the
+                    // chrome there instead. The tap is never eaten.
                     setOnTouchListener { _, ev ->
                         if (ev.action == android.view.MotionEvent.ACTION_UP) {
-                            main.post { pokeChrome() }
+                            main.post {
+                                if (big) {
+                                    pokeChrome()
+                                } else {
+                                    chromeVisible = !chromeVisible
+                                    pokeTick += 1
+                                }
+                            }
                         }
                         false
                     }
@@ -697,11 +706,18 @@ fun PlayerScreen(
         }
 
         // Caption overlay (website-style): cue window is cur + sync offset.
+        // Captions track the chrome on BOTH phone and TV - they ride up
+        // while the bar is showing (TV bar is taller, so higher there) and
+        // sink toward the bottom when it minimizes (Netflix feel).
         if (capCue != null && !showEps && !showSubs) {
+            val bottomPad by animateDpAsState(
+                targetValue = if (chromeVisible) (if (big) 156.dp else 112.dp) else (if (big) 38.dp else 30.dp),
+                label = "capBottom",
+            )
             val capMod = when (subs?.pos ?: "bottom") {
                 "top" -> Modifier.align(Alignment.TopCenter).padding(top = 70.dp)
                 "center" -> Modifier.align(Alignment.Center)
-                else -> Modifier.align(Alignment.BottomCenter).padding(bottom = 160.dp)
+                else -> Modifier.align(Alignment.BottomCenter).padding(bottom = bottomPad)
             }
             Text(
                 capCue.text,
