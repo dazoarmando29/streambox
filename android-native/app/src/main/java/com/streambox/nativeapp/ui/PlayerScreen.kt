@@ -190,6 +190,34 @@ private val SUBLANGS = listOf(
     "ru" to "RU", "tr" to "TR", "id" to "ID",
 )
 
+/* Ad Shield (same battle-tested list as the Android wrapper): ad-network
+   hosts die in shouldInterceptRequest on EVERY frame - ad scripts and
+   popunders inside the embeds never load. Video/source hosts untouched. */
+private val AD_HOSTS = setOf(
+    "doubleclick.net", "googlesyndication.com", "googleadservices.com", "google-analytics.com",
+    "googletagmanager.com", "adservice.google.com", "adnxs.com", "adsrvr.org", "adroll.com",
+    "popads.net", "popcash.net", "propellerads.com", "propellerads.net", "popundertotal.com",
+    "tapadu.com", "exoclick.com", "juicyads.com", "hilltopads.com", "highcpm.com",
+    "adsterra.com", "adsterra.net", "histats.com", "hotjar.com", "facebook.net",
+    "amazon-adsystem.com", "scorecardresearch.com", "outbrain.com", "taboola.com",
+    "trafficjunky.net", "trafficjunky.com", "a-ads.com", "ads-mrg.com", "onclickmax.com",
+    "adblokkster.com", "bc.vc", "bc-ads.com", "tsyndicate.com", "syndicat-france.com",
+)
+
+private fun isAdHost(host: String): Boolean {
+    if (host.isEmpty()) return false
+    for (ad in AD_HOSTS) {
+        if (host == ad || host.endsWith(".$ad")) return true
+    }
+    return false
+}
+
+private fun isProviderHost(host: String): Boolean {
+    val h = host.lowercase(java.util.Locale.US)
+    return h == "cinesrc.st" || h.endsWith(".cinesrc.st") ||
+        h == "ani.pm" || h.endsWith(".ani.pm")
+}
+
 /* TV navigation layers, Netflix-style: at VIDEO the L/R keys seek and OK
    toggles play; Up/Down walk skip pill -> slider -> buttons where L/R
    navigates and OK clicks. Back walks layers first, then home. */
@@ -509,6 +537,70 @@ fun PlayerScreen(
                                 view?.evaluateJavascript(SB_HOOK, null)
                             } catch (e: Exception) {
                             }
+                        }
+
+                        // Ad Shield: ad/tracker hosts return empty - every
+                        // frame, so in-embed popunders die before loading.
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: android.webkit.WebResourceRequest?,
+                        ): android.webkit.WebResourceResponse? {
+                            try {
+                                val host = (request?.url?.host ?: "").lowercase(java.util.Locale.US)
+                                if (isAdHost(host)) {
+                                    return android.webkit.WebResourceResponse(
+                                        "text/plain", "utf-8",
+                                        java.io.ByteArrayInputStream(ByteArray(0)),
+                                    )
+                                }
+                            } catch (e: Exception) {
+                            }
+                            return super.shouldInterceptRequest(view, request)
+                        }
+
+                        // Tab-hijack guard: main frame stays on the provider
+                        // embed; subframes (video hosts) flow untouched.
+                        // Exotic schemes are blocked everywhere (wrapper rule).
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: android.webkit.WebResourceRequest?,
+                        ): Boolean {
+                            try {
+                                val r = request ?: return false
+                                val scheme = (r.url?.scheme ?: "").lowercase(java.util.Locale.US)
+                                if (scheme != "http" && scheme != "https" && scheme.isNotEmpty()) return true
+                                if (!r.isForMainFrame) return false
+                                val host = r.url?.host ?: ""
+                                return !isProviderHost(host)
+                            } catch (e: Exception) {
+                                return false
+                            }
+                        }
+
+                        // VidCore-style broken cert chains self-heal in modern
+                        // Chromium; strict WebViews need the surgical exception
+                        // (chain-trust ONLY on that host - wrapper rule).
+                        override fun onReceivedSslError(
+                            view: WebView?,
+                            handler: android.webkit.SslErrorHandler?,
+                            error: android.net.http.SslError?,
+                        ) {
+                            try {
+                                var h = ""
+                                try {
+                                    val u = java.net.URI(error?.url ?: "")
+                                    if (u.host != null) h = u.host.lowercase(java.util.Locale.US)
+                                } catch (e: Exception) {
+                                }
+                                if ((h == "vidcore.org" || h.endsWith(".vidcore.org")) &&
+                                    error?.primaryError == android.net.http.SslError.SSL_UNTRUSTED
+                                ) {
+                                    handler?.proceed()
+                                    return
+                                }
+                            } catch (e: Exception) {
+                            }
+                            handler?.cancel()
                         }
                     }
                     webChromeClient = WebChromeClient()
