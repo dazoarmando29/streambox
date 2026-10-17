@@ -134,6 +134,37 @@ private fun fallbackChain(m: String): List<String> = when (m) {
     else -> listOf()
 }
 
+/* Providers ship EMBEDS: top-level loads get their website shell (AniPM
+   "Watch now" page) or their anti-leech sandbox wall (VidRift). The website
+   runs each one inside an iframe - so do we. CineSrc is the exception: it
+   serves its bare player either way and our hook drives it directly. */
+private val WRAPPED = setOf("anipm", "vidrift", "vidzen", "vidbolt")
+
+private fun mirrorBase(m: String): String = when (m) {
+    "anipm" -> "https://ani.pm/"
+    "vidrift" -> "https://embed.vidrift.net/"
+    "vidzen" -> "https://vidzen.fun/"
+    "vidbolt" -> "https://vidbolt.pro/"
+    else -> "https://cinesrc.st/"
+}
+
+/** Load the provider the way the website does: embed URL in our own shell
+    page's iframe (postMessage contract flows both ways via SB_HOOK). */
+private fun loadMirror(w: WebView, embedUrl: String, m: String) {
+    if (m in WRAPPED) {
+        val html = "<!DOCTYPE html><html><head>" +
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+            "</head><body style=\"margin:0;background:#000;overflow:hidden\">" +
+            "<iframe src=\"" + embedUrl + "\" " +
+            "style=\"border:0;position:fixed;inset:0;width:100%;height:100%\" " +
+            "allow=\"autoplay; encrypted-media; fullscreen; picture-in-picture\" " +
+            "allowfullscreen></iframe></body></html>"
+        w.loadDataWithBaseURL(mirrorBase(m), html, "text/html", "utf-8", null)
+    } else {
+        w.loadUrl(embedUrl)
+    }
+}
+
 /** Builds the provider embed URL. Contracts (verified against the live
     players): CineSrc /embed/movie/:id and /embed/tv/:id?s=&e= with
     &controls=false hiding ITS bar (ours is the player, house rule); AniPM
@@ -278,7 +309,7 @@ private val SB_HOOK = """
     if (m.ns === "anipm.player") {
       if (m.id === 0 && m.ok) { live = true; while (q.length) post(q.shift()); return; }
       var ev = m.event, d = m.data || {};
-      if (ev === "ready") { live = true; while (q.length) post(q.shift()); }
+      if (ev === "ready") { live = true; while (q.length) post(q.shift()); send("ready", {}); }
       if (ev === "play" || ev === "playing") send("play", {});
       else if (ev === "pause" || ev === "paused") send("pause", {});
       else if (ev === "ended") send("ended", {});
@@ -600,7 +631,8 @@ fun PlayerScreen(
         chromeVisible = true
         main.post {
             try {
-                web?.loadUrl(playerUrl(title, epSeason, epNumber, mal, ani, mirror, startAt))
+                val w = web ?: return@post
+                loadMirror(w, playerUrl(title, epSeason, epNumber, mal, ani, mirror, startAt), mirror)
             } catch (e: Exception) {
             }
         }
@@ -908,9 +940,15 @@ fun PlayerScreen(
                     settings.domStorageEnabled = true
                     settings.setMediaPlaybackRequiresUserGesture(false)
                     settings.setSupportMultipleWindows(false)
+                    settings.javaScriptCanOpenWindowsAutomatically = true
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
                     settings.builtInZoomControls = false
+                    // Bot-wall insurance (VidRift is bot-walled): look like a
+                    // real Chrome, allow player subresources, never block http
+                    // media on https shells.
+                    settings.userAgentString = (settings.userAgentString ?: "").replace("; wv", "")
+                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                     setLayerType(View.LAYER_TYPE_HARDWARE, null)
                     // Never intercept subframe navigation: players navigate
                     // their own inner frames to video hosts (wrapper lesson).
@@ -918,25 +956,6 @@ fun PlayerScreen(
                         override fun onPageFinished(view: WebView?, u: String?) {
                             try {
                                 view?.evaluateJavascript(SB_HOOK, null)
-                            } catch (e: Exception) {
-                            }
-                        }
-
-                        // AniPM sometimes drops the embed onto its own WEBSITE
-                        // ("Watch now" page) - undrivable on TV. Any main-frame
-                        // exit from /embed is treated as broken and hops.
-                        override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
-                            super.doUpdateVisitedHistory(view, url, isReload)
-                            try {
-                                val u = android.net.Uri.parse(url ?: "")
-                                val host = (u.host ?: "").lowercase(java.util.Locale.US)
-                                val path = u.path ?: ""
-                                if (mirror == "anipm" &&
-                                    (host == "ani.pm" || host.endsWith(".ani.pm")) &&
-                                    !path.startsWith("/embed") && !hopped
-                                ) {
-                                    hopMirror()
-                                }
                             } catch (e: Exception) {
                             }
                         }
@@ -1010,7 +1029,10 @@ fun PlayerScreen(
                         main.post {
                             try {
                                 val o = org.json.JSONObject(j)
-                                if (t == "ready" || t == "play" || t == "timeupdate" || t == "loadedmetadata") {
+                                // Watchdog counts REAL playback only - an idle
+                                // preview video or bare metadata must not
+                                // defeat the auto-hop (Beerus lesson).
+                                if (t == "play" || t == "timeupdate" || t == "ended") {
                                     gotMedia = true
                                 }
                                 when (t) {
@@ -1145,7 +1167,7 @@ fun PlayerScreen(
                         }
                         false
                     }
-                    loadUrl(playerUrl(title, epSeason, epNumber, mal, ani, mirror))
+                    loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror), mirror)
                     web = this
                 }
             },
