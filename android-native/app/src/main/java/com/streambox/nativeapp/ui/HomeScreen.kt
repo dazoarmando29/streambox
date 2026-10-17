@@ -197,7 +197,7 @@ private fun TopBar(searchMode: Boolean, onSearchToggle: () -> Unit, adultOpen: B
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .height(42.dp)
-                .focusRing()
+                .focusRing(RoundedCornerShape(50))
                 .background(Pill, RoundedCornerShape(50))
                 .clickable { onSearchToggle() }
                 .padding(horizontal = 14.dp),
@@ -212,7 +212,7 @@ private fun TopBar(searchMode: Boolean, onSearchToggle: () -> Unit, adultOpen: B
         Box(
             modifier = Modifier
                 .size(42.dp)
-                .focusRing()
+                .focusRing(CircleShape)
                 .background(Pill, CircleShape)
                 .clickable { onAdultToggle() },
             contentAlignment = Alignment.Center,
@@ -369,7 +369,7 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .width(if (big) 300.dp else 240.dp)
-                        .focusRing()
+                        .focusRing(RoundedCornerShape(12.dp))
                         .clip(RoundedCornerShape(12.dp))
                         .background(Card)
                         .clickable { onResume(p) }
@@ -412,7 +412,7 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                     Box(
                         modifier = Modifier
                             .size(30.dp)
-                            .focusRing()
+                            .focusRing(CircleShape)
                             .background(Pill, CircleShape)
                             .clickable { onRemove(p) },
                         contentAlignment = Alignment.Center,
@@ -462,7 +462,7 @@ private fun PosterCard(t: Title, onOpen: (Title) -> Unit) {
     Column(
         modifier = Modifier
             .width(if (AppEnv.isTv) 150.dp else 118.dp)
-            .focusRing()
+            .focusRing(RoundedCornerShape(10.dp))
             .clip(RoundedCornerShape(10.dp))
             .clickable { onOpen(t) },
     ) {

@@ -37,6 +37,7 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -166,16 +167,21 @@ private fun BottomNav(current: Section, onPick: (Section) -> Unit) {
     }
 }
 
-/** D-pad comfort: a bright teal ring on whatever the remote is on. */
-fun Modifier.focusRing(): Modifier = composed {
+/** D-pad comfort: a bright teal ring on whatever the remote is on. The ring
+    exists ONLY while focused - a 0.dp border still paints a Skia hairline,
+    which outlined every button in the app (TV screenshots lesson). */
+fun Modifier.focusRing(shape: Shape = RoundedCornerShape(16.dp)): Modifier = composed {
     var focused by remember { mutableStateOf(false) }
     onFocusChanged { focused = it.isFocused }
-        .border(
-            width = if (focused) 3.dp else 0.dp,
-            color = Accent,
-            shape = RoundedCornerShape(14.dp),
+        .then(
+            if (focused) {
+                Modifier
+                    .border(3.dp, Accent, shape)
+                    .scale(1.05f)
+            } else {
+                Modifier
+            }
         )
-        .scale(if (focused) 1.05f else 1f)
 }
 
 /** Pill button in the website's style. */
@@ -186,6 +192,7 @@ fun PillButton(
     accent: Boolean = false,
     outline: Boolean = false,
     icon: ImageVector? = null,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val h = if (big) 54.dp else 46.dp
@@ -198,9 +205,9 @@ fun PillButton(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
-        modifier = Modifier
+        modifier = modifier
             .height(h)
-            .focusRing()
+            .focusRing(RoundedCornerShape(50))
             .background(bg, RoundedCornerShape(50))
             .then(
                 if (outline) Modifier.border(2.dp, Color(0xFF2A3B55), RoundedCornerShape(50))

@@ -15,6 +15,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -67,6 +69,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 
 import androidx.compose.ui.text.font.FontWeight
@@ -559,6 +562,13 @@ fun PlayerScreen(
     // clearFocus() on fade/layer-reset left none, so once chrome minimized
     // the remote went dead and the chrome could never come back (TV bug).
     val keySinkFR = remember { FocusRequester() }
+    // Sheet entry points: on TV an open sheet OWNS the remote - focus lands
+    // inside it and stays trapped there (focusProperties exit=Cancel). It
+    // used to stay on the player-bar button BEHIND the panel, so the D-pad
+    // kept driving the player instead of the sheet (bug report).
+    val epsFirstFR = remember { FocusRequester() }
+    val subsFirstFR = remember { FocusRequester() }
+    val serverFirstFR = remember { FocusRequester() }
 
     fun save(c: Float, d: Float) {
         try {
@@ -838,6 +848,17 @@ fun PlayerScreen(
                         LAYER_SLIDER -> sliderFR.requestFocus()
                         LAYER_BUTTONS -> playFR.requestFocus()
                         else -> keySinkFR.requestFocus()
+                    }
+                }
+            }
+        }
+        LaunchedEffect(showEps, showSubs, showServers) {
+            if (big) {
+                runCatching {
+                    when {
+                        showEps -> epsFirstFR.requestFocus()
+                        showSubs -> subsFirstFR.requestFocus()
+                        showServers -> serverFirstFR.requestFocus()
                     }
                 }
             }
@@ -1138,7 +1159,7 @@ fun PlayerScreen(
                 Box(
                     modifier = Modifier
                         .size(if (big) 92.dp else 76.dp)
-                        .focusRing()
+                        .focusRing(CircleShape)
                         .background(Accent, CircleShape)
                         .clickable { if (!playing) togglePlay() },
                     contentAlignment = Alignment.Center,
@@ -1173,7 +1194,7 @@ fun PlayerScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .focusRequester(skipFR)
-                            .focusRing()
+                            .focusRing(RoundedCornerShape(50))
                             .background(Accent, RoundedCornerShape(50))
                             .clickable { skipNow(hit) }
                             .padding(horizontal = 18.dp, vertical = 10.dp),
@@ -1231,7 +1252,7 @@ fun PlayerScreen(
                     modifier = Modifier
                         .size(if (big) 56.dp else 48.dp)
                         .focusRequester(playFR)
-                        .focusRing()
+                        .focusRing(CircleShape)
                         .background(Accent, CircleShape)
                         .clickable { togglePlay() },
                     contentAlignment = Alignment.Center,
@@ -1252,7 +1273,7 @@ fun PlayerScreen(
                 Box(
                     modifier = Modifier
                         .size(if (big) 56.dp else 48.dp)
-                        .focusRing()
+                        .focusRing(CircleShape)
                         .background(Pill, CircleShape)
                         .clickable {
                             muted = !muted
@@ -1313,7 +1334,8 @@ fun PlayerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color(0x99000000))
-                    .clickable { showEps = false },
+                    .focusProperties { exit = { FocusRequester.Cancel } }
+                    .pointerInput(Unit) { detectTapGestures { showEps = false } },
                 contentAlignment = Alignment.Center,
             ) {
                 Column(
@@ -1340,7 +1362,7 @@ fun PlayerScreen(
                         Spacer(modifier = Modifier.height(14.dp))
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        PillButton("Load", big, accent = true) {
+                        PillButton("Load", big, accent = true, modifier = Modifier.focusRequester(epsFirstFR)) {
                             showEps = false
                             save(0f, dur)
                             cur = 0f
@@ -1360,7 +1382,8 @@ fun PlayerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color(0x99000000))
-                    .clickable { showSubs = false },
+                    .focusProperties { exit = { FocusRequester.Cancel } }
+                    .pointerInput(Unit) { detectTapGestures { showSubs = false } },
                 contentAlignment = Alignment.Center,
             ) {
                 Column(
@@ -1383,11 +1406,13 @@ fun PlayerScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(SUBLANGS) { (code, label) ->
+                        items(SUBLANGS.size) { i ->
+                            val (code, label) = SUBLANGS[i]
                             val on = code == wyzLang
                             Box(
                                 modifier = Modifier
-                                    .focusRing()
+                                    .then(if (i == 0) Modifier.focusRequester(subsFirstFR) else Modifier)
+                                    .focusRing(CircleShape)
                                     .background(if (on) Accent else Pill, CircleShape)
                                     .clickable { wyzLang = code }
                                     .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -1581,7 +1606,8 @@ fun PlayerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color(0x99000000))
-                    .clickable { showServers = false },
+                    .focusProperties { exit = { FocusRequester.Cancel } }
+                    .pointerInput(Unit) { detectTapGestures { showServers = false } },
                 contentAlignment = Alignment.Center,
             ) {
                 Column(
@@ -1593,10 +1619,11 @@ fun PlayerScreen(
                 ) {
                     Text("Server", color = Accent, fontWeight = FontWeight.Black, fontSize = if (big) 20.sp else 17.sp)
                     Spacer(modifier = Modifier.height(12.dp))
-                    serverList.forEach { id ->
+                    serverList.forEachIndexed { i, id ->
                         BarPill(
                             (MIRROR_NAMES[id] ?: id) + if (id == mirror) "  (current)" else "",
                             big,
+                            modifier = if (i == 0) Modifier.focusRequester(serverFirstFR) else Modifier,
                         ) {
                             if (id != mirror) {
                                 val at = cur
@@ -1620,7 +1647,7 @@ private fun CircleBtn(label: String, big: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(if (big) 68.dp else 58.dp)
-            .focusRing()
+            .focusRing(CircleShape)
             .background(Color(0x990B1426), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -1630,12 +1657,18 @@ private fun CircleBtn(label: String, big: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun BarPill(label: String, big: Boolean, icon: ImageVector? = null, onClick: () -> Unit) {
+private fun BarPill(
+    label: String,
+    big: Boolean,
+    icon: ImageVector? = null,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
+        modifier = modifier
             .height(if (big) 52.dp else 44.dp)
-            .focusRing()
+            .focusRing(RoundedCornerShape(50))
             .background(Pill, RoundedCornerShape(50))
             .clickable(onClick = onClick)
             .padding(horizontal = if (big) 16.dp else 13.dp),

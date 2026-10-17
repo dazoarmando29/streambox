@@ -12,8 +12,8 @@ android {
         applicationId = "com.streambox.nativeapp"
         minSdk = 24
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.10"
+        versionCode = 11
+        versionName = "0.11"
         // Backend: Cloudflare Worker (catalog proxy + anime mapping).
         // Provider keys live in the Worker as Wrangler secrets - never here.
         buildConfigField("String", "API_BASE", "\"https://streambox-api.dazoarmando.workers.dev\"")
@@ -30,6 +30,9 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        // focusProperties (sheet focus traps) is experimental-but-stable in
+        // the pinned BOM - opt in once here so it never breaks the build.
+        freeCompilerArgs += "-opt-in=androidx.compose.ui.ExperimentalComposeUiApi"
     }
 
     buildTypes {
