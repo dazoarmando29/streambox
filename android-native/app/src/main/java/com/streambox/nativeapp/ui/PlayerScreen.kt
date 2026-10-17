@@ -92,15 +92,56 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/* Mirror routing (website rules): movies/TV default CineSrc, anime AniPM.
+   ANIME_BAD_CATALOG keeps Doraemon away from VidBolt (it serves FMA:B for
+   the right id). VidRift is TMDB-direct (works for anime when the AniPM
+   mapping is missing). VidZen has no anime routes. Mid-session switches
+   never change the next title's primary. */
+private val MIRROR_NAMES = mapOf(
+    "cinesrc" to "CineSrc",
+    "anipm" to "AniPM",
+    "vidrift" to "VidRift",
+    "vidzen" to "VidZen",
+    "vidbolt" to "VidBolt",
+)
+
+private fun mirrorsFor(title: Title, mal: Int?, ani: Int?): List<String> = when (title.type) {
+    "anime" -> buildList {
+        if (mal != null || ani != null) add("anipm")
+        add("vidrift")
+        if (!Regex("doraemon", RegexOption.IGNORE_CASE).containsMatchIn(title.name)) add("vidbolt")
+    }
+    else -> listOf("cinesrc", "vidrift", "vidzen", "vidbolt")
+}
+
+private fun defaultMirror(title: Title, mal: Int?, ani: Int?): String = when (title.type) {
+    "anime" -> if (mal != null || ani != null) "anipm" else "vidrift"
+    else -> "cinesrc"
+}
+
 /** Builds the provider embed URL. Contracts (verified against the live
     players): CineSrc /embed/movie/:id and /embed/tv/:id?s=&e= with
     &controls=false hiding ITS bar (ours is the player, house rule); AniPM
     /embed/mal/:mal/:ep/dub|sub (valid routes; /en is a 404 and is never
-    generated here). */
-fun playerUrl(title: Title, season: Int, episode: Int, mal: Int?, ani: Int?): String {
-    return when (title.type) {
-        "movie" -> "https://cinesrc.st/embed/movie/" + title.id + "?controls=false"
-        "anime" -> {
+    generated here); VidRift /embed/tv|movie (mobileSheets); VidZen /tv|movie
+    (autoPlay + theme + startAt); VidBolt /tv|movie|anime/mal (autoPlay +
+    mobileSheets + startAt - its skip-seek can black the surface, so skips
+    reload at startAt like the website). */
+fun playerUrl(
+    title: Title,
+    season: Int,
+    episode: Int,
+    mal: Int?,
+    ani: Int?,
+    mirror: String = "",
+    startAt: Float = 0f,
+): String {
+    val m = mirror.ifEmpty { defaultMirror(title, mal, ani) }
+    val ep = episode.coerceAtLeast(1)
+    val st = startAt.toInt().coerceAtLeast(0)
+    val stq = if (st > 0) "&startAt=" + st else ""
+    return when (m) {
+        "anipm" -> {
             // House rule pinned forever: Dragon Ball = English dub with the
             // Bruce Faulconer score; everything else starts on sub.
             val lang = if (Regex("dragon\\s*ball", RegexOption.IGNORE_CASE).containsMatchIn(title.name)) {
@@ -108,11 +149,35 @@ fun playerUrl(title: Title, season: Int, episode: Int, mal: Int?, ani: Int?): St
             } else {
                 "sub"
             }
-            val ep = episode.coerceAtLeast(1)
-            if (mal != null) "https://ani.pm/embed/mal/" + mal + "/" + ep + "/" + lang
-            else "https://ani.pm/embed/ani/" + (ani ?: title.id) + "/" + ep + "/" + lang
+            val base = if (mal != null) {
+                "https://ani.pm/embed/mal/" + mal + "/" + ep + "/" + lang
+            } else {
+                "https://ani.pm/embed/ani/" + (ani ?: title.id) + "/" + ep + "/" + lang
+            }
+            base + "?color=14b8a6" + (if (st > 0) "&start=" + st else "")
         }
-        else -> "https://cinesrc.st/embed/tv/" + title.id + "?s=" + season + "&e=" + episode + "&controls=false"
+        "vidrift" -> if (title.type == "movie") {
+            "https://embed.vidrift.net/embed/movie/" + title.id + "?mobileSheets=true"
+        } else {
+            "https://embed.vidrift.net/embed/tv/" + title.id + "/" + season + "/" + ep + "?mobileSheets=true"
+        }
+        "vidzen" -> if (title.type == "movie") {
+            "https://vidzen.fun/movie/" + title.id + "?autoPlay=true&theme=14b8a6" + stq
+        } else {
+            "https://vidzen.fun/tv/" + title.id + "/" + season + "/" + ep + "?autoPlay=true&theme=14b8a6" + stq
+        }
+        "vidbolt" -> when (title.type) {
+            "movie" -> "https://vidbolt.pro/movie/" + title.id + "?autoPlay=true&mobileSheets=true&theme=14b8a6" + stq
+            "anime" -> "https://vidbolt.pro/anime/mal/" + (mal ?: ani ?: title.id) + "/" + ep +
+                "?autoPlay=true&mobileSheets=true&theme=14b8a6" + stq
+            else -> "https://vidbolt.pro/tv/" + title.id + "/" + season + "/" + ep +
+                "?autoPlay=true&mobileSheets=true&theme=14b8a6" + stq
+        }
+        else -> if (title.type == "movie") {
+            "https://cinesrc.st/embed/movie/" + title.id + "?controls=false"
+        } else {
+            "https://cinesrc.st/embed/tv/" + title.id + "?s=" + season + "&e=" + episode + "&controls=false"
+        }
     }
 }
 
@@ -148,13 +213,22 @@ private fun hitAt(cur: Float, skips: IntroDb.Skips): SkipHit? {
     own postMessage contract - belt and braces, so our bar always answers.
     AniPM gets its real protocol (website parity): {ns:"anipm.player",v:1,
     id,cmd,args} posted to the embed window, hello handshake + pre-ready
-    queue (the player drops early mail), quality/subs/language/rate cmds. */
+    queue (the player drops early mail), quality/subs/language/rate cmds.
+    VidRift: resume/quality only (NO play/pause API - taps at the surface).
+    VidZen/VidBolt: {type:"play"|"pause"|"seek"+time} with pre-ready seek
+    queues; VidBolt durations ride durationchange (timeupdate has time only).
+    All folds land as the same Android.event types, so Kotlin stays one code
+    path regardless of who is on screen. */
 private val SB_HOOK = """
 (function(){
   if (window.__sbHooked) return; window.__sbHooked = true;
   function send(t, o){ try { Android.event(t, JSON.stringify(o||{})); } catch(e){} }
   var h = location.hostname;
-  var ANIPM = h === "ani.pm" || h.slice(-7) === ".ani.pm";
+  var ANIPM = h === "ani.pm" || h.endsWith(".ani.pm");
+  var VR = h === "vidrift.net" || h.endsWith(".vidrift.net");
+  var VZ = h === "vidzen.fun" || h.endsWith(".vidzen.fun");
+  var VB = h === "vidbolt.pro" || h.endsWith(".vidbolt.pro") ||
+           h === "vidbolt.xyz" || h.endsWith(".vidbolt.xyz");
   var seq = 0, live = !ANIPM, q = [];
   function post(m){
     try { window.postMessage(m, "*"); } catch(e){}
@@ -166,21 +240,92 @@ private val SB_HOOK = """
     if (!live) q.push(m);
   }
   function hello(){ post({ ns: "anipm.player", v: 1, id: 0, cmd: "hello", args: {} }); }
+  // VidRift has no play/pause message: tap the surface (their UI toggles).
+  function tapSurface(){
+    try {
+      var v = document.querySelector('video');
+      if (!v) return;
+      var r = v.getBoundingClientRect();
+      var x = r.left + r.width / 2, y = r.top + r.height / 2;
+      var el = document.elementFromPoint(x, y) || v;
+      var ev = function(t){ el.dispatchEvent(new MouseEvent(t, {bubbles: true, cancelable: true, clientX: x, clientY: y})); };
+      ev('mousedown'); ev('mouseup'); ev('click');
+    } catch(e){}
+  }
+  function boltSeek(t){
+    var cl = Math.max(0, Math.floor(t));
+    if (!window.__sbBoltOn) { window.__sbBoltQ = cl; return; }
+    window.__sbBoltQ = null;
+    post({ type: 'seek', time: cl });
+  }
   window.addEventListener("message", function(e){
-    var m = e.data; if (!m || m.ns !== "anipm.player") return;
-    if (m.id === 0 && m.ok) { live = true; while (q.length) post(q.shift()); return; }
-    var ev = m.event, d = m.data || {};
-    if (ev === "ready") { live = true; while (q.length) post(q.shift()); }
-    if (ev === "play" || ev === "playing") send("play", {});
-    else if (ev === "pause" || ev === "paused") send("pause", {});
-    else if (ev === "ended") send("ended", {});
-    else if (ev === "timeupdate") send("timeupdate", {currentTime: d.currentTime||0, duration: d.duration||0});
-    else if (ev === "durationchange") send("loadedmetadata", {duration: d.duration||0});
-    else if (ev === "qualitychange") send("anipm:quality", {qualities: d.qualities||[], quality: d.quality});
-    else if (ev === "subtitlechange") send("anipm:subtitles", {tracks: d.tracks||[]});
-    else if (ev === "languagechange") send("anipm:lang", {lang: d.lang||d.language||""});
-    else if (ev === "episodechange") send("anipm:episode", {episode: d.episode, season: d.season});
-    else if (ev === "autoplayblocked") send("anipm:autoplay", {});
+    var m = e.data; if (!m || typeof m !== "object") return;
+    if (m.ns === "anipm.player") {
+      if (m.id === 0 && m.ok) { live = true; while (q.length) post(q.shift()); return; }
+      var ev = m.event, d = m.data || {};
+      if (ev === "ready") { live = true; while (q.length) post(q.shift()); }
+      if (ev === "play" || ev === "playing") send("play", {});
+      else if (ev === "pause" || ev === "paused") send("pause", {});
+      else if (ev === "ended") send("ended", {});
+      else if (ev === "timeupdate") send("timeupdate", {currentTime: d.currentTime||0, duration: d.duration||0});
+      else if (ev === "durationchange") send("loadedmetadata", {duration: d.duration||0});
+      else if (ev === "qualitychange") send("anipm:quality", {qualities: d.qualities||[], quality: d.quality});
+      else if (ev === "subtitlechange") send("anipm:subtitles", {tracks: d.tracks||[]});
+      else if (ev === "languagechange") send("anipm:lang", {lang: d.lang||d.language||""});
+      else if (ev === "episodechange") send("anipm:episode", {episode: d.episode, season: d.season});
+      else if (ev === "autoplayblocked") send("anipm:autoplay", {});
+      return;
+    }
+    if (VR) {
+      if (m.type === "vidrift:progress") send("timeupdate", {currentTime: m.currentTime||0, duration: m.duration||0});
+      else if (m.type === "vidrift:paused") send("pause", {});
+      else if (m.type === "vidrift:unpaused") send("play", {});
+      else if (m.type === "vidrift:ended") send("ended", {});
+      else if (m.type === "vidrift:episode") send("mirror:episode", {season: m.season, episode: m.episode});
+      else if (m.type === "vidrift:nextup-play") send("mirror:nextup", {season: m.season, episode: m.episode});
+      return;
+    }
+    if (VZ) {
+      var evn = "", c, du;
+      if (m.type === "vidzen") { evn = String(m.event||"").toLowerCase(); c = m.currentTime; du = m.duration; }
+      else if (m.type === "vidzen:status") {
+        if (typeof m.paused === "boolean") send(m.paused ? "pause" : "play", {});
+        return;
+      } else if (m.type === "PLAYER_EVENT" && m.data && typeof m.data === "object") {
+        var dd = m.data;
+        evn = String(dd.event || dd.player_status || "").toLowerCase();
+        c = dd.currentTime != null ? dd.currentTime : dd.player_progress;
+        du = dd.duration != null ? dd.duration : dd.player_duration;
+      } else return;
+      if (evn === "timeupdate" || evn === "progress" || evn === "seeked" || evn === "seeking") {
+        window.__sbZenOn = true;
+        if (window.__sbZenQ != null) {
+          var zq = window.__sbZenQ; window.__sbZenQ = null;
+          post({ type: 'seek', time: Math.floor(zq) });
+        }
+        send("timeupdate", {currentTime: c||0, duration: du||0});
+      }
+      else if (evn === "play" || evn === "playing" || evn === "unpaused") { window.__sbZenOn = true; send("play", {}); }
+      else if (evn === "pause" || evn === "paused") send("pause", {});
+      else if (evn === "ended" || evn === "complete") send("ended", {});
+      return;
+    }
+    if (VB) {
+      if (m.type === "durationchange") { window.__sbDur = m.duration||0; send("loadedmetadata", {duration: m.duration||0}); return; }
+      if (m.type === "timeupdate") {
+        window.__sbBoltOn = true;
+        if (window.__sbBoltQ != null) {
+          var bq = window.__sbBoltQ; window.__sbBoltQ = null;
+          post({ type: 'seek', time: Math.floor(bq) });
+        }
+        send("timeupdate", {currentTime: m.time||0, duration: window.__sbDur||0});
+        return;
+      }
+      if (m.type === "ready") { send("ready", {}); return; }
+      if (m.type === "play" || m.type === "playing") { window.__sbBoltOn = true; send("play", {}); return; }
+      if (m.type === "pause" || m.type === "paused") { send("pause", {}); return; }
+      if (m.type === "ended") { send("ended", {}); return; }
+    }
   });
   function hook(){
     var v = document.querySelector('video');
@@ -197,11 +342,41 @@ private val SB_HOOK = """
   hook();
   setInterval(hook, 1000);
   window.__sb = {
-    play: function(){ var v=document.querySelector('video'); if(v) v.play(); if(ANIPM) anipmSend('play', {}); try{window.postMessage({type:'cinesrc:command',command:'play',args:[]},'*');}catch(e){} },
-    pause: function(){ var v=document.querySelector('video'); if(v) v.pause(); if(ANIPM) anipmSend('pause', {}); try{window.postMessage({type:'cinesrc:command',command:'pause',args:[]},'*');}catch(e){} },
-    seek: function(t){ var v=document.querySelector('video'); if(v) v.currentTime=t; if(ANIPM) anipmSend('seek', {time: t}); try{window.postMessage({type:'cinesrc:command',command:'seek',args:[t]},'*');}catch(e){} },
-    mute: function(m){ var v=document.querySelector('video'); if(v) v.muted=!!m; if(ANIPM) anipmSend('setMuted', {muted: !!m}); try{window.postMessage({type:'cinesrc:command',command:'setMuted',args:[!!m]},'*');}catch(e){} },
-    rate: function(r){ var v=document.querySelector('video'); if(v) v.playbackRate=r; if(ANIPM) anipmSend('setPlaybackRate', {rate: r}); try{window.postMessage({type:'cinesrc:command',command:'setPlaybackRate',args:[r]},'*');}catch(e){} },
+    play: function(){
+      var v=document.querySelector('video'); if(v) v.play();
+      if (ANIPM) anipmSend('play', {});
+      else if (VZ || VB) post({type:'play'});
+      else if (VR) tapSurface();
+      try{window.postMessage({type:'cinesrc:command',command:'play',args:[]},'*');}catch(e){}
+    },
+    pause: function(){
+      var v=document.querySelector('video'); if(v) v.pause();
+      if (ANIPM) anipmSend('pause', {});
+      else if (VZ || VB) post({type:'pause'});
+      else if (VR) tapSurface();
+      try{window.postMessage({type:'cinesrc:command',command:'pause',args:[]},'*');}catch(e){}
+    },
+    seek: function(t){
+      var v=document.querySelector('video'); if(v) v.currentTime=t;
+      if (ANIPM) anipmSend('seek', {time: t});
+      else if (VR) post({type:'vidrift:resume', currentTime: t});
+      else if (VZ) {
+        if (!window.__sbZenOn) { window.__sbZenQ = t; }
+        else post({type:'seek', time: Math.floor(t)});
+      }
+      else if (VB) boltSeek(t);
+      try{window.postMessage({type:'cinesrc:command',command:'seek',args:[t]},'*');}catch(e){}
+    },
+    mute: function(m){
+      var v=document.querySelector('video'); if(v) v.muted=!!m;
+      if (ANIPM) anipmSend('setMuted', {muted: !!m});
+      try{window.postMessage({type:'cinesrc:command',command:'setMuted',args:[!!m]},'*');}catch(e){}
+    },
+    rate: function(r){
+      var v=document.querySelector('video'); if(v) v.playbackRate=r;
+      if (ANIPM) anipmSend('setPlaybackRate', {rate: r});
+      try{window.postMessage({type:'cinesrc:command',command:'setPlaybackRate',args:[r]},'*');}catch(e){}
+    },
     q: function(n){ if(ANIPM) anipmSend('setQuality', {height: n}); },
     lang: function(l){ if(ANIPM) anipmSend('setLanguage', {lang: l}); },
     subs: function(on, label){ if(ANIPM) anipmSend('setSubtitles', on ? {enabled: true, label: label||''} : {enabled: false}); },
@@ -260,7 +435,11 @@ private fun isAdHost(host: String): Boolean {
 private fun isProviderHost(host: String): Boolean {
     val h = host.lowercase(java.util.Locale.US)
     return h == "cinesrc.st" || h.endsWith(".cinesrc.st") ||
-        h == "ani.pm" || h.endsWith(".ani.pm")
+        h == "ani.pm" || h.endsWith(".ani.pm") ||
+        h == "vidrift.net" || h.endsWith(".vidrift.net") ||
+        h == "vidzen.fun" || h.endsWith(".vidzen.fun") ||
+        h == "vidbolt.pro" || h.endsWith(".vidbolt.pro") ||
+        h == "vidbolt.xyz" || h.endsWith(".vidbolt.xyz")
 }
 
 /* TV navigation layers, Netflix-style: at VIDEO the L/R keys seek and OK
@@ -297,6 +476,11 @@ fun PlayerScreen(
     var web by remember { mutableStateOf<WebView?>(null) }
     var layer by remember { mutableStateOf(LAYER_VIDEO) }
     var lastSave by remember { mutableStateOf(0L) }
+    // Active mirror (website routing): per-title default; a mid-session
+    // switch never changes the next title's primary.
+    var mirror by remember { mutableStateOf(defaultMirror(title, mal, ani)) }
+    var showServers by remember { mutableStateOf(false) }
+    val serverList = remember(title.id, title.type, mal, ani) { mirrorsFor(title, mal, ani) }
     // Netflix behavior: chrome fades while playing after idle; any touch/key
     // wakes it; it STAYS up while paused or while you are using it.
     var chromeVisible by remember { mutableStateOf(true) }
@@ -386,11 +570,11 @@ fun PlayerScreen(
         }
     }
 
-    fun load() {
+    fun load(startAt: Float = 0f) {
         chromeVisible = true
         main.post {
             try {
-                web?.loadUrl(playerUrl(title, epSeason, epNumber, mal, ani))
+                web?.loadUrl(playerUrl(title, epSeason, epNumber, mal, ani, mirror, startAt))
             } catch (e: Exception) {
             }
         }
@@ -418,8 +602,8 @@ fun PlayerScreen(
 
     // Idle fade: only while actually playing with no panel open. On fade the
     // TV focus resets to the video layer so keys keep working blind.
-    LaunchedEffect(chromeVisible, playing, showEps, showSubs, pokeTick) {
-        if (chromeVisible && playing && !showEps && !showSubs) {
+    LaunchedEffect(chromeVisible, playing, showEps, showSubs, showServers, pokeTick) {
+        if (chromeVisible && playing && !showEps && !showSubs && !showServers) {
             delay(4500)
             chromeVisible = false
             layer = LAYER_VIDEO
@@ -438,13 +622,18 @@ fun PlayerScreen(
     }
 
     fun skipNow(h: SkipHit) {
-        when (h.kind) {
-            "credits" -> {
+        when {
+            h.kind == "credits" -> {
                 epNumber += 1
                 save(0f, dur)
                 cur = 0f
                 playing = true
                 load()
+            }
+            mirror == "vidbolt" && h.end != null -> {
+                // VidBolt's in-place skip seeks can leave a black surface -
+                // reopen at the marker through startAt (website boltSkipTo).
+                h.end?.let { e -> cur = e; load(startAt = e) }
             }
             else -> h.end?.let { seekTo(it) }
         }
@@ -551,6 +740,7 @@ fun PlayerScreen(
     // unwind the UI layers like the TV apps do.
     BackHandler {
         when {
+            showServers -> showServers = false
             showSubs -> showSubs = false
             showEps -> showEps = false
             big && layer != LAYER_VIDEO -> {
@@ -592,7 +782,7 @@ fun PlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
             .onPreviewKeyEvent { e ->
-                if (!big || showEps || showSubs || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                if (!big || showEps || showSubs || showServers || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 pokeChrome()
                 val layers = layerList()
                 val i = layers.indexOf(layer).coerceAtLeast(0)
@@ -640,8 +830,8 @@ fun PlayerScreen(
         LaunchedEffect(Unit) {
             if (big) runCatching { keySinkFR.requestFocus() }
         }
-        LaunchedEffect(showEps, showSubs) {
-            if (big && !showEps && !showSubs) {
+        LaunchedEffect(showEps, showSubs, showServers) {
+            if (big && !showEps && !showSubs && !showServers) {
                 runCatching {
                     when (layer) {
                         LAYER_SKIP -> skipFR.requestFocus()
@@ -819,6 +1009,36 @@ fun PlayerScreen(
                                         // mute-bypass. TV hands it a play.
                                         if (big) cmd("window.__sb && window.__sb.play()")
                                     }
+                                    "ready" -> {
+                                        // VidBolt TV: its shell waits for a
+                                        // play kick (website parity).
+                                        if (big && mirror == "vidbolt") cmd("window.__sb && window.__sb.play()")
+                                    }
+                                    "mirror:episode" -> {
+                                        // Provider advanced internally (Up
+                                        // Next / picker): sync state only -
+                                        // reloading would double-switch.
+                                        val e = o.optInt("episode", -1)
+                                        val s = o.optInt("season", -1)
+                                        if (e > 0) {
+                                            save(0f, dur)
+                                            if (s > 0) epSeason = s
+                                            epNumber = e
+                                            cur = 0f
+                                        }
+                                    }
+                                    "mirror:nextup" -> {
+                                        // Their Up Next fired under OUR
+                                        // episode list - WE advance (website
+                                        // parity: nextup-play means e+1).
+                                        save(0f, dur)
+                                        val s = o.optInt("season", -1)
+                                        if (s > 0) epSeason = s
+                                        epNumber = o.optInt("episode", epNumber) + 1
+                                        cur = 0f
+                                        playing = true
+                                        load()
+                                    }
                                     else -> {}
                                 }
                             } catch (e: Exception) {
@@ -848,7 +1068,7 @@ fun PlayerScreen(
                         }
                         false
                     }
-                    loadUrl(playerUrl(title, epSeason, epNumber, mal, ani))
+                    loadUrl(playerUrl(title, epSeason, epNumber, mal, ani, mirror))
                     web = this
                 }
             },
@@ -1025,6 +1245,10 @@ fun PlayerScreen(
                 }
                 BarPill("-10s", big) { seekRel(-10f) }
                 BarPill("+30s", big) { seekRel(30f) }
+                // Mute + rate exist only on mirrors we can actually drive
+                // (website: no dead buttons - VidRift/VidZen/VidBolt expose
+                // neither a volume nor a rate command).
+                if (mirror == "cinesrc" || mirror == "anipm") {
                 Box(
                     modifier = Modifier
                         .size(if (big) 56.dp else 48.dp)
@@ -1050,6 +1274,7 @@ fun PlayerScreen(
                     rateIdx = (rateIdx + 1) % RATES.size
                     cmd("window.__sb && window.__sb.rate(" + RATES[rateIdx] + ")")
                 }
+                }
                 // AniPM quality ladder (only real, player-reported values -
                 // never invent 4K: house rule).
                 if (anipmQs.isNotEmpty()) {
@@ -1060,9 +1285,9 @@ fun PlayerScreen(
                         cmd("window.__sb && window.__sb.q(" + next + ")")
                     }
                 }
-                // Sub/Dub pill (anime only, AniPM setLanguage). DBZ default
-                // dub is decided at URL build - this switches live.
-                if (title.type == "anime") {
+                // Sub/Dub pill (anime on AniPM - setLanguage live). DBZ
+                // default dub is decided at URL build; this switches.
+                if (title.type == "anime" && mirror == "anipm") {
                     BarPill(if (anipmLang == "dub") "Dub" else "Sub", big) {
                         val next = if (anipmLang == "dub") "sub" else "dub"
                         anipmLang = next
@@ -1070,6 +1295,7 @@ fun PlayerScreen(
                     }
                 }
                 Spacer(modifier = Modifier.weight(1f))
+                BarPill(MIRROR_NAMES[mirror] ?: mirror, big) { showServers = true }
                 BarPill("Subs", big) { showSubs = true }
                 BarPill("Episodes", big, icon = Icons.Filled.Menu) { showEps = true }
                 BarPill("Home", big) {
@@ -1344,6 +1570,45 @@ fun PlayerScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                     PillButton("Close", big, accent = true) { showSubs = false }
+                }
+            }
+        }
+
+        // Server sheet: mirror picker (website server-list rules - Doraemon
+        // never lists VidBolt, anime without mapping never lists AniPM).
+        if (showServers) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0x99000000))
+                    .clickable { showServers = false },
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(20.dp)
+                        .background(Color(0xFF0B1426), RoundedCornerShape(16.dp))
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("Server", color = Accent, fontWeight = FontWeight.Black, fontSize = if (big) 20.sp else 17.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    serverList.forEach { id ->
+                        BarPill(
+                            (MIRROR_NAMES[id] ?: id) + if (id == mirror) "  (current)" else "",
+                            big,
+                        ) {
+                            if (id != mirror) {
+                                val at = cur
+                                mirror = id
+                                playing = true
+                                load(startAt = at)
+                            }
+                            showServers = false
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    PillButton("Close", big, accent = true) { showServers = false }
                 }
             }
         }

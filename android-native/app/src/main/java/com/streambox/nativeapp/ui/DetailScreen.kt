@@ -134,7 +134,7 @@ fun DetailScreen(
                 Text(
                     when (mapping) {
                         "loading" -> "Matching anime id..."
-                        else -> "No anime mapping found - cannot start AniPM for this title."
+                        else -> "No anime mapping found - AniPM is out; play goes through VidRift."
                     },
                     color = Color(0xFFF6C177),
                     fontSize = 13.sp,
@@ -149,7 +149,9 @@ fun DetailScreen(
                     accent = true,
                     icon = Icons.Filled.PlayArrow,
                 ) {
-                    if (title.type != "anime" || mapping == "ok") {
+                    // Missing mapping no longer blocks play: the player
+                    // routes anime-without-ids to VidRift (website rule).
+                    if (title.type != "anime" || mapping != "loading") {
                         onPlay(season, episode, ids?.mal, ids?.ani)
                     }
                 }
