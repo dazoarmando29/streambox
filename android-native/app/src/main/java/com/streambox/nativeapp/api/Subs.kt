@@ -11,8 +11,8 @@ data class SubFile(
     val name: String,
     val lang: String,
     val cues: List<Cue>,
-    val pos: String = "bottom", // bottom | center | top
-    val offset: Float = 0f, // seconds, +0.5 steps, clamped +/-30 (site rules)
+    // Placement + sync are SETTINGS (website behavior): they live in the
+    // player state (remembered per title), not on the file.
 )
 
 data class WyzItem(

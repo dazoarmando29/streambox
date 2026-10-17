@@ -37,8 +37,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
@@ -86,6 +86,7 @@ import com.streambox.nativeapp.api.Wyz
 import com.streambox.nativeapp.api.WyzItem
 import com.streambox.nativeapp.data.Progress
 import com.streambox.nativeapp.data.Store
+import com.streambox.nativeapp.data.SubPick
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -267,13 +268,18 @@ fun PlayerScreen(
     var wyzItems by remember { mutableStateOf(listOf<WyzItem>()) }
     var subMsg by remember { mutableStateOf("") }
     var wyzBusy by remember { mutableStateOf(false) }
+    // Placement + sync are settings, remembered per title (site behavior):
+    // they outlive the file and every episode of the title.
+    val subPref = Store.subsPref(ctx, title.type, title.id)
+    var subPos by remember { mutableStateOf(subPref.pos) }
+    var subOffset by remember { mutableFloatStateOf(subPref.offset) }
 
     fun setSub(name: String, lang: String, cues: List<Cue>) {
         if (cues.isEmpty()) {
             subMsg = "Couldn't read that file - is it .srt or .vtt?"
             return
         }
-        subs = SubFile(name, lang, cues, subs?.pos ?: "bottom", subs?.offset ?: 0f)
+        subs = SubFile(name, lang, cues)
         subMsg = "Loaded " + cues.size + " lines."
     }
 
@@ -299,7 +305,13 @@ fun PlayerScreen(
             if (text == null) {
                 subMsg = "Download failed - try another release."
             } else {
-                setSub(item.release, item.display.ifEmpty { wyzLang.uppercase() }, Subs.parse(text))
+                val lang = item.display.ifEmpty { wyzLang.uppercase() }
+                setSub(item.release, lang, Subs.parse(text))
+                // Remember the pick for THIS episode so reopening restores it.
+                Store.saveSubPick(
+                    ctx, title.type, title.id, epSeason, epNumber,
+                    SubPick(item.url, item.release, lang),
+                )
             }
         }
     }
@@ -450,9 +462,26 @@ fun PlayerScreen(
         }
     }
 
-    val capCue = remember(cur, subs) {
+    // Per-episode memory: restore the last URL-backed subtitle pick when the
+    // episode opens (website behavior). A manual local file can't be re-read
+    // after a restart, so only chain picks persist.
+    LaunchedEffect(title.id, epSeason, epNumber) {
+        val pick = withContext(Dispatchers.IO) {
+            runCatching {
+                Store.subPick(ctx, title.type, title.id, epSeason, epNumber)
+            }.getOrNull()
+        } ?: return@LaunchedEffect
+        val text = withContext(Dispatchers.IO) {
+            runCatching { Wyz.fetchFile(pick.url) }.getOrNull()
+        }
+        if (text != null && subs == null) {
+            setSub(pick.name, pick.lang, Subs.parse(text))
+        }
+    }
+
+    val capCue = remember(cur, subs, subOffset) {
         val f = subs ?: return@remember null
-        val t = cur + f.offset
+        val t = cur + subOffset
         f.cues.firstOrNull { t >= it.s && t <= it.e }
     }
 
@@ -751,7 +780,7 @@ fun PlayerScreen(
                 targetValue = if (chromeVisible) (if (big) 156.dp else 112.dp) else (if (big) 38.dp else 30.dp),
                 label = "capBottom",
             )
-            val capMod = when (subs?.pos ?: "bottom") {
+            val capMod = when (subPos) {
                 "top" -> Modifier.align(Alignment.TopCenter).padding(top = 70.dp)
                 "center" -> Modifier.align(Alignment.Center)
                 else -> Modifier.align(Alignment.BottomCenter).padding(bottom = bottomPad)
@@ -899,7 +928,7 @@ fun PlayerScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        if (muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
+                        if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
                         contentDescription = "Mute",
                         tint = Color.White,
                         modifier = Modifier.size(20.dp),
@@ -1106,6 +1135,8 @@ fun PlayerScreen(
                         BarPill("Clear", big) {
                             subs = null
                             subMsg = ""
+                            // Forgetting the pick keeps it gone after reopen.
+                            Store.saveSubPick(ctx, title.type, title.id, epSeason, epNumber, null)
                         }
                         BarPill("Try backups", big) { bsTick += 1 }
                     }
@@ -1116,37 +1147,41 @@ fun PlayerScreen(
                         BarPill("<", big) {
                             // "<" moves captions UP the screen (site rule)
                             val order = listOf("bottom", "center", "top")
-                            val i = order.indexOf(subs?.pos ?: "bottom").let { if (it < 0) 0 else it }
-                            subs = subs?.copy(pos = order[(i + 1) % order.size])
+                            val i = order.indexOf(subPos).let { if (it < 0) 0 else it }
+                            subPos = order[(i + 1) % order.size]
+                            Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
                         }
                         Text(
-                            (subs?.pos ?: "bottom").replaceFirstChar { it.uppercase() },
+                            subPos.replaceFirstChar { it.uppercase() },
                             color = Color.White,
                             fontWeight = FontWeight.Black,
                             modifier = Modifier.padding(horizontal = 12.dp),
                         )
                         BarPill(">", big) {
                             val order = listOf("bottom", "center", "top")
-                            val i = order.indexOf(subs?.pos ?: "bottom").let { if (it < 0) 0 else it }
-                            subs = subs?.copy(pos = order[(i + 2) % order.size])
+                            val i = order.indexOf(subPos).let { if (it < 0) 0 else it }
+                            subPos = order[(i + 2) % order.size]
+                            Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Sync", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.width(74.dp))
                         BarPill("-", big) {
-                            val o = Math.round(((subs?.offset ?: 0f) - 0.5f) * 10) / 10f
-                            subs = subs?.copy(offset = o.coerceIn(-30f, 30f))
+                            val o = Math.round((subOffset - 0.5f) * 10) / 10f
+                            subOffset = o.coerceIn(-30f, 30f)
+                            Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
                         }
                         Text(
-                            ((subs?.offset ?: 0f)).let { (if (it >= 0) "+" else "") + String.format("%.1f", it) + "s" },
+                            subOffset.let { (if (it >= 0) "+" else "") + String.format("%.1f", it) + "s" },
                             color = Accent,
                             fontWeight = FontWeight.Black,
                             modifier = Modifier.padding(horizontal = 12.dp),
                         )
                         BarPill("+", big) {
-                            val o = Math.round(((subs?.offset ?: 0f) + 0.5f) * 10) / 10f
-                            subs = subs?.copy(offset = o.coerceIn(-30f, 30f))
+                            val o = Math.round((subOffset + 0.5f) * 10) / 10f
+                            subOffset = o.coerceIn(-30f, 30f)
+                            Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
                         }
                     }
                     Spacer(modifier = Modifier.height(12.dp))

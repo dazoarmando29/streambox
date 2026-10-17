@@ -17,7 +17,9 @@
    11 DOM: no duplicate ids; every literal id reference resolves
    12 inline handlers call functions that exist
    13 workflow YAML stays pure ASCII (console/log safety)
-   14 manifest.webmanifest parses */
+   14 manifest.webmanifest parses
+   15 native Kotlin: volume icons stay AutoMirrored (deprecated Icons.Filled
+      .Volume* warned in build 0.8 QA - mirror-safe forever) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -183,15 +185,37 @@ const missingFn = [...handlers].filter((f) => !fnDefs.has(f) && !HOOKS.has(f)).s
 if (!missingFn.length) ok("all " + handlers.size + " inline handler functions defined");
 else missingFn.forEach((f) => bad("inline handler calls undefined function: " + f + "()"));
 
-/* ---------- 13. workflow ASCII ---------- */
-const wf = read(".github/workflows/android-apk.yml");
-const nonAscii = [...new Set([...wf].filter((c) => c.charCodeAt(0) > 127))];
-if (!nonAscii.length) ok("workflow YAML is pure ASCII");
-else bad("workflow YAML has non-ASCII chars: " + nonAscii.map((c) => "U+" + c.charCodeAt(0).toString(16).toUpperCase()).join(" "));
+/* ---------- 13. workflow ASCII (every workflow, not just android-apk) ---------- */
+const wfDir = path.join(ROOT, ".github/workflows");
+for (const wf of fs.readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f)).sort()) {
+  const src = fs.readFileSync(path.join(wfDir, wf), "utf8");
+  const nonAscii = [...new Set([...src].filter((c) => c.charCodeAt(0) > 127))];
+  if (!nonAscii.length) ok("workflow YAML pure ASCII: " + wf);
+  else bad("workflow " + wf + " has non-ASCII chars: " + nonAscii.map((c) => "U+" + c.charCodeAt(0).toString(16).toUpperCase()).join(" "));
+}
 
 /* ---------- 14. manifest parses ---------- */
 try { JSON.parse(read("manifest.webmanifest")); ok("manifest.webmanifest parses"); }
 catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
+
+/* ---------- 15. native volume icons stay AutoMirrored ---------- */
+const natDir = path.join(ROOT, "android-native/app/src/main/java");
+const natBad = [];
+const walkKt = (d) => {
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = path.join(d, e.name);
+    if (e.isDirectory()) walkKt(p);
+    else if (e.name.endsWith(".kt")) {
+      const src = fs.readFileSync(p, "utf8");
+      for (const m of src.matchAll(/Icons\.Filled\.Volume\w*/g)) {
+        natBad.push(path.relative(ROOT, p).replace(/\\/g, "/") + ": " + m[0]);
+      }
+    }
+  }
+};
+if (fs.existsSync(natDir)) walkKt(natDir);
+if (!natBad.length) ok("native: volume icons are AutoMirrored only");
+else natBad.forEach((x) => bad("deprecated volume icon (use Icons.AutoMirrored.Filled.Volume*): " + x));
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

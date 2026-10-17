@@ -19,6 +19,13 @@ data class Progress(
     val ani: Int?,
 )
 
+/** Per-title subtitle placement + sync memory (device-local). */
+data class SubsPref(val pos: String = "bottom", val offset: Float = 0f)
+
+/** Per-episode subtitle pick. URL-backed picks only - a manually picked
+    local file can't be re-read after a restart. */
+data class SubPick(val url: String, val name: String, val lang: String)
+
 /** Device-local stores (phone and TV keep their own state, house rule).
     SharedPreferences JSON - same spirit as the site's localStorage keys. */
 object Store {
@@ -26,6 +33,8 @@ object Store {
     private const val K_PROGRESS = "progress"
     private const val K_LIST = "mylist"
     private const val K_ADULT = "adult_open"
+    private const val K_SUBS_PREF = "subs_pref"
+    private const val K_SUB_PICK = "sub_pick"
 
     private fun prefs(ctx: Context) =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -129,5 +138,80 @@ object Store {
 
     fun setAdultOpen(ctx: Context, open: Boolean) {
         prefs(ctx).edit().putBoolean(K_ADULT, open).apply()
+    }
+
+    private fun subKey(type: String, id: Int) = type + id
+
+    private fun epKey(type: String, id: Int, season: Int, episode: Int) =
+        type + id + ":" + season + ":" + episode
+
+    fun subsPref(ctx: Context, type: String, id: Int): SubsPref {
+        return try {
+            val o = JSONObject(prefs(ctx).getString(K_SUBS_PREF, "{}") ?: "{}")
+                .optJSONObject(subKey(type, id))
+            SubsPref(
+                pos = o?.optString("pos")?.ifEmpty { "bottom" } ?: "bottom",
+                offset = (o?.optDouble("offset") ?: 0.0).toFloat(),
+            )
+        } catch (e: Exception) {
+            SubsPref()
+        }
+    }
+
+    fun saveSubsPref(ctx: Context, type: String, id: Int, pos: String, offset: Float) {
+        try {
+            val root = JSONObject(prefs(ctx).getString(K_SUBS_PREF, "{}") ?: "{}")
+            val next = JSONObject()
+            val key = subKey(type, id)
+            next.put(key, JSONObject().put("pos", pos).put("offset", offset.toDouble()))
+            val keys = root.keys()
+            var n = 1
+            while (keys.hasNext() && n < 40) {
+                val k = keys.next()
+                if (k != key) {
+                    next.put(k, root.getJSONObject(k))
+                    n++
+                }
+            }
+            prefs(ctx).edit().putString(K_SUBS_PREF, next.toString()).apply()
+        } catch (e: Exception) {
+        }
+    }
+
+    fun subPick(ctx: Context, type: String, id: Int, season: Int, episode: Int): SubPick? {
+        return try {
+            val o = JSONObject(prefs(ctx).getString(K_SUB_PICK, "{}") ?: "{}")
+                .optJSONObject(epKey(type, id, season, episode)) ?: return null
+            val url = o.optString("url")
+            if (url.isEmpty()) null else SubPick(url, o.optString("name"), o.optString("lang"))
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** pick == null forgets the episode's subtitle (user hit Clear). */
+    fun saveSubPick(ctx: Context, type: String, id: Int, season: Int, episode: Int, pick: SubPick?) {
+        try {
+            val root = JSONObject(prefs(ctx).getString(K_SUB_PICK, "{}") ?: "{}")
+            val next = JSONObject()
+            val key = epKey(type, id, season, episode)
+            if (pick != null) {
+                next.put(
+                    key,
+                    JSONObject().put("url", pick.url).put("name", pick.name).put("lang", pick.lang),
+                )
+            }
+            val keys = root.keys()
+            var n = if (pick != null) 1 else 0
+            while (keys.hasNext() && n < 60) {
+                val k = keys.next()
+                if (k != key) {
+                    next.put(k, root.getJSONObject(k))
+                    n++
+                }
+            }
+            prefs(ctx).edit().putString(K_SUB_PICK, next.toString()).apply()
+        } catch (e: Exception) {
+        }
     }
 }
