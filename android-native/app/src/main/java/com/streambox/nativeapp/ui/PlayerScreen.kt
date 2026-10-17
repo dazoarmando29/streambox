@@ -86,6 +86,7 @@ import com.streambox.nativeapp.api.WyzItem
 import com.streambox.nativeapp.data.Progress
 import com.streambox.nativeapp.data.Store
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -253,6 +254,10 @@ fun PlayerScreen(
     var web by remember { mutableStateOf<WebView?>(null) }
     var layer by remember { mutableStateOf(LAYER_VIDEO) }
     var lastSave by remember { mutableStateOf(0L) }
+    // Netflix behavior: chrome fades while playing after idle; any touch/key
+    // wakes it; it STAYS up while paused or while you are using it.
+    var chromeVisible by remember { mutableStateOf(true) }
+    var pokeTick by remember { mutableIntStateOf(0) }
     val main = remember { Handler(Looper.getMainLooper()) }
 
     // Subtitles (website Subs panel): file + Wyzie search, position + sync.
@@ -314,6 +319,7 @@ fun PlayerScreen(
     }
 
     fun load() {
+        chromeVisible = true
         main.post {
             try {
                 web?.loadUrl(playerUrl(title, epSeason, epNumber, mal, ani))
@@ -337,11 +343,28 @@ fun PlayerScreen(
         cur = target
     }
 
+    fun pokeChrome() {
+        chromeVisible = true
+        pokeTick += 1
+    }
+
+    // Idle fade: only while actually playing with no panel open. On fade the
+    // TV focus resets to the video layer so keys keep working blind.
+    LaunchedEffect(chromeVisible, playing, showEps, showSubs, pokeTick) {
+        if (chromeVisible && playing && !showEps && !showSubs) {
+            delay(4500)
+            chromeVisible = false
+            layer = LAYER_VIDEO
+            runCatching { focus.clearFocus() }
+        }
+    }
+
     fun seekRel(d: Float) {
         seekTo((if (scrub >= 0) scrub else cur) + d)
     }
 
     fun togglePlay() {
+        pokeChrome()
         playing = !playing
         cmd(if (playing) "window.__sb && window.__sb.play()" else "window.__sb && window.__sb.pause()")
     }
@@ -485,6 +508,7 @@ fun PlayerScreen(
             .background(Color.Black)
             .onPreviewKeyEvent { e ->
                 if (!big || showEps || showSubs || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                pokeChrome()
                 val layers = layerList()
                 val i = layers.indexOf(layer).coerceAtLeast(0)
                 when (e.key) {
@@ -632,13 +656,22 @@ fun PlayerScreen(
                     // TV: keep D-pad on OUR bar, never trapped in the embed
                     isFocusable = !big
                     isFocusableInTouchMode = !big
+                    // Any tap wakes the chrome (Netflix-style) without eating
+                    // the touch - the embed still gets it.
+                    setOnTouchListener { _, ev ->
+                        if (ev.action == android.view.MotionEvent.ACTION_UP) {
+                            main.post { pokeChrome() }
+                        }
+                        false
+                    }
                     loadUrl(playerUrl(title, epSeason, epNumber, mal, ani))
                     web = this
                 }
             },
         )
 
-        // Top-left title card (website style).
+        // Top-left title card (website style) - fades with the chrome.
+        if (chromeVisible) {
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -660,6 +693,7 @@ fun PlayerScreen(
                 fontWeight = FontWeight.Black,
                 fontSize = if (big) 18.sp else 15.sp,
             )
+        }
         }
 
         // Caption overlay (website-style): cue window is cur + sync offset.
@@ -705,6 +739,8 @@ fun PlayerScreen(
         }
 
         // Bottom control bar (website style): skip pill + time row + buttons.
+        // Chrome fades when idle; the skip pill stays while in its range.
+        if (chromeVisible || hit != null) {
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -741,6 +777,7 @@ fun PlayerScreen(
                 }
             }
 
+            if (chromeVisible) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     fmt(if (scrub >= 0) scrub else cur) + " / " + fmt(dur),
@@ -830,6 +867,8 @@ fun PlayerScreen(
                     onHome()
                 }
             }
+            }
+        }
         }
 
         // Episodes sheet (website-style episode switcher).
