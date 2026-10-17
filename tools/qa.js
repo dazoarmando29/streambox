@@ -20,7 +20,13 @@
    14 manifest.webmanifest parses
    15 native Kotlin: volume icons stay AutoMirrored (deprecated Icons.Filled
       .Volume* warned in build 0.8 QA - mirror-safe forever)
-   16 native SB_HOOK bridge JS parses (node --check on the extracted shim) */
+   16 native SB_HOOK bridge JS parses (node --check on the extracted shim)
+   17 native HLS slot stays dormant (pre-build): the debug test asset is
+      the ONLY stream URL in native code and lives in HlsPlayer.kt, the
+      website never references it, mirrorsFor never lists "hls", every way
+      into the slot is gated on the hidden AppEnv.hlsTest flag, and the
+      build never opts in to media3's UnstableApi (doc marker - the opt-in
+      flag itself warns) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -233,6 +239,58 @@ if (fs.existsSync(psPath)) {
   }
 } else {
   warn("PlayerScreen.kt not found - SB_HOOK check skipped");
+}
+
+/* ---------- 17. native HLS slot stays dormant (pre-build rules) ---------- */
+const hlsPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HlsPlayer.kt");
+if (!fs.existsSync(hlsPath)) bad("HlsPlayer.kt missing - the HLS slot file is gone");
+else {
+  const hlsSrc = fs.readFileSync(hlsPath, "utf8");
+  if (/const val HLS_TEST_URL\s*=/.test(hlsSrc)) ok("HLS_TEST_URL defined in the slot file");
+  else bad("HLS_TEST_URL definition missing from HlsPlayer.kt");
+}
+// The slot's debug test asset is the ONLY stream URL allowed in native
+// code - a provider stream URL anywhere else would be invented routing
+// (house rule: never hardcode stream URLs).
+const m3u8Hits = [];
+const walkM3u8 = (d) => {
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = path.join(d, e.name);
+    if (e.isDirectory()) walkM3u8(p);
+    else if (e.name.endsWith(".kt")) {
+      const src = fs.readFileSync(p, "utf8");
+      if (/\.m3u8/.test(src)) m3u8Hits.push(path.relative(ROOT, p).replace(/\\/g, "/"));
+    }
+  }
+};
+const natSrcRoot = path.join(ROOT, "android-native/app/src/main/java");
+if (fs.existsSync(natSrcRoot)) walkM3u8(natSrcRoot);
+const strayM3u8 = m3u8Hits.filter((f) => !/HlsPlayer\.kt$/.test(f));
+if (!strayM3u8.length) ok("the only stream URL in native code is the HLS test asset (slot file)");
+else strayM3u8.forEach((f) => bad("stream URL outside the HLS slot file: " + f));
+if (/devstreaming-cdn|test-streams\.mux|bipbop/.test(html + sw)) bad("HLS test asset referenced on the website - it is native-debug only");
+else ok("HLS test asset never touches the website");
+// The slot stays OUT of the normal server sheet and out of every default -
+// only the hidden flag opens it (dormant pre-build rule).
+if (!fs.existsSync(psPath)) bad("PlayerScreen.kt missing - HLS slot gates cannot be verified");
+else {
+  const ps2 = fs.readFileSync(psPath, "utf8");
+  const mf = ps2.match(/private fun mirrorsFor[\s\S]*?\n\}/);
+  if (mf && !/"hls"/.test(mf[0])) ok("mirrorsFor never lists the HLS slot");
+  else bad("mirrorsFor lists \"hls\" - the slot must stay out of the normal server sheet");
+  if (/if \(AppEnv\.hlsTest\) "hls" else defaultMirror/.test(ps2)) ok("HLS default-mirror entry gated on AppEnv.hlsTest");
+  else bad("HLS slot entered as default mirror without the AppEnv.hlsTest gate");
+  if (/mirrorsFor\(title, mal, ani\) \+ if \(AppEnv\.hlsTest\)/.test(ps2)) ok("HLS server-sheet row gated on AppEnv.hlsTest");
+  else bad("HLS server-sheet row missing the AppEnv.hlsTest gate");
+}
+// UnstableApi is a doc marker, NOT an opt-in requirement marker - an
+// -opt-in flag for it only produces "not an opt-in requirement marker"
+// compiler warnings (seen in the 0.22 build). The slot builds warning-free
+// (zero-warning rule): never re-add that flag.
+{
+  const bg = read("android-native/app/build.gradle.kts");
+  if (!/opt-in=androidx\.media3/.test(bg)) ok("no media3 opt-in flag (UnstableApi is not an opt-in marker)");
+  else bad("build.gradle.kts opts in to androidx.media3.* - that annotation is not an opt-in marker and warns");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

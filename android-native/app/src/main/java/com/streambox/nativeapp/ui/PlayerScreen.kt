@@ -78,6 +78,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import com.streambox.nativeapp.AppEnv
 import com.streambox.nativeapp.api.Api
 import com.streambox.nativeapp.api.Backups
@@ -113,6 +119,10 @@ private val MIRROR_NAMES = mapOf(
     "vidsrctw" to "VidSrc.tw",
     "vidsrcsh" to "VidSrc.sh",
     "vidsrcapi" to "VidSrc API",
+    // Direct HLS slot (pre-build): named here for the bar label, but never
+    // listed by mirrorsFor - it enters the sheet only under the hidden
+    // hlstest flag (qa.js pins both halves of that).
+    "hls" to "Direct HLS",
 )
 
 private fun mirrorsFor(title: Title, mal: Int?, ani: Int?): List<String> = when (title.type) {
@@ -592,13 +602,23 @@ fun PlayerScreen(
     var epNumber by remember { mutableIntStateOf(episode) }
     var skips by remember { mutableStateOf(IntroDb.Skips(listOf(), listOf(), listOf())) }
     var web by remember { mutableStateOf<WebView?>(null) }
+    // Direct HLS slot (pre-build): the Media3 engine is created ONLY when
+    // the hidden hlstest flag opens the slot - dormant in every normal run.
+    val hlsPlayer = remember {
+        if (AppEnv.hlsTest) ExoPlayer.Builder(ctx).build().also { it.playWhenReady = true } else null
+    }
+    var hlsLoaded by remember { mutableStateOf(false) }
     var layer by remember { mutableStateOf(LAYER_VIDEO) }
     var lastSave by remember { mutableStateOf(0L) }
     // Active mirror (website routing): per-title default; a mid-session
     // switch never changes the next title's primary.
-    var mirror by remember { mutableStateOf(defaultMirror(title, mal, ani)) }
+    var mirror by remember {
+        mutableStateOf(if (AppEnv.hlsTest) "hls" else defaultMirror(title, mal, ani))
+    }
     var showServers by remember { mutableStateOf(false) }
-    val serverList = remember(title.id, title.type, mal, ani) { mirrorsFor(title, mal, ani) }
+    val serverList = remember(title.id, title.type, mal, ani) {
+        mirrorsFor(title, mal, ani) + if (AppEnv.hlsTest) listOf("hls") else listOf()
+    }
     // Auto-recovery: bad route / website page / dead embed gets ONE hop to
     // the next allowed mirror (never loops - one hop per title).
     var gotMedia by remember { mutableStateOf(false) }
@@ -710,8 +730,28 @@ fun PlayerScreen(
         // position themselves; the rest get one seek when the player reports
         // ready - switching providers never loses your place (task rule).
         val urlCarriesStart = mirror == "vidzen" || mirror == "vidbolt" || mirror == "anipm" ||
-            mirror == "vidcore" || mirror.startsWith("vidsrc")
+            mirror == "vidcore" || mirror.startsWith("vidsrc") || mirror == "hls"
         pendingSeek = if (startAt > 0f && !urlCarriesStart) startAt else -1f
+        if (mirror == "hls") {
+            // The HLS slot carries its own start position - no deferred seek
+            // and no WebView. hlsLoaded latches here so the surface's boot
+            // effect can never race a server-switch load back to 0.
+            hlsLoaded = true
+            val p = hlsPlayer ?: return
+            val at = (startAt * 1000).toLong().coerceAtLeast(0)
+            main.post {
+                try {
+                    p.setMediaItem(
+                        MediaItem.fromUri(AppEnv.hlsTestUrl.ifEmpty { HLS_TEST_URL }),
+                        if (at > 0) at else C.TIME_UNSET,
+                    )
+                    p.prepare()
+                    p.playWhenReady = true
+                } catch (e: Exception) {
+                }
+            }
+            return
+        }
         main.post {
             try {
                 val w = web ?: return@post
@@ -751,6 +791,12 @@ fun PlayerScreen(
     fun seekTo(t: Float) {
         val target = t.coerceAtLeast(0f)
         cur = target
+        val hp = hlsPlayer
+        if (mirror == "hls" && hp != null) {
+            // Native seek - the HLS slot owns its playback clock.
+            hp.seekTo((target * 1000).toLong())
+            return
+        }
         if (mirror == "vidcore" || mirror.startsWith("vidsrc")) {
             // VidCore/VidSrc publish events only (no seek command) - their
             // one documented seek is startAt, so the remote's L/R reopens at
@@ -784,6 +830,11 @@ fun PlayerScreen(
     fun togglePlay() {
         pokeChrome()
         playing = !playing
+        val hp = hlsPlayer
+        if (mirror == "hls" && hp != null) {
+            if (playing) hp.play() else hp.pause()
+            return
+        }
         cmd(if (playing) "window.__sb && window.__sb.play()" else "window.__sb && window.__sb.pause()")
     }
 
@@ -974,7 +1025,55 @@ fun PlayerScreen(
     }
 
     DisposableEffect(Unit) {
-        onDispose { save(if (scrub >= 0) scrub else cur, dur) }
+        onDispose {
+            save(if (scrub >= 0) scrub else cur, dur)
+            try { hlsPlayer?.release() } catch (e: Exception) {}
+        }
+    }
+
+    // HLS slot events fold into the same seam the SB_HOOK bridge feeds.
+    // REAL playback only counts for the watchdog (Media3's isPlaying is
+    // false while buffering/stalled - same rule as the web seam, where
+    // metadata/preview never counted as media).
+    DisposableEffect(hlsPlayer) {
+        val p = hlsPlayer
+        val l = if (p == null) null else object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) {
+                    gotMedia = true
+                    playing = true
+                }
+            }
+
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED) playing = false
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                playing = false
+            }
+        }
+        if (p != null && l != null) p.addListener(l)
+        onDispose {
+            if (p != null && l != null) p.removeListener(l)
+        }
+    }
+    LaunchedEffect(hlsPlayer, mirror) {
+        val p = hlsPlayer ?: return@LaunchedEffect
+        if (mirror != "hls") return@LaunchedEffect
+        while (true) {
+            val d = p.duration
+            if (d > 0) {
+                cur = p.currentPosition / 1000f
+                dur = d / 1000f
+                val now = System.currentTimeMillis()
+                if (now - lastSave > 5000) {
+                    lastSave = now
+                    save(cur, dur)
+                }
+            }
+            delay(500)
+        }
     }
 
     fun layerList(): List<String> = buildList {
@@ -1073,6 +1172,40 @@ fun PlayerScreen(
             }
         }
 
+        // Direct HLS slot: our own Media3 surface. Every chrome feature
+        // (skip pills, captions, fade, watchdog, saves) reads the same
+        // cur/dur/playing seam, so the bar below works unchanged.
+        if (mirror == "hls") {
+            val hp = hlsPlayer
+            if (hp != null) {
+                LaunchedEffect(hp) {
+                    if (!hlsLoaded) {
+                        hlsLoaded = true
+                        load()
+                    }
+                }
+                HlsSurface(
+                    player = hp,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onDoubleTap = { off ->
+                                    if (off.x > size.width / 2f) seekRel(10f) else seekRel(-10f)
+                                    pokeChrome()
+                                },
+                                onTap = {
+                                    if (big) pokeChrome()
+                                    else {
+                                        chromeVisible = !chromeVisible
+                                        pokeTick += 1
+                                    }
+                                },
+                            )
+                        },
+                )
+            }
+        } else {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctxWeb ->
@@ -1347,6 +1480,7 @@ fun PlayerScreen(
                 }
             },
         )
+        }
 
         // Top-left title card (website style) - fades with the chrome.
         if (chromeVisible) {
@@ -1366,7 +1500,11 @@ fun PlayerScreen(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                if (title.type == "movie") "MOVIE" else "S" + epSeason + " E" + epNumber,
+                when {
+                    mirror == "hls" -> "HLS SHELL TEST"
+                    title.type == "movie" -> "MOVIE"
+                    else -> "S" + epSeason + " E" + epNumber
+                },
                 color = Color.White,
                 fontWeight = FontWeight.Black,
                 fontSize = if (big) 18.sp else 15.sp,
@@ -1526,8 +1664,9 @@ fun PlayerScreen(
                 BarPill("+30s", big) { seekRel(30f) }
                 // Mute + rate exist only on mirrors we can actually drive
                 // (website: no dead buttons - VidRift/VidZen/VidBolt expose
-                // neither a volume nor a rate command).
-                if (mirror == "cinesrc" || mirror == "anipm") {
+                // neither a volume nor a rate command). The HLS slot is
+                // fully ours, so it gets both.
+                if (mirror == "cinesrc" || mirror == "anipm" || mirror == "hls") {
                 Box(
                     modifier = Modifier
                         .size(if (big) 56.dp else 48.dp)
@@ -1535,6 +1674,8 @@ fun PlayerScreen(
                         .background(Pill, CircleShape)
                         .clickable {
                             muted = !muted
+                            val hp = hlsPlayer
+                            if (mirror == "hls" && hp != null) hp.volume = if (muted) 0f else 1f
                             cmd("window.__sb && window.__sb.mute(" + muted + ")")
                         },
                     contentAlignment = Alignment.Center,
@@ -1551,6 +1692,8 @@ fun PlayerScreen(
                     big,
                 ) {
                     rateIdx = (rateIdx + 1) % RATES.size
+                    val hp = hlsPlayer
+                    if (mirror == "hls" && hp != null) hp.playbackParameters = PlaybackParameters(RATES[rateIdx])
                     cmd("window.__sb && window.__sb.rate(" + RATES[rateIdx] + ")")
                 }
                 }
