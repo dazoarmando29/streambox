@@ -66,8 +66,55 @@ import com.streambox.nativeapp.api.Api
 import com.streambox.nativeapp.api.Title
 import com.streambox.nativeapp.data.Progress
 import com.streambox.nativeapp.data.Store
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+
+/** Session memory of catalog rows: Back-from-player and tab switches paint
+    instantly while a background revalidate keeps them fresh (build 0.13 -
+    refetching five sequential catalogs made the TV feel endless). */
+private object BrowseCache {
+    val rows = HashMap<String, List<Pair<String, List<Title>>>>()
+    val searches = HashMap<String, List<Title>>()
+}
+
+/** Every row loads in parallel and one dead endpoint can never sink the
+    page - it just comes back empty. */
+private suspend fun fetchRows(section: Section): List<Pair<String, List<Title>>> =
+    withContext(Dispatchers.IO) {
+        coroutineScope {
+            suspend fun row(label: String, f: () -> List<Title>) = async {
+                label to runCatching { f() }.getOrDefault(listOf())
+            }
+            when (section) {
+                Section.HOME -> listOf(
+                    row("Trending Now") { Api.trending() },
+                    row("Popular Movies") { Api.popularMovies() },
+                    row("Popular Shows") { Api.popularTv() },
+                    row("Top Rated Movies") { Api.topRatedMovies() },
+                    row("Top Rated Shows") { Api.topRatedTv() },
+                )
+                Section.MOVIES -> listOf(
+                    row("Trending Movies") { Api.trending().filter { it.type == "movie" } },
+                    row("Popular Movies") { Api.popularMovies() },
+                    row("Top Rated Movies") { Api.topRatedMovies() },
+                )
+                Section.TV -> listOf(
+                    row("Trending Shows") { Api.trending().filter { it.type != "movie" } },
+                    row("Popular Shows") { Api.popularTv() },
+                    row("Top Rated Shows") { Api.topRatedTv() },
+                )
+                Section.ANIME -> listOf(
+                    row("Popular Anime") { Api.anime() },
+                    row("Top Rated Anime") { Api.animeTop() },
+                )
+                Section.MYLIST -> listOf()
+            }.awaitAll()
+        }
+    }
 
 @Composable
 fun BrowseScreen(
@@ -91,49 +138,49 @@ fun BrowseScreen(
     var adultOpen by remember { mutableStateOf(Store.adultOpen(ctx)) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var loadedKey by remember { mutableStateOf("") }
 
     LaunchedEffect(section, submitted, searchMode) {
         cont = Store.progressList(ctx)
         myList = Store.listItems(ctx)
-        loading = true
+        val isSearch = searchMode && submitted.isNotBlank()
+        val key = if (isSearch) "s:" + submitted.trim().lowercase() + ":" + section else "r:" + section
+        // Stale-while-revalidate: cached content paints immediately and is
+        // refreshed in the background - Back-from-player is instant now.
+        val hitRows = BrowseCache.rows[key]
+        val hitSearch = BrowseCache.searches[key]
+        when {
+            hitRows != null -> { rows = hitRows; results = listOf() }
+            hitSearch != null -> { results = hitSearch; rows = listOf() }
+            key != loadedKey -> { rows = listOf(); results = listOf() }
+        }
+        loading = rows.isEmpty() && results.isEmpty()
         error = null
         try {
-            withContext(Dispatchers.IO) {
-                if (searchMode && submitted.isNotBlank()) {
-                    results = Api.search(submitted, if (section == Section.ANIME) "anime" else null)
-                    rows = listOf()
-                } else {
-                    results = listOf()
-                    rows = when (section) {
-                        Section.HOME -> listOf(
-                            "Trending Now" to Api.trending(),
-                            "Popular Movies" to Api.popularMovies(),
-                            "Popular Shows" to Api.popularTv(),
-                            "Top Rated Movies" to Api.topRatedMovies(),
-                            "Top Rated Shows" to Api.topRatedTv(),
-                        )
-                        Section.MOVIES -> listOf(
-                            "Trending Movies" to Api.trending().filter { it.type == "movie" },
-                            "Popular Movies" to Api.popularMovies(),
-                            "Top Rated Movies" to Api.topRatedMovies(),
-                        )
-                        Section.TV -> listOf(
-                            "Trending Shows" to Api.trending().filter { it.type != "movie" },
-                            "Popular Shows" to Api.popularTv(),
-                            "Top Rated Shows" to Api.topRatedTv(),
-                        )
-                        Section.ANIME -> listOf(
-                            "Popular Anime" to Api.anime(),
-                            "Top Rated Anime" to Api.animeTop(),
-                        )
-                        Section.MYLIST -> listOf()
-                    }
+            if (isSearch) {
+                val fresh = withContext(Dispatchers.IO) {
+                    runCatching {
+                        Api.search(submitted, if (section == Section.ANIME) "anime" else null)
+                    }.getOrDefault(listOf())
                 }
+                results = fresh
+                rows = listOf()
+                BrowseCache.searches[key] = fresh
+            } else {
+                rows = fetchRows(section)
+                results = listOf()
+                BrowseCache.rows[key] = rows
             }
+            loadedKey = key
+        } catch (e: CancellationException) {
+            // Leaving/recomposing cancels the load - that is normal navigation,
+            // NEVER an error (the old catch surfaced "coroutine scope left the
+            // composition" to the user).
+            throw e
         } catch (e: Exception) {
-            error = e.message ?: "load failed"
-            rows = listOf()
-            results = listOf()
+            if (rows.isEmpty() && results.isEmpty()) {
+                error = "Couldn't load the catalog - check your connection and try again."
+            }
         }
         loading = false
     }
@@ -167,7 +214,7 @@ fun BrowseScreen(
             error != null -> Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
-            ) { Text("Could not load: " + error, color = Dim) }
+            ) { Text(error ?: "", color = Dim) }
             searchMode && submitted.isNotBlank() -> SearchGrid(results, adultOpen, onOpen)
             section == Section.MYLIST -> MyListGrid(myList, adultOpen, onOpen)
             else -> Feed(rows, cont, adultOpen, big, onOpen, onPlay, onResume,
