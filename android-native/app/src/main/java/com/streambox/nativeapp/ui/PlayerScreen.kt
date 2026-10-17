@@ -68,7 +68,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
+
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -239,7 +239,6 @@ fun PlayerScreen(
     onHome: () -> Unit,
 ) {
     val ctx = LocalContext.current
-    val focus = LocalFocusManager.current
     val big = AppEnv.isTv
 
     var playing by remember { mutableStateOf(true) }
@@ -308,6 +307,11 @@ fun PlayerScreen(
     val sliderFR = remember { FocusRequester() }
     val playFR = remember { FocusRequester() }
     val skipFR = remember { FocusRequester() }
+    // Key sink: an invisible focus holder. Compose only routes D-pad keys
+    // through onPreviewKeyEvent while SOME node keeps focus - the old
+    // clearFocus() on fade/layer-reset left none, so once chrome minimized
+    // the remote went dead and the chrome could never come back (TV bug).
+    val keySinkFR = remember { FocusRequester() }
 
     fun save(c: Float, d: Float) {
         try {
@@ -356,7 +360,7 @@ fun PlayerScreen(
             delay(4500)
             chromeVisible = false
             layer = LAYER_VIDEO
-            runCatching { focus.clearFocus() }
+            runCatching { keySinkFR.requestFocus() }
         }
     }
 
@@ -459,7 +463,7 @@ fun PlayerScreen(
     LaunchedEffect(hit == null) {
         if (hit == null && layer == LAYER_SKIP) {
             layer = LAYER_VIDEO
-            runCatching { focus.clearFocus() }
+            runCatching { keySinkFR.requestFocus() }
         }
     }
 
@@ -471,7 +475,7 @@ fun PlayerScreen(
             showEps -> showEps = false
             big && layer != LAYER_VIDEO -> {
                 layer = LAYER_VIDEO
-                runCatching { focus.clearFocus() }
+                runCatching { keySinkFR.requestFocus() }
             }
             else -> {
                 save(if (scrub >= 0) scrub else cur, dur)
@@ -495,7 +499,7 @@ fun PlayerScreen(
         layer = target
         runCatching {
             when (target) {
-                LAYER_VIDEO -> focus.clearFocus()
+                LAYER_VIDEO -> keySinkFR.requestFocus()
                 LAYER_SKIP -> skipFR.requestFocus()
                 LAYER_SLIDER -> sliderFR.requestFocus()
                 LAYER_BUTTONS -> playFR.requestFocus()
@@ -540,6 +544,35 @@ fun PlayerScreen(
                 }
             },
     ) {
+        // Invisible focus holder: Compose dispatches D-pad keys through
+        // onPreviewKeyEvent only while some node holds focus, so the sink
+        // keeps the remote alive whenever nothing else wants focus. It has
+        // no pointer handlers - touch passes straight through.
+        Box(
+            Modifier
+                .matchParentSize()
+                .focusRequester(keySinkFR)
+                .focusable(),
+        )
+
+        // TV: keys must work from the very first press, and closing a panel
+        // must hand focus back to the active layer - never leave zero focus.
+        LaunchedEffect(Unit) {
+            if (big) runCatching { keySinkFR.requestFocus() }
+        }
+        LaunchedEffect(showEps, showSubs) {
+            if (big && !showEps && !showSubs) {
+                runCatching {
+                    when (layer) {
+                        LAYER_SKIP -> skipFR.requestFocus()
+                        LAYER_SLIDER -> sliderFR.requestFocus()
+                        LAYER_BUTTONS -> playFR.requestFocus()
+                        else -> keySinkFR.requestFocus()
+                    }
+                }
+            }
+        }
+
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctxWeb ->
@@ -654,9 +687,13 @@ fun PlayerScreen(
                             }
                         }
                     }), "Android")
-                    // TV: keep D-pad on OUR bar, never trapped in the embed
+                    // TV: keep D-pad on OUR bar, never trapped in the embed.
+                    // Block descendants too - the WebView's internal views
+                    // must not steal focus from the key sink.
                     isFocusable = !big
                     isFocusableInTouchMode = !big
+                    if (big) descendantFocusability =
+                        android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
                     // Phone: a tap MINIMIZES the chrome and a tap brings it
                     // back (toggle). TV has no touch - any key wakes the
                     // chrome there instead. The tap is never eaten.
