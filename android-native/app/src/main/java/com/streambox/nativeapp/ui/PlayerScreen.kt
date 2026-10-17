@@ -109,6 +109,10 @@ private val MIRROR_NAMES = mapOf(
     "vidrift" to "VidRift",
     "vidzen" to "VidZen",
     "vidbolt" to "VidBolt",
+    "vidcore" to "VidCore",
+    "vidsrctw" to "VidSrc.tw",
+    "vidsrcsh" to "VidSrc.sh",
+    "vidsrcapi" to "VidSrc API",
 )
 
 private fun mirrorsFor(title: Title, mal: Int?, ani: Int?): List<String> = when (title.type) {
@@ -116,8 +120,14 @@ private fun mirrorsFor(title: Title, mal: Int?, ani: Int?): List<String> = when 
         if (mal != null || ani != null) add("anipm")
         add("vidrift")
         if (!Regex("doraemon", RegexOption.IGNORE_CASE).containsMatchIn(title.name)) add("vidbolt")
+        // Verified 2026-10-17: VidCore + VidSrc family all take TMDB ids and
+        // cover anime via the TV endpoint (VidSrc anime guide).
+        addAll(listOf("vidcore", "vidsrcsh", "vidsrctw", "vidsrcapi"))
     }
-    else -> listOf("cinesrc", "vidrift", "vidzen", "vidbolt")
+    else -> listOf(
+        "cinesrc", "vidrift", "vidzen", "vidbolt",
+        "vidcore", "vidsrcsh", "vidsrctw", "vidsrcapi",
+    )
 }
 
 private fun defaultMirror(title: Title, mal: Int?, ani: Int?): String = when (title.type) {
@@ -128,13 +138,16 @@ private fun defaultMirror(title: Title, mal: Int?, ani: Int?): String = when (ti
 /** One auto-hop chain when a mirror stalls or serves its own WEBSITE instead
     of the player (AniPM's "Watch now" page is undrivable on TV) - website
     stuckFallback spirit, first entry allowed for this title wins. */
-private fun fallbackChain(m: String): List<String> = when (m) {
-    "anipm" -> listOf("vidrift", "vidbolt", "cinesrc")
-    "cinesrc" -> listOf("vidrift", "vidzen", "vidbolt")
-    "vidrift" -> listOf("vidzen", "vidbolt", "cinesrc", "anipm")
-    "vidzen" -> listOf("vidbolt", "vidrift", "cinesrc")
-    "vidbolt" -> listOf("vidrift", "vidzen", "cinesrc")
-    else -> listOf()
+private fun fallbackChain(m: String): List<String> {
+    val extras = listOf("vidcore", "vidsrcsh", "vidsrctw", "vidsrcapi")
+    return when (m) {
+        "anipm" -> listOf("vidrift", "vidbolt", "cinesrc") + extras
+        "cinesrc" -> listOf("vidrift", "vidzen", "vidbolt") + extras
+        "vidrift" -> listOf("vidzen", "vidbolt", "cinesrc", "anipm") + extras
+        "vidzen" -> listOf("vidbolt", "vidrift", "cinesrc") + extras
+        "vidbolt" -> listOf("vidrift", "vidzen", "cinesrc") + extras
+        else -> (listOf("vidrift", "vidzen", "cinesrc", "anipm") + extras).filter { it != m }
+    }
 }
 
 /* Providers ship EMBEDS: top-level loads get their website shell (AniPM
@@ -222,12 +235,38 @@ fun playerUrl(
             else -> "https://vidbolt.pro/tv/" + title.id + "/" + season + "/" + ep +
                 "?autoPlay=true&mobileSheets=true&theme=14b8a6" + stq
         }
+        // VidCore (docs 2026-10-17): TMDB embeds, autoplay/startAt/theme.
+        "vidcore" -> {
+            val base = if (title.type == "movie") {
+                "https://vidcore.org/embed/movie/" + title.id
+            } else {
+                "https://vidcore.org/embed/tv/" + title.id + "/" + season + "/" + ep
+            }
+            base + "?autoplay=true&theme=14b8a6" + (if (st > 0) "&startAt=" + st else "")
+        }
+        // VidSrc family (docs 2026-10-17): one product, mirror domains -
+        // TMDB/IMDb ids, autoplay + startAt resume. "VidSrc API" integrates
+        // via its working docs host: the canonical vidsrcapi.com does not
+        // resolve DNS (verified), while vidsrc3.created.app serves embeds.
+        "vidsrctw" -> vidsrcUrl("vidsrc.tw", title, season, ep, st)
+        "vidsrcsh" -> vidsrcUrl("vidsrc.sh", title, season, ep, st)
+        "vidsrcapi" -> vidsrcUrl("vidsrc3.created.app", title, season, ep, st)
         else -> if (title.type == "movie") {
             "https://cinesrc.st/embed/movie/" + title.id + "?controls=false"
         } else {
             "https://cinesrc.st/embed/tv/" + title.id + "?s=" + season + "&e=" + episode + "&controls=false"
         }
     }
+}
+
+/** VidSrc-family embed (tv/movie by TMDB id - anime rides the TV route). */
+private fun vidsrcUrl(host: String, title: Title, season: Int, ep: Int, st: Int): String {
+    val path = if (title.type == "movie") {
+        "https://" + host + "/embed/movie/" + title.id
+    } else {
+        "https://" + host + "/embed/tv/" + title.id + "/" + season + "/" + ep
+    }
+    return path + "?autoplay=1" + (if (st > 0) "&startAt=" + st else "")
 }
 
 private fun fmt(s: Float): String {
@@ -282,6 +321,10 @@ private val SB_HOOK = """
   var VZ = h === "vidzen.fun" || h.endsWith(".vidzen.fun");
   var VB = h === "vidbolt.pro" || h.endsWith(".vidbolt.pro") ||
            h === "vidbolt.xyz" || h.endsWith(".vidbolt.xyz");
+  var VC = h === "vidcore.org" || h.endsWith(".vidcore.org");
+  var VS = h === "vidsrc.tw" || h.endsWith(".vidsrc.tw") ||
+           h === "vidsrc.sh" || h.endsWith(".vidsrc.sh") ||
+           h === "vidsrc3.created.app";
   var seq = 0, live = !ANIPM, q = [];
   function post(m){
     try { window.postMessage(m, "*"); } catch(e){}
@@ -313,6 +356,24 @@ private val SB_HOOK = """
   }
   window.addEventListener("message", function(e){
     var m = e.data; if (!m || typeof m !== "object") return;
+    // VidSrc family contract (docs 2026-10-17): {type:"PLAYER_EVENT", data:{
+    // player_status, player_progress, player_duration}} - events OUT only.
+    if (m.type === "PLAYER_EVENT") {
+      var d2 = m.data || {};
+      var st2 = String(d2.player_status || "").toLowerCase();
+      var t2 = { currentTime: d2.player_progress || 0, duration: d2.player_duration || 0 };
+      if (st2 === "playing") { send("play", {}); send("timeupdate", t2); }
+      else if (st2 === "paused") { send("pause", {}); send("timeupdate", t2); }
+      else if (st2 === "completed") send("ended", {});
+      else if (st2 === "seeked") send("timeupdate", t2);
+      return;
+    }
+    // VidCore contract (docs 2026-10-17): vidcore:play / vidcore:pause /
+    // vidcore:ended - events OUT only, no inbound commands.
+    var vt = String(m.type || "");
+    if (vt === "vidcore:play" || (vt === "vidcore" && m.event === "play")) { send("play", {}); return; }
+    if (vt === "vidcore:pause" || (vt === "vidcore" && m.event === "pause")) { send("pause", {}); return; }
+    if (vt === "vidcore:ended" || (vt === "vidcore" && m.event === "ended")) { send("ended", {}); return; }
     if (m.ns === "anipm.player") {
       if (m.id === 0 && m.ok) { live = true; while (q.length) post(q.shift()); return; }
       var ev = m.event, d = m.data || {};
@@ -399,14 +460,14 @@ private val SB_HOOK = """
       var v=document.querySelector('video'); if(v) v.play();
       if (ANIPM) anipmSend('play', {});
       else if (VZ || VB) post({type:'play'});
-      else if (VR) tapSurface();
+      else if (VR || VC || VS) tapSurface();
       try{window.postMessage({type:'cinesrc:command',command:'play',args:[]},'*');}catch(e){}
     },
     pause: function(){
       var v=document.querySelector('video'); if(v) v.pause();
       if (ANIPM) anipmSend('pause', {});
       else if (VZ || VB) post({type:'pause'});
-      else if (VR) tapSurface();
+      else if (VR || VC || VS) tapSurface();
       try{window.postMessage({type:'cinesrc:command',command:'pause',args:[]},'*');}catch(e){}
     },
     seek: function(t){
@@ -492,7 +553,11 @@ private fun isProviderHost(host: String): Boolean {
         h == "vidrift.net" || h.endsWith(".vidrift.net") ||
         h == "vidzen.fun" || h.endsWith(".vidzen.fun") ||
         h == "vidbolt.pro" || h.endsWith(".vidbolt.pro") ||
-        h == "vidbolt.xyz" || h.endsWith(".vidbolt.xyz")
+        h == "vidbolt.xyz" || h.endsWith(".vidbolt.xyz") ||
+        h == "vidcore.org" || h.endsWith(".vidcore.org") ||
+        h == "vidsrc.tw" || h.endsWith(".vidsrc.tw") ||
+        h == "vidsrc.sh" || h.endsWith(".vidsrc.sh") ||
+        h == "vidsrc3.created.app"
 }
 
 /* TV navigation layers, Netflix-style: at VIDEO the L/R keys seek and OK
@@ -644,7 +709,8 @@ fun PlayerScreen(
         // Mirrors whose URL carries startAt (vidzen/vidbolt/anipm) keep the
         // position themselves; the rest get one seek when the player reports
         // ready - switching providers never loses your place (task rule).
-        val urlCarriesStart = mirror == "vidzen" || mirror == "vidbolt" || mirror == "anipm"
+        val urlCarriesStart = mirror == "vidzen" || mirror == "vidbolt" || mirror == "anipm" ||
+            mirror == "vidcore" || mirror.startsWith("vidsrc")
         pendingSeek = if (startAt > 0f && !urlCarriesStart) startAt else -1f
         main.post {
             try {
@@ -726,6 +792,11 @@ fun PlayerScreen(
             mirror == "vidbolt" && h.end != null -> {
                 // VidBolt's in-place skip seeks can leave a black surface -
                 // reopen at the marker through startAt (website boltSkipTo).
+                h.end?.let { e -> cur = e; load(startAt = e) }
+            }
+            (mirror == "vidcore" || mirror.startsWith("vidsrc")) && h.end != null -> {
+                // VidCore/VidSrc expose no seek command (events out only) -
+                // skips reopen at startAt, the only seek they document.
                 h.end?.let { e -> cur = e; load(startAt = e) }
             }
             else -> h.end?.let { seekTo(it) }
@@ -1841,7 +1912,8 @@ fun PlayerScreen(
                     modifier = Modifier
                         .padding(20.dp)
                         .background(Color(0xFF0B1426), RoundedCornerShape(16.dp))
-                        .padding(16.dp),
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text("Server", color = Accent, fontWeight = FontWeight.Black, fontSize = if (big) 20.sp else 17.sp)
