@@ -145,11 +145,43 @@ private fun hitAt(cur: Float, skips: IntroDb.Skips): SkipHit? {
 
 /** JS shim: hooks the embed's <video>, forwards its events to Kotlin, and
     exposes window.__sb commands. Direct video driving PLUS the provider's
-    own postMessage contract - belt and braces, so our bar always answers. */
+    own postMessage contract - belt and braces, so our bar always answers.
+    AniPM gets its real protocol (website parity): {ns:"anipm.player",v:1,
+    id,cmd,args} posted to the embed window, hello handshake + pre-ready
+    queue (the player drops early mail), quality/subs/language/rate cmds. */
 private val SB_HOOK = """
 (function(){
   if (window.__sbHooked) return; window.__sbHooked = true;
   function send(t, o){ try { Android.event(t, JSON.stringify(o||{})); } catch(e){} }
+  var h = location.hostname;
+  var ANIPM = h === "ani.pm" || h.slice(-7) === ".ani.pm";
+  var seq = 0, live = !ANIPM, q = [];
+  function post(m){
+    try { window.postMessage(m, "*"); } catch(e){}
+    try { for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage(m, "*"); } catch(e){}
+  }
+  function anipmSend(cmd, args){
+    var m = { ns: "anipm.player", v: 1, id: ++seq, cmd: cmd, args: args || {} };
+    post(m);
+    if (!live) q.push(m);
+  }
+  function hello(){ post({ ns: "anipm.player", v: 1, id: 0, cmd: "hello", args: {} }); }
+  window.addEventListener("message", function(e){
+    var m = e.data; if (!m || m.ns !== "anipm.player") return;
+    if (m.id === 0 && m.ok) { live = true; while (q.length) post(q.shift()); return; }
+    var ev = m.event, d = m.data || {};
+    if (ev === "ready") { live = true; while (q.length) post(q.shift()); }
+    if (ev === "play" || ev === "playing") send("play", {});
+    else if (ev === "pause" || ev === "paused") send("pause", {});
+    else if (ev === "ended") send("ended", {});
+    else if (ev === "timeupdate") send("timeupdate", {currentTime: d.currentTime||0, duration: d.duration||0});
+    else if (ev === "durationchange") send("loadedmetadata", {duration: d.duration||0});
+    else if (ev === "qualitychange") send("anipm:quality", {qualities: d.qualities||[], quality: d.quality});
+    else if (ev === "subtitlechange") send("anipm:subtitles", {tracks: d.tracks||[]});
+    else if (ev === "languagechange") send("anipm:lang", {lang: d.lang||d.language||""});
+    else if (ev === "episodechange") send("anipm:episode", {episode: d.episode, season: d.season});
+    else if (ev === "autoplayblocked") send("anipm:autoplay", {});
+  });
   function hook(){
     var v = document.querySelector('video');
     if (!v || v.__sb) return;
@@ -165,12 +197,22 @@ private val SB_HOOK = """
   hook();
   setInterval(hook, 1000);
   window.__sb = {
-    play: function(){ var v=document.querySelector('video'); if(v) v.play(); try{window.postMessage({type:'cinesrc:command',command:'play',args:[]},'*');}catch(e){} },
-    pause: function(){ var v=document.querySelector('video'); if(v) v.pause(); try{window.postMessage({type:'cinesrc:command',command:'pause',args:[]},'*');}catch(e){} },
-    seek: function(t){ var v=document.querySelector('video'); if(v) v.currentTime=t; try{window.postMessage({type:'cinesrc:command',command:'seek',args:[t]},'*');}catch(e){} },
-    mute: function(m){ var v=document.querySelector('video'); if(v) v.muted=!!m; try{window.postMessage({type:'cinesrc:command',command:'setMuted',args:[!!m]},'*');}catch(e){} },
-    rate: function(r){ var v=document.querySelector('video'); if(v) v.playbackRate=r; try{window.postMessage({type:'cinesrc:command',command:'setPlaybackRate',args:[r]},'*');}catch(e){} }
+    play: function(){ var v=document.querySelector('video'); if(v) v.play(); if(ANIPM) anipmSend('play', {}); try{window.postMessage({type:'cinesrc:command',command:'play',args:[]},'*');}catch(e){} },
+    pause: function(){ var v=document.querySelector('video'); if(v) v.pause(); if(ANIPM) anipmSend('pause', {}); try{window.postMessage({type:'cinesrc:command',command:'pause',args:[]},'*');}catch(e){} },
+    seek: function(t){ var v=document.querySelector('video'); if(v) v.currentTime=t; if(ANIPM) anipmSend('seek', {time: t}); try{window.postMessage({type:'cinesrc:command',command:'seek',args:[t]},'*');}catch(e){} },
+    mute: function(m){ var v=document.querySelector('video'); if(v) v.muted=!!m; if(ANIPM) anipmSend('setMuted', {muted: !!m}); try{window.postMessage({type:'cinesrc:command',command:'setMuted',args:[!!m]},'*');}catch(e){} },
+    rate: function(r){ var v=document.querySelector('video'); if(v) v.playbackRate=r; if(ANIPM) anipmSend('setPlaybackRate', {rate: r}); try{window.postMessage({type:'cinesrc:command',command:'setPlaybackRate',args:[r]},'*');}catch(e){} },
+    q: function(n){ if(ANIPM) anipmSend('setQuality', {height: n}); },
+    lang: function(l){ if(ANIPM) anipmSend('setLanguage', {lang: l}); },
+    subs: function(on, label){ if(ANIPM) anipmSend('setSubtitles', on ? {enabled: true, label: label||''} : {enabled: false}); },
+    autoNext: function(on){ if(ANIPM) anipmSend('setAutoNext', {on: !!on}); },
+    autoSkip: function(on){ if(ANIPM) anipmSend('setAutoSkip', {on: !!on}); }
   };
+  if (ANIPM) {
+    hello();
+    var tries = 0;
+    var timer = setInterval(function(){ if (live || ++tries > 10) { clearInterval(timer); return; } hello(); }, 1000);
+  }
 })();
 """
 
@@ -273,6 +315,15 @@ fun PlayerScreen(
     val subPref = Store.subsPref(ctx, title.type, title.id)
     var subPos by remember { mutableStateOf(subPref.pos) }
     var subOffset by remember { mutableFloatStateOf(subPref.offset) }
+    // AniPM protocol state (website anipm.player parity): the player reports
+    // its quality ladder, audio language, and its own subtitle tracks.
+    var anipmQs by remember { mutableStateOf(listOf<Int>()) }
+    var anipmQ by remember { mutableStateOf<Int?>(null) }
+    var anipmLang by remember {
+        mutableStateOf(if (title.name.contains("dragon ball", true)) "dub" else "sub")
+    }
+    var anipmSubLabels by remember { mutableStateOf(listOf<String>()) }
+    var anipmSubIdx by remember { mutableIntStateOf(-1) } // -1 = player subs off
 
     fun setSub(name: String, lang: String, cues: List<Cue>) {
         if (cues.isEmpty()) {
@@ -710,6 +761,64 @@ fun PlayerScreen(
                                             save(cur, dur)
                                         }
                                     }
+                                    "anipm:quality" -> {
+                                        val arr = o.optJSONArray("qualities")
+                                        val qs = mutableListOf<Int>()
+                                        if (arr != null) {
+                                            for (i in 0 until arr.length()) {
+                                                val it = arr.opt(i)
+                                                val height = when (it) {
+                                                    is Number -> it.toInt()
+                                                    is org.json.JSONObject -> it.optInt("height", -1)
+                                                    else -> -1
+                                                }
+                                                if (height in 240..4320) qs.add(height)
+                                            }
+                                        }
+                                        anipmQs = qs.distinct().sortedDescending()
+                                        val curQ = o.optInt("quality", -1)
+                                        if (curQ > 0) anipmQ = curQ
+                                    }
+                                    "anipm:subtitles" -> {
+                                        val arr = o.optJSONArray("tracks")
+                                        val labels = mutableListOf<String>()
+                                        if (arr != null) {
+                                            for (i in 0 until arr.length()) {
+                                                val it = arr.opt(i)
+                                                val label = when (it) {
+                                                    is org.json.JSONObject ->
+                                                        it.optString("label")
+                                                            .ifEmpty { it.optString("name") }
+                                                            .ifEmpty { it.optString("language") }
+                                                    else -> it?.toString() ?: ""
+                                                }
+                                                if (label.isNotBlank()) labels.add(label)
+                                            }
+                                        }
+                                        anipmSubLabels = labels.distinct()
+                                    }
+                                    "anipm:lang" -> {
+                                        val l = o.optString("lang").lowercase()
+                                        if (l == "dub" || l == "sub") anipmLang = l
+                                    }
+                                    "anipm:episode" -> {
+                                        // The player switched episodes itself
+                                        // (phone taps): sync OUR state only -
+                                        // reloading would double-switch.
+                                        val e = o.optInt("episode", -1)
+                                        val s = o.optInt("season", -1)
+                                        if (e > 0) {
+                                            save(0f, dur)
+                                            if (s > 0) epSeason = s
+                                            epNumber = e
+                                            cur = 0f
+                                        }
+                                    }
+                                    "anipm:autoplay" -> {
+                                        // Real playback kick - NEVER the
+                                        // mute-bypass. TV hands it a play.
+                                        if (big) cmd("window.__sb && window.__sb.play()")
+                                    }
                                     else -> {}
                                 }
                             } catch (e: Exception) {
@@ -940,6 +1049,25 @@ fun PlayerScreen(
                 ) {
                     rateIdx = (rateIdx + 1) % RATES.size
                     cmd("window.__sb && window.__sb.rate(" + RATES[rateIdx] + ")")
+                }
+                // AniPM quality ladder (only real, player-reported values -
+                // never invent 4K: house rule).
+                if (anipmQs.isNotEmpty()) {
+                    BarPill(anipmQ?.let { it.toString() + "p" } ?: "Q", big) {
+                        val i = anipmQ?.let { q -> anipmQs.indexOfFirst { it == q } } ?: -1
+                        val next = anipmQs[(i + 1) % anipmQs.size]
+                        anipmQ = next
+                        cmd("window.__sb && window.__sb.q(" + next + ")")
+                    }
+                }
+                // Sub/Dub pill (anime only, AniPM setLanguage). DBZ default
+                // dub is decided at URL build - this switches live.
+                if (title.type == "anime") {
+                    BarPill(if (anipmLang == "dub") "Dub" else "Sub", big) {
+                        val next = if (anipmLang == "dub") "sub" else "dub"
+                        anipmLang = next
+                        cmd("window.__sb && window.__sb.lang('" + next + "')")
+                    }
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 BarPill("Subs", big) { showSubs = true }
@@ -1185,6 +1313,36 @@ fun PlayerScreen(
                         }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
+                    // AniPM's own subtitle tracks (player-side), website
+                    // setSubtitles parity: Off + reported labels, cycled.
+                    if (anipmSubLabels.isNotEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Player subs", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.width(74.dp))
+                            BarPill("<", big) {
+                                val n = anipmSubLabels.size
+                                anipmSubIdx = if (anipmSubIdx <= 0) n - 1 else anipmSubIdx - 1
+                                val label = anipmSubLabels[anipmSubIdx]
+                                cmd("window.__sb && window.__sb.subs(true, '" + label.replace("'", "") + "')")
+                            }
+                            Text(
+                                anipmSubLabels.getOrNull(anipmSubIdx) ?: "Off",
+                                color = Color.White,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                            )
+                            BarPill(">", big) {
+                                val n = anipmSubLabels.size
+                                anipmSubIdx = if (anipmSubIdx >= n - 1) -1 else anipmSubIdx + 1
+                                if (anipmSubIdx < 0) {
+                                    cmd("window.__sb && window.__sb.subs(false)")
+                                } else {
+                                    val label = anipmSubLabels[anipmSubIdx]
+                                    cmd("window.__sb && window.__sb.subs(true, '" + label.replace("'", "") + "')")
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                     PillButton("Close", big, accent = true) { showSubs = false }
                 }
             }

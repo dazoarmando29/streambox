@@ -19,7 +19,8 @@
    13 workflow YAML stays pure ASCII (console/log safety)
    14 manifest.webmanifest parses
    15 native Kotlin: volume icons stay AutoMirrored (deprecated Icons.Filled
-      .Volume* warned in build 0.8 QA - mirror-safe forever) */
+      .Volume* warned in build 0.8 QA - mirror-safe forever)
+   16 native SB_HOOK bridge JS parses (node --check on the extracted shim) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -216,6 +217,23 @@ const walkKt = (d) => {
 if (fs.existsSync(natDir)) walkKt(natDir);
 if (!natBad.length) ok("native: volume icons are AutoMirrored only");
 else natBad.forEach((x) => bad("deprecated volume icon (use Icons.AutoMirrored.Filled.Volume*): " + x));
+
+/* ---------- 16. native SB_HOOK bridge JS parses ---------- */
+const psPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/PlayerScreen.kt");
+if (fs.existsSync(psPath)) {
+  const ps = fs.readFileSync(psPath, "utf8");
+  const m = ps.match(/private val SB_HOOK = """\n([\s\S]*?)\n?"""/);
+  if (!m) bad("SB_HOOK raw string not found in PlayerScreen.kt");
+  else {
+    const tmp = path.join(os.tmpdir(), "sb_hook_check.js");
+    fs.writeFileSync(tmp, m[1]);
+    const r = cp.spawnSync(process.execPath, ["--check", tmp], { encoding: "utf8" });
+    if (r.status === 0) ok("node --check native SB_HOOK bridge JS");
+    else bad("SB_HOOK JS syntax error:\n" + (r.stderr || r.stdout));
+  }
+} else {
+  warn("PlayerScreen.kt not found - SB_HOOK check skipped");
+}
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);
