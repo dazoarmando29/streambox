@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -78,7 +79,7 @@ fun DetailScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
     ) {
-        Box(modifier = Modifier.fillMaxWidth().height(if (big) 320.dp else 240.dp)) {
+        Box(modifier = Modifier.fillMaxWidth().height(if (big) 380.dp else 260.dp)) {
             AsyncImage(
                 model = ImageRequest.Builder(ctx).data(title.backdrop ?: title.poster).crossfade(true).build(),
                 contentDescription = title.name,
@@ -92,14 +93,24 @@ fun DetailScreen(
                         Brush.verticalGradient(listOf(Color(0x660B1426), Color(0xCC0B1426), Ink)),
                     )
             )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(listOf(Color(0xB30B1426), Color(0x000B1426))),
+                    )
+            )
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(
+                        horizontal = if (big) 28.dp else 16.dp,
+                        vertical = if (big) 18.dp else 12.dp,
+                    ),
             ) {
                 Text(
                     title.name,
-                    fontSize = if (big) 32.sp else 26.sp,
+                    fontSize = if (big) 40.sp else 26.sp,
                     fontWeight = FontWeight.Black,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -112,15 +123,20 @@ fun DetailScreen(
                             (if (title.year > 0) title.year.toString() + "  -  " else "") + title.type.uppercase(),
                         color = Soft,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
+                        fontSize = if (big) 15.sp else 13.sp,
                     )
                 }
             }
         }
 
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(if (big) 28.dp else 16.dp)) {
             if (title.overview.isNotBlank()) {
-                Text(title.overview, color = Soft, fontSize = 14.sp)
+                Text(
+                    title.overview,
+                    color = Soft,
+                    fontSize = if (big) 16.sp else 14.sp,
+                    modifier = Modifier.widthIn(max = if (big) 820.dp else 560.dp),
+                )
                 Spacer(modifier = Modifier.height(14.dp))
             }
 
@@ -158,7 +174,6 @@ fun DetailScreen(
                 PillButton(
                     if (inList) "In My List" else "My List",
                     big,
-                    outline = !inList,
                     icon = if (inList) Icons.Filled.Check else Icons.Filled.Add,
                 ) {
                     Store.toggleList(ctx, title)

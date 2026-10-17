@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -71,6 +72,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun BrowseScreen(
     section: Section,
+    onSection: (Section) -> Unit,
     onOpen: (Title) -> Unit,
     onPlay: (Title) -> Unit,
     onResume: (Progress) -> Unit,
@@ -138,6 +140,8 @@ fun BrowseScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         TopBar(
+            section = section,
+            onSection = onSection,
             searchMode = searchMode,
             onSearchToggle = { searchMode = !searchMode; submitted = ""; input = "" },
             adultOpen = adultOpen,
@@ -175,28 +179,42 @@ fun BrowseScreen(
     }
 }
 
+/** Top chrome. Design split: TV gets the WEBSITE's top tab bar (logo +
+    Home/Movies/TV Shows/Anime/My List + search + lock, D-pad friendly);
+    phone keeps a compact logo bar with the floating bottom nav below. */
 @Composable
-private fun TopBar(searchMode: Boolean, onSearchToggle: () -> Unit, adultOpen: Boolean, onAdultToggle: () -> Unit) {
+private fun TopBar(
+    section: Section,
+    onSection: (Section) -> Unit,
+    searchMode: Boolean,
+    onSearchToggle: () -> Unit,
+    adultOpen: Boolean,
+    onAdultToggle: () -> Unit,
+) {
+    val big = AppEnv.isTv
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (big) Color(0xFF0E1B2E) else Ink)
+            .height(if (big) 68.dp else 56.dp)
+            .padding(horizontal = if (big) 20.dp else 14.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .size(if (AppEnv.isTv) 42.dp else 36.dp)
-                .background(Accent, RoundedCornerShape(12.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
+        LogoMark(big)
+        if (big) {
+            Spacer(modifier = Modifier.width(28.dp))
+            Section.values().forEach { s ->
+                NavTab(
+                    label = if (s == Section.TV) "TV Shows" else s.label,
+                    on = s == section,
+                ) { onSection(s) }
+            }
         }
-        Spacer(modifier = Modifier.width(10.dp))
-        Text("Stream", color = Color.White, fontWeight = FontWeight.Black, fontSize = 22.sp)
-        Text("Box", color = Accent, fontWeight = FontWeight.Black, fontSize = 22.sp)
         Spacer(modifier = Modifier.weight(1f))
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .height(42.dp)
+                .height(if (big) 46.dp else 42.dp)
                 .focusRing(RoundedCornerShape(50))
                 .background(Pill, RoundedCornerShape(50))
                 .clickable { onSearchToggle() }
@@ -211,7 +229,7 @@ private fun TopBar(searchMode: Boolean, onSearchToggle: () -> Unit, adultOpen: B
         Spacer(modifier = Modifier.width(10.dp))
         Box(
             modifier = Modifier
-                .size(42.dp)
+                .size(if (big) 46.dp else 42.dp)
                 .focusRing(CircleShape)
                 .background(Pill, CircleShape)
                 .clickable { onAdultToggle() },
@@ -224,6 +242,55 @@ private fun TopBar(searchMode: Boolean, onSearchToggle: () -> Unit, adultOpen: B
                 modifier = Modifier.size(18.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun LogoMark(big: Boolean) {
+    Box(
+        modifier = Modifier
+            .size(if (big) 42.dp else 36.dp)
+            .background(Accent, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
+    }
+    Spacer(modifier = Modifier.width(10.dp))
+    Text("Stream", color = Color.White, fontWeight = FontWeight.Black, fontSize = if (big) 24.sp else 22.sp)
+    Text("Box", color = Accent, fontWeight = FontWeight.Black, fontSize = if (big) 24.sp else 22.sp)
+}
+
+/** Website-style tab: active gets the rounded highlight AND the accent
+    underline; the whole tab is a 52dp+ D-pad target. */
+@Composable
+private fun NavTab(label: String, on: Boolean, onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .height(52.dp)
+            .focusRing(RoundedCornerShape(12.dp))
+            .background(
+                if (on) Color(0x2214B8A6) else Color.Transparent,
+                RoundedCornerShape(12.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            label,
+            color = if (on) Color.White else Dim,
+            fontWeight = if (on) FontWeight.Black else FontWeight.Bold,
+            fontSize = 15.sp,
+            maxLines = 1,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .width(22.dp)
+                .height(3.dp)
+                .background(if (on) Accent else Color.Transparent, RoundedCornerShape(2.dp)),
+        )
     }
 }
 
@@ -286,7 +353,7 @@ private fun Feed(
 
 @Composable
 private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> Unit, onOpen: (Title) -> Unit) {
-    Box(modifier = Modifier.fillMaxWidth().height(if (big) 320.dp else 240.dp)) {
+    Box(modifier = Modifier.fillMaxWidth().height(if (big) 420.dp else 260.dp)) {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(true).build(),
             contentDescription = t.name,
@@ -300,10 +367,21 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                     Brush.verticalGradient(listOf(Color(0x330B1426), Color(0xCC0B1426), Ink)),
                 )
         )
+        // Website hero: a left-side wash so the text block always reads.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(listOf(Color(0xB30B1426), Color(0x000B1426))),
+                )
+        )
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(
+                    horizontal = if (big) 28.dp else 16.dp,
+                    vertical = if (big) 18.dp else 12.dp,
+                ),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -312,16 +390,16 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                     .padding(horizontal = 8.dp, vertical = 3.dp),
             ) {
                 Text(
-                    "#1 " + (rowLabel?.uppercase() ?: "FEATURED") + " - " + t.type.uppercase(),
+                    "#1 " + (rowLabel?.uppercase() ?: "FEATURED") + " \u2022 " + t.type.uppercase(),
                     color = Ink,
                     fontWeight = FontWeight.Black,
-                    fontSize = 11.sp,
+                    fontSize = if (big) 13.sp else 11.sp,
                 )
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 t.name,
-                fontSize = if (big) 32.sp else 26.sp,
+                fontSize = if (big) 44.sp else 28.sp,
                 fontWeight = FontWeight.Black,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -334,7 +412,7 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                         (if (t.year > 0) t.year.toString() + "  -  " else "") + t.type.uppercase(),
                     color = Soft,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
+                    fontSize = if (big) 15.sp else 13.sp,
                 )
             }
             if (t.overview.isNotBlank()) {
@@ -342,13 +420,14 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                 Text(
                     t.overview,
                     color = Soft,
-                    fontSize = 13.sp,
+                    fontSize = if (big) 15.sp else 13.sp,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = if (big) 720.dp else 520.dp),
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 PillButton("Watch", big, accent = true, icon = Icons.Filled.PlayArrow) { onPlay(t) }
                 PillButton("Details", big, icon = Icons.Filled.Info) { onOpen(t) }
             }
@@ -368,7 +447,7 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
-                        .width(if (big) 300.dp else 240.dp)
+                        .width(if (big) 320.dp else 250.dp)
                         .focusRing(RoundedCornerShape(12.dp))
                         .clip(RoundedCornerShape(12.dp))
                         .background(Card)
@@ -434,11 +513,16 @@ private fun SectionHeader(label: String) {
         Box(
             modifier = Modifier
                 .width(4.dp)
-                .height(18.dp)
+                .height(if (AppEnv.isTv) 22.dp else 18.dp)
                 .background(Accent, RoundedCornerShape(2.dp)),
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text(label, fontSize = 17.sp, fontWeight = FontWeight.Black, color = Color.White)
+        Text(
+            label,
+            fontSize = if (AppEnv.isTv) 21.sp else 17.sp,
+            fontWeight = FontWeight.Black,
+            color = Color.White,
+        )
     }
 }
 
@@ -461,9 +545,9 @@ private fun PosterRow(label: String, titles: List<Title>, onOpen: (Title) -> Uni
 private fun PosterCard(t: Title, onOpen: (Title) -> Unit) {
     Column(
         modifier = Modifier
-            .width(if (AppEnv.isTv) 150.dp else 118.dp)
-            .focusRing(RoundedCornerShape(10.dp))
-            .clip(RoundedCornerShape(10.dp))
+            .width(if (AppEnv.isTv) 170.dp else 128.dp)
+            .focusRing(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp))
             .clickable { onOpen(t) },
     ) {
         AsyncImage(
@@ -496,7 +580,7 @@ private fun SearchGrid(titles: List<Title>, adultOpen: Boolean, onOpen: (Title) 
         return
     }
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(if (AppEnv.isTv) 150.dp else 118.dp),
+        columns = GridCells.Adaptive(if (AppEnv.isTv) 170.dp else 128.dp),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -516,7 +600,7 @@ private fun MyListGrid(titles: List<Title>, adultOpen: Boolean, onOpen: (Title) 
         return
     }
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(if (AppEnv.isTv) 150.dp else 118.dp),
+        columns = GridCells.Adaptive(if (AppEnv.isTv) 170.dp else 128.dp),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),

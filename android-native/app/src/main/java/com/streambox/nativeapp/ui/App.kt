@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -91,6 +92,10 @@ fun StreamBoxApp() {
                 is Screen.Browse -> Column(modifier = Modifier.fillMaxSize()) {
                     BrowseScreen(
                         section = section,
+                        onSection = {
+                            section = it
+                            screen = Screen.Browse(it)
+                        },
                         onOpen = { screen = Screen.Detail(it) },
                         onPlay = { t ->
                             if (t.type == "movie") play(t, 1, 1, null, null)
@@ -104,9 +109,13 @@ fun StreamBoxApp() {
                         },
                         modifier = Modifier.weight(1f),
                     )
-                    BottomNav(current = section) {
-                        section = it
-                        screen = Screen.Browse(it)
+                    // TV uses the website-style top tab bar instead - the
+                    // bottom nav is a phone pattern (design split rule).
+                    if (!AppEnv.isTv) {
+                        BottomNav(current = section) {
+                            section = it
+                            screen = Screen.Browse(it)
+                        }
                     }
                 }
 
@@ -129,39 +138,52 @@ fun StreamBoxApp() {
     }
 }
 
+/** Phone navigation: a floating rounded pill bar with an accent chip on the
+    active tab (modern mobile pattern; TV gets the website's top tab bar). */
 @Composable
 private fun BottomNav(current: Section, onPick: (Section) -> Unit) {
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF0E1B2E))
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+            .background(Ink)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        Section.values().forEach { s ->
-            val on = s == current
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .width(64.dp)
-                    .focusRing()
-                    .clickable { onPick(s) }
-                    .padding(vertical = 6.dp),
-            ) {
-                Icon(
-                    imageVector = s.icon,
-                    contentDescription = s.label,
-                    tint = if (on) Accent else Dim,
-                    modifier = Modifier.size(if (AppEnv.isTv) 26.dp else 22.dp),
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    s.label,
-                    fontSize = if (AppEnv.isTv) 12.sp else 10.sp,
-                    fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
-                    color = if (on) Accent else Dim,
-                    maxLines = 1,
-                )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF16243C), RoundedCornerShape(26.dp))
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            Section.values().forEach { s ->
+                val on = s == current
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRing(RoundedCornerShape(18.dp))
+                        .background(
+                            if (on) Color(0x2E14B8A6) else Color.Transparent,
+                            RoundedCornerShape(18.dp),
+                        )
+                        .clickable { onPick(s) }
+                        .padding(vertical = 8.dp),
+                ) {
+                    Icon(
+                        imageVector = s.icon,
+                        contentDescription = s.label,
+                        tint = if (on) Accent else Dim,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        s.label,
+                        fontSize = 10.sp,
+                        fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                        color = if (on) Accent else Dim,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }
@@ -196,9 +218,11 @@ fun PillButton(
     onClick: () -> Unit,
 ) {
     val h = if (big) 54.dp else 46.dp
+    // Solid pills everywhere (website style): "outline" keeps its name but
+    // renders as the soft gray fill - drawn borders are gone for good.
     val bg = when {
         accent -> Accent
-        outline -> Color.Transparent
+        outline -> Color(0xFF24344E)
         else -> Pill
     }
     val fg = if (accent) Ink else Color.White
@@ -209,10 +233,6 @@ fun PillButton(
             .height(h)
             .focusRing(RoundedCornerShape(50))
             .background(bg, RoundedCornerShape(50))
-            .then(
-                if (outline) Modifier.border(2.dp, Color(0xFF2A3B55), RoundedCornerShape(50))
-                else Modifier
-            )
             .clickable(onClick = onClick)
             .padding(horizontal = if (big) 22.dp else 18.dp),
     ) {
