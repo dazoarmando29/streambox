@@ -750,8 +750,15 @@ fun PlayerScreen(
 
     fun seekTo(t: Float) {
         val target = t.coerceAtLeast(0f)
-        cmd("window.__sb && window.__sb.seek(" + target.toInt() + ")")
         cur = target
+        if (mirror == "vidcore" || mirror.startsWith("vidsrc")) {
+            // VidCore/VidSrc publish events only (no seek command) - their
+            // one documented seek is startAt, so the remote's L/R reopens at
+            // the target. Real control, no fake buttons (task rule).
+            load(startAt = target)
+            return
+        }
+        cmd("window.__sb && window.__sb.seek(" + target.toInt() + ")")
     }
 
     fun pokeChrome() {
