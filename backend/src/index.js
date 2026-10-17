@@ -61,6 +61,8 @@ async function route(request, env) {
   const url = new URL(request.url);
   if (url.pathname === "/healthz") return json({ ok: true, name: "streambox-api" }, 200, origin);
   if (url.pathname === "/api/anime-map") return animeMap(url, env, origin);
+  if (url.pathname === "/api/wyz/search") return wyzSearch(url, env, origin);
+  if (url.pathname === "/api/bs-subs") return bsSubs(url, env, origin);
   if (url.pathname.startsWith("/api/tmdb/")) return tmdbProxy(url, env, request, origin);
   return json({ error: "not_found" }, 404, origin);
 }
@@ -262,6 +264,125 @@ function pickAnime(list, title, year) {
     return t && (t.includes(want) || want.includes(t));
   });
   return (contains.length ? contains[0] : pool[0]) || null;
+}
+
+/* Wyzie subtitle search proxy: the shared key lives in a Wrangler secret,
+   never in the APK or the front end. Files download straight from the
+   URLs in the results (public once listed). */
+async function wyzSearch(url, env, origin) {
+  const key = env && (env.WYZIE_API_KEY || env.WYZIE_KEY);
+  if (!key) return json({ error: "wyz_key_not_configured" }, 503, origin);
+
+  const params = new URLSearchParams(url.search);
+  const id = params.get("id") || "";
+  const language = (params.get("language") || "en").toLowerCase();
+  if (!/^\d+$/.test(id)) return json({ error: "bad_id" }, 400, origin);
+  if (!/^[a-z]{2,3}$/.test(language)) return json({ error: "bad_language" }, 400, origin);
+
+  const q = new URLSearchParams({
+    id,
+    language,
+    format: "srt",
+    limit: "25",
+    key,
+  });
+  const season = params.get("season");
+  const episode = params.get("episode");
+  if (season && /^\d+$/.test(season)) q.set("season", season);
+  if (episode && /^\d+$/.test(episode)) q.set("episode", episode);
+
+  const target = "https://sub.wyzie.io/search?" + q.toString();
+  const res = await fetch(target, {
+    headers: { accept: "application/json", "user-agent": UA },
+    signal: AbortSignal.timeout(10000),
+  });
+  const body = await res.text();
+  return new Response(body, {
+    status: res.status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      ...corsHeaders(origin),
+    },
+  });
+}
+
+/* BetaSeries backup subtitles (TV only): the whole tvdb->show->episode->
+    subtitles chain runs here so the API key stays a Worker secret and the
+    client gets one small normalized response. Backup #2 behind TSDB. */
+async function bsSubs(url, env, origin) {
+  const key = env && (env.BETASERIES_API_KEY || env.BETASERIES_KEY);
+  if (!key) return json({ error: "bs_key_not_configured" }, 503, origin);
+  const tkey = env && env.TMDB_API_KEY;
+  if (!tkey) return json({ error: "tmdb_key_not_configured" }, 503, origin);
+
+  const params = new URLSearchParams(url.search);
+  const tmdb = params.get("tmdb") || "";
+  const season = params.get("season") || "";
+  const episode = params.get("episode") || "";
+  const lang = (params.get("lang") || "en").toLowerCase();
+  if (!/^\d+$/.test(tmdb)) return json({ error: "bad_tmdb" }, 400, origin);
+  if (!/^\d+$/.test(season) || !/^\d+$/.test(episode)) return json({ error: "bad_episode" }, 400, origin);
+  if (!/^[a-z]{2,3}$/.test(lang)) return json({ error: "bad_language" }, 400, origin);
+
+  // 1. TMDB -> TheTVDB id
+  const extRes = await fetch(
+    "https://api.themoviedb.org/3/tv/" + tmdb + "/external_ids?api_key=" + tkey,
+    { signal: AbortSignal.timeout(8000) }
+  );
+  if (!extRes.ok) return json({ error: "tmdb_external_ids_failed" }, 502, origin);
+  const ext = await extRes.json();
+  const tvdb = ext && (ext.tvdb_id || ext.tvdbId);
+  if (!tvdb) return json({ error: "no_tvdb" }, 404, origin);
+
+  const bs = async (path, ps) => {
+    const q = new URLSearchParams({ v: "3.0", key });
+    for (const [k, v] of Object.entries(ps)) q.set(k, v);
+    const res = await fetch("https://api.betaseries.com" + path + "?" + q.toString(), {
+      headers: { accept: "application/json", "user-agent": UA },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error("bs_http_" + res.status);
+    return res.json();
+  };
+
+  try {
+    const sh = await bs("/shows/display", { thetvdb_id: String(tvdb) });
+    const show = sh && sh.show;
+    if (!show || !show.id) return json({ error: "not_listed" }, 404, origin);
+    const se = await bs("/shows/episodes", { id: String(show.id), season });
+    const ep = (((se && se.episodes) || []).find((e) => Number(e.episode) === Number(episode)) || null);
+    if (!ep || !ep.id) return json({ error: "episode_not_listed" }, 404, origin);
+    const su = await bs("/subtitles/episode", { id: String(ep.id) });
+    const list = ((su && su.subtitles) || []).filter((s) => s && s.id);
+
+    // rank: filename language tokens + quality (same recipe as the site)
+    const TOK = {
+      en: ["english", ".en.", "eng"], es: ["spanish", "espanol", ".es."],
+      fr: ["french", "francais", ".fr.", "vostfr"], de: ["german", "deutsch", ".de."],
+      ar: ["arabic", ".ar."], hi: ["hindi", ".hi."], tl: ["tagalog", ".tl."],
+      pt: ["portuguese", ".pt."], it: ["italian", ".it."], nl: ["dutch", ".nl."],
+      ru: ["russian", ".ru."], tr: ["turkish", ".tr."], id: ["indonesian", ".id."],
+    }[lang] || [];
+    const score = (s) => {
+      const f = String((s && s.file) || "").toLowerCase();
+      let sc = Number(s.quality) || 0;
+      if (TOK.some((t) => f.includes(t))) sc += 10;
+      return sc;
+    };
+    const rows = list
+      .sort((a, b) => score(b) - score(a))
+      .map((s) => ({
+        file: s.file || ("BetaSeries #" + s.id),
+        language: s.language || lang.toUpperCase(),
+        source: s.source || "BetaSeries",
+        quality: s.quality || 0,
+        url: "https://www.betaseries.com/srt/" + s.id,
+      }));
+    return json({ data: rows }, 200, origin);
+  } catch (e) {
+    return json({ error: "bs_failed", detail: String((e && e.message) || e) }, 502, origin);
+  }
 }
 
 /* ---------- TMDB proxy: key stays in a Wrangler secret ---------- */

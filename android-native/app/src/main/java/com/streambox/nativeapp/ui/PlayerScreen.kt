@@ -9,6 +9,8 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -20,17 +22,23 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -43,6 +51,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,16 +69,24 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.streambox.nativeapp.AppEnv
+import com.streambox.nativeapp.api.Backups
+import com.streambox.nativeapp.api.Cue
 import com.streambox.nativeapp.api.IntroDb
+import com.streambox.nativeapp.api.SubFile
+import com.streambox.nativeapp.api.Subs
 import com.streambox.nativeapp.api.Title
+import com.streambox.nativeapp.api.Wyz
+import com.streambox.nativeapp.api.WyzItem
 import com.streambox.nativeapp.data.Progress
 import com.streambox.nativeapp.data.Store
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Builds the provider embed URL. Contracts (verified against the live
@@ -167,6 +184,12 @@ class SBBridge(private val on: (String, String) -> Unit) {
 
 private val RATES = listOf(1f, 1.25f, 1.5f, 2f, 0.5f)
 
+private val SUBLANGS = listOf(
+    "en" to "EN", "es" to "ES", "fr" to "FR", "de" to "DE", "ar" to "AR",
+    "hi" to "HI", "tl" to "TL", "pt" to "PT", "it" to "IT", "nl" to "NL",
+    "ru" to "RU", "tr" to "TR", "id" to "ID",
+)
+
 /* TV navigation layers, Netflix-style: at VIDEO the L/R keys seek and OK
    toggles play; Up/Down walk skip pill -> slider -> buttons where L/R
    navigates and OK clicks. Back walks layers first, then home. */
@@ -203,6 +226,50 @@ fun PlayerScreen(
     var layer by remember { mutableStateOf(LAYER_VIDEO) }
     var lastSave by remember { mutableStateOf(0L) }
     val main = remember { Handler(Looper.getMainLooper()) }
+
+    // Subtitles (website Subs panel): file + Wyzie search, position + sync.
+    var showSubs by remember { mutableStateOf(false) }
+    var subs by remember { mutableStateOf<SubFile?>(null) }
+    var wyzLang by remember { mutableStateOf("en") }
+    var wyzItems by remember { mutableStateOf(listOf<WyzItem>()) }
+    var subMsg by remember { mutableStateOf("") }
+    var wyzBusy by remember { mutableStateOf(false) }
+
+    fun setSub(name: String, lang: String, cues: List<Cue>) {
+        if (cues.isEmpty()) {
+            subMsg = "Couldn't read that file - is it .srt or .vtt?"
+            return
+        }
+        subs = SubFile(name, lang, cues, subs?.pos ?: "bottom", subs?.offset ?: 0f)
+        subMsg = "Loaded " + cues.size + " lines."
+    }
+
+    val pickSub = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                val text = ctx.contentResolver.openInputStream(uri)
+                    ?.bufferedReader()?.use { it.readText() } ?: ""
+                val name = uri.lastPathSegment ?: "picked.srt"
+                setSub(name, Subs.guessLang(name), Subs.parse(text))
+            }.onFailure {
+                subMsg = "Couldn't open that file."
+            }
+        }
+    }
+
+    val scope = rememberCoroutineScope()
+    fun loadFrom(item: WyzItem) {
+        scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching { Wyz.fetchFile(item.url) }.getOrNull()
+            }
+            if (text == null) {
+                subMsg = "Download failed - try another release."
+            } else {
+                setSub(item.release, item.display.ifEmpty { wyzLang.uppercase() }, Subs.parse(text))
+            }
+        }
+    }
 
     val sliderFR = remember { FocusRequester() }
     val playFR = remember { FocusRequester() }
@@ -273,6 +340,66 @@ fun PlayerScreen(
         }
     }
 
+    // Subtitle search chain (website rules): Wyzie first (1,000/day shared
+    // key), straight to backups when it is empty/capped/missing - TSDB
+    // (keyless) then BetaSeries (TV only). Manual re-run pill bumps bsTick.
+    var bsTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(showSubs, wyzLang, title.id, epSeason, epNumber, bsTick) {
+        if (showSubs) {
+            wyzBusy = true
+            subMsg = ""
+            val isTv = title.type != "movie"
+            var note = ""
+            var items = try {
+                withContext(Dispatchers.IO) {
+                    Wyz.search(
+                        title.id,
+                        wyzLang,
+                        if (isTv) epSeason else null,
+                        if (isTv) epNumber else null,
+                    )
+                }
+            } catch (e: Exception) {
+                note = when {
+                    (e.message ?: "").contains("429") -> "Wyzie is capped (1,000/day) - showing backups."
+                    (e.message ?: "").contains("503") -> "Wyzie key not set - showing backups."
+                    else -> "Wyzie failed - showing backups."
+                }
+                listOf()
+            }
+            if (items.isEmpty()) {
+                items = withContext(Dispatchers.IO) {
+                    val tsdb = runCatching {
+                        Backups.tsdbFind(
+                            title.id, isTv, wyzLang,
+                            if (isTv) epSeason else null,
+                            if (isTv) epNumber else null,
+                        )
+                    }.getOrDefault(listOf())
+                    if (tsdb.isNotEmpty()) tsdb
+                    else if (isTv) runCatching {
+                        Backups.bsFind(title.id, wyzLang, epSeason, epNumber)
+                    }.getOrDefault(listOf())
+                    else listOf()
+                }
+                if (items.isNotEmpty() && note.isEmpty()) note = "No Wyzie results - showing backups."
+            }
+            wyzItems = items
+            subMsg = when {
+                items.isEmpty() && note.isEmpty() -> "No subtitles found - load a .srt/.vtt file below."
+                items.isEmpty() -> note + " Nothing found - load a .srt/.vtt file below."
+                else -> note
+            }
+            wyzBusy = false
+        }
+    }
+
+    val capCue = remember(cur, subs) {
+        val f = subs ?: return@remember null
+        val t = cur + f.offset
+        f.cues.firstOrNull { t >= it.s && t <= it.e }
+    }
+
     val hit = remember(cur, skips, title.type) {
         if (title.type == "movie") null else hitAt(cur, skips)
     }
@@ -288,6 +415,7 @@ fun PlayerScreen(
     // unwind the UI layers like the TV apps do.
     BackHandler {
         when {
+            showSubs -> showSubs = false
             showEps -> showEps = false
             big && layer != LAYER_VIDEO -> {
                 layer = LAYER_VIDEO
@@ -328,7 +456,7 @@ fun PlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
             .onPreviewKeyEvent { e ->
-                if (!big || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                if (!big || showEps || showSubs || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val layers = layerList()
                 val i = layers.indexOf(layer).coerceAtLeast(0)
                 when (e.key) {
@@ -439,6 +567,26 @@ fun PlayerScreen(
                 color = Color.White,
                 fontWeight = FontWeight.Black,
                 fontSize = if (big) 18.sp else 15.sp,
+            )
+        }
+
+        // Caption overlay (website-style): cue window is cur + sync offset.
+        if (capCue != null && !showEps && !showSubs) {
+            val capMod = when (subs?.pos ?: "bottom") {
+                "top" -> Modifier.align(Alignment.TopCenter).padding(top = 70.dp)
+                "center" -> Modifier.align(Alignment.Center)
+                else -> Modifier.align(Alignment.BottomCenter).padding(bottom = 160.dp)
+            }
+            Text(
+                capCue.text,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                fontSize = if (big) 20.sp else 16.sp,
+                modifier = capMod
+                    .padding(horizontal = 28.dp)
+                    .background(Color(0x99000000), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
 
@@ -583,6 +731,7 @@ fun PlayerScreen(
                     cmd("window.__sb && window.__sb.rate(" + RATES[rateIdx] + ")")
                 }
                 Spacer(modifier = Modifier.weight(1f))
+                BarPill("Subs", big) { showSubs = true }
                 BarPill("Episodes", big, icon = Icons.Filled.Menu) { showEps = true }
                 BarPill("Home", big) {
                     save(if (scrub >= 0) scrub else cur, dur)
@@ -633,6 +782,191 @@ fun PlayerScreen(
                         }
                         PillButton("Close", big) { showEps = false }
                     }
+                }
+            }
+        }
+
+        // Subtitles panel (website Subs tab): language chips + provider chain
+        // results + own file + Position/Sync to match the captions.
+        if (showSubs) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0x99000000))
+                    .clickable { showSubs = false },
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .background(Card, RoundedCornerShape(18.dp))
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Subtitles",
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 18.sp,
+                            modifier = Modifier.weight(1f),
+                        )
+                        BarPill("Close", big) { showSubs = false }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(SUBLANGS) { (code, label) ->
+                            val on = code == wyzLang
+                            Box(
+                                modifier = Modifier
+                                    .focusRing()
+                                    .background(if (on) Accent else Pill, CircleShape)
+                                    .clickable { wyzLang = code }
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                            ) {
+                                Text(
+                                    label,
+                                    color = if (on) Ink else Color.White,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 13.sp,
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (subMsg.isNotEmpty()) {
+                        Text(subMsg, color = Color(0xFFF6C177), fontSize = 11.sp)
+                        Spacer(modifier = Modifier.height(6.dp))
+                    } else {
+                        Text(
+                            "Same title, different releases - pick yours for exact sync.",
+                            color = Dim,
+                            fontSize = 11.sp,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+
+                    Box(modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
+                        if (wyzBusy) {
+                            CircularProgressIndicator(
+                                color = Accent,
+                                modifier = Modifier.align(Alignment.Center),
+                            )
+                        } else {
+                            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                                wyzItems.forEach { item ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                            .background(Pill, RoundedCornerShape(12.dp))
+                                            .padding(10.dp),
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                item.release,
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                listOf(
+                                                    item.display,
+                                                    item.origin,
+                                                    if (item.downloads > 0) item.downloads.toString() else "",
+                                                    if (item.cc) "CC" else "",
+                                                ).filter { it.isNotEmpty() }.joinToString("  -  "),
+                                                color = Dim,
+                                                fontSize = 10.sp,
+                                                maxLines = 1,
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        BarPill("Load", big) { loadFrom(item) }
+                                    }
+                                }
+                                if (wyzItems.isEmpty() && !wyzBusy) {
+                                    BarPill("Try backups (TSDB + BetaSeries)", big) { bsTick += 1 }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("MY SUBTITLES (YOUR FILE)", color = Dim, fontWeight = FontWeight.Black, fontSize = 11.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Pill, RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                    ) {
+                        Text(
+                            subs?.let {
+                                it.name + "  -  " + it.lang + "  -  " + it.cues.size + " lines"
+                            } ?: "None loaded",
+                            color = if (subs != null) Color.White else Dim,
+                            fontSize = 12.sp,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        BarPill("Load .srt / .vtt", big) {
+                            runCatching { pickSub.launch(arrayOf("*/*")) }
+                        }
+                        BarPill("Clear", big) {
+                            subs = null
+                            subMsg = ""
+                        }
+                        BarPill("Try backups", big) { bsTick += 1 }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Position", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.width(74.dp))
+                        BarPill("<", big) {
+                            // "<" moves captions UP the screen (site rule)
+                            val order = listOf("bottom", "center", "top")
+                            val i = order.indexOf(subs?.pos ?: "bottom").let { if (it < 0) 0 else it }
+                            subs = subs?.copy(pos = order[(i + 1) % order.size])
+                        }
+                        Text(
+                            (subs?.pos ?: "bottom").replaceFirstChar { it.uppercase() },
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                        )
+                        BarPill(">", big) {
+                            val order = listOf("bottom", "center", "top")
+                            val i = order.indexOf(subs?.pos ?: "bottom").let { if (it < 0) 0 else it }
+                            subs = subs?.copy(pos = order[(i + 2) % order.size])
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Sync", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.width(74.dp))
+                        BarPill("-", big) {
+                            val o = Math.round(((subs?.offset ?: 0f) - 0.5f) * 10) / 10f
+                            subs = subs?.copy(offset = o.coerceIn(-30f, 30f))
+                        }
+                        Text(
+                            ((subs?.offset ?: 0f)).let { (if (it >= 0) "+" else "") + String.format("%.1f", it) + "s" },
+                            color = Accent,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                        )
+                        BarPill("+", big) {
+                            val o = Math.round(((subs?.offset ?: 0f) + 0.5f) * 10) / 10f
+                            subs = subs?.copy(offset = o.coerceIn(-30f, 30f))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    PillButton("Close", big, accent = true) { showSubs = false }
                 }
             }
         }
