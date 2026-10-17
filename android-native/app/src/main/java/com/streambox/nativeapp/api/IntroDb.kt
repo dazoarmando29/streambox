@@ -8,7 +8,12 @@ import java.net.URL
     website uses. TV shows + anime only; movies never skip (house rule). */
 object IntroDb {
     data class TRange(val start: Float, val end: Float?)
-    data class Skips(val intro: List<TRange>, val recap: List<TRange>, val credits: List<TRange>)
+    data class Skips(
+        val intro: List<TRange>,
+        val recap: List<TRange>,
+        val credits: List<TRange>,
+        val preview: List<TRange> = listOf(),
+    )
 
     fun fetch(tmdbId: Int, season: Int, episode: Int): Skips {
         val u = "https://api.theintrodb.org/v3/media?tmdb_id=" + tmdbId +

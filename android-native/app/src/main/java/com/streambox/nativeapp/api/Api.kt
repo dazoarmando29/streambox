@@ -119,6 +119,22 @@ object Api {
             typeOverride
         )
 
+    /** TMDB -> IMDb id (SkipDB is keyed by IMDb). Anime rows are TMDB tv;
+        the other kind is tried once for anime movies / mixed results. */
+    fun imdbId(type: String, id: Int): String? {
+        fun pick(kind: String): String? {
+            val v = get("/api/tmdb/3/" + kind + "/" + id + "/external_ids").optString("imdb_id", "")
+            return if (v.isNullOrEmpty() || v == "null") null else v
+        }
+        return try {
+            val first = if (type == "movie") "movie" else "tv"
+            val other = if (first == "tv") "movie" else "tv"
+            runCatching { pick(first) }.getOrNull() ?: runCatching { pick(other) }.getOrNull()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     fun animeMap(name: String, year: Int): AnimeIds? {
         return try {
             val o = get(

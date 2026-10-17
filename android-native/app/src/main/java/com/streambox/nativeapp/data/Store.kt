@@ -26,6 +26,10 @@ data class SubsPref(val pos: String = "bottom", val offset: Float = 0f)
     local file can't be re-read after a restart. */
 data class SubPick(val url: String, val name: String, val lang: String)
 
+/** Caption style (device-local taste settings, task spec: size/color/
+    background opacity for OUR overlay - never the embed's own captions). */
+data class SubStyle(val size: Int = 16, val color: Int = 0, val bg: Int = 60)
+
 /** Device-local stores (phone and TV keep their own state, house rule).
     SharedPreferences JSON - same spirit as the site's localStorage keys. */
 object Store {
@@ -35,6 +39,8 @@ object Store {
     private const val K_ADULT = "adult_open"
     private const val K_SUBS_PREF = "subs_pref"
     private const val K_SUB_PICK = "sub_pick"
+    private const val K_SUB_STYLE = "sub_style"
+    private const val K_AUTO_SKIP = "auto_skip"
 
     private fun prefs(ctx: Context) =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -138,6 +144,36 @@ object Store {
 
     fun setAdultOpen(ctx: Context, open: Boolean) {
         prefs(ctx).edit().putBoolean(K_ADULT, open).apply()
+    }
+
+    fun autoSkip(ctx: Context): Boolean = prefs(ctx).getBoolean(K_AUTO_SKIP, false)
+
+    fun setAutoSkip(ctx: Context, on: Boolean) {
+        prefs(ctx).edit().putBoolean(K_AUTO_SKIP, on).apply()
+    }
+
+    fun subStyle(ctx: Context): SubStyle {
+        return try {
+            val o = JSONObject(prefs(ctx).getString(K_SUB_STYLE, "{}") ?: "{}")
+            SubStyle(
+                size = o.optInt("size", 16).coerceIn(12, 26),
+                color = o.optInt("color", 0).coerceIn(0, 2),
+                bg = o.optInt("bg", 60).coerceIn(0, 90),
+            )
+        } catch (e: Exception) {
+            SubStyle()
+        }
+    }
+
+    fun saveSubStyle(ctx: Context, s: SubStyle) {
+        try {
+            val o = JSONObject()
+                .put("size", s.size.coerceIn(12, 26))
+                .put("color", s.color.coerceIn(0, 2))
+                .put("bg", s.bg.coerceIn(0, 90))
+            prefs(ctx).edit().putString(K_SUB_STYLE, o.toString()).apply()
+        } catch (e: Exception) {
+        }
     }
 
     private fun subKey(type: String, id: Int) = type + id

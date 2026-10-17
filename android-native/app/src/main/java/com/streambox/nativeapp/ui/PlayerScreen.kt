@@ -79,9 +79,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.streambox.nativeapp.AppEnv
+import com.streambox.nativeapp.api.Api
 import com.streambox.nativeapp.api.Backups
 import com.streambox.nativeapp.api.Cue
 import com.streambox.nativeapp.api.IntroDb
+import com.streambox.nativeapp.api.SkipTimes
 import com.streambox.nativeapp.api.SubFile
 import com.streambox.nativeapp.api.Subs
 import com.streambox.nativeapp.api.Title
@@ -90,6 +92,7 @@ import com.streambox.nativeapp.api.WyzItem
 import com.streambox.nativeapp.data.Progress
 import com.streambox.nativeapp.data.Store
 import com.streambox.nativeapp.data.SubPick
+import com.streambox.nativeapp.data.SubStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -236,7 +239,8 @@ private fun fmt(s: Float): String {
 }
 
 /** Skip hit (TV + anime only, never movies). Priority: recap -> intro ->
-    credits, same as the website. The pill exists ONLY inside the range. */
+    credits ("Next Ep") -> preview, same spirit as the website. The pill
+    exists ONLY inside the range. */
 private data class SkipHit(val kind: String, val end: Float?, val label: String)
 
 private fun hitAt(cur: Float, skips: IntroDb.Skips): SkipHit? {
@@ -250,6 +254,9 @@ private fun hitAt(cur: Float, skips: IntroDb.Skips): SkipHit? {
     }
     skips.credits.firstOrNull(::inRange)?.let {
         return SkipHit("credits", it.end, "Next Ep")
+    }
+    skips.preview.firstOrNull(::inRange)?.let {
+        return SkipHit("preview", it.end, "Skip Preview")
     }
     return null
 }
@@ -531,6 +538,8 @@ fun PlayerScreen(
     // the next allowed mirror (never loops - one hop per title).
     var gotMedia by remember { mutableStateOf(false) }
     var hopped by remember { mutableStateOf(false) }
+    // One deferred seek for mirrors without URL startAt (provider switches).
+    var pendingSeek by remember { mutableStateOf(-1f) }
     // Netflix behavior: chrome fades while playing after idle; any touch/key
     // wakes it; it STAYS up while paused or while you are using it.
     var chromeVisible by remember { mutableStateOf(true) }
@@ -549,6 +558,9 @@ fun PlayerScreen(
     val subPref = Store.subsPref(ctx, title.type, title.id)
     var subPos by remember { mutableStateOf(subPref.pos) }
     var subOffset by remember { mutableFloatStateOf(subPref.offset) }
+    // Caption style (task spec: size/color/background opacity of OUR
+    // overlay - device-local taste, never the embed's captions).
+    var subStyle by remember { mutableStateOf(Store.subStyle(ctx)) }
     // AniPM protocol state (website anipm.player parity): the player reports
     // its quality ladder, audio language, and its own subtitle tracks.
     var anipmQs by remember { mutableStateOf(listOf<Int>()) }
@@ -629,6 +641,11 @@ fun PlayerScreen(
 
     fun load(startAt: Float = 0f) {
         chromeVisible = true
+        // Mirrors whose URL carries startAt (vidzen/vidbolt/anipm) keep the
+        // position themselves; the rest get one seek when the player reports
+        // ready - switching providers never loses your place (task rule).
+        val urlCarriesStart = mirror == "vidzen" || mirror == "vidbolt" || mirror == "anipm"
+        pendingSeek = if (startAt > 0f && !urlCarriesStart) startAt else -1f
         main.post {
             try {
                 val w = web ?: return@post
@@ -715,12 +732,36 @@ fun PlayerScreen(
         }
     }
 
-    // Skip timings (TV + anime only - movies never skip).
-    LaunchedEffect(title.id, epSeason, epNumber, title.type) {
-        skips = if (title.type == "movie") {
-            IntroDb.Skips(listOf(), listOf(), listOf())
+    // Skip timings (TV + anime only - movies never skip). Three verified
+    // sources merge: AniSkip (MAL id), SkipDB (IMDb id, duration-matched)
+    // and TheIntroDB (TMDB id). Empty sources add nothing; the fetch runs
+    // again once real stream duration is known so duration matching works.
+    LaunchedEffect(title.id, title.type, epSeason, epNumber, mal, if (dur > 30) dur.toInt() else 0) {
+        if (title.type == "movie") {
+            skips = IntroDb.Skips(listOf(), listOf(), listOf())
         } else {
-            withContext(Dispatchers.IO) { IntroDb.fetch(title.id, epSeason, epNumber) }
+            val d = if (dur > 30) dur else 0f
+            skips = withContext(Dispatchers.IO) {
+                val db = runCatching {
+                    IntroDb.fetch(title.id, epSeason, epNumber)
+                }.getOrDefault(IntroDb.Skips(listOf(), listOf(), listOf()))
+                val ani = if (mal != null) SkipTimes.aniSkip(mal, epNumber, d) else listOf()
+                val imdb = runCatching { Api.imdbId(title.type, title.id) }.getOrNull() ?: ""
+                val sk = if (imdb.isNotEmpty()) {
+                    SkipTimes.skipDb(imdb, epSeason, epNumber, d)
+                } else {
+                    listOf()
+                }
+                fun ranges(hits: List<SkipTimes.Hit>, kind: String): List<IntroDb.TRange> =
+                    hits.filter { it.kind == kind }.map { IntroDb.TRange(it.start, it.end) }
+                val all = ani + sk
+                IntroDb.Skips(
+                    intro = db.intro + ranges(all, "intro"),
+                    recap = db.recap + ranges(all, "recap"),
+                    credits = db.credits + ranges(all, "credits"),
+                    preview = db.preview + ranges(all, "preview"),
+                )
+            }
         }
     }
 
@@ -809,6 +850,30 @@ fun PlayerScreen(
         if (hit == null && layer == LAYER_SKIP) {
             layer = LAYER_VIDEO
             runCatching { keySinkFR.requestFocus() }
+        }
+    }
+
+    // Auto-skip: intro/recap/preview seek past; credits auto-advance (Next
+    // Ep), one skip per range per episode. Toggle lives in the Episodes
+    // sheet and persists per device.
+    var autoSkip by remember { mutableStateOf(Store.autoSkip(ctx)) }
+    var autoDone by remember { mutableStateOf("") }
+    LaunchedEffect(cur, hit, autoSkip) {
+        val h = hit
+        if (autoSkip && playing && h != null && h.end != null) {
+            val key = epSeason.toString() + ":" + epNumber + ":" + h.kind + ":" + h.end
+            if (autoDone != key) {
+                autoDone = key
+                if (h.kind == "credits") {
+                    epNumber += 1
+                    save(0f, dur)
+                    cur = 0f
+                    playing = true
+                    load()
+                } else {
+                    h.end?.let { seekTo(it) }
+                }
+            }
         }
     }
 
@@ -1039,7 +1104,14 @@ fun PlayerScreen(
                                     "play" -> playing = true
                                     "pause" -> playing = false
                                     "ended" -> playing = false
-                                    "loadedmetadata" -> dur = o.optDouble("duration", 0.0).toFloat()
+                                    "loadedmetadata" -> {
+                                        dur = o.optDouble("duration", 0.0).toFloat()
+                                        if (pendingSeek >= 0f) {
+                                            val t = pendingSeek
+                                            pendingSeek = -1f
+                                            seekTo(t)
+                                        }
+                                    }
                                     "timeupdate" -> {
                                         cur = o.optDouble("currentTime", 0.0).toFloat()
                                         val d = o.optDouble("duration", 0.0).toFloat()
@@ -1112,6 +1184,11 @@ fun PlayerScreen(
                                         // VidBolt TV: its shell waits for a
                                         // play kick (website parity).
                                         if (big && mirror == "vidbolt") cmd("window.__sb && window.__sb.play()")
+                                        if (pendingSeek >= 0f) {
+                                            val t = pendingSeek
+                                            pendingSeek = -1f
+                                            seekTo(t)
+                                        }
                                     }
                                     "mirror:episode" -> {
                                         // Provider advanced internally (Up
@@ -1152,16 +1229,36 @@ fun PlayerScreen(
                     if (big) descendantFocusability =
                         android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
                     // Phone: a tap MINIMIZES the chrome and a tap brings it
-                    // back (toggle). TV has no touch - any key wakes the
-                    // chrome there instead. The tap is never eaten.
-                    setOnTouchListener { _, ev ->
+                    // back (toggle); a double-tap seeks -10s left / +10s right
+                    // (Netflix mobile pattern). TV has no touch - any key
+                    // wakes the chrome there instead. The tap is never eaten.
+                    var lastTapMs = 0L
+                    var lastTapX = 0f
+                    setOnTouchListener { v, ev ->
                         if (ev.action == android.view.MotionEvent.ACTION_UP) {
+                            val now = System.currentTimeMillis()
+                            val x = ev.x
+                            val half = v.width / 2f
                             main.post {
                                 if (big) {
                                     pokeChrome()
                                 } else {
-                                    chromeVisible = !chromeVisible
-                                    pokeTick += 1
+                                    val isDouble = now - lastTapMs < 300 && Math.abs(x - lastTapX) < 80
+                                    if (isDouble) {
+                                        lastTapMs = 0
+                                        if (x > half) seekRel(10f) else seekRel(-10f)
+                                        pokeChrome()
+                                    } else {
+                                        lastTapMs = now
+                                        lastTapX = x
+                                        main.postDelayed({
+                                            if (lastTapMs != 0L && System.currentTimeMillis() - lastTapMs >= 290) {
+                                                lastTapMs = 0
+                                                chromeVisible = !chromeVisible
+                                                pokeTick += 1
+                                            }
+                                        }, 300)
+                                    }
                                 }
                             }
                         }
@@ -1213,15 +1310,20 @@ fun PlayerScreen(
                 "center" -> Modifier.align(Alignment.Center)
                 else -> Modifier.align(Alignment.BottomCenter).padding(bottom = bottomPad)
             }
+            val capColor = when (subStyle.color) {
+                1 -> Color(0xFFFFE066)
+                2 -> Color(0xFF7FE7F5)
+                else -> Color.White
+            }
             Text(
                 capCue.text,
-                color = Color.White,
+                color = capColor,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
-                fontSize = if (big) 20.sp else 16.sp,
+                fontSize = (if (big) subStyle.size + 4 else subStyle.size).sp,
                 modifier = capMod
                     .padding(horizontal = 28.dp)
-                    .background(Color(0x99000000), RoundedCornerShape(8.dp))
+                    .background(Color(0xFF000000).copy(alpha = subStyle.bg / 100f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
@@ -1439,6 +1541,22 @@ fun PlayerScreen(
                         }
                         Spacer(modifier = Modifier.height(14.dp))
                     }
+                    if (title.type != "movie") {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Auto-skip", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.width(84.dp))
+                            BarPill(if (autoSkip) "ON" else "OFF", big) {
+                                autoSkip = !autoSkip
+                                Store.setAutoSkip(ctx, autoSkip)
+                            }
+                            Text(
+                                "  intros/recaps skip themselves",
+                                color = Dim,
+                                fontSize = 11.sp,
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         PillButton("Load", big, accent = true, modifier = Modifier.focusRequester(epsFirstFR)) {
                             showEps = false
@@ -1639,6 +1757,37 @@ fun PlayerScreen(
                             val o = Math.round((subOffset + 0.5f) * 10) / 10f
                             subOffset = o.coerceIn(-30f, 30f)
                             Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Style", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.width(74.dp))
+                        BarPill("A-", big) {
+                            subStyle = subStyle.copy(size = (subStyle.size - 2).coerceIn(12, 26))
+                            Store.saveSubStyle(ctx, subStyle)
+                        }
+                        Text(
+                            subStyle.size.toString() + "sp",
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.padding(horizontal = 10.dp),
+                        )
+                        BarPill("A+", big) {
+                            subStyle = subStyle.copy(size = (subStyle.size + 2).coerceIn(12, 26))
+                            Store.saveSubStyle(ctx, subStyle)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(modifier = Modifier.width(74.dp))
+                        BarPill("Color", big) {
+                            subStyle = subStyle.copy(color = (subStyle.color + 1) % 3)
+                            Store.saveSubStyle(ctx, subStyle)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        BarPill("BG " + subStyle.bg + "%", big) {
+                            subStyle = subStyle.copy(bg = (subStyle.bg + 30) % 120)
+                            Store.saveSubStyle(ctx, subStyle)
                         }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
