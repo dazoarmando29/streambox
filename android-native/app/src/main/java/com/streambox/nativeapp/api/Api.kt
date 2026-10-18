@@ -205,10 +205,10 @@ object Api {
         return out
     }
 
-    /** Full title details for the Series Episodes design: genres, runtime,
-        the season directory, studio/languages/certification and the trailer
-        + extras rail. Every field is real TMDB data - anything missing is
-        simply left empty and the UI hides it (never invent metadata). */
+    /** Core title details (one TMDB call): genres, runtime, the season
+        directory, studio/languages and the aired gate. Cert + videos are
+        separate calls so the detail screen can fetch everything in
+        parallel (speed pass 0.32). Nothing is ever invented. */
     fun details(type: String, id: Int): TDetail {
         val kind = if (type == "movie") "movie" else "tv"
         return try {
@@ -250,63 +250,76 @@ object Api {
                 }
                 out.take(4).joinToString(", ")
             }
-            val cert = runCatching {
-                if (kind == "movie") {
-                    val rd = get("/api/tmdb/3/movie/" + id + "/release_dates").optJSONArray("results")
-                    var c = ""
-                    if (rd != null) {
-                        for (i in 0 until rd.length()) {
-                            val r = rd.optJSONObject(i) ?: continue
-                            if (r.optString("iso_3166_1") != "US") continue
-                            val arr = r.optJSONArray("release_dates") ?: continue
-                            for (j in 0 until arr.length()) {
-                                val v = arr.optJSONObject(j)?.optString("certification", "") ?: ""
-                                if (v.isNotBlank()) { c = v; break }
-                            }
-                        }
-                    }
-                    c
-                } else {
-                    val cr = get("/api/tmdb/3/tv/" + id + "/content_ratings").optJSONArray("results")
-                    var c = ""
-                    if (cr != null) {
-                        for (i in 0 until cr.length()) {
-                            val r = cr.optJSONObject(i) ?: continue
-                            if (r.optString("iso_3166_1") == "US") {
-                                c = r.optString("rating", "")
-                                break
-                            }
-                        }
-                    }
-                    c
-                }
-            }.getOrDefault("")
-            val videos = ArrayList<VideoInfo>()
-            runCatching {
-                val vArr = get("/api/tmdb/3/" + kind + "/" + id + "/videos").optJSONArray("results")
-                if (vArr != null) {
-                    for (i in 0 until vArr.length()) {
-                        val v = vArr.optJSONObject(i) ?: continue
-                        if (v.optString("site", "") != "YouTube") continue
-                        val key = v.optString("key", "")
-                        if (key.isBlank()) continue
-                        videos.add(VideoInfo(key, v.optString("name", ""), v.optString("type", "")))
-                    }
-                }
-            }
             TDetail(
                 genres = genres,
                 runtime = runtime,
                 seasons = seasons,
                 studio = studio,
                 langs = langs,
-                cert = cert,
-                videos = videos,
+                cert = "",
+                videos = listOf(),
                 aired = o.optString("release_date", "").ifEmpty { o.optString("first_air_date", "") }
                     .let { it.isBlank() || it.take(10) <= today() },
             )
         } catch (e: Exception) {
             TDetail(listOf(), 0, listOf(), "", "", "", listOf())
+        }
+    }
+
+    /** US content rating / certification (real TMDB only, "" when absent). */
+    fun cert(type: String, id: Int): String {
+        return try {
+            if (type == "movie") {
+                val rd = get("/api/tmdb/3/movie/" + id + "/release_dates").optJSONArray("results")
+                var c = ""
+                if (rd != null) {
+                    for (i in 0 until rd.length()) {
+                        val r = rd.optJSONObject(i) ?: continue
+                        if (r.optString("iso_3166_1") != "US") continue
+                        val arr = r.optJSONArray("release_dates") ?: continue
+                        for (j in 0 until arr.length()) {
+                            val v = arr.optJSONObject(j)?.optString("certification", "") ?: ""
+                            if (v.isNotBlank()) { c = v; break }
+                        }
+                    }
+                }
+                c
+            } else {
+                val cr = get("/api/tmdb/3/tv/" + id + "/content_ratings").optJSONArray("results")
+                var c = ""
+                if (cr != null) {
+                    for (i in 0 until cr.length()) {
+                        val r = cr.optJSONObject(i) ?: continue
+                        if (r.optString("iso_3166_1") == "US") {
+                            c = r.optString("rating", "")
+                            break
+                        }
+                    }
+                }
+                c
+            }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    /** Trailer + extras (real TMDB videos, YouTube keys only). */
+    fun videos(type: String, id: Int): List<VideoInfo> {
+        return try {
+            val kind = if (type == "movie") "movie" else "tv"
+            val vArr = get("/api/tmdb/3/" + kind + "/" + id + "/videos").optJSONArray("results")
+                ?: return listOf()
+            val out = ArrayList<VideoInfo>()
+            for (i in 0 until vArr.length()) {
+                val v = vArr.optJSONObject(i) ?: continue
+                if (v.optString("site", "") != "YouTube") continue
+                val key = v.optString("key", "")
+                if (key.isBlank()) continue
+                out.add(VideoInfo(key, v.optString("name", ""), v.optString("type", "")))
+            }
+            out
+        } catch (e: Exception) {
+            listOf()
         }
     }
 

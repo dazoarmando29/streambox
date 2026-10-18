@@ -873,11 +873,12 @@ fun PlayerScreen(
     }
 
     // Quick-select rail for the Episodes sheet (design pack): real TMDB
-    // season episodes, fetched when the sheet opens.
+    // season episodes, prefetched while the video loads so the sheet opens
+    // instantly (speed pass 0.32).
     var epsList by remember { mutableStateOf(listOf<Ep>()) }
     var epsBusy by remember { mutableStateOf(false) }
-    LaunchedEffect(showEps, epSeason, title.id) {
-        if (showEps && title.type != "movie") {
+    LaunchedEffect(epSeason, title.id) {
+        if (title.type != "movie") {
             epsBusy = true
             epsList = withContext(Dispatchers.IO) {
                 runCatching { Api.season(title.id, epSeason) }.getOrDefault(listOf())

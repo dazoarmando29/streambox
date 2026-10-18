@@ -84,38 +84,54 @@ private object BrowseCache {
     val searches = HashMap<String, List<Title>>()
 }
 
-/** Every row loads in parallel and one dead endpoint can never sink the
-    page - it just comes back empty. */
-private suspend fun fetchRows(section: Section): List<Pair<String, List<Title>>> =
+/** The canonical row plan per section - shared by the loader and the
+    incremental painter so rows never reorder as they land. */
+private fun rowPlan(section: Section): List<Pair<String, () -> List<Title>>> = when (section) {
+    Section.HOME -> listOf(
+        "Trending Now" to { Api.trending() },
+        "Popular Movies" to { Api.popularMovies() },
+        "Popular Shows" to { Api.popularTv() },
+        "Top Rated Movies" to { Api.topRatedMovies() },
+        "Top Rated Shows" to { Api.topRatedTv() },
+    )
+    Section.MOVIES -> listOf(
+        "Trending Movies" to { Api.trending().filter { it.type == "movie" } },
+        "Popular Movies" to { Api.popularMovies() },
+        "Top Rated Movies" to { Api.topRatedMovies() },
+    )
+    Section.TV -> listOf(
+        "Trending Shows" to { Api.trending().filter { it.type != "movie" } },
+        "Popular Shows" to { Api.popularTv() },
+        "Top Rated Shows" to { Api.topRatedTv() },
+    )
+    Section.ANIME -> listOf(
+        "Popular Anime" to { Api.anime() },
+        "Top Rated Anime" to { Api.animeTop() },
+    )
+    Section.MYLIST -> listOf()
+}
+
+/** Every row loads in parallel AND paints the moment it lands (speed pass
+    0.32): the hero appears after the first request instead of after all
+    five, in canonical order so nothing jumps. One dead endpoint can never
+    sink the page - it just comes back empty. */
+private suspend fun fetchRows(
+    section: Section,
+    onProgress: (List<Pair<String, List<Title>>>) -> Unit,
+): List<Pair<String, List<Title>>> =
     withContext(Dispatchers.IO) {
         coroutineScope {
-            suspend fun row(label: String, f: () -> List<Title>) = async {
-                label to runCatching { f() }.getOrDefault(listOf())
-            }
-            when (section) {
-                Section.HOME -> listOf(
-                    row("Trending Now") { Api.trending() },
-                    row("Popular Movies") { Api.popularMovies() },
-                    row("Popular Shows") { Api.popularTv() },
-                    row("Top Rated Movies") { Api.topRatedMovies() },
-                    row("Top Rated Shows") { Api.topRatedTv() },
-                )
-                Section.MOVIES -> listOf(
-                    row("Trending Movies") { Api.trending().filter { it.type == "movie" } },
-                    row("Popular Movies") { Api.popularMovies() },
-                    row("Top Rated Movies") { Api.topRatedMovies() },
-                )
-                Section.TV -> listOf(
-                    row("Trending Shows") { Api.trending().filter { it.type != "movie" } },
-                    row("Popular Shows") { Api.popularTv() },
-                    row("Top Rated Shows") { Api.topRatedTv() },
-                )
-                Section.ANIME -> listOf(
-                    row("Popular Anime") { Api.anime() },
-                    row("Top Rated Anime") { Api.animeTop() },
-                )
-                Section.MYLIST -> listOf()
+            val plan = rowPlan(section)
+            val order = plan.map { it.first }
+            val done = java.util.Collections.synchronizedMap(HashMap<String, List<Title>>())
+            plan.map { (label, f) ->
+                async {
+                    val titles = runCatching { f() }.getOrDefault(listOf())
+                    done[label] = titles
+                    onProgress(order.mapNotNull { l -> done[l]?.let { l to it } })
+                }
             }.awaitAll()
+            order.mapNotNull { l -> done[l]?.let { l to it } }
         }
     }
 
@@ -170,7 +186,10 @@ fun BrowseScreen(
                 rows = listOf()
                 BrowseCache.searches[key] = fresh
             } else {
-                rows = fetchRows(section)
+                // Rows paint as they land - hero first, rest stream in.
+                // Over a cached paint we revalidate silently (no flicker
+                // back to partial rows) and swap once complete.
+                rows = fetchRows(section) { partial -> if (hitRows == null) rows = partial }
                 results = listOf()
                 BrowseCache.rows[key] = rows
             }
@@ -442,7 +461,7 @@ private fun Feed(
 private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> Unit, onOpen: (Title) -> Unit) {
     Box(modifier = Modifier.fillMaxWidth().height(if (big) 420.dp else 260.dp)) {
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(true).build(),
+            model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(100).build(),
             contentDescription = t.name,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
@@ -588,7 +607,7 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                                 .background(Pill),
                         ) {
                             AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current).data(p.poster).crossfade(true).build(),
+                                model = ImageRequest.Builder(LocalContext.current).data(p.poster).crossfade(100).build(),
                                 contentDescription = p.name,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize(),
@@ -717,7 +736,7 @@ fun PosterCard(t: Title, onOpen: (Title) -> Unit) {
                 .clickable { onOpen(t) },
         ) {
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(true).build(),
+                model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(100).build(),
                 contentDescription = t.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
@@ -927,7 +946,7 @@ private fun MyListCard(
                     .background(Pill),
             ) {
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(true).build(),
+                    model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(100).build(),
                     contentDescription = t.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -1073,7 +1092,7 @@ private fun MyListRow(
                     .background(Pill),
             ) {
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(true).build(),
+                    model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(100).build(),
                     contentDescription = t.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),

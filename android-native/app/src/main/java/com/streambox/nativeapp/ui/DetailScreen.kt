@@ -65,6 +65,8 @@ import com.streambox.nativeapp.api.VideoInfo
 import com.streambox.nativeapp.data.Progress
 import com.streambox.nativeapp.data.Store
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 /** The Series Episodes design (the pack's third screen set) for movie,
@@ -125,17 +127,33 @@ fun DetailScreen(
     }
 
     LaunchedEffect(title.id, title.type) {
-        val triple = withContext(Dispatchers.IO) {
-            Triple(
+        // Speed pass 0.32: details/credits/similar run in PARALLEL and each
+        // paints the moment it lands - the page never waits for the slowest.
+        coroutineScope {
+            val d = async(Dispatchers.IO) {
                 runCatching { Api.details(title.type, title.id) }
-                    .getOrDefault(TDetail(listOf(), 0, listOf(), "", "", "", listOf())),
-                runCatching { Api.credits(title.type, title.id) }.getOrDefault(listOf()),
-                runCatching { Api.similar(title.type, title.id) }.getOrDefault(listOf()),
-            )
+                    .getOrDefault(TDetail(listOf(), 0, listOf(), "", "", "", listOf()))
+            }
+            val c = async(Dispatchers.IO) {
+                runCatching { Api.credits(title.type, title.id) }.getOrDefault(listOf())
+            }
+            val s = async(Dispatchers.IO) {
+                runCatching { Api.similar(title.type, title.id) }.getOrDefault(listOf())
+            }
+            det = d.await()
+            cast = c.await()
+            similar = s.await()
         }
-        det = triple.first
-        cast = triple.second
-        similar = triple.third
+    }
+
+    // Second wave: certification + trailer/extras ride in behind the core
+    // (they only feed chips and rails, never blocking the page).
+    LaunchedEffect(title.id, title.type) {
+        val pair = withContext(Dispatchers.IO) {
+            runCatching { Api.cert(title.type, title.id) }.getOrDefault("") to
+                runCatching { Api.videos(title.type, title.id) }.getOrDefault(listOf())
+        }
+        det = det.copy(cert = pair.first, videos = pair.second)
     }
 
     // Remote/gesture Back works everywhere - no hunting for a button on TV.
@@ -156,7 +174,7 @@ fun DetailScreen(
         item {
             Box(modifier = Modifier.fillMaxWidth().height(if (big) 560.dp else 440.dp)) {
                 AsyncImage(
-                    model = ImageRequest.Builder(ctx).data(title.backdrop ?: title.poster).crossfade(true).build(),
+                    model = ImageRequest.Builder(ctx).data(title.backdrop ?: title.poster).crossfade(100).build(),
                     contentDescription = title.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -681,7 +699,7 @@ fun DetailScreen(
                                 ) {
                                     if (m.photo != null) {
                                         AsyncImage(
-                                            model = ImageRequest.Builder(ctx).data(m.photo).crossfade(true).build(),
+                                            model = ImageRequest.Builder(ctx).data(m.photo).crossfade(100).build(),
                                             contentDescription = m.name,
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier.fillMaxSize().clip(CircleShape),
@@ -774,7 +792,7 @@ fun DetailScreen(
                                     AsyncImage(
                                         model = ImageRequest.Builder(ctx)
                                             .data("https://img.youtube.com/vi/" + v.key + "/hqdefault.jpg")
-                                            .crossfade(true)
+                                            .crossfade(100)
                                             .build(),
                                         contentDescription = v.name,
                                         contentScale = ContentScale.Crop,
@@ -953,7 +971,7 @@ private fun EpisodeRow(
         ) {
             if (ep.still != null) {
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data(ep.still).crossfade(true).build(),
+                    model = ImageRequest.Builder(LocalContext.current).data(ep.still).crossfade(100).build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
