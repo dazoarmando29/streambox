@@ -20,12 +20,17 @@ data class Title(
 
 data class AnimeIds(val mal: Int?, val ani: Int?)
 
+/** One episode of a TV/anime season (real TMDB fields only - a missing
+    still or runtime is normal, especially on long-running anime). */
+data class Ep(val n: Int, val name: String, val still: String?, val runtime: Int, val year: Int, val overview: String)
+
 /** Client for the streambox-api Worker: TMDB catalog (key stays server-side)
     and TMDB->MAL/AniList mapping (Jikan/AniList woes solved server-side). */
 object Api {
     private const val BASE = BuildConfig.API_BASE
     private const val IMG = "https://image.tmdb.org/t/p/w342"
     private const val IMG_W780 = "https://image.tmdb.org/t/p/w780"
+    private const val IMG_W300 = "https://image.tmdb.org/t/p/w300"
 
     private fun get(path: String): JSONObject {
         val conn = URL(BASE + path).openConnection() as HttpURLConnection
@@ -133,6 +138,30 @@ object Api {
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** Season episodes (detail page grid): TMDB /tv/{id}/season/{n} via the
+        Worker's TMDB proxy. Lazy UI handles 1,400+ episode seasons. */
+    fun season(id: Int, season: Int): List<Ep> {
+        val arr = get("/api/tmdb/3/tv/" + id + "/season/" + season).optJSONArray("episodes")
+            ?: return listOf()
+        val out = ArrayList<Ep>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val n = o.optInt("episode_number", 0)
+            if (n <= 0) continue
+            out.add(
+                Ep(
+                    n = n,
+                    name = o.optString("name", ""),
+                    still = img(o, "still_path", IMG_W300),
+                    runtime = o.optInt("runtime", 0),
+                    year = o.optString("air_date", "").take(4).toIntOrNull() ?: 0,
+                    overview = o.optString("overview", ""),
+                )
+            )
+        }
+        return out
     }
 
     fun animeMap(name: String, year: Int): AnimeIds? {
