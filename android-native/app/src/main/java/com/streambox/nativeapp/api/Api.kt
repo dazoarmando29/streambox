@@ -24,6 +24,9 @@ data class AnimeIds(val mal: Int?, val ani: Int?)
     still or runtime is normal, especially on long-running anime). */
 data class Ep(val n: Int, val name: String, val still: String?, val runtime: Int, val year: Int, val overview: String)
 
+/** One cast member (detail rail): name + role + portrait when TMDB has it. */
+data class CastMem(val name: String, val role: String, val photo: String?)
+
 /** Client for the streambox-api Worker: TMDB catalog (key stays server-side)
     and TMDB->MAL/AniList mapping (Jikan/AniList woes solved server-side). */
 object Api {
@@ -31,6 +34,7 @@ object Api {
     private const val IMG = "https://image.tmdb.org/t/p/w342"
     private const val IMG_W780 = "https://image.tmdb.org/t/p/w780"
     private const val IMG_W300 = "https://image.tmdb.org/t/p/w300"
+    private const val IMG_W185 = "https://image.tmdb.org/t/p/w185"
 
     private fun get(path: String): JSONObject {
         val conn = URL(BASE + path).openConnection() as HttpURLConnection
@@ -162,6 +166,30 @@ object Api {
             )
         }
         return out
+    }
+
+    /** Top billed cast (detail rail) - TMDB credits via the Worker proxy. */
+    fun credits(type: String, id: Int): List<CastMem> {
+        val kind = if (type == "movie") "movie" else "tv"
+        val arr = get("/api/tmdb/3/" + kind + "/" + id + "/credits").optJSONArray("cast")
+            ?: return listOf()
+        val out = ArrayList<CastMem>()
+        for (i in 0 until minOf(arr.length(), 12)) {
+            val o = arr.optJSONObject(i) ?: continue
+            val name = o.optString("name", "")
+            if (name.isBlank()) continue
+            out.add(CastMem(name, o.optString("character", ""), img(o, "profile_path", IMG_W185)))
+        }
+        return out
+    }
+
+    /** Similar titles (detail rail) - anime keeps its anime routing. */
+    fun similar(type: String, id: Int): List<Title> {
+        val kind = if (type == "movie") "movie" else "tv"
+        val arr = get("/api/tmdb/3/" + kind + "/" + id + "/similar").optJSONArray("results")
+            ?: return listOf()
+        return titlesFrom(arr, if (type == "movie") "movie" else if (type == "anime") "anime" else null)
+            .filter { it.poster != null }
     }
 
     fun animeMap(name: String, year: Int): AnimeIds? {

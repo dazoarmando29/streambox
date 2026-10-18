@@ -56,7 +56,14 @@ enum class Section(val label: String, val icon: ImageVector) {
 sealed class Screen {
     data class Browse(val section: Section) : Screen()
     data class Detail(val title: Title) : Screen()
-    data class Player(val title: Title, val season: Int, val episode: Int, val mal: Int?, val ani: Int?) : Screen()
+    data class Player(
+        val title: Title,
+        val season: Int,
+        val episode: Int,
+        val mal: Int?,
+        val ani: Int?,
+        val lang: String? = null,
+    ) : Screen()
 }
 
 private val StreamColors = darkColorScheme(
@@ -73,8 +80,8 @@ fun StreamBoxApp() {
     var section by remember { mutableStateOf(Section.HOME) }
     var screen by remember { mutableStateOf<Screen>(Screen.Browse(Section.HOME)) }
 
-    fun play(t: Title, season: Int, episode: Int, mal: Int?, ani: Int?) {
-        screen = Screen.Player(t, season, episode, mal, ani)
+    fun play(t: Title, season: Int, episode: Int, mal: Int?, ani: Int?, lang: String? = null) {
+        screen = Screen.Player(t, season, episode, mal, ani, lang)
     }
 
     // Space Grotesk is the house voice (titles, labels, numerics): every
@@ -116,7 +123,8 @@ fun StreamBoxApp() {
                 is Screen.Detail -> DetailScreen(
                     title = s.title,
                     onBack = { screen = Screen.Browse(section) },
-                    onPlay = { season, episode, mal, ani -> play(s.title, season, episode, mal, ani) },
+                    onPlay = { season, episode, mal, ani, lang -> play(s.title, season, episode, mal, ani, lang) },
+                    onOpen = { screen = Screen.Detail(it) },
                 )
 
                 is Screen.Player -> PlayerScreen(
@@ -125,6 +133,7 @@ fun StreamBoxApp() {
                     episode = s.episode,
                     mal = s.mal,
                     ani = s.ani,
+                    lang = s.lang,
                     onHome = { screen = Screen.Browse(section) },
                 )
             }

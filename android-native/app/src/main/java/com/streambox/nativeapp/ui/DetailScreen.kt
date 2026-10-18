@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -51,6 +54,7 @@ import coil.request.ImageRequest
 import com.streambox.nativeapp.AppEnv
 import com.streambox.nativeapp.api.Api
 import com.streambox.nativeapp.api.AnimeIds
+import com.streambox.nativeapp.api.CastMem
 import com.streambox.nativeapp.api.Ep
 import com.streambox.nativeapp.api.Title
 import com.streambox.nativeapp.data.Store
@@ -68,7 +72,8 @@ import kotlinx.coroutines.withContext
 fun DetailScreen(
     title: Title,
     onBack: () -> Unit,
-    onPlay: (season: Int, episode: Int, mal: Int?, ani: Int?) -> Unit,
+    onPlay: (season: Int, episode: Int, mal: Int?, ani: Int?, lang: String?) -> Unit,
+    onOpen: (Title) -> Unit,
 ) {
     val ctx = LocalContext.current
     val big = AppEnv.isTv
@@ -81,6 +86,14 @@ fun DetailScreen(
     var expanded by remember { mutableStateOf(false) }
     var episodes by remember { mutableStateOf(listOf<Ep>()) }
     var epsBusy by remember { mutableStateOf(false) }
+    var cast by remember { mutableStateOf(listOf<CastMem>()) }
+    var similar by remember { mutableStateOf(listOf<Title>()) }
+    // AniPM start language (design pack SUB|DUB chips): the house default
+    // stands - Dragon Ball starts on the Faulconer English dub, everything
+    // else on sub - and the chips only override per play.
+    var subDub by remember {
+        mutableStateOf(if (title.name.contains("dragon ball", true)) "dub" else "sub")
+    }
     // Continue-watching marker for the episode rail (device-local memory).
     val saved = remember(title.id, title.type) {
         Store.progressList(ctx).firstOrNull { it.type == title.type && it.id == title.id }
@@ -103,6 +116,15 @@ fun DetailScreen(
             }
             epsBusy = false
         }
+    }
+
+    LaunchedEffect(title.id, title.type) {
+        val (c, s) = withContext(Dispatchers.IO) {
+            runCatching { Api.credits(title.type, title.id) }.getOrDefault(listOf()) to
+                runCatching { Api.similar(title.type, title.id) }.getOrDefault(listOf())
+        }
+        cast = c
+        similar = s
     }
 
     // Remote/gesture Back works everywhere - no hunting for a button on TV.
@@ -266,6 +288,48 @@ fun DetailScreen(
         // ---- Primary action block ----
         item {
             Column(modifier = Modifier.padding(horizontal = if (big) 28.dp else 16.dp, vertical = if (big) 16.dp else 12.dp)) {
+                // SUB | DUB chips (design pack anime details): the AniPM
+                // start language for this play.
+                if (title.type == "anime" && mapping == "ok") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "AUDIO",
+                            color = Dim,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = if (big) 11.sp else 10.sp,
+                            letterSpacing = 1.5.sp,
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        listOf("sub" to "Sub", "dub" to "Dub").forEach { (key, label) ->
+                            val on = subDub == key
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .focusRing(RoundedCornerShape(50), pop = false)
+                                    .background(if (on) Accent else Pill, RoundedCornerShape(50))
+                                    .clickable { subDub = key }
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                            ) {
+                                Text(
+                                    label,
+                                    color = if (on) Ink else Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = if (big) 13.sp else 12.sp,
+                                )
+                            }
+                        }
+                        if (title.name.contains("dragon ball", true)) {
+                            Text(
+                                "Faulconer dub pinned",
+                                color = Dim,
+                                fontFamily = BodyFont,
+                                fontSize = 10.sp,
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
                 PillButton(
                     if (title.type == "movie") "Play Movie" else "Play S" + season + " E" + episode,
                     big,
@@ -276,7 +340,7 @@ fun DetailScreen(
                     // Missing mapping no longer blocks play: the player
                     // routes anime-without-ids to VidRift (website rule).
                     if (title.type != "anime" || mapping != "loading") {
-                        onPlay(season, episode, ids?.mal, ids?.ani)
+                        onPlay(season, episode, ids?.mal, ids?.ani, if (title.type == "anime") subDub else null)
                     }
                 }
                 Spacer(modifier = Modifier.height(10.dp))
@@ -381,14 +445,98 @@ fun DetailScreen(
                 ) {
                     episode = ep.n
                     if (title.type != "anime" || mapping != "loading") {
-                        onPlay(season, ep.n, ids?.mal, ids?.ani)
+                        onPlay(season, ep.n, ids?.mal, ids?.ani, if (title.type == "anime") subDub else null)
                     }
                 }
             }
-            item { Spacer(modifier = Modifier.height(if (big) 28.dp else 24.dp)) }
-        } else {
-            item { Spacer(modifier = Modifier.height(if (big) 28.dp else 24.dp)) }
         }
+
+        // ---- Cast & similar rails (design pack sections) ----
+        if (cast.isNotEmpty()) {
+            item { CastRail(cast, big) }
+        }
+        if (similar.isNotEmpty()) {
+            item { SimilarRail(similar, big, onOpen) }
+        }
+        item { Spacer(modifier = Modifier.height(if (big) 28.dp else 24.dp)) }
+    }
+}
+
+/** Circular portrait rail (design pack "Starring Cast & Crew"). */
+@Composable
+private fun CastRail(cast: List<CastMem>, big: Boolean) {
+    Column {
+        SectionHeader("Cast & Crew")
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            items(cast.size) { i ->
+                val m = cast[i]
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.widthIn(max = if (big) 110.dp else 88.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(if (big) 84.dp else 64.dp)
+                            .background(Pill, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (m.photo != null) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current).data(m.photo).crossfade(true).build(),
+                                contentDescription = m.name,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            )
+                        } else {
+                            Text(
+                                m.name.take(1).uppercase(),
+                                color = Accent,
+                                fontWeight = FontWeight.Black,
+                                fontSize = if (big) 26.sp else 20.sp,
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        m.name,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (big) 12.sp else 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (m.role.isNotBlank()) {
+                        Text(
+                            m.role,
+                            color = Dim,
+                            fontFamily = BodyFont,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+    }
+}
+
+/** "More Like This" poster rail (design pack section). */
+@Composable
+private fun SimilarRail(similar: List<Title>, big: Boolean, onOpen: (Title) -> Unit) {
+    Column {
+        SectionHeader("More Like This")
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(similar.size) { i -> PosterCard(similar[i], onOpen) }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
     }
 }
 

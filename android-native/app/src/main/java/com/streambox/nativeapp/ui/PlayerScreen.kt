@@ -209,6 +209,7 @@ fun playerUrl(
     ani: Int?,
     mirror: String = "",
     startAt: Float = 0f,
+    langOverride: String = "",
 ): String {
     val m = mirror.ifEmpty { defaultMirror(title, mal, ani) }
     val ep = episode.coerceAtLeast(1)
@@ -217,11 +218,13 @@ fun playerUrl(
     return when (m) {
         "anipm" -> {
             // House rule pinned forever: Dragon Ball = English dub with the
-            // Bruce Faulconer score; everything else starts on sub.
-            val lang = if (Regex("dragon\\s*ball", RegexOption.IGNORE_CASE).containsMatchIn(title.name)) {
-                "dub"
-            } else {
-                "sub"
+            // Bruce Faulconer score; everything else starts on sub. A real
+            // user pick (detail chips / Sub-Dub pill) may override per play -
+            // and only ever as dub|sub (the routes know no other value).
+            val lang = when {
+                langOverride == "dub" || langOverride == "sub" -> langOverride
+                Regex("dragon\\s*ball", RegexOption.IGNORE_CASE).containsMatchIn(title.name) -> "dub"
+                else -> "sub"
             }
             val base = if (mal != null) {
                 "https://ani.pm/embed/mal/" + mal + "/" + ep + "/" + lang
@@ -588,6 +591,7 @@ fun PlayerScreen(
     episode: Int,
     mal: Int?,
     ani: Int?,
+    lang: String? = null,
     onHome: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -653,7 +657,12 @@ fun PlayerScreen(
     var anipmQs by remember { mutableStateOf(listOf<Int>()) }
     var anipmQ by remember { mutableStateOf<Int?>(null) }
     var anipmLang by remember {
-        mutableStateOf(if (title.name.contains("dragon ball", true)) "dub" else "sub")
+        // Start language: the detail SUB|DUB pick wins, else the pinned
+        // house default (Dragon Ball dub, everything else sub).
+        mutableStateOf(
+            lang?.takeIf { it == "dub" || it == "sub" }
+                ?: (if (title.name.contains("dragon ball", true)) "dub" else "sub")
+        )
     }
     var anipmSubLabels by remember { mutableStateOf(listOf<String>()) }
     var anipmSubIdx by remember { mutableIntStateOf(-1) } // -1 = player subs off
@@ -757,7 +766,7 @@ fun PlayerScreen(
         main.post {
             try {
                 val w = web ?: return@post
-                loadMirror(w, playerUrl(title, epSeason, epNumber, mal, ani, mirror, startAt), mirror)
+                loadMirror(w, playerUrl(title, epSeason, epNumber, mal, ani, mirror, startAt, anipmLang), mirror)
             } catch (e: Exception) {
             }
         }
@@ -1491,7 +1500,7 @@ fun PlayerScreen(
                         }
                         false
                     }
-                    loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror), mirror)
+                    loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, 0f, anipmLang), mirror)
                     web = this
                 }
             },

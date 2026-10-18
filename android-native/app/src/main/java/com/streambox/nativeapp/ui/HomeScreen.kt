@@ -652,7 +652,7 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
 }
 
 @Composable
-private fun SectionHeader(label: String, right: String? = null) {
+fun SectionHeader(label: String, right: String? = null) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
@@ -699,7 +699,7 @@ private fun PosterRow(label: String, titles: List<Title>, onOpen: (Title) -> Uni
 }
 
 @Composable
-private fun PosterCard(t: Title, onOpen: (Title) -> Unit) {
+fun PosterCard(t: Title, onOpen: (Title) -> Unit) {
     Column(
         modifier = Modifier.width(if (AppEnv.isTv) 170.dp else 128.dp),
     ) {
