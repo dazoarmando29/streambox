@@ -2482,7 +2482,8 @@ private fun QuickEpCard(
         modifier = modifier
             .focusRing(RoundedCornerShape(14.dp))
             .background(if (selected) Color(0x1A00F0B5) else Pill, RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
+            // Unaired episodes are schedule rows, not play targets.
+            .then(if (ep.aired) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 10.dp, vertical = 10.dp),
     ) {
         Box(
@@ -2519,7 +2520,15 @@ private fun QuickEpCard(
                 maxLines = 1,
             )
         }
-        if (selected) {
+        if (!ep.aired) {
+            Text(
+                "COMING SOON",
+                color = Amber,
+                fontWeight = FontWeight.Bold,
+                fontSize = 9.sp,
+                letterSpacing = 1.sp,
+            )
+        } else if (selected) {
             Text(
                 "SELECTED",
                 color = Accent,

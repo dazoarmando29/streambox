@@ -271,6 +271,21 @@ fun DetailScreen(
                                 )
                             }
                         }
+                        if (!det.aired) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0x33F5A623), RoundedCornerShape(50))
+                                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                            ) {
+                                Text(
+                                    "COMING SOON",
+                                    color = Amber,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = if (big) 11.sp else 10.sp,
+                                    letterSpacing = 1.sp,
+                                )
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
@@ -390,6 +405,7 @@ fun DetailScreen(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                 }
+                if (det.aired) {
                 PillButton(
                     when {
                         rp != null && title.type != "movie" ->
@@ -448,6 +464,32 @@ fun DetailScreen(
                             )
                         }
                     }
+                }
+                } else {
+                    // Not out yet (Avengers: Doomsday case): a Coming Soon
+                    // plate where Play would be - My List below still works.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (big) 54.dp else 46.dp)
+                            .background(Pill, RoundedCornerShape(50)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "COMING SOON",
+                            color = Amber,
+                            fontWeight = FontWeight.Black,
+                            fontSize = if (big) 16.sp else 14.sp,
+                            letterSpacing = 2.sp,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Not out yet - save it to My List and check back.",
+                        color = Dim,
+                        fontFamily = BodyFont,
+                        fontSize = 11.sp,
+                    )
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -899,7 +941,9 @@ private fun EpisodeRow(
             .padding(horizontal = if (big) 28.dp else 16.dp, vertical = 5.dp)
             .focusRing(RoundedCornerShape(16.dp))
             .background(if (current) Color(0x1400F0B5) else Card, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            // Unaired rows stay visible but are NOT play targets (no dead
+            // buttons - the D-pad skips them like Netflix's schedule rows).
+            .then(if (ep.aired) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(10.dp),
     ) {
         Box(
@@ -923,19 +967,21 @@ private fun EpisodeRow(
                     modifier = Modifier.align(Alignment.Center),
                 )
             }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(if (big) 34.dp else 28.dp)
-                    .background(Color(0xB30B111E), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.PlayArrow,
-                    contentDescription = null,
-                    tint = Accent,
-                    modifier = Modifier.size(if (big) 18.dp else 15.dp),
-                )
+            if (ep.aired) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(if (big) 34.dp else 28.dp)
+                        .background(Color(0xB30B111E), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        tint = Accent,
+                        modifier = Modifier.size(if (big) 18.dp else 15.dp),
+                    )
+                }
             }
             Box(
                 modifier = Modifier
@@ -976,7 +1022,15 @@ private fun EpisodeRow(
                     )
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                if (current && savedDur > 0 && savedCur > 5) {
+                if (!ep.aired) {
+                    Text(
+                        "COMING SOON",
+                        color = Amber,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (big) 11.sp else 9.sp,
+                        letterSpacing = 1.sp,
+                    )
+                } else if (current && savedDur > 0 && savedCur > 5) {
                     Text(
                         fmtMin(((savedDur - savedCur) / 60).toInt().coerceAtLeast(1)) + " left",
                         color = Accent,

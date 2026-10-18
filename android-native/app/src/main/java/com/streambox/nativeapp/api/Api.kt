@@ -21,8 +21,18 @@ data class Title(
 data class AnimeIds(val mal: Int?, val ani: Int?)
 
 /** One episode of a TV/anime season (real TMDB fields only - a missing
-    still or runtime is normal, especially on long-running anime). */
-data class Ep(val n: Int, val name: String, val still: String?, val runtime: Int, val year: Int, val overview: String)
+    still or runtime is normal, especially on long-running anime). aired
+    compares the real air date against today: future episodes render as
+    Coming Soon instead of a dead play target. */
+data class Ep(
+    val n: Int,
+    val name: String,
+    val still: String?,
+    val runtime: Int,
+    val year: Int,
+    val overview: String,
+    val aired: Boolean = true,
+)
 
 /** One cast member (detail rail): name + role + portrait when TMDB has it. */
 data class CastMem(val name: String, val role: String, val photo: String?)
@@ -33,7 +43,9 @@ data class SeasonInfo(val n: Int, val count: Int, val name: String)
 /** One TMDB video (trailer / extra clip, YouTube keys only). */
 data class VideoInfo(val key: String, val name: String, val kind: String)
 
-/** Everything the Series Episodes design needs from TMDB details. */
+/** Everything the Series Episodes design needs from TMDB details. aired is
+    false only when the real release/air date is in the future (Avengers:
+    Doomsday case) - then the UI says Coming Soon instead of Play. */
 data class TDetail(
     val genres: List<String>,
     val runtime: Int,
@@ -42,6 +54,7 @@ data class TDetail(
     val langs: String,
     val cert: String,
     val videos: List<VideoInfo>,
+    val aired: Boolean = true,
 )
 
 /** Client for the streambox-api Worker: TMDB catalog (key stays server-side)
@@ -81,6 +94,10 @@ object Api {
 
     private fun titleOf(o: JSONObject): String =
         o.optString("title", "").ifEmpty { o.optString("name", "") }
+
+    /** Today as ISO date - aired/Coming Soon gates compare real TMDB dates. */
+    private fun today(): String =
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
 
     private fun titlesFrom(arr: JSONArray, typeOverride: String?): List<Title> {
         val out = ArrayList<Title>()
@@ -167,18 +184,21 @@ object Api {
         val arr = get("/api/tmdb/3/tv/" + id + "/season/" + season).optJSONArray("episodes")
             ?: return listOf()
         val out = ArrayList<Ep>()
+        val today = today()
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
             val n = o.optInt("episode_number", 0)
             if (n <= 0) continue
+            val d = o.optString("air_date", "")
             out.add(
                 Ep(
                     n = n,
                     name = o.optString("name", ""),
                     still = img(o, "still_path", IMG_W300),
                     runtime = o.optInt("runtime", 0),
-                    year = o.optString("air_date", "").take(4).toIntOrNull() ?: 0,
+                    year = d.take(4).toIntOrNull() ?: 0,
                     overview = o.optString("overview", ""),
+                    aired = d.isBlank() || d.take(10) <= today,
                 )
             )
         }
@@ -274,7 +294,17 @@ object Api {
                     }
                 }
             }
-            TDetail(genres, runtime, seasons, studio, langs, cert, videos)
+            TDetail(
+                genres = genres,
+                runtime = runtime,
+                seasons = seasons,
+                studio = studio,
+                langs = langs,
+                cert = cert,
+                videos = videos,
+                aired = o.optString("release_date", "").ifEmpty { o.optString("first_air_date", "") }
+                    .let { it.isBlank() || it.take(10) <= today() },
+            )
         } catch (e: Exception) {
             TDetail(listOf(), 0, listOf(), "", "", "", listOf())
         }
