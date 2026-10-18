@@ -27,6 +27,23 @@ data class Ep(val n: Int, val name: String, val still: String?, val runtime: Int
 /** One cast member (detail rail): name + role + portrait when TMDB has it. */
 data class CastMem(val name: String, val role: String, val photo: String?)
 
+/** One season in the Season Directory (real TMDB counts). */
+data class SeasonInfo(val n: Int, val count: Int, val name: String)
+
+/** One TMDB video (trailer / extra clip, YouTube keys only). */
+data class VideoInfo(val key: String, val name: String, val kind: String)
+
+/** Everything the Series Episodes design needs from TMDB details. */
+data class TDetail(
+    val genres: List<String>,
+    val runtime: Int,
+    val seasons: List<SeasonInfo>,
+    val studio: String,
+    val langs: String,
+    val cert: String,
+    val videos: List<VideoInfo>,
+)
+
 /** Client for the streambox-api Worker: TMDB catalog (key stays server-side)
     and TMDB->MAL/AniList mapping (Jikan/AniList woes solved server-side). */
 object Api {
@@ -166,6 +183,101 @@ object Api {
             )
         }
         return out
+    }
+
+    /** Full title details for the Series Episodes design: genres, runtime,
+        the season directory, studio/languages/certification and the trailer
+        + extras rail. Every field is real TMDB data - anything missing is
+        simply left empty and the UI hides it (never invent metadata). */
+    fun details(type: String, id: Int): TDetail {
+        val kind = if (type == "movie") "movie" else "tv"
+        return try {
+            val o = get("/api/tmdb/3/" + kind + "/" + id)
+            val genres = ArrayList<String>()
+            val gArr = o.optJSONArray("genres")
+            if (gArr != null) {
+                for (i in 0 until gArr.length()) {
+                    val g = gArr.optJSONObject(i)?.optString("name", "") ?: ""
+                    if (g.isNotBlank()) genres.add(g)
+                }
+            }
+            val runtime = if (kind == "movie") {
+                o.optInt("runtime", 0)
+            } else {
+                o.optJSONArray("episode_run_time")?.optInt(0, 0) ?: 0
+            }
+            val seasons = ArrayList<SeasonInfo>()
+            val sArr = o.optJSONArray("seasons")
+            if (sArr != null) {
+                for (i in 0 until sArr.length()) {
+                    val s = sArr.optJSONObject(i) ?: continue
+                    val n = s.optInt("season_number", 0)
+                    if (n <= 0) continue
+                    seasons.add(SeasonInfo(n, s.optInt("episode_count", 0), s.optString("name", "")))
+                }
+            }
+            val comp = o.optJSONArray("production_companies")
+            val studio = if (comp != null && comp.length() > 0) {
+                comp.optJSONObject(0)?.optString("name", "") ?: ""
+            } else ""
+            val lArr = o.optJSONArray("spoken_languages")
+            val langs = if (lArr == null) "" else {
+                val out = ArrayList<String>()
+                for (i in 0 until lArr.length()) {
+                    val l = lArr.optJSONObject(i) ?: continue
+                    val name = l.optString("english_name", "").ifEmpty { l.optString("name", "") }
+                    if (name.isNotBlank()) out.add(name)
+                }
+                out.take(4).joinToString(", ")
+            }
+            val cert = runCatching {
+                if (kind == "movie") {
+                    val rd = get("/api/tmdb/3/movie/" + id + "/release_dates").optJSONArray("results")
+                    var c = ""
+                    if (rd != null) {
+                        for (i in 0 until rd.length()) {
+                            val r = rd.optJSONObject(i) ?: continue
+                            if (r.optString("iso_3166_1") != "US") continue
+                            val arr = r.optJSONArray("release_dates") ?: continue
+                            for (j in 0 until arr.length()) {
+                                val v = arr.optJSONObject(j)?.optString("certification", "") ?: ""
+                                if (v.isNotBlank()) { c = v; break }
+                            }
+                        }
+                    }
+                    c
+                } else {
+                    val cr = get("/api/tmdb/3/tv/" + id + "/content_ratings").optJSONArray("results")
+                    var c = ""
+                    if (cr != null) {
+                        for (i in 0 until cr.length()) {
+                            val r = cr.optJSONObject(i) ?: continue
+                            if (r.optString("iso_3166_1") == "US") {
+                                c = r.optString("rating", "")
+                                break
+                            }
+                        }
+                    }
+                    c
+                }
+            }.getOrDefault("")
+            val videos = ArrayList<VideoInfo>()
+            runCatching {
+                val vArr = get("/api/tmdb/3/" + kind + "/" + id + "/videos").optJSONArray("results")
+                if (vArr != null) {
+                    for (i in 0 until vArr.length()) {
+                        val v = vArr.optJSONObject(i) ?: continue
+                        if (v.optString("site", "") != "YouTube") continue
+                        val key = v.optString("key", "")
+                        if (key.isBlank()) continue
+                        videos.add(VideoInfo(key, v.optString("name", ""), v.optString("type", "")))
+                    }
+                }
+            }
+            TDetail(genres, runtime, seasons, studio, langs, cert, videos)
+        } catch (e: Exception) {
+            TDetail(listOf(), 0, listOf(), "", "", "", listOf())
+        }
     }
 
     /** Top billed cast (detail rail) - TMDB credits via the Worker proxy. */
