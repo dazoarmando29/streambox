@@ -2171,9 +2171,9 @@ private fun BarPill(
     }
 }
 
-/** Tiny key cap for the TV remote legend (design pack 10-foot HUD). */
+/** Tiny key cap for the TV remote legends (design pack 10-foot HUD). */
 @Composable
-private fun KeyChip(label: String) {
+fun KeyChip(label: String) {
     Box(
         modifier = Modifier
             .background(Glass, RoundedCornerShape(6.dp))

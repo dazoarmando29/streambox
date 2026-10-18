@@ -189,42 +189,78 @@ fun BrowseScreen(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        TopBar(
-            section = section,
-            onSection = onSection,
-            searchMode = searchMode,
-            onSearchToggle = { searchMode = !searchMode; submitted = ""; input = "" },
-            adultOpen = adultOpen,
-            onAdultToggle = {
-                adultOpen = !adultOpen
-                Store.setAdultOpen(ctx, adultOpen)
-            },
-        )
-
-        if (searchMode) {
-            SearchField(
-                input = input,
-                onInput = { input = it },
-                onSubmit = { submitted = input },
-            )
+        val body: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
+            if (searchMode) {
+                SearchField(
+                    input = input,
+                    onInput = { input = it },
+                    onSubmit = { submitted = input },
+                )
+            }
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    loading -> Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) { CircularProgressIndicator(color = Accent) }
+                    error != null -> Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(error ?: "", color = Dim, fontFamily = BodyFont) }
+                    searchMode && submitted.isNotBlank() -> SearchGrid(results, adultOpen, onOpen)
+                    section == Section.MYLIST -> MyListView(
+                        titles = myList,
+                        adultOpen = adultOpen,
+                        big = big,
+                        onOpen = onOpen,
+                        onPlay = onPlay,
+                        onRemove = { t ->
+                            Store.toggleList(ctx, t)
+                            myList = Store.listItems(ctx)
+                        },
+                    )
+                    else -> Feed(rows, cont, adultOpen, big, onOpen, onPlay, onResume,
+                        onRemoveCont = { p ->
+                            Store.removeProgress(ctx, p.type, p.id)
+                            cont = Store.progressList(ctx)
+                        })
+                }
+            }
         }
 
-        when {
-            loading -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) { CircularProgressIndicator(color = Accent) }
-            error != null -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) { Text(error ?: "", color = Dim, fontFamily = BodyFont) }
-            searchMode && submitted.isNotBlank() -> SearchGrid(results, adultOpen, onOpen)
-            section == Section.MYLIST -> MyListGrid(myList, adultOpen, onOpen)
-            else -> Feed(rows, cont, adultOpen, big, onOpen, onPlay, onResume,
-                onRemoveCont = { p ->
-                    Store.removeProgress(ctx, p.type, p.id)
-                    cont = Store.progressList(ctx)
-                })
+        if (big) {
+            // TV shell (design pack): icon rail owns the left edge, the
+            // status strip carries device + clock, content flows beside it.
+            Row(modifier = Modifier.fillMaxSize()) {
+                TvRail(
+                    section = section,
+                    onSection = onSection,
+                    onSearchToggle = { searchMode = !searchMode; submitted = ""; input = "" },
+                    adultOpen = adultOpen,
+                    onAdultToggle = {
+                        adultOpen = !adultOpen
+                        Store.setAdultOpen(ctx, adultOpen)
+                    },
+                )
+                Column(modifier = Modifier.weight(1f).fillMaxSize()) {
+                    TvStatusBar()
+                    body()
+                    TvLegend()
+                }
+            }
+        } else {
+            TopBar(
+                section = section,
+                onSection = onSection,
+                searchMode = searchMode,
+                onSearchToggle = { searchMode = !searchMode; submitted = ""; input = "" },
+                adultOpen = adultOpen,
+                onAdultToggle = {
+                    adultOpen = !adultOpen
+                    Store.setAdultOpen(ctx, adultOpen)
+                },
+            )
+            body()
         }
     }
 }
@@ -478,9 +514,22 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
+            val heroCtx = LocalContext.current
+            var heroList by remember(t.id) { mutableStateOf(Store.inList(heroCtx, t.type, t.id)) }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 PillButton("Watch", big, accent = true, icon = Icons.Filled.PlayArrow) { onPlay(t) }
                 PillButton("Details", big, icon = Icons.Filled.Info) { onOpen(t) }
+                if (big) {
+                    // TV hero (design pack): Watch Now | Details | My List.
+                    PillButton(
+                        if (heroList) "In My List" else "My List",
+                        big,
+                        icon = if (heroList) Icons.Filled.Check else Icons.Filled.Add,
+                    ) {
+                        Store.toggleList(heroCtx, t)
+                        heroList = Store.inList(heroCtx, t.type, t.id)
+                    }
+                }
             }
         }
     }
@@ -502,7 +551,10 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
         prevCount = cont.size
     }
     Column {
-        SectionHeader("Continue Watching")
+        SectionHeader(
+            "Continue Watching",
+            right = if (cont.size > 1) cont.size.toString() + " IN PROGRESS" else null,
+        )
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -527,16 +579,31 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                             .clickable { onResume(p) }
                             .padding(8.dp),
                     ) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current).data(p.poster).crossfade(true).build(),
-                            contentDescription = p.name,
-                            contentScale = ContentScale.Crop,
+                        Box(
                             modifier = Modifier
                                 .width(64.dp)
                                 .height(90.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(Pill),
-                        )
+                        ) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current).data(p.poster).crossfade(true).build(),
+                                contentDescription = p.name,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            // Teal watch-progress bar on the art (design
+                            // pack Continue cards).
+                            if (p.dur > 0 && p.cur > 5) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .fillMaxWidth(fraction = (p.cur / p.dur).coerceIn(0.05f, 1f))
+                                        .height(3.dp)
+                                        .background(Accent),
+                                )
+                            }
+                        }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -585,10 +652,10 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
 }
 
 @Composable
-private fun SectionHeader(label: String) {
+private fun SectionHeader(label: String, right: String? = null) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(start = 16.dp, bottom = 8.dp),
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
     ) {
         Box(
             modifier = Modifier
@@ -603,6 +670,16 @@ private fun SectionHeader(label: String) {
             fontWeight = FontWeight.Black,
             color = Color.White,
         )
+        if (right != null) {
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                right,
+                color = Dim,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (AppEnv.isTv) 12.sp else 10.sp,
+                letterSpacing = 1.sp,
+            )
+        }
     }
 }
 
@@ -644,6 +721,31 @@ private fun PosterCard(t: Title, onOpen: (Title) -> Unit) {
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
+            // Rating cap (design pack posters): glass chip, real vote only.
+            if (t.vote > 0) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .background(Color(0xD90B111E), RoundedCornerShape(50))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Star,
+                        contentDescription = null,
+                        tint = Accent,
+                        modifier = Modifier.size(10.dp),
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        String.format("%.1f", t.vote),
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                    )
+                }
+            }
         }
         Text(
             t.name,
@@ -676,22 +778,367 @@ private fun SearchGrid(titles: List<Title>, adultOpen: Boolean, onOpen: (Title) 
     }
 }
 
+/** My List (design pack: filter chips + list rows with play/remove sibling
+    targets). The row body opens details, the teal circle plays, the X
+    removes - three separate focus targets, remote-safe (0.21 lesson). */
 @Composable
-private fun MyListGrid(titles: List<Title>, adultOpen: Boolean, onOpen: (Title) -> Unit) {
+private fun MyListView(
+    titles: List<Title>,
+    adultOpen: Boolean,
+    big: Boolean,
+    onOpen: (Title) -> Unit,
+    onPlay: (Title) -> Unit,
+    onRemove: (Title) -> Unit,
+) {
+    var filter by remember { mutableStateOf("all") }
     val shown = titles.filter { !it.adult || adultOpen }
-    if (shown.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("My List is empty - add titles from any Details screen", color = Dim)
+    val counts = mapOf(
+        "all" to shown.size,
+        "movie" to shown.count { it.type == "movie" },
+        "tv" to shown.count { it.type == "tv" },
+        "anime" to shown.count { it.type == "anime" },
+    )
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
+        ) {
+            Text(
+                "MY LIST",
+                color = Color.White,
+                fontWeight = FontWeight.Black,
+                fontSize = if (big) 22.sp else 18.sp,
+                letterSpacing = 1.sp,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                shown.size.toString() + " SAVED",
+                color = Accent,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (big) 12.sp else 10.sp,
+                letterSpacing = 1.5.sp,
+            )
         }
-        return
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            listOf("all" to "All", "movie" to "Movies", "tv" to "TV Shows", "anime" to "Anime").forEach { (key, label) ->
+                val on = filter == key
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .focusRing(RoundedCornerShape(50), pop = false)
+                        .background(if (on) Accent else Pill, RoundedCornerShape(50))
+                        .clickable { filter = key }
+                        .padding(horizontal = if (big) 16.dp else 12.dp, vertical = if (big) 10.dp else 8.dp),
+                ) {
+                    Text(
+                        label,
+                        color = if (on) Ink else Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (big) 14.sp else 12.sp,
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        (counts[key] ?: 0).toString(),
+                        color = if (on) Ink.copy(alpha = 0.7f) else Dim,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (big) 12.sp else 10.sp,
+                    )
+                }
+            }
+        }
+        val filtered = when (filter) {
+            "movie" -> shown.filter { it.type == "movie" }
+            "tv" -> shown.filter { it.type == "tv" }
+            "anime" -> shown.filter { it.type == "anime" }
+            else -> shown
+        }
+        if (filtered.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    if (shown.isEmpty()) "My List is empty - add titles from any Details screen"
+                    else "Nothing in this filter yet",
+                    color = Dim,
+                    fontFamily = BodyFont,
+                )
+            }
+            return@Column
+        }
+        LazyColumn(
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(filtered, key = { it.type + "-" + it.id }) { t ->
+                MyListRow(t, big, onOpen, onPlay, onRemove)
+            }
+        }
     }
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(if (AppEnv.isTv) 170.dp else 128.dp),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxSize(),
+}
+
+@Composable
+private fun MyListRow(
+    t: Title,
+    big: Boolean,
+    onOpen: (Title) -> Unit,
+    onPlay: (Title) -> Unit,
+    onRemove: (Title) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Card),
     ) {
-        items(shown, key = { it.type + "-" + it.id }) { t -> PosterCard(t, onOpen) }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .weight(1f)
+                .focusRing(RoundedCornerShape(16.dp))
+                .clickable { onOpen(t) }
+                .padding(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(if (big) 78.dp else 64.dp)
+                    .height(if (big) 110.dp else 92.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Pill),
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(true).build(),
+                    contentDescription = t.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(5.dp)
+                        .background(Color(0xE60B111E), RoundedCornerShape(50))
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        when (t.type) {
+                            "movie" -> "Movie"
+                            "anime" -> "Anime"
+                            else -> "TV"
+                        },
+                        color = Accent,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    t.name,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (big) 17.sp else 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    listOf(
+                        if (t.year > 0) t.year.toString() else "",
+                        when (t.type) {
+                            "movie" -> "Movie"
+                            "anime" -> "Anime"
+                            else -> "TV Series"
+                        },
+                    ).filter { it.isNotEmpty() }.joinToString("  \u2022  "),
+                    color = Dim,
+                    fontFamily = BodyFont,
+                    fontSize = if (big) 12.sp else 11.sp,
+                    maxLines = 1,
+                )
+                if (t.vote > 0) {
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.Star,
+                            contentDescription = null,
+                            tint = Accent,
+                            modifier = Modifier.size(if (big) 13.dp else 11.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            String.format("%.1f", t.vote),
+                            color = Soft,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = if (big) 12.sp else 11.sp,
+                        )
+                    }
+                }
+            }
+        }
+        // Play + remove are SIBLING targets beside the row body.
+        Box(
+            modifier = Modifier
+                .size(if (big) 52.dp else 44.dp)
+                .focusRing(CircleShape)
+                .glow(CircleShape, elevation = 10.dp)
+                .background(Accent, CircleShape)
+                .clickable { onPlay(t) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.PlayArrow,
+                contentDescription = "Play",
+                tint = Ink,
+                modifier = Modifier.size(if (big) 26.dp else 22.dp),
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Box(
+            modifier = Modifier
+                .padding(end = if (big) 14.dp else 10.dp)
+                .size(if (big) 48.dp else 40.dp)
+                .focusRing(CircleShape)
+                .background(Pill, CircleShape)
+                .clickable { onRemove(t) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Remove",
+                tint = Color.White,
+                modifier = Modifier.size(if (big) 20.dp else 16.dp),
+            )
+        }
+    }
+}
+
+/** TV shell left rail (design pack android_tv_home): logo + search, the
+    five sections as glowing icon buttons, the parental lock at the bottom.
+    Every target is 56dp+ and focus-ring'd for the D-pad. */
+@Composable
+private fun TvRail(
+    section: Section,
+    onSection: (Section) -> Unit,
+    onSearchToggle: () -> Unit,
+    adultOpen: Boolean,
+    onAdultToggle: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(84.dp)
+            .fillMaxSize()
+            .background(Color(0xFF0E1524))
+            .padding(vertical = 12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .background(Accent, RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.PlayArrow, contentDescription = "StreamBox", tint = Ink, modifier = Modifier.size(26.dp))
+        }
+        Spacer(modifier = Modifier.height(18.dp))
+        RailBtn(Icons.Filled.Search, "Search", on = false, onClick = onSearchToggle)
+        Spacer(modifier = Modifier.height(10.dp))
+        Section.values().forEach { s ->
+            RailBtn(s.icon, s.label, on = s == section) { onSection(s) }
+            Spacer(modifier = Modifier.height(10.dp))
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        RailBtn(Icons.Filled.Lock, "Adults-only gate", on = adultOpen, tint = Amber, onClick = onAdultToggle)
+    }
+}
+
+@Composable
+private fun RailBtn(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    on: Boolean,
+    tint: Color = if (on) Ink else Dim,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .focusRing(CircleShape, pop = false)
+            .background(if (on) Accent else Color.Transparent, CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(24.dp))
+    }
+}
+
+/** TV status strip (design pack: device line + clock pill). */
+@Composable
+private fun TvStatusBar() {
+    var clock by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        val fmt = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.US)
+        while (true) {
+            clock = fmt.format(java.util.Date())
+            kotlinx.coroutines.delay(30000)
+        }
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .padding(horizontal = 24.dp),
+    ) {
+        Box(modifier = Modifier.size(9.dp).background(Accent, CircleShape))
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            "ANDROID TV",
+            color = Color.White,
+            fontWeight = FontWeight.Black,
+            fontSize = 13.sp,
+            letterSpacing = 2.sp,
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .background(Pill, RoundedCornerShape(50))
+                .padding(horizontal = 14.dp, vertical = 7.dp),
+        ) {
+            Text("CLOCK", color = Dim, fontWeight = FontWeight.Bold, fontSize = 10.sp, letterSpacing = 1.5.sp)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(clock, color = Color.White, fontWeight = FontWeight.Black, fontSize = 13.sp)
+        }
+    }
+}
+
+/** TV browse legend (design pack 10-foot HUD key caps). */
+@Composable
+private fun TvLegend() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+    ) {
+        KeyChip("OK")
+        Text("Select", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.width(12.dp))
+        KeyChip("\u25B2  \u25BC")
+        Text("Navigate", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.width(12.dp))
+        KeyChip("BACK")
+        Text("Back", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.weight(1f))
+        Text(
+            "STREAMBOX 10-FOOT UI",
+            color = Color(0xFF3B4A63),
+            fontWeight = FontWeight.Bold,
+            fontSize = 10.sp,
+            letterSpacing = 1.5.sp,
+        )
     }
 }
