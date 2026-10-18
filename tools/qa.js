@@ -35,7 +35,10 @@
    20 circular focus targets draw circles only: round buttons use
       focusRingCircle (pure drawCircle traces) and the app root keeps the
       default indication off (NoIndication) - the 0.34 TV bug where square
-      highlight plates showed behind round rail/X buttons */
+      highlight plates showed behind round rail/X buttons
+   21 player resume boots at the SAVED position: the WebView/HLS boots pass
+      resumeAt (derived from Store progress) - the 0.34 bug where the boot
+      hardcoded 0f and Continue Watching restarted the title */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -357,6 +360,22 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("default indication disabled (no square state-layer plates)");
   } else {
     bad("NoIndication missing - the default indication draws square plates behind round buttons on TV");
+  }
+}
+
+/* ---------- 21. player resume boots at the saved position ---------- */
+{
+  const psResume = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psResume) bad("PlayerScreen.kt missing - resume boot cannot be verified");
+  else {
+    if (/val resumeAt = run \{[\s\S]*?Store\.progressList\(ctx\)/.test(psResume)) ok("resumeAt derives from saved Store progress");
+    else bad("resumeAt missing - the player must boot at the saved position");
+    if (/playerUrl\(title, epSeason, epNumber, mal, ani, mirror, resumeAt,/.test(psResume)) ok("WebView boot loads at resumeAt");
+    else bad("WebView boot does not pass resumeAt to playerUrl - Continue Watching would restart at 0");
+    if (/mirror, 0f, anipmLang/.test(psResume)) bad("playerUrl boot call hardcodes 0f - pass resumeAt");
+    else ok("no hardcoded 0f start at the player boot");
+    if (/load\(startAt = resumeAt\)/.test(psResume)) ok("HLS slot boots at resumeAt");
+    else bad("HLS boot missing resumeAt");
   }
 }
 

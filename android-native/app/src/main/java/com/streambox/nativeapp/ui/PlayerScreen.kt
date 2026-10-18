@@ -287,6 +287,12 @@ private fun vidsrcUrl(host: String, title: Title, season: Int, ep: Int, st: Int)
     return path + "?autoplay=1" + (if (st > 0) "&startAt=" + st else "")
 }
 
+/** Mirrors whose embed URL itself carries the resume position (startAt /
+    start). Everything else (cinesrc, vidrift) gets ONE deferred seek when
+    the player reports ready - so a provider switch never loses the spot. */
+private fun urlCarriesStart(m: String): Boolean =
+    m == "vidzen" || m == "vidbolt" || m == "anipm" || m == "vidcore" || m.startsWith("vidsrc") || m == "hls"
+
 private fun fmt(s: Float): String {
     val total = s.toInt().coerceAtLeast(0)
     val h = total / 3600
@@ -604,8 +610,20 @@ fun PlayerScreen(
     val ctx = LocalContext.current
     val big = AppEnv.isTv
 
+    // Resume (Continue Watching / Detail Resume / My List): playback boots
+    // at the SAVED spot for THIS episode (or this movie) - 0.35 fix, the
+    // WebView boot hardcoded 0f so Continue Watching silently restarted
+    // the title. Opening a different episode than the saved one starts it
+    // fresh; anime rides the same seam (anipm carries start= in its URL).
+    val resumeAt = run {
+        val sp = Store.progressList(ctx).firstOrNull { it.type == title.type && it.id == title.id }
+        if (sp != null && sp.cur > 5f &&
+            (title.type == "movie" || (sp.season == season && sp.episode == episode))
+        ) sp.cur else 0f
+    }
+
     var playing by remember { mutableStateOf(true) }
-    var cur by remember { mutableFloatStateOf(0f) }
+    var cur by remember { mutableFloatStateOf(resumeAt) }
     var dur by remember { mutableFloatStateOf(0f) }
     var muted by remember { mutableStateOf(false) }
     var rateIdx by remember { mutableIntStateOf(0) }
@@ -628,8 +646,9 @@ fun PlayerScreen(
     var lastSave by remember { mutableStateOf(0L) }
     // Active mirror (website routing): per-title default; a mid-session
     // switch never changes the next title's primary.
+    val bootMirror = if (AppEnv.hlsTest) "hls" else defaultMirror(title, mal, ani)
     var mirror by remember {
-        mutableStateOf(if (AppEnv.hlsTest) "hls" else defaultMirror(title, mal, ani))
+        mutableStateOf(bootMirror)
     }
     var showServers by remember { mutableStateOf(false) }
     val serverList = remember(title.id, title.type, mal, ani) {
@@ -639,8 +658,11 @@ fun PlayerScreen(
     // the next allowed mirror (never loops - one hop per title).
     var gotMedia by remember { mutableStateOf(false) }
     var hopped by remember { mutableStateOf(false) }
-    // One deferred seek for mirrors without URL startAt (provider switches).
-    var pendingSeek by remember { mutableStateOf(-1f) }
+    // One deferred seek for mirrors without URL startAt (provider switches
+    // AND the boot resume on URL-less mirrors like cinesrc/vidrift).
+    var pendingSeek by remember {
+        mutableStateOf(if (resumeAt > 0f && !urlCarriesStart(bootMirror)) resumeAt else -1f)
+    }
     // Netflix behavior: chrome fades while playing after idle; any touch/key
     // wakes it; it STAYS up while paused or while you are using it.
     var chromeVisible by remember { mutableStateOf(true) }
@@ -750,9 +772,7 @@ fun PlayerScreen(
         // Mirrors whose URL carries startAt (vidzen/vidbolt/anipm) keep the
         // position themselves; the rest get one seek when the player reports
         // ready - switching providers never loses your place (task rule).
-        val urlCarriesStart = mirror == "vidzen" || mirror == "vidbolt" || mirror == "anipm" ||
-            mirror == "vidcore" || mirror.startsWith("vidsrc") || mirror == "hls"
-        pendingSeek = if (startAt > 0f && !urlCarriesStart) startAt else -1f
+        pendingSeek = if (startAt > 0f && !urlCarriesStart(mirror)) startAt else -1f
         if (mirror == "hls") {
             // The HLS slot carries its own start position - no deferred seek
             // and no WebView. hlsLoaded latches here so the surface's boot
@@ -795,10 +815,12 @@ fun PlayerScreen(
         if (hopped) return
         val fb = fallbackChain(mirror).firstOrNull { it != mirror && serverList.contains(it) } ?: return
         hopped = true
+        val at = cur
         mirror = fb
-        cur = 0f
         playing = true
-        load()
+        // The auto-hop keeps the spot (task rule: switching providers never
+        // loses your place) - it used to reset to 0 like a fresh play.
+        load(startAt = at)
     }
 
     // Startup watchdog: no media in 30s (bad route, website page, dead
@@ -934,46 +956,50 @@ fun PlayerScreen(
     // key), straight to backups when it is empty/capped/missing - TSDB
     // (keyless) then BetaSeries (TV only). Manual re-run pill bumps bsTick.
     var bsTick by remember { mutableIntStateOf(0) }
+    suspend fun fetchSubChain(): Pair<String, List<WyzItem>> {
+        val isTv = title.type != "movie"
+        var note = ""
+        var items = try {
+            withContext(Dispatchers.IO) {
+                Wyz.search(
+                    title.id,
+                    wyzLang,
+                    if (isTv) epSeason else null,
+                    if (isTv) epNumber else null,
+                )
+            }
+        } catch (e: Exception) {
+            note = when {
+                (e.message ?: "").contains("429") -> "Wyzie is capped (1,000/day) - showing backups."
+                (e.message ?: "").contains("503") -> "Wyzie key not set - showing backups."
+                else -> "Wyzie failed - showing backups."
+            }
+            listOf()
+        }
+        if (items.isEmpty()) {
+            items = withContext(Dispatchers.IO) {
+                val tsdb = runCatching {
+                    Backups.tsdbFind(
+                        title.id, isTv, wyzLang,
+                        if (isTv) epSeason else null,
+                        if (isTv) epNumber else null,
+                    )
+                }.getOrDefault(listOf())
+                if (tsdb.isNotEmpty()) tsdb
+                else if (isTv) runCatching {
+                    Backups.bsFind(title.id, wyzLang, epSeason, epNumber)
+                }.getOrDefault(listOf())
+                else listOf()
+            }
+            if (items.isNotEmpty() && note.isEmpty()) note = "No Wyzie results - showing backups."
+        }
+        return note to items
+    }
     LaunchedEffect(showSubs, wyzLang, title.id, epSeason, epNumber, bsTick) {
         if (showSubs) {
             wyzBusy = true
             subMsg = ""
-            val isTv = title.type != "movie"
-            var note = ""
-            var items = try {
-                withContext(Dispatchers.IO) {
-                    Wyz.search(
-                        title.id,
-                        wyzLang,
-                        if (isTv) epSeason else null,
-                        if (isTv) epNumber else null,
-                    )
-                }
-            } catch (e: Exception) {
-                note = when {
-                    (e.message ?: "").contains("429") -> "Wyzie is capped (1,000/day) - showing backups."
-                    (e.message ?: "").contains("503") -> "Wyzie key not set - showing backups."
-                    else -> "Wyzie failed - showing backups."
-                }
-                listOf()
-            }
-            if (items.isEmpty()) {
-                items = withContext(Dispatchers.IO) {
-                    val tsdb = runCatching {
-                        Backups.tsdbFind(
-                            title.id, isTv, wyzLang,
-                            if (isTv) epSeason else null,
-                            if (isTv) epNumber else null,
-                        )
-                    }.getOrDefault(listOf())
-                    if (tsdb.isNotEmpty()) tsdb
-                    else if (isTv) runCatching {
-                        Backups.bsFind(title.id, wyzLang, epSeason, epNumber)
-                    }.getOrDefault(listOf())
-                    else listOf()
-                }
-                if (items.isNotEmpty() && note.isEmpty()) note = "No Wyzie results - showing backups."
-            }
+            val (note, items) = fetchSubChain()
             wyzItems = items
             subMsg = when {
                 items.isEmpty() && note.isEmpty() -> "No subtitles found - load a .srt/.vtt file below."
@@ -986,18 +1012,38 @@ fun PlayerScreen(
 
     // Per-episode memory: restore the last URL-backed subtitle pick when the
     // episode opens (website behavior). A manual local file can't be re-read
-    // after a restart, so only chain picks persist.
+    // after a restart, so only chain picks persist. Movies + TV shows with
+    // no saved pick AUTO-LOAD the chain's first hit (0.35 request) - captions
+    // on from the first frame without opening the Subs sheet. Anime keeps
+    // its embed's own captioning (a Faulconer dub has no business carrying
+    // forced English text).
     LaunchedEffect(title.id, epSeason, epNumber) {
         val pick = withContext(Dispatchers.IO) {
-            runCatching {
-                Store.subPick(ctx, title.type, title.id, epSeason, epNumber)
-            }.getOrNull()
-        } ?: return@LaunchedEffect
-        val text = withContext(Dispatchers.IO) {
-            runCatching { Wyz.fetchFile(pick.url) }.getOrNull()
+            runCatching { Store.subPick(ctx, title.type, title.id, epSeason, epNumber) }.getOrNull()
         }
-        if (text != null && subs == null) {
-            setSub(pick.name, pick.lang, Subs.parse(text))
+        if (pick != null) {
+            val text = withContext(Dispatchers.IO) {
+                runCatching { Wyz.fetchFile(pick.url) }.getOrNull()
+            }
+            if (text != null && subs == null) {
+                setSub(pick.name, pick.lang, Subs.parse(text))
+                return@LaunchedEffect
+            }
+        }
+        if (title.type == "anime" || subs != null) return@LaunchedEffect
+        val first = fetchSubChain().second.firstOrNull() ?: return@LaunchedEffect
+        val text = withContext(Dispatchers.IO) {
+            runCatching { Wyz.fetchFile(first.url) }.getOrNull()
+        } ?: return@LaunchedEffect
+        if (subs == null) {
+            val lang = first.display.ifEmpty { wyzLang.uppercase() }
+            setSub(first.release, lang, Subs.parse(text))
+            // Remember it as THIS episode's pick so reopening restores the
+            // same file instead of spending the chain again.
+            Store.saveSubPick(
+                ctx, title.type, title.id, epSeason, epNumber,
+                SubPick(first.url, first.release, lang),
+            )
         }
     }
 
@@ -1217,7 +1263,7 @@ fun PlayerScreen(
                 LaunchedEffect(hp) {
                     if (!hlsLoaded) {
                         hlsLoaded = true
-                        load()
+                        load(startAt = resumeAt)
                     }
                 }
                 HlsSurface(
@@ -1511,7 +1557,7 @@ fun PlayerScreen(
                         }
                         false
                     }
-                    loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, 0f, anipmLang, cinesrcQ), mirror)
+                    loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, resumeAt, anipmLang, cinesrcQ), mirror)
                     web = this
                 }
             },
