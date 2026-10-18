@@ -1496,6 +1496,7 @@ fun PlayerScreen(
                 color = Accent,
                 fontWeight = FontWeight.Black,
                 fontSize = if (big) 15.sp else 12.sp,
+                letterSpacing = 1.5.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1556,6 +1557,7 @@ fun PlayerScreen(
                     modifier = Modifier
                         .size(if (big) 92.dp else 76.dp)
                         .focusRing(CircleShape)
+                        .glow(CircleShape)
                         .background(Accent, CircleShape)
                         .clickable { if (!playing) togglePlay() },
                     contentAlignment = Alignment.Center,
@@ -1583,7 +1585,9 @@ fun PlayerScreen(
                 Row(modifier = Modifier.padding(bottom = 8.dp)) {
                     val label = when {
                         hit.kind == "credits" -> hit.label
-                        hit.end != null -> hit.label + " - " + fmt(hit.end)
+                        // Design pack: the pill counts DOWN the range
+                        // ("Skip Intro  2:04"), not the end timestamp.
+                        hit.end != null -> hit.label + "  " + fmt((hit.end - cur).coerceAtLeast(0f))
                         else -> hit.label
                     }
                     Row(
@@ -1608,8 +1612,14 @@ fun PlayerScreen(
             if (chromeVisible) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    fmt(if (scrub >= 0) scrub else cur) + " / " + fmt(dur),
-                    color = Color.White,
+                    fmt(if (scrub >= 0) scrub else cur),
+                    color = Accent,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (big) 16.sp else 13.sp,
+                )
+                Text(
+                    "  /  " + fmt(dur),
+                    color = Dim,
                     fontWeight = FontWeight.Bold,
                     fontSize = if (big) 15.sp else 12.sp,
                 )
@@ -1639,6 +1649,12 @@ fun PlayerScreen(
                     fontWeight = FontWeight.Bold,
                     fontSize = if (big) 15.sp else 12.sp,
                 )
+                Text(
+                    "  (" + fmt(dur) + ")",
+                    color = Dim,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (big) 12.sp else 10.sp,
+                )
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1649,6 +1665,7 @@ fun PlayerScreen(
                         .size(if (big) 56.dp else 48.dp)
                         .focusRequester(playFR)
                         .focusRing(CircleShape)
+                        .glow(CircleShape, elevation = 12.dp)
                         .background(Accent, CircleShape)
                         .clickable { togglePlay() },
                     contentAlignment = Alignment.Center,
@@ -1717,12 +1734,34 @@ fun PlayerScreen(
                     }
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                BarPill(MIRROR_NAMES[mirror] ?: mirror, big) { showServers = true }
+                // Live server dot + name (design pack: "● AniPM").
+                BarPill("\u25CF  " + (MIRROR_NAMES[mirror] ?: mirror), big) { showServers = true }
                 BarPill("Subs", big) { showSubs = true }
                 BarPill("Episodes", big, icon = Icons.Filled.Menu) { showEps = true }
                 BarPill("Home", big) {
                     save(if (scrub >= 0) scrub else cur, dur)
                     onHome()
+                }
+            }
+            // 10-foot legend (design pack): the remote map as key chips, so
+            // TV users always know what OK / L-R / U-D / BACK do here.
+            if (big) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    KeyChip("OK")
+                    Text("Play/Pause", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    KeyChip("\u25C0  \u25B6")
+                    Text("Seek", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    KeyChip("\u25B2  \u25BC")
+                    Text("Navigate", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    KeyChip("BACK")
+                    Text("Home", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
             }
@@ -2129,5 +2168,23 @@ private fun BarPill(
             Spacer(modifier = Modifier.width(6.dp))
         }
         Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = if (big) 15.sp else 12.sp)
+    }
+}
+
+/** Tiny key cap for the TV remote legend (design pack 10-foot HUD). */
+@Composable
+private fun KeyChip(label: String) {
+    Box(
+        modifier = Modifier
+            .background(Glass, RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    ) {
+        Text(
+            label,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 10.sp,
+            letterSpacing = 0.5.sp,
+        )
     }
 }
