@@ -1488,7 +1488,7 @@ fun PlayerScreen(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(12.dp)
-                .background(Color(0xCC0B1426), RoundedCornerShape(12.dp))
+                .background(Color(0xCC0B111E), RoundedCornerShape(12.dp))
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Text(
@@ -1573,7 +1573,7 @@ fun PlayerScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Color(0x000B1426), Color(0xE60B1426))))
+                .background(Brush.verticalGradient(listOf(Color(0x000B111E), Color(0xE60B111E))))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
             // Skip pill - visible ONLY inside intro/recap/credits. TV: its own
@@ -1630,7 +1630,7 @@ fun PlayerScreen(
                     colors = SliderDefaults.colors(
                         thumbColor = Accent,
                         activeTrackColor = Accent,
-                        inactiveTrackColor = Color(0xFF24374F),
+                        inactiveTrackColor = Color(0xFF243247),
                     ),
                 )
                 Text(
@@ -1773,6 +1773,7 @@ fun PlayerScreen(
                             Text(
                                 "  intros/recaps skip themselves",
                                 color = Dim,
+                                fontFamily = BodyFont,
                                 fontSize = 11.sp,
                             )
                         }
@@ -1846,12 +1847,13 @@ fun PlayerScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     if (subMsg.isNotEmpty()) {
-                        Text(subMsg, color = Color(0xFFF6C177), fontSize = 11.sp)
+                        Text(subMsg, color = Amber, fontFamily = BodyFont, fontSize = 11.sp)
                         Spacer(modifier = Modifier.height(6.dp))
                     } else {
                         Text(
                             "Same title, different releases - pick yours for exact sync.",
                             color = Dim,
+                            fontFamily = BodyFont,
                             fontSize = 11.sp,
                         )
                         Spacer(modifier = Modifier.height(6.dp))
@@ -2061,7 +2063,7 @@ fun PlayerScreen(
                 Column(
                     modifier = Modifier
                         .padding(20.dp)
-                        .background(Color(0xFF0B1426), RoundedCornerShape(16.dp))
+                        .background(Ink, RoundedCornerShape(16.dp))
                         .padding(16.dp)
                         .verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -2097,7 +2099,7 @@ private fun CircleBtn(label: String, big: Boolean, onClick: () -> Unit) {
         modifier = Modifier
             .size(if (big) 68.dp else 58.dp)
             .focusRing(CircleShape)
-            .background(Color(0x990B1426), CircleShape)
+            .background(Color(0x990B111E), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

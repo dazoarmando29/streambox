@@ -99,14 +99,14 @@ fun DetailScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
-                        Brush.verticalGradient(listOf(Color(0x330B1426), Color(0xB30B1426), Ink)),
+                        Brush.verticalGradient(listOf(Color(0x330B111E), Color(0xB30B111E), Ink)),
                     )
             )
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
-                        Brush.horizontalGradient(listOf(Color(0xB30B1426), Color(0x000B1426))),
+                        Brush.horizontalGradient(listOf(Color(0xB30B111E), Color(0x000B111E))),
                     )
             )
             Column(
@@ -153,6 +153,7 @@ fun DetailScreen(
                     Text(
                         title.overview,
                         color = Soft,
+                        fontFamily = BodyFont,
                         fontSize = if (big) 16.sp else 13.sp,
                         maxLines = 4,
                         overflow = TextOverflow.Ellipsis,
@@ -190,7 +191,7 @@ fun DetailScreen(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
-                        .background(Color(0x33F6C177), RoundedCornerShape(10.dp))
+                        .background(Color(0x33F5A623), RoundedCornerShape(10.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 ) {
                     Text(
@@ -198,7 +199,7 @@ fun DetailScreen(
                             "loading" -> "Matching anime id..."
                             else -> "No anime mapping - play goes through VidRift."
                         },
-                        color = Color(0xFFF6C177),
+                        color = Amber,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                     )

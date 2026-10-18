@@ -26,7 +26,10 @@
       website never references it, mirrorsFor never lists "hls", every way
       into the slot is gated on the hidden AppEnv.hlsTest flag, and the
       build never opts in to media3's UnstableApi (doc marker - the opt-in
-      flag itself warns) */
+      flag itself warns)
+   18 native sources stay free of the C-to-o corruption signature (a 0.23
+      bulk-replace flattened its pairs into characters and rewrote every
+      capital C in App.kt - Column->oolumn, Color->oolor) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -292,6 +295,24 @@ else {
   if (!/opt-in=androidx\.media3/.test(bg)) ok("no media3 opt-in flag (UnstableApi is not an opt-in marker)");
   else bad("build.gradle.kts opts in to androidx.media3.* - that annotation is not an opt-in marker and warns");
 }
+
+/* ---------- 18. native sources free of the C-to-o corruption signature ---------- */
+const corruptHits = [];
+const walkCorrupt = (d) => {
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = path.join(d, e.name);
+    if (e.isDirectory()) walkCorrupt(p);
+    else if (e.name.endsWith(".kt")) {
+      const src = fs.readFileSync(p, "utf8");
+      if (/oolumn|oolor|oomposable|darkoolor|Roundedoorner|oompositionLocalProvider|Streamoolors|oenterVertically/.test(src)) {
+        corruptHits.push(path.relative(ROOT, p).replace(/\\/g, "/"));
+      }
+    }
+  }
+};
+if (fs.existsSync(natSrcRoot)) walkCorrupt(natSrcRoot);
+if (!corruptHits.length) ok("native sources free of the C-to-o corruption signature");
+else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " - rewrite the file, never bulk-replace identifiers"));
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

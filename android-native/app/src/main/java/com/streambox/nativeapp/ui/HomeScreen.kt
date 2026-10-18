@@ -217,7 +217,7 @@ fun BrowseScreen(
             error != null -> Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
-            ) { Text(error ?: "", color = Dim) }
+            ) { Text(error ?: "", color = Dim, fontFamily = BodyFont) }
             searchMode && submitted.isNotBlank() -> SearchGrid(results, adultOpen, onOpen)
             section == Section.MYLIST -> MyListGrid(myList, adultOpen, onOpen)
             else -> Feed(rows, cont, adultOpen, big, onOpen, onPlay, onResume,
@@ -246,7 +246,7 @@ private fun TopBar(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (big) Color(0xFF0E1B2E) else Ink)
+            .background(if (big) Color(0xFF0E1524) else Ink)
             .height(if (big) 68.dp else 56.dp)
             .padding(horizontal = if (big) 20.dp else 14.dp),
     ) {
@@ -288,7 +288,7 @@ private fun TopBar(
             Icon(
                 Icons.Filled.Lock,
                 contentDescription = "Adults-only gate",
-                tint = if (adultOpen) Accent else Color(0xFFF6C177),
+                tint = if (adultOpen) Accent else Amber,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -320,7 +320,7 @@ private fun NavTab(label: String, on: Boolean, onClick: () -> Unit) {
             .height(52.dp)
             .focusRing(RoundedCornerShape(12.dp), pop = false)
             .background(
-                if (on) Color(0x2214B8A6) else Color.Transparent,
+                if (on) Color(0x2200F0B5) else Color.Transparent,
                 RoundedCornerShape(12.dp),
             )
             .clickable(onClick = onClick)
@@ -355,7 +355,7 @@ private fun SearchField(input: String, onInput: (String) -> Unit, onSubmit: () -
         shape = RoundedCornerShape(24.dp),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = Accent,
-            unfocusedBorderColor = Color(0xFF24374F),
+            unfocusedBorderColor = Color(0xFF243247),
             focusedContainerColor = Card,
             unfocusedContainerColor = Card,
             focusedTextColor = Color.White,
@@ -414,7 +414,7 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.verticalGradient(listOf(Color(0x330B1426), Color(0xCC0B1426), Ink)),
+                    Brush.verticalGradient(listOf(Color(0x330B111E), Color(0xCC0B111E), Ink)),
                 )
         )
         // Website hero: a left-side wash so the text block always reads.
@@ -422,7 +422,7 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.horizontalGradient(listOf(Color(0xB30B1426), Color(0x000B1426))),
+                    Brush.horizontalGradient(listOf(Color(0xB30B111E), Color(0x000B111E))),
                 )
         )
         Column(
@@ -470,6 +470,7 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                 Text(
                     t.overview,
                     color = Soft,
+                    fontFamily = BodyFont,
                     fontSize = if (big) 15.sp else 13.sp,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,

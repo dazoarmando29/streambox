@@ -1,9 +1,6 @@
 package com.streambox.nativeapp.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,42 +22,29 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.streambox.nativeapp.AppEnv
 import com.streambox.nativeapp.api.Title
 
-/* Design tokens - same palette as the website. */
-val Accent = Color(0xFF14B8A6)
-val Ink = Color(0xFF0B1426)
-val Card = Color(0xFF132138)
-val Pill = Color(0xFF1D2C44)
-val Dim = Color(0xFF8FA3BF)
-val Soft = Color(0xFFC6D3E5)
-
+/* Design tokens live in Theme.kt (Obsidian Glow Cinematic). */
 enum class Section(val label: String, val icon: ImageVector) {
     HOME("Home", Icons.Filled.Home),
     MOVIES("Movies", Icons.Filled.Movie),
@@ -79,9 +63,9 @@ private val StreamColors = darkColorScheme(
     primary = Accent,
     onPrimary = Ink,
     background = Ink,
-    onBackground = Color(0xFFE8EEF7),
+    onBackground = Soft,
     surface = Card,
-    onSurface = Color(0xFFE8EEF7),
+    onSurface = Soft,
 )
 
 @Composable
@@ -93,7 +77,10 @@ fun StreamBoxApp() {
         screen = Screen.Player(t, season, episode, mal, ani)
     }
 
+    // Space Grotesk is the house voice (titles, labels, numerics): every
+    // Text inherits it; long-form copy opts into BodyFont at the call site.
     MaterialTheme(colorScheme = StreamColors) {
+        CompositionLocalProvider(LocalTextStyle provides TextStyle(fontFamily = DisplayFont)) {
         Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
             when (val s = screen) {
                 is Screen.Browse -> Column(modifier = Modifier.fillMaxSize()) {
@@ -142,11 +129,12 @@ fun StreamBoxApp() {
                 )
             }
         }
+        }
     }
 }
 
-/** Phone navigation: a floating rounded pill bar with an accent chip on the
-    active tab (modern mobile pattern; TV gets the website's top tab bar). */
+/** Phone navigation: a frosted glass dock with a glowing teal pill on the
+    active tab (Obsidian Glow); TV gets the website's top tab bar. */
 @Composable
 private fun BottomNav(current: Section, onPick: (Section) -> Unit) {
     Box(
@@ -158,7 +146,7 @@ private fun BottomNav(current: Section, onPick: (Section) -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF16243C), RoundedCornerShape(26.dp))
+                .background(Card, RoundedCornerShape(26.dp))
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
@@ -170,7 +158,7 @@ private fun BottomNav(current: Section, onPick: (Section) -> Unit) {
                         .weight(1f)
                         .focusRing(RoundedCornerShape(18.dp), pop = false)
                         .background(
-                            if (on) Color(0x2E14B8A6) else Color.Transparent,
+                            if (on) Color(0x3300F0B5) else Color.Transparent,
                             RoundedCornerShape(18.dp),
                         )
                         .clickable { onPick(s) }
@@ -196,47 +184,6 @@ private fun BottomNav(current: Section, onPick: (Section) -> Unit) {
     }
 }
 
-/** D-pad comfort: a teal ring + a gentle pop on whatever the remote is on.
-    Both ANIMATE (the old 0.dp border was a Skia hairline AND the scale
-    snapped instantly - both felt broken on TV). The ring is stroked along
-    the node's own shape so it hugs pills, circles and posters exactly. */
-fun Modifier.focusRing(
-    shape: Shape = RoundedCornerShape(16.dp),
-    pop: Boolean = true,
-): Modifier = composed {
-    var focused by remember { mutableStateOf(false) }
-    val ring by animateFloatAsState(
-        targetValue = if (focused) 1f else 0f,
-        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
-        label = "focusRing",
-    )
-    val scale by animateFloatAsState(
-        targetValue = if (focused && pop) 1.06f else 1f,
-        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "focusPop",
-    )
-    onFocusChanged { focused = it.isFocused }
-        .scale(scale)
-        .drawWithContent {
-            drawContent()
-            if (ring > 0f) {
-                val stroke = Stroke(width = 3.dp.toPx())
-                val c = Accent.copy(alpha = ring)
-                when (val o = shape.createOutline(size, layoutDirection, this)) {
-                    is Outline.Rectangle -> drawRect(color = c, style = stroke)
-                    is Outline.Rounded -> drawRoundRect(
-                        color = c,
-                        topLeft = Offset(o.roundRect.left, o.roundRect.top),
-                        size = Size(o.roundRect.width, o.roundRect.height),
-                        cornerRadius = o.roundRect.topLeftCornerRadius,
-                        style = stroke,
-                    )
-                    is Outline.Generic -> drawPath(o.path, color = c, style = stroke)
-                }
-            }
-        }
-}
-
 /** Pill button in the website's style. */
 @Composable
 fun PillButton(
@@ -251,9 +198,10 @@ fun PillButton(
     val h = if (big) 54.dp else 46.dp
     // Solid pills everywhere (website style): "outline" keeps its name but
     // renders as the soft gray fill - drawn borders are gone for good.
+    // The accent pill blooms (Obsidian Glow primary CTA).
     val bg = when {
         accent -> Accent
-        outline -> Color(0xFF24344E)
+        outline -> Color(0xFF243247)
         else -> Pill
     }
     val fg = if (accent) Ink else Color.White
@@ -261,6 +209,7 @@ fun PillButton(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
         modifier = modifier
+            .then(if (accent) Modifier.glow(RoundedCornerShape(50)) else Modifier)
             .height(h)
             .focusRing(RoundedCornerShape(50))
             .background(bg, RoundedCornerShape(50))
@@ -271,6 +220,6 @@ fun PillButton(
             Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(if (big) 22.dp else 18.dp))
             Spacer(modifier = Modifier.width(8.dp))
         }
-        Text(label, color = fg, fontWeight = FontWeight.Black, fontSize = if (big) 17.sp else 14.sp)
+        Text(label, color = fg, fontWeight = FontWeight.Bold, fontSize = if (big) 17.sp else 14.sp)
     }
 }
