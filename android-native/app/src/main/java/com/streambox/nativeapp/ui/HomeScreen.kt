@@ -210,6 +210,7 @@ fun BrowseScreen(
                     searchMode && submitted.isNotBlank() -> SearchGrid(results, adultOpen, onOpen)
                     section == Section.MYLIST -> MyListView(
                         titles = myList,
+                        cont = cont,
                         adultOpen = adultOpen,
                         big = big,
                         onOpen = onOpen,
@@ -778,12 +779,14 @@ private fun SearchGrid(titles: List<Title>, adultOpen: Boolean, onOpen: (Title) 
     }
 }
 
-/** My List (design pack: filter chips + list rows with play/remove sibling
-    targets). The row body opens details, the teal circle plays, the X
-    removes - three separate focus targets, remote-safe (0.21 lesson). */
+/** My List (design pack): filter chips + list rows on phone; on TV the
+    mock's media-card grid with Resume and remove as sibling targets. The
+    row/card body opens details, the teal circle plays, the X removes -
+    three separate focus targets, remote-safe (0.21 lesson). */
 @Composable
 private fun MyListView(
     titles: List<Title>,
+    cont: List<Progress>,
     adultOpen: Boolean,
     big: Boolean,
     onOpen: (Title) -> Unit,
@@ -866,13 +869,174 @@ private fun MyListView(
             }
             return@Column
         }
-        LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxSize(),
+        if (big) {
+            // TV (design pack My List): media-card grid - thumb + chips +
+            // progress, then Resume and remove as sibling targets below.
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(320.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(filtered, key = { it.type + "-" + it.id }) { t ->
+                    val p = cont.firstOrNull { it.type == t.type && it.id == t.id }
+                    MyListCard(t, p, onOpen, onPlay, onRemove)
+                }
+            }
+        } else {
+            LazyColumn(
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(filtered, key = { it.type + "-" + it.id }) { t ->
+                    MyListRow(t, big, onOpen, onPlay, onRemove)
+                }
+            }
+        }
+    }
+}
+
+/** TV My List media card (design pack): 16:9 art with chips + watch
+    progress, title/meta/status, then sibling Resume + remove targets. */
+@Composable
+private fun MyListCard(
+    t: Title,
+    p: Progress?,
+    onOpen: (Title) -> Unit,
+    onPlay: (Title) -> Unit,
+    onRemove: (Title) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Card),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRing(RoundedCornerShape(18.dp))
+                .clickable { onOpen(t) },
         ) {
-            items(filtered, key = { it.type + "-" + it.id }) { t ->
-                MyListRow(t, big, onOpen, onPlay, onRemove)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp)
+                    .background(Pill),
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(true).build(),
+                    contentDescription = t.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                        .background(Color(0xE60B111E), RoundedCornerShape(50))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        when (t.type) {
+                            "movie" -> "Movie"
+                            "anime" -> "Anime"
+                            else -> "TV"
+                        },
+                        color = Accent,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                    )
+                }
+                if (t.vote > 0) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .background(Color(0xD90B111E), RoundedCornerShape(50))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    ) {
+                        Icon(Icons.Filled.Star, contentDescription = null, tint = Accent, modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            String.format("%.1f", t.vote),
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
+                if (p != null && p.dur > 0 && p.cur > 5) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth(fraction = (p.cur / p.dur).coerceIn(0.05f, 1f))
+                            .height(4.dp)
+                            .background(Accent),
+                    )
+                }
+            }
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                Text(
+                    t.name,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    when {
+                        p == null -> "Unwatched"
+                        p.dur > 0 && p.cur > 5 -> (p.cur / p.dur * 100).toInt().toString() + "% watched"
+                        else -> "S" + p.season + ":E" + p.episode + " ready"
+                    },
+                    color = if (p != null) Accent else Dim,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .focusRing(RoundedCornerShape(50))
+                    .background(Accent, RoundedCornerShape(50))
+                    .clickable { onPlay(t) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            ) {
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    contentDescription = "Play",
+                    tint = Ink,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    if (p != null && p.cur > 5) "Resume" else "Play",
+                    color = Ink,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 12.sp,
+                )
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .focusRing(CircleShape)
+                    .background(Pill, CircleShape)
+                    .clickable { onRemove(t) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(16.dp))
             }
         }
     }
