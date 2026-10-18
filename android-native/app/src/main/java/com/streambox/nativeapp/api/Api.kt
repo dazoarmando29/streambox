@@ -155,6 +155,26 @@ object Api {
             "anime"
         )
 
+    /** Shows with at least one EPISODE that aired in the last 7 days (real
+        TMDB episode air dates - discover's air_date filter looks across all
+        episodes, so long-runners like Doraemon qualify the week they drop).
+        Drives the New Episodes row + badges in the TV/Anime areas. */
+    fun newEpisodes(anime: Boolean): List<Title> {
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        val cal = java.util.Calendar.getInstance()
+        val end = fmt.format(cal.time)
+        cal.add(java.util.Calendar.DAY_OF_YEAR, -7)
+        val start = fmt.format(cal.time)
+        return titlesFrom(
+            get(
+                "/api/tmdb/3/discover/tv?air_date.gte=" + start + "&air_date.lte=" + end +
+                    "&sort_by=popularity.desc" +
+                    (if (anime) "&with_genres=16&with_original_language=ja" else "")
+            ).getJSONArray("results"),
+            if (anime) "anime" else "tv"
+        )
+    }
+
     fun search(query: String, typeOverride: String?): List<Title> =
         titlesFrom(
             get("/api/tmdb/3/search/multi?query=" + java.net.URLEncoder.encode(query, "UTF-8"))

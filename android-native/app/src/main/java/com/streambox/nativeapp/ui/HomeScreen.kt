@@ -1,5 +1,8 @@
 package com.streambox.nativeapp.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -47,12 +50,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -71,9 +76,12 @@ import com.streambox.nativeapp.data.Progress
 import com.streambox.nativeapp.data.Store
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Session memory of catalog rows: Back-from-player and tab switches paint
@@ -100,11 +108,13 @@ private fun rowPlan(section: Section): List<Pair<String, () -> List<Title>>> = w
         "Top Rated Movies" to { Api.topRatedMovies() },
     )
     Section.TV -> listOf(
+        "New Episodes" to { Api.newEpisodes(false) },
         "Trending Shows" to { Api.trending().filter { it.type != "movie" } },
         "Popular Shows" to { Api.popularTv() },
         "Top Rated Shows" to { Api.topRatedTv() },
     )
     Section.ANIME -> listOf(
+        "New Episodes" to { Api.newEpisodes(true) },
         "Popular Anime" to { Api.anime() },
         "Top Rated Anime" to { Api.animeTop() },
     )
@@ -336,7 +346,7 @@ private fun TopBar(
         Box(
             modifier = Modifier
                 .size(if (big) 46.dp else 42.dp)
-                .focusRing(CircleShape)
+                .focusRingCircle()
                 .background(Pill, CircleShape)
                 .clickable { onAdultToggle() },
             contentAlignment = Alignment.Center,
@@ -435,6 +445,12 @@ private fun Feed(
 ) {
     val hero = rows.firstOrNull()?.second?.firstOrNull { !it.adult || adultOpen }
         ?: rows.firstOrNull()?.second?.firstOrNull()
+    // Titles whose real TMDB episode air dates land in the last 7 days ride
+    // a NEW EPISODES badge in the TV/Anime areas (the New Episodes row is
+    // the same feed - no extra request, nothing invented).
+    val newIds: Set<Int> = remember(rows) {
+        rows.firstOrNull { it.first == "New Episodes" }?.second?.map { it.id }?.toSet() ?: setOf()
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 20.dp),
@@ -451,7 +467,7 @@ private fun Feed(
         items(rows, key = { it.first }) { (label, titles) ->
             val shown = titles.filter { !it.adult || adultOpen }
             if (shown.isNotEmpty()) {
-                PosterRow(label, shown, onOpen)
+                PosterRow(label, shown, newIds, onOpen)
             }
         }
     }
@@ -577,25 +593,25 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
         )
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(cont, key = { it.type + "-" + it.id }) { p ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .width(if (big) 320.dp else 250.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Card),
-                ) {
-                    // The resume area and the clear X are SIBLING focus
-                    // targets. Nesting the X inside the card's clickable made
-                    // it unreachable by D-pad (bug report 0.21).
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // The resume card is a STANDALONE glass card and the
+                    // clear X is its SIBLING outside it (same remote-safe
+                    // split as My List). The old shared card+X container put
+                    // the focus ring inside a parent clip, so the ring
+                    // wrapped the card mid-body and popped into its edges -
+                    // the "horrible border" TV bug report (0.34). Now the
+                    // ring hugs the card and blooms past it cleanly.
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .weight(1f)
+                            .width(if (big) 258.dp else 204.dp)
                             .focusRequester(frs.getOrPut(p.type + "-" + p.id) { FocusRequester() })
-                            .focusRing(RoundedCornerShape(12.dp))
+                            .focusRing(RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Card)
                             .clickable { onResume(p) }
                             .padding(8.dp),
                     ) {
@@ -641,19 +657,22 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                                 maxLines = 1,
                             )
                             Text(
-                                if (p.dur > 0 && p.cur > 5) (p.cur / p.dur * 100).toInt().toString() + "% watched"
-                                else "Not started",
+                                if (p.dur > 0 && p.cur > 5) {
+                                    val leftM = maxOf(1, ((p.dur - p.cur) / 60f).toInt())
+                                    (p.cur / p.dur * 100).toInt().toString() + "% watched  \u2022  " + leftM + "m left"
+                                } else "Not started",
                                 color = Accent,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
                     Box(
                         modifier = Modifier
-                            .padding(end = if (big) 10.dp else 8.dp)
                             .size(if (big) 44.dp else 34.dp)
-                            .focusRing(CircleShape)
+                            .focusRingCircle(pop = false)
                             .background(Pill, CircleShape)
                             .clickable { onRemove(p) },
                         contentAlignment = Alignment.Center,
@@ -704,7 +723,7 @@ fun SectionHeader(label: String, right: String? = null) {
 }
 
 @Composable
-private fun PosterRow(label: String, titles: List<Title>, onOpen: (Title) -> Unit) {
+private fun PosterRow(label: String, titles: List<Title>, newIds: Set<Int>, onOpen: (Title) -> Unit) {
     Column {
         SectionHeader(label)
         LazyRow(
@@ -712,14 +731,14 @@ private fun PosterRow(label: String, titles: List<Title>, onOpen: (Title) -> Uni
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(titles, key = { it.type + "-" + it.id }) { t ->
-                PosterCard(t, onOpen)
+                PosterCard(t, onOpen, newEp = t.type != "movie" && t.id in newIds)
             }
         }
     }
 }
 
 @Composable
-fun PosterCard(t: Title, onOpen: (Title) -> Unit) {
+fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false) {
     Column(
         modifier = Modifier.width(if (AppEnv.isTv) 170.dp else 128.dp),
     ) {
@@ -763,6 +782,26 @@ fun PosterCard(t: Title, onOpen: (Title) -> Unit) {
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 10.sp,
+                    )
+                }
+            }
+            // NEW EPISODES: real TMDB episode air dates inside the last 7
+            // days (TV/Anime areas) - so a dropped episode is visible while
+            // browsing any row, not only the New Episodes row.
+            if (newEp) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(6.dp)
+                        .background(Accent, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        "NEW EPISODES",
+                        color = Ink,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 9.sp,
+                        letterSpacing = 0.5.sp,
                     )
                 }
             }
@@ -1050,7 +1089,7 @@ private fun MyListCard(
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .focusRing(CircleShape)
+                    .focusRingCircle()
                     .background(Pill, CircleShape)
                     .clickable { onRemove(t) },
                 contentAlignment = Alignment.Center,
@@ -1165,7 +1204,7 @@ private fun MyListRow(
         Box(
             modifier = Modifier
                 .size(if (big) 52.dp else 44.dp)
-                .focusRing(CircleShape)
+                .focusRingCircle()
                 .glow(CircleShape, elevation = 10.dp)
                 .background(Accent, CircleShape)
                 .clickable { onPlay(t) },
@@ -1183,7 +1222,7 @@ private fun MyListRow(
             modifier = Modifier
                 .padding(end = if (big) 14.dp else 10.dp)
                 .size(if (big) 48.dp else 40.dp)
-                .focusRing(CircleShape)
+                .focusRingCircle()
                 .background(Pill, CircleShape)
                 .clickable { onRemove(t) },
             contentAlignment = Alignment.Center,
@@ -1200,7 +1239,10 @@ private fun MyListRow(
 
 /** TV shell left rail (design pack android_tv_home): logo + search, the
     five sections as glowing icon buttons, the parental lock at the bottom.
-    Every target is 56dp+ and focus-ring'd for the D-pad. */
+    While the remote is inside the rail it opens a little and shows the
+    labels (Home / Movies / TV Shows / Anime / My List), then folds back to
+    icon-only - a short hold after the last focus loss keeps it from
+    flickering between buttons (0.34 request). */
 @Composable
 private fun TvRail(
     section: Section,
@@ -1209,13 +1251,21 @@ private fun TvRail(
     adultOpen: Boolean,
     onAdultToggle: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    var expanded by remember { mutableStateOf(false) }
+    var foldJob by remember { mutableStateOf<Job?>(null) }
+    val railW by animateFloatAsState(
+        targetValue = if (expanded) 200f else 84f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "railWidth",
+    )
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
+        horizontalAlignment = Alignment.Start,
         modifier = Modifier
-            .width(84.dp)
+            .width(railW.dp)
             .fillMaxSize()
             .background(Color(0xFF0E1524))
-            .padding(vertical = 12.dp),
+            .padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 10.dp),
     ) {
         Box(
             modifier = Modifier
@@ -1226,14 +1276,42 @@ private fun TvRail(
             Icon(Icons.Filled.PlayArrow, contentDescription = "StreamBox", tint = Ink, modifier = Modifier.size(26.dp))
         }
         Spacer(modifier = Modifier.height(18.dp))
-        RailBtn(Icons.Filled.Search, "Search", on = false, onClick = onSearchToggle)
+        val onRailFocus: (Boolean) -> Unit = { focused ->
+            foldJob?.cancel()
+            if (focused) {
+                expanded = true
+            } else {
+                foldJob = scope.launch {
+                    delay(250)
+                    expanded = false
+                }
+            }
+        }
+        RailBtn(Icons.Filled.Search, "Search", on = false, expanded = expanded, onFocus = onRailFocus, onClick = onSearchToggle)
         Spacer(modifier = Modifier.height(10.dp))
         Section.values().forEach { s ->
-            RailBtn(s.icon, s.label, on = s == section) { onSection(s) }
+            RailBtn(
+                s.icon,
+                when (s) {
+                    Section.TV -> "TV Shows"
+                    else -> s.label
+                },
+                on = s == section,
+                expanded = expanded,
+                onFocus = onRailFocus,
+            ) { onSection(s) }
             Spacer(modifier = Modifier.height(10.dp))
         }
         Spacer(modifier = Modifier.weight(1f))
-        RailBtn(Icons.Filled.Lock, "Adults-only gate", on = adultOpen, tint = Amber, onClick = onAdultToggle)
+        RailBtn(
+            Icons.Filled.Lock,
+            "Adults-Only",
+            on = adultOpen,
+            expanded = expanded,
+            tint = Amber,
+            onFocus = onRailFocus,
+            onClick = onAdultToggle,
+        )
     }
 }
 
@@ -1242,18 +1320,33 @@ private fun RailBtn(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     on: Boolean,
+    expanded: Boolean,
     tint: Color = if (on) Ink else Dim,
+    onFocus: (Boolean) -> Unit,
     onClick: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .size(56.dp)
-            .focusRing(CircleShape, pop = false)
-            .background(if (on) Accent else Color.Transparent, CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(24.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .onFocusChanged { onFocus(it.isFocused) }
+                .focusRingCircle(pop = false)
+                .background(if (on) Accent else Color.Transparent, CircleShape)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(24.dp))
+        }
+        if (expanded) {
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                label,
+                color = if (on) Accent else Soft,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                maxLines = 1,
+            )
+        }
     }
 }
 

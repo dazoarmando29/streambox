@@ -1592,7 +1592,7 @@ fun PlayerScreen(
                 Box(
                     modifier = Modifier
                         .size(if (big) 92.dp else 76.dp)
-                        .focusRing(CircleShape)
+                        .focusRingCircle()
                         .glow(CircleShape)
                         .background(Accent, CircleShape)
                         .clickable { if (!playing) togglePlay() },
@@ -1700,7 +1700,7 @@ fun PlayerScreen(
                     modifier = Modifier
                         .size(if (big) 56.dp else 48.dp)
                         .focusRequester(playFR)
-                        .focusRing(CircleShape)
+                        .focusRingCircle()
                         .glow(CircleShape, elevation = 12.dp)
                         .background(Accent, CircleShape)
                         .clickable { togglePlay() },
@@ -1723,7 +1723,7 @@ fun PlayerScreen(
                 Box(
                     modifier = Modifier
                         .size(if (big) 56.dp else 48.dp)
-                        .focusRing(CircleShape)
+                        .focusRingCircle()
                         .background(Pill, CircleShape)
                         .clickable {
                             muted = !muted
@@ -2074,7 +2074,7 @@ fun PlayerScreen(
                             Box(
                                 modifier = Modifier
                                     .then(if (i == 0) Modifier.focusRequester(subsFirstFR) else Modifier)
-                                    .focusRing(CircleShape)
+                                    .focusRing(RoundedCornerShape(50))
                                     .background(if (on) Accent else Pill, CircleShape)
                                     .clickable { wyzLang = code }
                                     .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -2437,7 +2437,7 @@ private fun CircleBtn(label: String, big: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(if (big) 68.dp else 58.dp)
-            .focusRing(CircleShape)
+            .focusRingCircle()
             .background(Color(0x990B111E), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,

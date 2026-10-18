@@ -1,6 +1,8 @@
 package com.streambox.nativeapp.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.IndicationNodeFactory
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,7 +38,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.node.DelegatableNode
+import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -75,6 +80,24 @@ private val StreamColors = darkColorScheme(
     onSurface = Soft,
 )
 
+/** No-op indication: the default ripple/hover state layer draws its bounded
+    region as a SQUARE plate behind round buttons on TV (0.34 bug report).
+    Every target here carries its own ring/glow as feedback, so content
+    draws untouched and nothing else paints. */
+private object NoIndication : IndicationNodeFactory {
+    override fun create(interactionSource: androidx.compose.foundation.interaction.InteractionSource): DelegatableNode =
+        NoIndicationNode()
+
+    override fun equals(other: Any?): Boolean = other === this
+    override fun hashCode(): Int = 0
+}
+
+private class NoIndicationNode : Modifier.Node(), DrawModifierNode {
+    override fun ContentDrawScope.draw() {
+        drawContent()
+    }
+}
+
 @Composable
 fun StreamBoxApp() {
     var section by remember { mutableStateOf(Section.HOME) }
@@ -87,7 +110,14 @@ fun StreamBoxApp() {
     // Space Grotesk is the house voice (titles, labels, numerics): every
     // Text inherits it; long-form copy opts into BodyFont at the call site.
     MaterialTheme(colorScheme = StreamColors) {
-        CompositionLocalProvider(LocalTextStyle provides TextStyle(fontFamily = DisplayFont)) {
+        CompositionLocalProvider(
+            LocalTextStyle provides TextStyle(fontFamily = DisplayFont),
+            // The default ripple/hover indication draws its bounded state
+            // layer as a SQUARE plate behind round buttons on TV (0.34 bug
+            // report). Every target here carries its own ring/glow, so the
+            // default indication is switched off app-wide.
+            LocalIndication provides NoIndication,
+        ) {
         Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
             when (val s = screen) {
                 is Screen.Browse -> Column(modifier = Modifier.fillMaxSize()) {

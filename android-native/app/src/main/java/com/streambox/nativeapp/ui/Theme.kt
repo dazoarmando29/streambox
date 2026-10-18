@@ -111,3 +111,40 @@ fun Modifier.focusRing(
             }
         }
 }
+
+/** Round focus ring for round targets (rail buttons, X/Play circles): pure
+    drawCircle traces, so a circular control can NEVER pick up a boxy
+    outline or plate - the 0.34 TV bug where square highlights showed
+    behind the round rail/X buttons. Same 3-stroke bloom language as
+    focusRing, same gentle pop. */
+fun Modifier.focusRingCircle(pop: Boolean = true): Modifier = composed {
+    var focused by remember { mutableStateOf(false) }
+    val ring by animateFloatAsState(
+        targetValue = if (focused) 1f else 0f,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "focusRingCircle",
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (focused && pop) 1.06f else 1f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "focusPopCircle",
+    )
+    onFocusChanged { focused = it.isFocused }
+        .scale(scale)
+        .drawWithContent {
+            drawContent()
+            if (ring > 0f) {
+                val r = size.minDimension / 2f
+                fun trace(width: Dp, alpha: Float) {
+                    drawCircle(
+                        color = Accent.copy(alpha = alpha * ring),
+                        radius = r,
+                        style = Stroke(width = width.toPx()),
+                    )
+                }
+                trace(10.dp, 0.16f)
+                trace(5.dp, 0.32f)
+                trace(2.5.dp, 0.95f)
+            }
+        }
+}

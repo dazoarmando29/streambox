@@ -31,7 +31,11 @@
       bulk-replace flattened its pairs into characters and rewrote every
       capital C in App.kt - Column->oolumn, Color->oolor)
    19 native CineSrc quality cycle matches the QLEVELS contract: only
-      ""/1080/720/480 - 2160 is never sent anywhere */
+      ""/1080/720/480 - 2160 is never sent anywhere
+   20 circular focus targets draw circles only: round buttons use
+      focusRingCircle (pure drawCircle traces) and the app root keeps the
+      default indication off (NoIndication) - the 0.34 TV bug where square
+      highlight plates showed behind round rail/X buttons */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -323,6 +327,37 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   const vals = m ? [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]) : null;
   if (vals && vals.join(",") === ",1080,720,480") ok("native CineSrc quality cycle is only \"\"/1080/720/480");
   else bad("native CINE_Q drifted from QLEVELS \"\"/1080/720/480 (never send 2160)");
+}
+
+/* ---------- 20. circular focus targets draw circles only ---------- */
+{
+  const boxyRings = [];
+  const walkRing = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walkRing(p);
+      else if (e.name.endsWith(".kt")) {
+        const src = fs.readFileSync(p, "utf8");
+        if (/focusRing\(\s*CircleShape/.test(src)) {
+          boxyRings.push(path.relative(ROOT, p).replace(/\\/g, "/"));
+        }
+      }
+    }
+  };
+  if (fs.existsSync(natSrcRoot)) walkRing(natSrcRoot);
+  if (!boxyRings.length) ok("round targets use focusRingCircle (drawCircle traces only)");
+  else boxyRings.forEach((f) => bad("focusRing(CircleShape) in " + f + " - round targets must use focusRingCircle (shape traces render boxy plates)"));
+  const themeSrc = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"))
+    ? read("android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt") : "";
+  if (/fun Modifier\.focusRingCircle\(/.test(themeSrc)) ok("focusRingCircle defined in Theme.kt");
+  else bad("focusRingCircle missing from Theme.kt");
+  const appSrc = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
+    ? read("android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt") : "";
+  if (/LocalIndication provides NoIndication/.test(appSrc) && /object NoIndication : IndicationNodeFactory/.test(appSrc)) {
+    ok("default indication disabled (no square state-layer plates)");
+  } else {
+    bad("NoIndication missing - the default indication draws square plates behind round buttons on TV");
+  }
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

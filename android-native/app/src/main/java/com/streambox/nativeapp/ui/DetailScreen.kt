@@ -1085,7 +1085,7 @@ private fun GlassCircle(size: Dp, icon: androidx.compose.ui.graphics.vector.Imag
     Box(
         modifier = Modifier
             .size(size)
-            .focusRing(CircleShape)
+            .focusRingCircle()
             .background(Glass, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
