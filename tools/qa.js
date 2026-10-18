@@ -42,7 +42,10 @@
    22 native never hardcodes unreported quality claims: the design mocks
       carry 4K/Atmos/HDR/Dolby chips but the house rule is "never label 4K
       unless reported", so those strings may never appear as native labels
-      (real player-reported ladders like AniPM heights still render) */
+      (real player-reported ladders like AniPM heights still render)
+   23 the no-media watchdog hops only after 30s of TOTAL silence (media
+      traffic + provider protocol keep it patient) - the 0.36 bug where a
+      fixed 30s timer threw slow AniPM/CineSrc loads over to VidRift */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -401,6 +404,20 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   if (fs.existsSync(natSrcRoot)) walkClaim(natSrcRoot);
   if (!claimHits.length) ok("native labels never hardcode 4K/Atmos/HDR/Dolby claims");
   else claimHits.forEach((x) => bad("unreported quality claim in native UI: " + x + " (never label 4K unless reported)"));
+}
+
+/* ---------- 23. watchdog hops only on real silence ---------- */
+{
+  const psW = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psW) bad("PlayerScreen.kt missing - watchdog cannot be verified");
+  else {
+    if (/lastMediaAt/.test(psW) && /idleFor/.test(psW)) ok("watchdog is idle-based (media traffic keeps it patient)");
+    else bad("watchdog lost its media-traffic patience - slow loads must never hop mirrors");
+    if (/delay\(30000\)[\s\S]{0,80}if \(!gotMedia\) hopMirror\(\)/.test(psW)) bad("fixed 30s hop timer is back - hop only after 30s of silence");
+    else ok("no fixed 30s hop timer");
+    if (/t\.startsWith\("anipm:"\)/.test(psW)) ok("provider protocol traffic counts as media life");
+    else bad("anipm protocol traffic must count as media life (wrapped players hop away otherwise)");
+  }
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

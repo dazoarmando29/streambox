@@ -38,8 +38,13 @@ data class Ep(
 /** One cast member (detail rail): name + role + portrait when TMDB has it. */
 data class CastMem(val name: String, val role: String, val photo: String?)
 
-/** One season in the Season Directory (real TMDB counts). */
-data class SeasonInfo(val n: Int, val count: Int, val name: String)
+/** One season in the Season Directory (real TMDB counts). air is the
+    season's first air date - a future date means the whole season is a
+    Coming Soon schedule entry, never a play target. */
+data class SeasonInfo(val n: Int, val count: Int, val name: String, val air: String = "")
+
+/** One crew member (Creator & Showrunner card): name + real TMDB job. */
+data class CrewMem(val name: String, val job: String)
 
 /** One TMDB video (trailer / extra clip, YouTube keys only). */
 data class VideoInfo(val key: String, val name: String, val kind: String)
@@ -255,7 +260,7 @@ object Api {
                     val s = sArr.optJSONObject(i) ?: continue
                     val n = s.optInt("season_number", 0)
                     if (n <= 0) continue
-                    seasons.add(SeasonInfo(n, s.optInt("episode_count", 0), s.optString("name", "")))
+                    seasons.add(SeasonInfo(n, s.optInt("episode_count", 0), s.optString("name", ""), s.optString("air_date", "")))
                 }
             }
             val comp = o.optJSONArray("production_companies")
@@ -356,6 +361,29 @@ object Api {
             val name = o.optString("name", "")
             if (name.isBlank()) continue
             out.add(CastMem(name, o.optString("character", ""), img(o, "profile_path", IMG_W185)))
+        }
+        return out
+    }
+
+    /** Creator & Showrunner card (design pack): the real people behind the
+        show - TMDB crew filtered to the credits that name them. */
+    fun crew(type: String, id: Int): List<CrewMem> {
+        val kind = if (type == "movie") "movie" else "tv"
+        val arr = get("/api/tmdb/3/" + kind + "/" + id + "/credits").optJSONArray("crew")
+            ?: return listOf()
+        val jobs = listOf("Creator", "Showrunner", "Director", "Executive Producer")
+        val out = ArrayList<CrewMem>()
+        val seen = HashSet<String>()
+        for (j in jobs) {
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                if (o.optString("job", "") != j) continue
+                val name = o.optString("name", "")
+                if (name.isBlank() || !seen.add(name)) continue
+                out.add(CrewMem(name, j))
+                break
+            }
+            if (out.size >= 3) break
         }
         return out
     }

@@ -57,6 +57,7 @@ import com.streambox.nativeapp.AppEnv
 import com.streambox.nativeapp.api.Api
 import com.streambox.nativeapp.api.AnimeIds
 import com.streambox.nativeapp.api.CastMem
+import com.streambox.nativeapp.api.CrewMem
 import com.streambox.nativeapp.api.Ep
 import com.streambox.nativeapp.api.SeasonInfo
 import com.streambox.nativeapp.api.TDetail
@@ -95,6 +96,7 @@ fun DetailScreen(
     var episodes by remember { mutableStateOf(listOf<Ep>()) }
     var epsBusy by remember { mutableStateOf(false) }
     var cast by remember { mutableStateOf(listOf<CastMem>()) }
+    var crewList by remember { mutableStateOf(listOf<CrewMem>()) }
     var similar by remember { mutableStateOf(listOf<Title>()) }
     var det by remember { mutableStateOf(TDetail(listOf(), 0, listOf(), "", "", "", listOf())) }
     var saved by remember {
@@ -137,11 +139,15 @@ fun DetailScreen(
             val c = async(Dispatchers.IO) {
                 runCatching { Api.credits(title.type, title.id) }.getOrDefault(listOf())
             }
+            val w = async(Dispatchers.IO) {
+                runCatching { Api.crew(title.type, title.id) }.getOrDefault(listOf())
+            }
             val s = async(Dispatchers.IO) {
                 runCatching { Api.similar(title.type, title.id) }.getOrDefault(listOf())
             }
             det = d.await()
             cast = c.await()
+            crewList = w.await()
             similar = s.await()
         }
     }
@@ -322,48 +328,30 @@ fun DetailScreen(
                             if (title.vote > 0) {
                                 append("\u2605 ")
                                 append(String.format("%.1f", title.vote))
+                                append(" /10")
                             }
                             if (title.year > 0) {
                                 if (isNotEmpty()) append("   \u2022   ")
                                 append(title.year)
                             }
-                            if (title.type == "movie") {
-                                if (det.runtime > 0) {
-                                    if (isNotEmpty()) append("   \u2022   ")
-                                    append(fmtMin(det.runtime))
-                                }
-                            } else {
+                            if (title.type == "movie" && det.runtime > 0) {
                                 if (isNotEmpty()) append("   \u2022   ")
-                                append("S").append(season).append(" E").append(episode)
-                                if (det.seasons.isNotEmpty()) {
-                                    append("   \u2022   ")
-                                    append(det.seasons.size).append(" Seasons")
-                                }
+                                append(fmtMin(det.runtime))
+                            }
+                            // Genres ride the meta line (design pack:
+                            // "9.0 /10 - Sci-Fi - Cyber Thriller - Action").
+                            for (g in det.genres) {
+                                if (isNotEmpty()) append("   \u2022   ")
+                                append(g)
                             }
                         },
                         color = Dim,
                         fontWeight = FontWeight.Medium,
                         fontSize = if (big) 15.sp else 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = if (big) 1100.dp else 560.dp),
                     )
-                    if (det.genres.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(det.genres.size) { i ->
-                                Box(
-                                    modifier = Modifier
-                                        .background(Glass, RoundedCornerShape(50))
-                                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                                ) {
-                                    Text(
-                                        det.genres[i],
-                                        color = Soft,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = if (big) 11.sp else 10.sp,
-                                    )
-                                }
-                            }
-                        }
-                    }
                     if (title.overview.isNotBlank()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
@@ -384,160 +372,124 @@ fun DetailScreen(
                             )
                         }
                     }
-                }
-            }
-        }
-
-        // ---- Resume / Play module ----
-        item {
-            Column(modifier = Modifier.padding(horizontal = if (big) 28.dp else 16.dp, vertical = if (big) 16.dp else 12.dp)) {
-                if (title.type == "anime" && mapping == "ok") {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "AUDIO",
-                            color = Dim,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = if (big) 11.sp else 10.sp,
-                            letterSpacing = 1.5.sp,
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        listOf("sub" to "Sub", "dub" to "Dub").forEach { (key, label) ->
-                            val on = subDub == key
+                    // CTA row (design pack series-details): PLAY + My List +
+                    // Trailer side by side - never stacked full-width.
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (det.aired) {
+                            PillButton(
+                                when {
+                                    rp != null && title.type != "movie" ->
+                                        "Resume S" + rp.season + " E" + rp.episode
+                                    rp != null -> "Resume Movie"
+                                    title.type == "movie" -> "Play Movie"
+                                    else -> "Play S" + season + " E" + episode
+                                },
+                                big,
+                                accent = true,
+                                icon = Icons.Filled.PlayArrow,
+                                modifier = Modifier.weight(1.4f),
+                            ) {
+                                if (title.type != "anime" || mapping != "loading") {
+                                    if (rp != null) {
+                                        onPlay(rp.season, rp.episode, ids?.mal, ids?.ani, langFor)
+                                    } else {
+                                        onPlay(season, episode, ids?.mal, ids?.ani, langFor)
+                                    }
+                                }
+                            }
+                        } else {
+                            // Not out yet (Avengers: Doomsday case): a Coming
+                            // Soon plate where Play would be - My List still
+                            // works right beside it.
+                            Box(
+                                modifier = Modifier
+                                    .weight(1.4f)
+                                    .height(if (big) 54.dp else 46.dp)
+                                    .background(Pill, RoundedCornerShape(50)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "COMING SOON",
+                                    color = Amber,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = if (big) 16.sp else 14.sp,
+                                    letterSpacing = 2.sp,
+                                )
+                            }
+                        }
+                        PillButton(
+                            if (inList) "In My List" else "My List",
+                            big,
+                            icon = if (inList) Icons.Filled.Check else Icons.Filled.Add,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Store.toggleList(ctx, title)
+                            inList = Store.inList(ctx, title.type, title.id)
+                        }
+                        if (trailer != null) {
+                            PillButton("Trailer", big, icon = Icons.Filled.PlayArrow, modifier = Modifier.weight(1f)) {
+                                openTrailer(ctx, trailer.key)
+                            }
+                        } else {
+                            PillButton("Back", big, icon = Icons.AutoMirrored.Filled.ArrowBack, modifier = Modifier.weight(1f)) {
+                                onBack()
+                            }
+                        }
+                    }
+                    if (rp != null && rp.dur > 0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                fmtMin(((rp.dur - rp.cur) / 60).toInt().coerceAtLeast(1)) + " left",
+                                color = Accent,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
-                                    .padding(end = 8.dp)
                                     .focusRing(RoundedCornerShape(50), pop = false)
-                                    .background(if (on) Accent else Pill, RoundedCornerShape(50))
-                                    .clickable { subDub = key }
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    .background(Pill, RoundedCornerShape(50))
+                                    .clickable {
+                                        Store.saveProgress(
+                                            ctx,
+                                            Progress(
+                                                rp.type, rp.id, rp.name, rp.poster, rp.season, rp.episode,
+                                                rp.dur, rp.dur, System.currentTimeMillis(), rp.mal, rp.ani,
+                                            ),
+                                        )
+                                        saved = Store.progressList(ctx)
+                                            .firstOrNull { it.type == title.type && it.id == title.id }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp),
                             ) {
                                 Text(
-                                    label,
-                                    color = if (on) Ink else Color.White,
+                                    "MARK AS WATCHED",
+                                    color = Color.White,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = if (big) 13.sp else 12.sp,
+                                    fontSize = 10.sp,
+                                    letterSpacing = 1.sp,
                                 )
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
-                if (det.aired) {
-                PillButton(
-                    when {
-                        rp != null && title.type != "movie" ->
-                            "Resume S" + rp.season + " E" + rp.episode
-                        rp != null -> "Resume Movie"
-                        title.type == "movie" -> "Play Movie"
-                        else -> "Play S" + season + " E" + episode
-                    },
-                    big,
-                    accent = true,
-                    icon = Icons.Filled.PlayArrow,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (title.type != "anime" || mapping != "loading") {
-                        if (rp != null) {
-                            onPlay(rp.season, rp.episode, ids?.mal, ids?.ani, langFor)
-                        } else {
-                            onPlay(season, episode, ids?.mal, ids?.ani, langFor)
-                        }
-                    }
-                }
-                if (rp != null && rp.dur > 0) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (!det.aired) {
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            fmtMin(((rp.dur - rp.cur) / 60).toInt().coerceAtLeast(1)) + " left",
-                            color = Accent,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
+                            "Not out yet - save it to My List and check back.",
+                            color = Dim,
+                            fontFamily = BodyFont,
+                            fontSize = 11.sp,
                         )
-                        Spacer(modifier = Modifier.weight(1f))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .focusRing(RoundedCornerShape(50), pop = false)
-                                .background(Pill, RoundedCornerShape(50))
-                                .clickable {
-                                    Store.saveProgress(
-                                        ctx,
-                                        Progress(
-                                            rp.type, rp.id, rp.name, rp.poster, rp.season, rp.episode,
-                                            rp.dur, rp.dur, System.currentTimeMillis(), rp.mal, rp.ani,
-                                        ),
-                                    )
-                                    saved = Store.progressList(ctx)
-                                        .firstOrNull { it.type == title.type && it.id == title.id }
-                                }
-                                .padding(horizontal = 12.dp, vertical = 7.dp),
-                        ) {
-                            Text(
-                                "MARK AS WATCHED",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp,
-                                letterSpacing = 1.sp,
-                            )
-                        }
-                    }
-                }
-                } else {
-                    // Not out yet (Avengers: Doomsday case): a Coming Soon
-                    // plate where Play would be - My List below still works.
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(if (big) 54.dp else 46.dp)
-                            .background(Pill, RoundedCornerShape(50)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "COMING SOON",
-                            color = Amber,
-                            fontWeight = FontWeight.Black,
-                            fontSize = if (big) 16.sp else 14.sp,
-                            letterSpacing = 2.sp,
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        "Not out yet - save it to My List and check back.",
-                        color = Dim,
-                        fontFamily = BodyFont,
-                        fontSize = 11.sp,
-                    )
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PillButton(
-                        if (inList) "In My List" else "My List",
-                        big,
-                        icon = if (inList) Icons.Filled.Check else Icons.Filled.Add,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Store.toggleList(ctx, title)
-                        inList = Store.inList(ctx, title.type, title.id)
-                    }
-                    if (trailer != null) {
-                        PillButton(
-                            "Trailer",
-                            big,
-                            icon = Icons.Filled.PlayArrow,
-                            modifier = Modifier.weight(1f),
-                        ) { openTrailer(ctx, trailer.key) }
-                    } else {
-                        PillButton(
-                            "Back",
-                            big,
-                            icon = Icons.AutoMirrored.Filled.ArrowBack,
-                            modifier = Modifier.weight(1f),
-                        ) { onBack() }
                     }
                 }
             }
         }
+
+        // (Play/Resume + My List + Trailer live in the hero CTA row now -
+        // design pack series-details. SUB|DUB moved to the info card.)
 
         // ---- Anime mapping note ----
         if (title.type == "anime" && mapping != "ok") {
@@ -570,42 +522,56 @@ fun DetailScreen(
                     Spacer(modifier = Modifier.height(if (big) 12.dp else 8.dp))
                     if (det.seasons.isNotEmpty()) {
                         Text(
-                            "SEASON DIRECTORY",
-                            color = Dim,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            letterSpacing = 1.5.sp,
+                            "SEASONS & EPISODES",
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            fontSize = if (big) 18.sp else 15.sp,
+                            letterSpacing = 0.5.sp,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
+                        // Design pack season pills: "Season 1  10 Episodes"
+                        // inline; a season whose air date is still in the
+                        // future is a COMING SOON schedule entry.
+                        val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                            .format(java.util.Date())
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(det.seasons.size) { i ->
                                 val s = det.seasons[i]
                                 val on = s.n == season
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                val soon = s.air.isNotBlank() && s.air > todayStr
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
                                         .focusRing(RoundedCornerShape(50), pop = false)
-                                        .background(if (on) Accent else Pill, RoundedCornerShape(50))
-                                        .clickable {
+                                        .background(if (on) Pill else Color(0x1AFFFFFF), RoundedCornerShape(50))
+                                        .then(if (!soon) Modifier.clickable {
                                             season = s.n
                                             episode = 1
-                                        }
-                                        .padding(horizontal = 16.dp, vertical = 9.dp),
+                                        } else Modifier)
+                                        .padding(horizontal = 16.dp, vertical = 10.dp),
                                 ) {
+                                    if (on) {
+                                        Box(modifier = Modifier.size(7.dp).background(Accent, CircleShape))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    }
                                     Text(
                                         "Season " + s.n,
-                                        color = if (on) Ink else Color.White,
-                                        fontWeight = FontWeight.Bold,
+                                        color = if (on) Accent else Color.White,
+                                        fontWeight = FontWeight.Black,
                                         fontSize = if (big) 13.sp else 12.sp,
                                     )
-                                    if (s.count > 0) {
-                                        Text(
-                                            s.count.toString() + " eps",
-                                            color = if (on) Ink.copy(alpha = 0.7f) else Dim,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 9.sp,
-                                        )
-                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        when {
+                                            soon -> "COMING SOON"
+                                            s.count > 0 -> s.count.toString() + " Episodes"
+                                            else -> ""
+                                        },
+                                        color = if (soon) Amber else Dim,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = if (big) 11.sp else 10.sp,
+                                        letterSpacing = if (soon) 1.sp else 0.sp,
+                                    )
                                 }
                             }
                         }
@@ -659,83 +625,121 @@ fun DetailScreen(
             }
         }
 
-        // ---- Top Cast ----
-        if (cast.isNotEmpty()) {
-            item {
-                Column {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(3.dp)
-                                .height(18.dp)
-                                .background(Cyan, RoundedCornerShape(50)),
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
+        // ---- Info card (design pack series-details footer): Creator &
+        // Showrunner, Starring Cast, Audio Streams and Subtitles & CC ----
+        item {
+            Column(modifier = Modifier.padding(horizontal = if (big) 28.dp else 16.dp)) {
+                Spacer(modifier = Modifier.height(if (big) 6.dp else 4.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(if (big) 24.dp else 10.dp),
+                    verticalAlignment = Alignment.Top,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Card, RoundedCornerShape(16.dp))
+                        .padding(if (big) 22.dp else 14.dp),
+                ) {
+                    InfoCol("CREATOR & SHOWRUNNER", Modifier.weight(1f)) {
+                        val lead = crewList.firstOrNull()
                         Text(
-                            "Top Cast",
-                            color = Color.White,
+                            lead?.name ?: "Not reported",
+                            color = if (lead != null) Color.White else Dim,
                             fontWeight = FontWeight.Bold,
-                            fontSize = if (big) 22.sp else 17.sp,
+                            fontSize = if (big) 15.sp else 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
+                        crewList.drop(1).forEach { c ->
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                c.job + ": " + c.name,
+                                color = Dim,
+                                fontFamily = BodyFont,
+                                fontSize = if (big) 12.sp else 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        items(cast.size) { i ->
-                            val m = cast[i]
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.widthIn(max = if (big) 110.dp else 88.dp),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(if (big) 84.dp else 64.dp)
-                                        .background(Pill, CircleShape),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    if (m.photo != null) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(ctx).data(m.photo).crossfade(100).build(),
-                                            contentDescription = m.name,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                        )
-                                    } else {
+                    InfoCol("STARRING CAST", Modifier.weight(1f)) {
+                        if (cast.isEmpty()) {
+                            Text(
+                                "Not reported",
+                                color = Dim,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = if (big) 15.sp else 13.sp,
+                            )
+                        } else {
+                            Text(
+                                cast[0].name,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = if (big) 15.sp else 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                cast.drop(1).take(3).joinToString(", ") { it.name },
+                                color = Dim,
+                                fontFamily = BodyFont,
+                                fontSize = if (big) 12.sp else 11.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    InfoCol("AUDIO STREAMS", Modifier.weight(1f)) {
+                        Text(
+                            det.langs.ifEmpty { "Not reported" },
+                            color = Soft,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = if (big) 13.sp else 12.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (title.type == "anime" && mapping == "ok") {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf("sub" to "Sub", "dub" to "Dub").forEach { (key, label) ->
+                                    val on = subDub == key
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .focusRing(RoundedCornerShape(50), pop = false)
+                                            .background(if (on) Accent else Pill, RoundedCornerShape(50))
+                                            .clickable { subDub = key }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    ) {
                                         Text(
-                                            m.name.take(1).uppercase(),
-                                            color = Accent,
-                                            fontWeight = FontWeight.Black,
-                                            fontSize = if (big) 26.sp else 20.sp,
+                                            label,
+                                            color = if (on) Ink else Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = if (big) 12.sp else 11.sp,
                                         )
                                     }
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    m.name,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = if (big) 12.sp else 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (m.role.isNotBlank()) {
-                                    Text(
-                                        m.role,
-                                        color = Dim,
-                                        fontFamily = BodyFont,
-                                        fontSize = 10.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
                                 }
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(14.dp))
+                    InfoCol("SUBTITLES & CC", Modifier.weight(1f)) {
+                        Text(
+                            "English, Spanish, French, German, Italian, Portuguese + more",
+                            color = Soft,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = if (big) 13.sp else 12.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            "Searchable via Wyzie / TSDB / BetaSeries + manual .srt / .vtt",
+                            color = Dim,
+                            fontFamily = BodyFont,
+                            fontSize = if (big) 12.sp else 11.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -902,6 +906,22 @@ fun DetailScreen(
     }
 }
 
+/** One labeled column of the detail info card (design pack footer). */
+@Composable
+private fun InfoCol(label: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Column(modifier = modifier) {
+        Text(
+            label,
+            color = Dim,
+            fontWeight = FontWeight.Bold,
+            fontSize = 9.sp,
+            letterSpacing = 1.5.sp,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        content()
+    }
+}
+
 /** One cell of the Specifications & Meta card (design pack). */
 @Composable
 private fun SpecCell(label: String, value: String, modifier: Modifier = Modifier, warn: Boolean = false) {
@@ -1001,6 +1021,38 @@ private fun EpisodeRow(
                     )
                 }
             }
+            if (ep.runtime > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .background(Color(0xE60B111E), RoundedCornerShape(50))
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        fmtMin(ep.runtime),
+                        color = Soft,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (big) 10.sp else 9.sp,
+                    )
+                }
+            }
+            if (current && savedDur > 0 && savedCur > 5) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .background(Color(0xE60B111E), RoundedCornerShape(50))
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        "Watched " + (savedCur / savedDur * 100).toInt() + "%",
+                        color = Accent,
+                        fontWeight = FontWeight.Black,
+                        fontSize = if (big) 10.sp else 9.sp,
+                    )
+                }
+            }
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -1021,24 +1073,22 @@ private fun EpisodeRow(
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Design pack numbering: "1. The Awakening".
                 Text(
-                    "E" + ep.n,
+                    ep.n.toString() + ". ",
                     color = Accent,
                     fontWeight = FontWeight.Bold,
-                    fontSize = if (big) 13.sp else 11.sp,
-                    letterSpacing = 1.sp,
+                    fontSize = if (big) 16.sp else 13.sp,
                 )
-                if (ep.name.isNotBlank() && ep.name != "Episode " + ep.n) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        ep.name,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = if (big) 16.sp else 13.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Text(
+                    if (ep.name.isNotBlank() && ep.name != "Episode " + ep.n) ep.name else "Episode " + ep.n,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (big) 16.sp else 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
                 Spacer(modifier = Modifier.weight(1f))
                 if (!ep.aired) {
                     Text(

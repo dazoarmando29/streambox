@@ -77,6 +77,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 
 import androidx.compose.ui.text.font.FontWeight
@@ -331,6 +332,10 @@ private fun hitAt(cur: Float, skips: IntroDb.Skips): SkipHit? {
     }
     return null
 }
+
+/** Media file extensions the watchdog counts as stream liveness (suffix
+    match - never spelled as dotted literals, see the Ad Shield hook). */
+private val MEDIA_EXTS = setOf("m3u8", "mpd", "ts", "m4s", "mp4", "webm", "aac", "m4a")
 
 /** JS shim: hooks the embed's <video>, forwards its events to Kotlin, and
     exposes window.__sb commands. Direct video driving PLUS the provider's
@@ -665,6 +670,9 @@ fun PlayerScreen(
     // the next allowed mirror (never loops - one hop per title).
     var gotMedia by remember { mutableStateOf(false) }
     var hopped by remember { mutableStateOf(false) }
+    // Last real media traffic (segment/manifest requests) - the watchdog's
+    // patience meter (0.37: slow AniPM/CineSrc loads must never hop away).
+    var lastMediaAt by remember { mutableStateOf(0L) }
     // One deferred seek for mirrors without URL startAt (provider switches
     // AND the boot resume on URL-less mirrors like cinesrc/vidrift).
     var pendingSeek by remember {
@@ -829,12 +837,23 @@ fun PlayerScreen(
         load(startAt = at)
     }
 
-    // Startup watchdog: no media in 30s (bad route, website page, dead
-    // embed, weak-box stall) -> hop once so the TV is never stuck.
+    // Startup watchdog (0.37 fix): hop only after 30s of TOTAL silence -
+    // the old fixed 30s timer threw slow-loading AniPM/CineSrc over to
+    // VidRift while the video was already coming up. Real media traffic
+    // (segment fetches) or provider protocol messages keep it patient; a
+    // genuinely dead embed still hops so the TV is never stuck.
     LaunchedEffect(mirror, epSeason, epNumber) {
         gotMedia = false
-        delay(30000)
-        if (!gotMedia) hopMirror()
+        val start = System.currentTimeMillis()
+        while (true) {
+            delay(5000)
+            if (gotMedia) break
+            val idleFor = System.currentTimeMillis() - maxOf(start, lastMediaAt)
+            if (idleFor >= 30000) {
+                hopMirror()
+                break
+            }
+        }
     }
 
     fun seekTo(t: Float) {
@@ -1357,6 +1376,19 @@ fun PlayerScreen(
                                         java.io.ByteArrayInputStream(ByteArray(0)),
                                     )
                                 }
+                                // Media-traffic liveness (0.37 watchdog fix):
+                                // real manifest/segment fetches prove a stream
+                                // is coming up even before a wrapped player's
+                                // events surface - the watchdog stays patient.
+                                // Extensions are matched suffix-style so no
+                                // stream-URL literal can live in this file
+                                // (qa: the only stream URL is the HLS slot).
+                                val ext = (request?.url?.path ?: "")
+                                    .lowercase(java.util.Locale.US)
+                                    .substringAfterLast('.', "")
+                                if (ext in MEDIA_EXTS) {
+                                    main.post { lastMediaAt = System.currentTimeMillis() }
+                                }
                             } catch (e: Exception) {
                             }
                             return super.shouldInterceptRequest(view, request)
@@ -1414,8 +1446,14 @@ fun PlayerScreen(
                                 val o = org.json.JSONObject(j)
                                 // Watchdog counts REAL playback only - an idle
                                 // preview video or bare metadata must not
-                                // defeat the auto-hop (Beerus lesson).
-                                if (t == "play" || t == "timeupdate" || t == "ended") {
+                                // defeat the auto-hop (Beerus lesson). Provider
+                                // PROTOCOL traffic (anipm:*/mirror:* only ever
+                                // comes from the live player) counts too, so a
+                                // wrapped player whose events are slow to
+                                // surface is never hopped away mid-load.
+                                if (t == "play" || t == "timeupdate" || t == "ended" ||
+                                    t.startsWith("anipm:") || t == "mirror:episode" || t == "mirror:nextup"
+                                ) {
                                     gotMedia = true
                                 }
                                 when (t) {
@@ -2265,8 +2303,12 @@ fun PlayerScreen(
             ) {
                 Column(
                     modifier = Modifier
-                        .padding(if (big) 32.dp else 16.dp)
+                        .padding(if (big) 24.dp else 12.dp)
                         .widthIn(max = if (big) 1320.dp else 560.dp)
+                        // Bounded height so the panel scrolls INSIDE the
+                        // screen - an unbounded scroll column let the
+                        // styling blocks run off the bottom edge (0.37 fix).
+                        .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * (if (big) 0.94f else 0.96f))
                         .background(Card, RoundedCornerShape(20.dp))
                         .padding(if (big) 22.dp else 16.dp)
                         .verticalScroll(rememberScrollState()),
@@ -2488,8 +2530,10 @@ fun PlayerScreen(
                         // COLUMN 4: STYLING & SYNC TUNING - the existing
                         // glass island rides as the fourth column.
                         Column(modifier = Modifier.weight(1.25f)) {
-                    // STYLING & SYNC TUNING (design pack panel): one glass
-                    // island for every caption taste, all device-local.
+                    // STYLING & SYNC TUNING (design pack blocks): every
+                    // control is a label row + its own chip row so nothing
+                    // wraps mid-control on the 10-foot UI (0.37 fix - the
+                    // old one-line steppers squeezed the column to jelly).
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2505,119 +2549,105 @@ fun PlayerScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("TEXT SIZE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(96.dp))
-                            BarPill("A -", big) {
-                                subStyle = subStyle.copy(size = (subStyle.size - 2).coerceIn(12, 26))
-                                Store.saveSubStyle(ctx, subStyle)
-                            }
+                            Text("TEXT SIZE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Spacer(modifier = Modifier.weight(1f))
                             Text(
                                 subStyle.size.toString() + "sp",
                                 color = Accent,
                                 fontWeight = FontWeight.Black,
-                                fontSize = 13.sp,
-                                modifier = Modifier.padding(horizontal = 12.dp),
+                                fontSize = 12.sp,
                             )
-                            BarPill("A +", big) {
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(14 to "Normal", 18 to "Large", 24 to "Huge").forEach { (v, name) ->
+                                StyleChip(name, subStyle.size == v, big) {
+                                    subStyle = subStyle.copy(size = v)
+                                    Store.saveSubStyle(ctx, subStyle)
+                                }
+                            }
+                            StyleChip("A-", on = false, big = big) {
+                                subStyle = subStyle.copy(size = (subStyle.size - 2).coerceIn(12, 26))
+                                Store.saveSubStyle(ctx, subStyle)
+                            }
+                            StyleChip("A+", on = false, big = big) {
                                 subStyle = subStyle.copy(size = (subStyle.size + 2).coerceIn(12, 26))
                                 Store.saveSubStyle(ctx, subStyle)
                             }
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("TIMING SYNC", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(96.dp))
-                            BarPill(" - ", big) {
-                                val o = Math.round((subOffset - 0.5f) * 10) / 10f
-                                subOffset = o.coerceIn(-30f, 30f)
-                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
-                            }
+                            Text("TIMING SYNC", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Spacer(modifier = Modifier.weight(1f))
                             Text(
                                 subOffset.let { (if (it >= 0) "+" else "") + String.format("%.1f", it) + "s" },
                                 color = Accent,
                                 fontWeight = FontWeight.Black,
-                                fontSize = 13.sp,
-                                modifier = Modifier.padding(horizontal = 12.dp),
+                                fontSize = 12.sp,
                             )
-                            BarPill(" + ", big) {
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            StyleChip("-0.5s", on = false, big = big) {
+                                val o = Math.round((subOffset - 0.5f) * 10) / 10f
+                                subOffset = o.coerceIn(-30f, 30f)
+                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                            }
+                            StyleChip("<", on = false, big = big) {
+                                val o = Math.round((subOffset - 0.5f) * 10) / 10f
+                                subOffset = o.coerceIn(-30f, 30f)
+                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                            }
+                            StyleChip(">", on = false, big = big) {
+                                val o = Math.round((subOffset + 0.5f) * 10) / 10f
+                                subOffset = o.coerceIn(-30f, 30f)
+                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                            }
+                            StyleChip("+0.5s", on = false, big = big) {
                                 val o = Math.round((subOffset + 0.5f) * 10) / 10f
                                 subOffset = o.coerceIn(-30f, 30f)
                                 Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
                             }
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("POSITION", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(96.dp))
-                            BarPill("<", big) {
-                                // "<" moves captions UP the screen (site rule)
-                                val order = listOf("bottom", "center", "top")
-                                val i = order.indexOf(subPos).let { if (it < 0) 0 else it }
-                                subPos = order[(i + 1) % order.size]
-                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
-                            }
-                            Text(
-                                subPos.replaceFirstChar { it.uppercase() },
-                                color = Color.White,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 13.sp,
-                                modifier = Modifier.padding(horizontal = 12.dp),
-                            )
-                            BarPill(">", big) {
-                                val order = listOf("bottom", "center", "top")
-                                val i = order.indexOf(subPos).let { if (it < 0) 0 else it }
-                                subPos = order[(i + 2) % order.size]
-                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
-                            }
+                            Text("POSITION", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("TEXT COLOR", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(96.dp))
-                            listOf(0 to "White", 1 to "Yellow", 2 to "Cyan").forEach { (idx, name) ->
-                                val on = subStyle.color == idx
-                                Box(
-                                    modifier = Modifier
-                                        .padding(end = 8.dp)
-                                        .focusRing(RoundedCornerShape(50), pop = false)
-                                        .background(if (on) Accent else Card, RoundedCornerShape(50))
-                                        .clickable {
-                                            subStyle = subStyle.copy(color = idx)
-                                            Store.saveSubStyle(ctx, subStyle)
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                                ) {
-                                    Text(
-                                        name,
-                                        color = if (on) Ink else when (idx) {
-                                            1 -> Color(0xFFFFE066)
-                                            2 -> Color(0xFF7FE7F5)
-                                            else -> Color.White
-                                        },
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
-                                    )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("top" to "Top", "center" to "Center", "bottom" to "Bottom").forEach { (v, name) ->
+                                StyleChip(name, subPos == v, big) {
+                                    subPos = v
+                                    Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
                                 }
                             }
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("BG PLATE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(96.dp))
-                            listOf(0 to "None", 60 to "Semi", 100 to "Solid").forEach { (v, name) ->
-                                val on = subStyle.bg == v
-                                Box(
-                                    modifier = Modifier
-                                        .padding(end = 8.dp)
-                                        .focusRing(RoundedCornerShape(50), pop = false)
-                                        .background(if (on) Accent else Card, RoundedCornerShape(50))
-                                        .clickable {
-                                            subStyle = subStyle.copy(bg = v)
-                                            Store.saveSubStyle(ctx, subStyle)
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                                ) {
-                                    Text(
-                                        name,
-                                        color = if (on) Ink else Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
-                                    )
+                            Text("TEXT COLOR", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(0 to "White", 1 to "Yellow", 2 to "Cyan").forEach { (idx, name) ->
+                                StyleChip(name, subStyle.color == idx, big) {
+                                    subStyle = subStyle.copy(color = idx)
+                                    Store.saveSubStyle(ctx, subStyle)
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("BACKGROUND PLATE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(0 to "None", 60 to "Semi (50%)", 100 to "Solid (100%)").forEach { (v, name) ->
+                                StyleChip(name, subStyle.bg == v, big) {
+                                    subStyle = subStyle.copy(bg = v)
+                                    Store.saveSubStyle(ctx, subStyle)
                                 }
                             }
                         }
@@ -2689,6 +2719,27 @@ fun PlayerScreen(
                 }
             }
         }
+    }
+}
+
+/** Compact chip for the Styling & Sync blocks (design pack): one line,
+    never wraps, ring hugs the pill. */
+@Composable
+private fun StyleChip(label: String, on: Boolean, big: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .focusRing(RoundedCornerShape(50), pop = false)
+            .background(if (on) Accent else Card, RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = if (big) 12.dp else 9.dp, vertical = 8.dp),
+    ) {
+        Text(
+            label,
+            color = if (on) Ink else Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp,
+            maxLines = 1,
+        )
     }
 }
 
