@@ -29,7 +29,9 @@
       flag itself warns)
    18 native sources stay free of the C-to-o corruption signature (a 0.23
       bulk-replace flattened its pairs into characters and rewrote every
-      capital C in App.kt - Column->oolumn, Color->oolor) */
+      capital C in App.kt - Column->oolumn, Color->oolor)
+   19 native CineSrc quality cycle matches the QLEVELS contract: only
+      ""/1080/720/480 - 2160 is never sent anywhere */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -313,6 +315,15 @@ const walkCorrupt = (d) => {
 if (fs.existsSync(natSrcRoot)) walkCorrupt(natSrcRoot);
 if (!corruptHits.length) ok("native sources free of the C-to-o corruption signature");
 else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " - rewrite the file, never bulk-replace identifiers"));
+
+/* ---------- 19. native quality cycle matches QLEVELS ---------- */
+{
+  const psq = fs.readFileSync(psPath, "utf8");
+  const m = psq.match(/private val CINE_Q = listOf\(([^)]*)\)/);
+  const vals = m ? [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]) : null;
+  if (vals && vals.join(",") === ",1080,720,480") ok("native CineSrc quality cycle is only \"\"/1080/720/480");
+  else bad("native CINE_Q drifted from QLEVELS \"\"/1080/720/480 (never send 2160)");
+}
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

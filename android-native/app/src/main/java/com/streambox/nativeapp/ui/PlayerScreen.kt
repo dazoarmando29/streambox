@@ -210,11 +210,14 @@ fun playerUrl(
     mirror: String = "",
     startAt: Float = 0f,
     langOverride: String = "",
+    quality: String = "",
 ): String {
     val m = mirror.ifEmpty { defaultMirror(title, mal, ani) }
     val ep = episode.coerceAtLeast(1)
     val st = startAt.toInt().coerceAtLeast(0)
     val stq = if (st > 0) "&startAt=" + st else ""
+    // Sanitize: the cycle contract is the only quality we ever send.
+    val cq = if (quality in CINE_Q && quality.isNotEmpty()) "&quality=" + quality else ""
     return when (m) {
         "anipm" -> {
             // House rule pinned forever: Dragon Ball = English dub with the
@@ -267,9 +270,9 @@ fun playerUrl(
         "vidsrcsh" -> vidsrcUrl("vidsrc.sh", title, season, ep, st)
         "vidsrcapi" -> vidsrcUrl("vidsrc3.created.app", title, season, ep, st)
         else -> if (title.type == "movie") {
-            "https://cinesrc.st/embed/movie/" + title.id + "?controls=false"
+            "https://cinesrc.st/embed/movie/" + title.id + "?controls=false" + cq
         } else {
-            "https://cinesrc.st/embed/tv/" + title.id + "?s=" + season + "&e=" + episode + "&controls=false"
+            "https://cinesrc.st/embed/tv/" + title.id + "?s=" + season + "&e=" + episode + "&controls=false" + cq
         }
     }
 }
@@ -533,6 +536,10 @@ class SBBridge(private val on: (String, String) -> Unit) {
 
 private val RATES = listOf(1f, 1.25f, 1.5f, 2f, 0.5f)
 
+// CineSrc quality cycle (website QLEVELS contract): ONLY ""/1080/720/480.
+// "2160" is never sent anywhere - house rule (qa.js pins both sides).
+private val CINE_Q = listOf("", "1080", "720", "480")
+
 private val SUBLANGS = listOf(
     "en" to "EN", "es" to "ES", "fr" to "FR", "de" to "DE", "ar" to "AR",
     "hi" to "HI", "tl" to "TL", "pt" to "PT", "it" to "IT", "nl" to "NL",
@@ -602,6 +609,9 @@ fun PlayerScreen(
     var dur by remember { mutableFloatStateOf(0f) }
     var muted by remember { mutableStateOf(false) }
     var rateIdx by remember { mutableIntStateOf(0) }
+    // CineSrc quality pick ("" = Auto): rides the embed URL, so a change
+    // reopens at the current position like the startAt seeks.
+    var cinesrcQ by remember { mutableStateOf("") }
     var scrub by remember { mutableFloatStateOf(-1f) }
     var showEps by remember { mutableStateOf(false) }
     var epSeason by remember { mutableIntStateOf(season) }
@@ -766,7 +776,7 @@ fun PlayerScreen(
         main.post {
             try {
                 val w = web ?: return@post
-                loadMirror(w, playerUrl(title, epSeason, epNumber, mal, ani, mirror, startAt, anipmLang), mirror)
+                loadMirror(w, playerUrl(title, epSeason, epNumber, mal, ani, mirror, startAt, anipmLang, cinesrcQ), mirror)
             } catch (e: Exception) {
             }
         }
@@ -1501,7 +1511,7 @@ fun PlayerScreen(
                         }
                         false
                     }
-                    loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, 0f, anipmLang), mirror)
+                    loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, 0f, anipmLang, cinesrcQ), mirror)
                     web = this
                 }
             },
@@ -1740,6 +1750,16 @@ fun PlayerScreen(
                     cmd("window.__sb && window.__sb.rate(" + RATES[rateIdx] + ")")
                 }
                 }
+                // CineSrc quality changer (website QLEVELS cycle):
+                // Auto -> 1080p -> 720p -> 480p. Each pick rides the embed
+                // URL, so the stream reopens at the current position.
+                if (mirror == "cinesrc") {
+                    BarPill(if (cinesrcQ.isEmpty()) "Auto" else cinesrcQ + "p", big) {
+                        cinesrcQ = CINE_Q[(CINE_Q.indexOf(cinesrcQ).let { if (it < 0) 0 else it } + 1) % CINE_Q.size]
+                        val at = cur
+                        load(startAt = at)
+                    }
+                }
                 // AniPM quality ladder (only real, player-reported values -
                 // never invent 4K: house rule).
                 if (anipmQs.isNotEmpty()) {
@@ -1763,11 +1783,12 @@ fun PlayerScreen(
                 // Live server dot + name (design pack: "● AniPM").
                 BarPill("\u25CF  " + (MIRROR_NAMES[mirror] ?: mirror), big) { showServers = true }
                 BarPill("Subs", big) { showSubs = true }
-                BarPill("Episodes", big, icon = Icons.Filled.Menu) { showEps = true }
-                BarPill("Home", big) {
-                    save(if (scrub >= 0) scrub else cur, dur)
-                    onHome()
+                // Movies have no episodes - the switcher is series/anime only.
+                if (title.type != "movie") {
+                    BarPill("Episodes", big, icon = Icons.Filled.Menu) { showEps = true }
                 }
+                // No Home pill: Back already goes home (Netflix-style) - one
+                // less target on the bar and one less button to hunt on TV.
             }
             // 10-foot legend (design pack): the remote map as key chips, so
             // TV users always know what OK / L-R / U-D / BACK do here.
