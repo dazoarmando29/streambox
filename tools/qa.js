@@ -38,7 +38,11 @@
       highlight plates showed behind round rail/X buttons
    21 player resume boots at the SAVED position: the WebView/HLS boots pass
       resumeAt (derived from Store progress) - the 0.34 bug where the boot
-      hardcoded 0f and Continue Watching restarted the title */
+      hardcoded 0f and Continue Watching restarted the title
+   22 native never hardcodes unreported quality claims: the design mocks
+      carry 4K/Atmos/HDR/Dolby chips but the house rule is "never label 4K
+      unless reported", so those strings may never appear as native labels
+      (real player-reported ladders like AniPM heights still render) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -377,6 +381,26 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     if (/load\(startAt = resumeAt\)/.test(psResume)) ok("HLS slot boots at resumeAt");
     else bad("HLS boot missing resumeAt");
   }
+}
+
+/* ---------- 22. no hardcoded unreported quality claims in native ---------- */
+{
+  const claimHits = [];
+  const walkClaim = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walkClaim(p);
+      else if (e.name.endsWith(".kt")) {
+        const src = fs.readFileSync(p, "utf8");
+        for (const m of src.matchAll(/"[^"\n]*\b(4K|Atmos|HDR10|HDR|Dolby)\b[^"\n]*"/g)) {
+          claimHits.push(path.relative(ROOT, p).replace(/\\/g, "/") + ": " + m[0]);
+        }
+      }
+    }
+  };
+  if (fs.existsSync(natSrcRoot)) walkClaim(natSrcRoot);
+  if (!claimHits.length) ok("native labels never hardcode 4K/Atmos/HDR/Dolby claims");
+  else claimHits.forEach((x) => bad("unreported quality claim in native UI: " + x + " (never label 4K unless reported)"));
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

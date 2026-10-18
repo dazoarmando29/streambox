@@ -12,8 +12,8 @@ android {
         applicationId = "com.streambox.nativeapp"
         minSdk = 24
         targetSdk = 34
-        versionCode = 35
-        versionName = "0.35"
+        versionCode = 36
+        versionName = "0.36"
         // Backend: Cloudflare Worker (catalog proxy + anime mapping).
         // Provider keys live in the Worker as Wrangler secrets - never here.
         buildConfigField("String", "API_BASE", "\"https://streambox-api.dazoarmando.workers.dev\"")

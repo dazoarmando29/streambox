@@ -32,6 +32,7 @@ data class Ep(
     val year: Int,
     val overview: String,
     val aired: Boolean = true,
+    val vote: Double = 0.0,
 )
 
 /** One cast member (detail rail): name + role + portrait when TMDB has it. */
@@ -219,6 +220,7 @@ object Api {
                     year = d.take(4).toIntOrNull() ?: 0,
                     overview = o.optString("overview", ""),
                     aired = d.isBlank() || d.take(10) <= today,
+                    vote = o.optDouble("vote_average", 0.0),
                 )
             )
         }

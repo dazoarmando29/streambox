@@ -597,29 +597,24 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
         ) {
             items(cont, key = { it.type + "-" + it.id }) { p ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // The resume card is a STANDALONE glass card and the
-                    // clear X is its SIBLING outside it (same remote-safe
-                    // split as My List). The old shared card+X container put
-                    // the focus ring inside a parent clip, so the ring
-                    // wrapped the card mid-body and popped into its edges -
-                    // the "horrible border" TV bug report (0.34). Now the
-                    // ring hugs the card and blooms past it cleanly.
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    // Design pack Continue card: wide 16:9 art with the
+                    // teal progress bar riding the bottom edge, title + meta
+                    // below. The clear X stays a SIBLING outside the card
+                    // (remote-safe split) and the ring hugs the card - no
+                    // wrapped borders (0.34 bug) - (0.36 design pass).
+                    Column(
                         modifier = Modifier
-                            .width(if (big) 258.dp else 204.dp)
+                            .width(if (big) 252.dp else 190.dp)
                             .focusRequester(frs.getOrPut(p.type + "-" + p.id) { FocusRequester() })
                             .focusRing(RoundedCornerShape(14.dp))
                             .clip(RoundedCornerShape(14.dp))
                             .background(Card)
-                            .clickable { onResume(p) }
-                            .padding(8.dp),
+                            .clickable { onResume(p) },
                     ) {
                         Box(
                             modifier = Modifier
-                                .width(64.dp)
-                                .height(90.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
                                 .background(Pill),
                         ) {
                             AsyncImage(
@@ -628,41 +623,47 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize(),
                             )
-                            // Teal watch-progress bar on the art (design
-                            // pack Continue cards).
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(listOf(Color(0x000B111E), Color(0x990B111E))),
+                                    ),
+                            )
                             if (p.dur > 0 && p.cur > 5) {
                                 Box(
                                     modifier = Modifier
                                         .align(Alignment.BottomStart)
                                         .fillMaxWidth(fraction = (p.cur / p.dur).coerceIn(0.05f, 1f))
-                                        .height(3.dp)
+                                        .height(4.dp)
                                         .background(Accent),
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                             Text(
                                 p.name,
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
+                                fontSize = if (big) 13.sp else 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                p.type.uppercase() + "  S" + p.season + " E" + p.episode,
+                                p.type.uppercase() + "  \u2022  S" + p.season + " E" + p.episode,
                                 color = Dim,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 maxLines = 1,
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 if (p.dur > 0 && p.cur > 5) {
                                     val leftM = maxOf(1, ((p.dur - p.cur) / 60f).toInt())
                                     (p.cur / p.dur * 100).toInt().toString() + "% watched  \u2022  " + leftM + "m left"
                                 } else "Not started",
                                 color = Accent,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                             )
@@ -852,6 +853,8 @@ private fun MyListView(
     onRemove: (Title) -> Unit,
 ) {
     var filter by remember { mutableStateOf("all") }
+    // Sort (design pack My List): Recently Added keeps the save order.
+    var sort by remember { mutableStateOf("recent") }
     val shown = titles.filter { !it.adult || adultOpen }
     val counts = mapOf(
         "all" to shown.size,
@@ -872,6 +875,33 @@ private fun MyListView(
                 letterSpacing = 1.sp,
             )
             Spacer(modifier = Modifier.weight(1f))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .focusRing(RoundedCornerShape(50), pop = false)
+                    .background(Pill, RoundedCornerShape(50))
+                    .clickable {
+                        sort = when (sort) {
+                            "recent" -> "az"
+                            "az" -> "rating"
+                            else -> "recent"
+                        }
+                    }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+            ) {
+                Text(
+                    "SORT: " + when (sort) {
+                        "az" -> "A-Z"
+                        "rating" -> "Rating"
+                        else -> "Recently Added"
+                    },
+                    color = Soft,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (big) 11.sp else 10.sp,
+                    letterSpacing = 1.sp,
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
             Text(
                 shown.size.toString() + " SAVED",
                 color = Accent,
@@ -915,6 +945,12 @@ private fun MyListView(
             "tv" -> shown.filter { it.type == "tv" }
             "anime" -> shown.filter { it.type == "anime" }
             else -> shown
+        }.let { base ->
+            when (sort) {
+                "az" -> base.sortedBy { it.name.lowercase() }
+                "rating" -> base.sortedByDescending { it.vote }
+                else -> base
+            }
         }
         if (filtered.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

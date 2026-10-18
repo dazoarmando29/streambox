@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -36,9 +37,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
@@ -70,6 +75,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 
@@ -80,6 +86,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
@@ -650,7 +658,6 @@ fun PlayerScreen(
     var mirror by remember {
         mutableStateOf(bootMirror)
     }
-    var showServers by remember { mutableStateOf(false) }
     val serverList = remember(title.id, title.type, mal, ani) {
         mirrorsFor(title, mal, ani) + if (AppEnv.hlsTest) listOf("hls") else listOf()
     }
@@ -754,7 +761,6 @@ fun PlayerScreen(
     // used to stay on the player-bar button BEHIND the panel, so the D-pad
     // kept driving the player instead of the sheet (bug report).
     val epsFirstFR = remember { FocusRequester() }
-    val subsFirstFR = remember { FocusRequester() }
     val serverFirstFR = remember { FocusRequester() }
 
     fun save(c: Float, d: Float) {
@@ -857,8 +863,8 @@ fun PlayerScreen(
 
     // Idle fade: only while actually playing with no panel open. On fade the
     // TV focus resets to the video layer so keys keep working blind.
-    LaunchedEffect(chromeVisible, playing, showEps, showSubs, showServers, pokeTick) {
-        if (chromeVisible && playing && !showEps && !showSubs && !showServers) {
+    LaunchedEffect(chromeVisible, playing, showEps, showSubs, pokeTick) {
+        if (chromeVisible && playing && !showEps && !showSubs) {
             delay(4500)
             chromeVisible = false
             layer = LAYER_VIDEO
@@ -916,6 +922,25 @@ fun PlayerScreen(
                 runCatching { Api.season(title.id, epSeason) }.getOrDefault(listOf())
             }
             epsBusy = false
+        }
+    }
+
+    // Real US certification for the HUD chip ("" when TMDB reports none -
+    // the chip simply does not render, nothing is ever invented).
+    var cert by remember { mutableStateOf("") }
+    LaunchedEffect(title.id, title.type) {
+        cert = withContext(Dispatchers.IO) {
+            runCatching { Api.cert(title.type, title.id) }.getOrDefault("")
+        }
+    }
+
+    // HUD clock (design pack top bar, both player HUD and the sheets).
+    var clock by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        val f = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.US)
+        while (true) {
+            clock = f.format(java.util.Date())
+            kotlinx.coroutines.delay(30000)
         }
     }
 
@@ -1092,7 +1117,6 @@ fun PlayerScreen(
     // unwind the UI layers like the TV apps do.
     BackHandler {
         when {
-            showServers -> showServers = false
             showSubs -> showSubs = false
             showEps -> showEps = false
             big && layer != LAYER_VIDEO -> {
@@ -1182,7 +1206,7 @@ fun PlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
             .onPreviewKeyEvent { e ->
-                if (!big || showEps || showSubs || showServers || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                if (!big || showEps || showSubs || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 pokeChrome()
                 val layers = layerList()
                 val i = layers.indexOf(layer).coerceAtLeast(0)
@@ -1230,8 +1254,8 @@ fun PlayerScreen(
         LaunchedEffect(Unit) {
             if (big) runCatching { keySinkFR.requestFocus() }
         }
-        LaunchedEffect(showEps, showSubs, showServers) {
-            if (big && !showEps && !showSubs && !showServers) {
+        LaunchedEffect(showEps, showSubs) {
+            if (big && !showEps && !showSubs) {
                 runCatching {
                     when (layer) {
                         LAYER_SKIP -> skipFR.requestFocus()
@@ -1242,13 +1266,14 @@ fun PlayerScreen(
                 }
             }
         }
-        LaunchedEffect(showEps, showSubs, showServers) {
+        LaunchedEffect(showEps, showSubs) {
             if (big) {
                 runCatching {
                     when {
                         showEps -> epsFirstFR.requestFocus()
-                        showSubs -> subsFirstFR.requestFocus()
-                        showServers -> serverFirstFR.requestFocus()
+                        // The merged Audio & Subtitles panel enters at its
+                        // first column (Servers).
+                        showSubs -> serverFirstFR.requestFocus()
                     }
                 }
             }
@@ -1564,7 +1589,10 @@ fun PlayerScreen(
         )
         }
 
-        // Top-left title card (website style) - fades with the chrome.
+        // Top bar (design pack TV HUD): the title card carries the show,
+        // Sx:Ex "episode name", real cert + CC chips - and the right edge
+        // carries the playback state + clock. Quality chips stay OFF unless
+        // a provider reports them (house rule: never claim 4K/Atmos).
         if (chromeVisible) {
         Column(
             modifier = Modifier
@@ -1582,16 +1610,92 @@ fun PlayerScreen(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            val epTitle = epsList.firstOrNull { it.n == epNumber }?.name ?: ""
             Text(
                 when {
                     mirror == "hls" -> "HLS SHELL TEST"
                     title.type == "movie" -> "MOVIE"
-                    else -> "S" + epSeason + " E" + epNumber
+                    epTitle.isNotBlank() && epTitle != "Episode " + epNumber ->
+                        "S" + epSeason + ":E" + epNumber + "  \u201C" + epTitle + "\u201D"
+                    else -> "S" + epSeason + ":E" + epNumber
                 },
                 color = Color.White,
                 fontWeight = FontWeight.Black,
                 fontSize = if (big) 18.sp else 15.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            if (cert.isNotBlank() || subs != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (cert.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .background(Color(0x66000000), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        ) {
+                            Text(
+                                cert,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 9.sp,
+                                letterSpacing = 1.sp,
+                            )
+                        }
+                    }
+                    if (subs != null) {
+                        Box(
+                            modifier = Modifier
+                                .background(Color(0x66000000), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        ) {
+                            Text(
+                                "CC",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 9.sp,
+                                letterSpacing = 1.sp,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp),
+        ) {
+            if (!playing) {
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xCC0B111E), RoundedCornerShape(50))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                ) {
+                    Text(
+                        "PAUSED",
+                        color = Amber,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 10.sp,
+                        letterSpacing = 1.5.sp,
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .background(Color(0xCC0B111E), RoundedCornerShape(50))
+                    .padding(horizontal = 12.dp, vertical = 5.dp),
+            ) {
+                Text(
+                    clock,
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = if (big) 13.sp else 11.sp,
+                    letterSpacing = 1.sp,
+                )
+            }
         }
         }
 
@@ -1761,6 +1865,21 @@ fun PlayerScreen(
                 }
                 BarPill("-10s", big) { seekRel(-10f) }
                 BarPill("+30s", big) { seekRel(30f) }
+                // Next Episode (design pack bar): series/anime only - and
+                // only when the next episode is real AND aired. Unaired
+                // stays a Coming Soon schedule row, never a dead target.
+                if (title.type != "movie") {
+                    val nextEp = epsList.firstOrNull { it.n == epNumber + 1 }
+                    if (epsList.isEmpty() || (nextEp != null && nextEp.aired)) {
+                        BarPill(if (big) "Next Episode" else "Next Ep", big, icon = Icons.Filled.SkipNext) {
+                            epNumber += 1
+                            save(0f, dur)
+                            cur = 0f
+                            playing = true
+                            load()
+                        }
+                    }
+                }
                 // Mute + rate exist only on mirrors we can actually drive
                 // (website: no dead buttons - VidRift/VidZen/VidBolt expose
                 // neither a volume nor a rate command). The HLS slot is
@@ -1826,9 +1945,10 @@ fun PlayerScreen(
                     }
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                // Live server dot + name (design pack: "● AniPM").
-                BarPill("\u25CF  " + (MIRROR_NAMES[mirror] ?: mirror), big) { showServers = true }
-                BarPill("Subs", big) { showSubs = true }
+                // Design pack bar: one Audio & Subtitles entry - the merged
+                // panel carries the SERVER picker as its first column (the
+                // separate server sheet is gone: no redundant buttons).
+                BarPill("Audio & Subtitles", big, icon = Icons.Filled.Subtitles) { showSubs = true }
                 // Movies have no episodes - the switcher is series/anime only.
                 if (title.type != "movie") {
                     BarPill("Episodes", big, icon = Icons.Filled.Menu) { showEps = true }
@@ -1848,13 +1968,13 @@ fun PlayerScreen(
                     Text("Play/Pause", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.width(10.dp))
                     KeyChip("\u25C0  \u25B6")
-                    Text("Seek", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Scrub 10s", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.width(10.dp))
                     KeyChip("\u25B2  \u25BC")
                     Text("Navigate", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.width(10.dp))
                     KeyChip("BACK")
-                    Text("Home", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Exit", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
             }
@@ -1899,13 +2019,15 @@ fun PlayerScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "Go to episode",
+                                "Episodes",
                                 color = Color.White,
                                 fontWeight = FontWeight.Black,
                                 fontSize = if (big) 21.sp else 18.sp,
                             )
                             Text(
-                                title.name + (if (title.type != "movie") "  \u2022  Season " + epSeason else ""),
+                                title.name +
+                                    (if (title.type != "movie") "  \u2022  Season " + epSeason +
+                                        (if (epsList.isNotEmpty()) "  \u2022  " + epsList.size + " Total Episodes" else "") else ""),
                                 color = Dim,
                                 fontFamily = BodyFont,
                                 fontSize = 11.sp,
@@ -1969,23 +2091,63 @@ fun PlayerScreen(
                             BarPill("E  +", big) { epNumber += 1 }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
-                        // Quick-select window: 12 episodes around the current
-                        // one - the sheet stays smooth on 1,400-episode seas.
+                        // Quick-select (design pack): range chips ("Episodes
+                        // 1-10", "11-20"...) drive a 10-card window - the
+                        // sheet stays smooth on 1,400-episode seasons.
                         val total = epsList.size
-                        val win = if (total <= 12) epsList else {
-                            val idx = epsList.indexOfFirst { it.n == epNumber }.let { if (it < 0) 0 else it }
-                            val start = (idx - 3).coerceIn(0, (total - 12).coerceAtLeast(0))
-                            epsList.subList(start, start + 12)
+                        val rangeSize = 10
+                        var rangeStart by remember(epSeason) { mutableIntStateOf(-1) }
+                        val winStart = when {
+                            total <= rangeSize -> 0
+                            rangeStart >= 0 -> rangeStart.coerceIn(0, (total - 1).coerceAtLeast(0))
+                            else -> {
+                                val idx = epsList.indexOfFirst { it.n == epNumber }.let { if (it < 0) 0 else it }
+                                (idx / rangeSize) * rangeSize
+                            }
+                        }
+                        val win = if (total <= rangeSize) epsList else {
+                            epsList.subList(winStart, minOf(winStart + rangeSize, total))
+                        }
+                        // Saved progress for THIS title: the one slot the
+                        // Store keeps - cards read resume/off it honestly.
+                        val savedProg = Store.progressList(ctx).firstOrNull {
+                            it.type == title.type && it.id == title.id
+                        }
+                        if (total > rangeSize) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                val rangeStarts = (0 until total step rangeSize).toList()
+                                items(rangeStarts.size) { i ->
+                                    val s = rangeStarts[i]
+                                    val e = minOf(s + rangeSize, total)
+                                    val on = s == winStart
+                                    Box(
+                                        modifier = Modifier
+                                            .focusRing(RoundedCornerShape(50), pop = false)
+                                            .background(if (on) Accent else Pill, RoundedCornerShape(50))
+                                            .clickable { rangeStart = s }
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    ) {
+                                        Text(
+                                            "Episodes " + epsList[s].n + "-" + epsList[e - 1].n,
+                                            color = if (on) Ink else Color.White,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 11.sp,
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
                         }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
-                                "Quick Select Episodes" + if (total > 0) " (" + total + ")" else "",
+                                "SELECT AN EPISODE TO RESUME OR JUMP DIRECTLY",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = if (big) 14.sp else 12.sp,
+                                fontSize = if (big) 12.sp else 11.sp,
+                                letterSpacing = 0.5.sp,
                             )
                             Spacer(modifier = Modifier.weight(1f))
                             Text(
@@ -2013,18 +2175,24 @@ fun PlayerScreen(
                             win.chunked(2).forEach { pair ->
                                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     pair.forEach { ep ->
+                                        val resumeEp = savedProg?.takeIf {
+                                            it.season == epSeason && it.episode == ep.n && it.cur > 5f &&
+                                                !(it.dur > 0 && it.cur >= it.dur * 0.95f)
+                                        }
                                         QuickEpCard(
                                             ep = ep,
                                             big = big,
                                             selected = ep.n == epNumber,
+                                            resume = resumeEp,
                                             modifier = Modifier.weight(1f),
                                         ) {
+                                            val at = resumeEp?.cur ?: 0f
                                             epNumber = ep.n
                                             showEps = false
                                             save(0f, dur)
-                                            cur = 0f
+                                            cur = at
                                             playing = true
-                                            load()
+                                            load(startAt = at)
                                         }
                                     }
                                     if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
@@ -2040,7 +2208,7 @@ fun PlayerScreen(
                                 .background(Pill, RoundedCornerShape(14.dp))
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                         ) {
-                            Text("Auto-skip", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Auto-play Next", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             Spacer(modifier = Modifier.width(10.dp))
                             BarPill(if (autoSkip) "ON" else "OFF", big) {
                                 autoSkip = !autoSkip
@@ -2048,7 +2216,7 @@ fun PlayerScreen(
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                "intros/recaps skip themselves",
+                                "skips intros/recaps and rolls the next episode",
                                 color = Dim,
                                 fontFamily = BodyFont,
                                 fontSize = 11.sp,
@@ -2083,8 +2251,9 @@ fun PlayerScreen(
             }
         }
 
-        // Subtitles panel (website Subs tab): language chips + provider chain
-        // results + own file + Position/Sync to match the captions.
+        // Audio & Subtitles panel (design pack TV overlay): SERVERS, AUDIO,
+        // SUBTITLES and STYLING & SYNC under one glass header - the server
+        // picker lives HERE now (0.36 request), no separate sheet.
         if (showSubs) {
             Box(
                 modifier = Modifier
@@ -2096,140 +2265,229 @@ fun PlayerScreen(
             ) {
                 Column(
                     modifier = Modifier
-                        .padding(16.dp)
-                        .background(Card, RoundedCornerShape(18.dp))
-                        .padding(16.dp)
+                        .padding(if (big) 32.dp else 16.dp)
+                        .widthIn(max = if (big) 1320.dp else 560.dp)
+                        .background(Card, RoundedCornerShape(20.dp))
+                        .padding(if (big) 22.dp else 16.dp)
                         .verticalScroll(rememberScrollState()),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "Subtitles",
+                            "Audio & Subtitles",
                             color = Color.White,
                             fontWeight = FontWeight.Black,
-                            fontSize = 18.sp,
-                            modifier = Modifier.weight(1f),
+                            fontSize = if (big) 22.sp else 18.sp,
                         )
+                        Spacer(modifier = Modifier.weight(1f))
+                        // Live status dots (design pack panel header): the
+                        // active server + the active caption language.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(7.dp).background(Accent, CircleShape))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(MIRROR_NAMES[mirror] ?: mirror, color = Soft, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text("  /  ", color = Dim, fontSize = 11.sp)
+                            Box(modifier = Modifier.size(7.dp).background(Accent, CircleShape))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(subs?.lang ?: "Subs off", color = Soft, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
                         BarPill("Close", big) { showSubs = false }
                     }
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(SUBLANGS.size) { i ->
-                            val (code, label) = SUBLANGS[i]
-                            val on = code == wyzLang
-                            Box(
-                                modifier = Modifier
-                                    .then(if (i == 0) Modifier.focusRequester(subsFirstFR) else Modifier)
-                                    .focusRing(RoundedCornerShape(50))
-                                    .background(if (on) Accent else Pill, CircleShape)
-                                    .clickable { wyzLang = code }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                            ) {
-                                Text(
-                                    label,
-                                    color = if (on) Ink else Color.White,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 13.sp,
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        // COLUMN 1: SERVERS (website server-list rules -
+                        // Doraemon never lists VidBolt, unmapped anime never
+                        // lists AniPM). Switching keeps the position.
+                        Column(modifier = Modifier.weight(1f)) {
+                            PanelColTitle("SERVERS")
+                            Spacer(modifier = Modifier.height(6.dp))
+                            serverList.forEachIndexed { i, id ->
+                                OptRow(
+                                    label = MIRROR_NAMES[id] ?: id,
+                                    detail = if (id == mirror) "Playing now" else "Keeps your position",
+                                    chip = if (id == mirror) "ACTIVE" else "",
+                                    active = id == mirror,
+                                    big = big,
+                                    modifier = if (i == 0) Modifier.focusRequester(serverFirstFR) else Modifier,
+                                ) {
+                                    if (id != mirror) {
+                                        val at = cur
+                                        mirror = id
+                                        playing = true
+                                        load(startAt = at)
+                                    }
+                                    showSubs = false
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                        }
+                        // COLUMN 2: AUDIO (honest only): AniPM drives its
+                        // dub|sub route live; every other embed owns its own
+                        // audio - we say so instead of shipping dead buttons.
+                        Column(modifier = Modifier.weight(1f)) {
+                            PanelColTitle("AUDIO TRACKS")
+                            Spacer(modifier = Modifier.height(6.dp))
+                            if (mirror == "anipm") {
+                                listOf("dub" to "English (Dub)", "sub" to "Japanese (Sub)").forEach { (code, name) ->
+                                    val on = anipmLang == code
+                                    val pinned = (if (title.name.contains("dragon ball", true)) "dub" else "sub") == code
+                                    OptRow(
+                                        label = name,
+                                        detail = if (code == "dub") "English dub track" else "Japanese audio track",
+                                        chip = if (on) "ACTIVE" else if (pinned) "DEFAULT" else "",
+                                        active = on,
+                                        big = big,
+                                    ) {
+                                        anipmLang = code
+                                        cmd("window.__sb && window.__sb.lang('" + code + "')")
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
+                            } else {
+                                OptRow(
+                                    label = "Original Audio",
+                                    detail = "The provider player owns audio",
+                                    chip = "DEFAULT",
+                                    active = true,
+                                    big = big,
                                 )
                             }
                         }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    if (subMsg.isNotEmpty()) {
-                        Text(subMsg, color = Amber, fontFamily = BodyFont, fontSize = 11.sp)
-                        Spacer(modifier = Modifier.height(6.dp))
-                    } else {
-                        Text(
-                            "Same title, different releases - pick yours for exact sync.",
-                            color = Dim,
-                            fontFamily = BodyFont,
-                            fontSize = 11.sp,
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                    }
-
-                    Box(modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
-                        if (wyzBusy) {
-                            CircularProgressIndicator(
-                                color = Accent,
-                                modifier = Modifier.align(Alignment.Center),
-                            )
-                        } else {
-                            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                                wyzItems.forEach { item ->
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
+                        // COLUMN 3: SUBTITLES - the language the chain
+                        // searches in, Off/active, then the real results.
+                        Column(modifier = Modifier.weight(1.15f)) {
+                            PanelColTitle("SUBTITLES")
+                            Spacer(modifier = Modifier.height(6.dp))
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(SUBLANGS.size) { i ->
+                                    val (code, label) = SUBLANGS[i]
+                                    val on = code == wyzLang
+                                    Box(
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 4.dp)
-                                            .background(Pill, RoundedCornerShape(12.dp))
-                                            .padding(10.dp),
+                                            .focusRing(RoundedCornerShape(50), pop = false)
+                                            .background(if (on) Accent else Pill, RoundedCornerShape(50))
+                                            .clickable { wyzLang = code }
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
                                     ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                item.release,
-                                                color = Color.White,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 12.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            Text(
-                                                listOf(
-                                                    item.display,
-                                                    item.origin,
-                                                    if (item.downloads > 0) item.downloads.toString() else "",
-                                                    if (item.cc) "CC" else "",
-                                                ).filter { it.isNotEmpty() }.joinToString("  -  "),
-                                                color = Dim,
-                                                fontSize = 10.sp,
-                                                maxLines = 1,
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        BarPill("Load", big) { loadFrom(item) }
+                                        Text(
+                                            label,
+                                            color = if (on) Ink else Color.White,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 12.sp,
+                                        )
                                     }
                                 }
-                                if (wyzItems.isEmpty() && !wyzBusy) {
-                                    BarPill("Try backups (TSDB + BetaSeries)", big) { bsTick += 1 }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            if (subMsg.isNotEmpty()) {
+                                Text(subMsg, color = Amber, fontFamily = BodyFont, fontSize = 11.sp)
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+
+                            val loadedSub = subs
+                            OptRow(
+                                label = "Off",
+                                detail = "No captions",
+                                chip = if (loadedSub == null) "ACTIVE" else "",
+                                active = loadedSub == null,
+                                big = big,
+                            ) {
+                                subs = null
+                                subMsg = ""
+                                // Forgetting the pick keeps it gone after reopen.
+                                Store.saveSubPick(ctx, title.type, title.id, epSeason, epNumber, null)
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            if (loadedSub != null) {
+                                OptRow(
+                                    label = loadedSub.name,
+                                    detail = loadedSub.lang + "  -  " + loadedSub.cues.size + " lines",
+                                    chip = "ACTIVE",
+                                    active = true,
+                                    big = big,
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                            if (wyzBusy) {
+                                CircularProgressIndicator(
+                                    color = Accent,
+                                    modifier = Modifier.padding(10.dp).size(24.dp),
+                                )
+                            } else {
+                                wyzItems.take(10).forEach { item ->
+                                    OptRow(
+                                        label = item.release,
+                                        detail = listOf(
+                                            item.display,
+                                            item.origin,
+                                            if (item.downloads > 0) item.downloads.toString() else "",
+                                            if (item.cc) "CC" else "",
+                                        ).filter { it.isNotEmpty() }.joinToString("  -  "),
+                                        chip = "",
+                                        active = false,
+                                        big = big,
+                                    ) { loadFrom(item) }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
+                                if (wyzItems.isEmpty()) {
+                                    OptRow(
+                                        label = "Try backups (TSDB + BetaSeries)",
+                                        detail = "Same title, different releases",
+                                        chip = "",
+                                        active = false,
+                                        big = big,
+                                    ) { bsTick += 1 }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
+                            }
+                            OptRow(
+                                label = "Load .srt / .vtt file",
+                                detail = "Your own subtitle file",
+                                chip = "",
+                                active = false,
+                                big = big,
+                            ) {
+                                runCatching { pickSub.launch(arrayOf("*/*")) }
+                            }
+                            // AniPM's own tracks (player-side) - real labels
+                            // only, website setSubtitles parity.
+                            if (anipmSubLabels.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                PanelColTitle("PLAYER TRACKS")
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OptRow(
+                                    label = "Off",
+                                    detail = "Player captions off",
+                                    chip = if (anipmSubIdx < 0) "ACTIVE" else "",
+                                    active = anipmSubIdx < 0,
+                                    big = big,
+                                ) {
+                                    anipmSubIdx = -1
+                                    cmd("window.__sb && window.__sb.subs(false)")
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                anipmSubLabels.forEachIndexed { i, lbl ->
+                                    OptRow(
+                                        label = lbl,
+                                        detail = "Player track",
+                                        chip = if (anipmSubIdx == i) "ACTIVE" else "",
+                                        active = anipmSubIdx == i,
+                                        big = big,
+                                    ) {
+                                        anipmSubIdx = i
+                                        cmd("window.__sb && window.__sb.subs(true, '" + lbl.replace("'", "") + "')")
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
                                 }
                             }
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text("MY SUBTITLES (YOUR FILE)", color = Dim, fontWeight = FontWeight.Black, fontSize = 11.sp)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Pill, RoundedCornerShape(12.dp))
-                            .padding(12.dp),
-                    ) {
-                        Text(
-                            subs?.let {
-                                it.name + "  -  " + it.lang + "  -  " + it.cues.size + " lines"
-                            } ?: "None loaded",
-                            color = if (subs != null) Color.White else Dim,
-                            fontSize = 12.sp,
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        BarPill("Load .srt / .vtt", big) {
-                            runCatching { pickSub.launch(arrayOf("*/*")) }
-                        }
-                        BarPill("Clear", big) {
-                            subs = null
-                            subMsg = ""
-                            // Forgetting the pick keeps it gone after reopen.
-                            Store.saveSubPick(ctx, title.type, title.id, epSeason, epNumber, null)
-                        }
-                        BarPill("Try backups", big) { bsTick += 1 }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
+                        // COLUMN 4: STYLING & SYNC TUNING - the existing
+                        // glass island rides as the fourth column.
+                        Column(modifier = Modifier.weight(1.25f)) {
                     // STYLING & SYNC TUNING (design pack panel): one glass
                     // island for every caption taste, all device-local.
                     Column(
@@ -2364,6 +2622,8 @@ fun PlayerScreen(
                             }
                         }
                     }
+                        }
+                    }
                     // Live preview - the caption exactly as it rides the
                     // player (design pack's preview line).
                     Spacer(modifier = Modifier.height(12.dp))
@@ -2398,81 +2658,123 @@ fun PlayerScreen(
                             fontSize = subStyle.size.sp,
                         )
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    // AniPM's own subtitle tracks (player-side), website
-                    // setSubtitles parity: Off + reported labels, cycled.
-                    if (anipmSubLabels.isNotEmpty()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Player subs", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.width(74.dp))
-                            BarPill("<", big) {
-                                val n = anipmSubLabels.size
-                                anipmSubIdx = if (anipmSubIdx <= 0) n - 1 else anipmSubIdx - 1
-                                val label = anipmSubLabels[anipmSubIdx]
-                                cmd("window.__sb && window.__sb.subs(true, '" + label.replace("'", "") + "')")
-                            }
+                    // TV 10-foot legend (design pack panel footer).
+                    if (big) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            KeyChip("OK")
+                            Text("Select", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            KeyChip("BACK")
+                            Text("Return to Video", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            KeyChip("\u25C0  \u25B6")
+                            Text("Switch Column", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            KeyChip("\u25B2  \u25BC")
+                            Text("Navigate Options", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.weight(1f))
                             Text(
-                                anipmSubLabels.getOrNull(anipmSubIdx) ?: "Off",
-                                color = Color.White,
-                                fontWeight = FontWeight.Black,
-                                modifier = Modifier.padding(horizontal = 12.dp),
+                                "ANDROID TV 10-FOOT HUD",
+                                color = Color(0xFF3B4A63),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp,
+                                letterSpacing = 1.5.sp,
                             )
-                            BarPill(">", big) {
-                                val n = anipmSubLabels.size
-                                anipmSubIdx = if (anipmSubIdx >= n - 1) -1 else anipmSubIdx + 1
-                                if (anipmSubIdx < 0) {
-                                    cmd("window.__sb && window.__sb.subs(false)")
-                                } else {
-                                    val label = anipmSubLabels[anipmSubIdx]
-                                    cmd("window.__sb && window.__sb.subs(true, '" + label.replace("'", "") + "')")
-                                }
-                            }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
                     }
-                    PillButton("Close", big, accent = true) { showSubs = false }
                 }
             }
         }
+    }
+}
 
-        // Server sheet: mirror picker (website server-list rules - Doraemon
-        // never lists VidBolt, anime without mapping never lists AniPM).
-        if (showServers) {
+/** Column title for the Audio & Subtitles panel (design pack columns). */
+@Composable
+private fun PanelColTitle(label: String) {
+    Text(
+        label,
+        color = Dim,
+        fontWeight = FontWeight.Bold,
+        fontSize = 10.sp,
+        letterSpacing = 1.5.sp,
+    )
+}
+
+/** Radio-style option row for the Audio & Subtitles panel (design pack):
+    check circle + label + detail + a right chip (ACTIVE / DEFAULT). A null
+    onClick renders a display-only row - never a dead button. */
+@Composable
+private fun OptRow(
+    label: String,
+    detail: String,
+    chip: String,
+    active: Boolean,
+    big: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.focusRing(RoundedCornerShape(12.dp), pop = false) else Modifier)
+            .background(if (active) Color(0x1A00F0B5) else Pill, RoundedCornerShape(12.dp))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .background(if (active) Accent else Color(0x33FFFFFF), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (active) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = Ink,
+                    modifier = Modifier.size(13.dp),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                label,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (big) 13.sp else 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (detail.isNotBlank()) {
+                Text(
+                    detail,
+                    color = Dim,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (chip.isNotBlank()) {
+            Spacer(modifier = Modifier.width(8.dp))
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0x99000000))
-                    .focusProperties { exit = { FocusRequester.Cancel } }
-                    .pointerInput(Unit) { detectTapGestures { showServers = false } },
-                contentAlignment = Alignment.Center,
+                    .background(if (active) Color(0x3300F0B5) else Color(0x1AFFFFFF), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
             ) {
-                Column(
-                    modifier = Modifier
-                        .padding(20.dp)
-                        .background(Ink, RoundedCornerShape(16.dp))
-                        .padding(16.dp)
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text("Server", color = Accent, fontWeight = FontWeight.Black, fontSize = if (big) 20.sp else 17.sp)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    serverList.forEachIndexed { i, id ->
-                        BarPill(
-                            (MIRROR_NAMES[id] ?: id) + if (id == mirror) "  (current)" else "",
-                            big,
-                            modifier = if (i == 0) Modifier.focusRequester(serverFirstFR) else Modifier,
-                        ) {
-                            if (id != mirror) {
-                                val at = cur
-                                mirror = id
-                                playing = true
-                                load(startAt = at)
-                            }
-                            showServers = false
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
-                    PillButton("Close", big, accent = true) { showServers = false }
-                }
+                Text(
+                    chip,
+                    color = if (active) Accent else Dim,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 8.sp,
+                    letterSpacing = 1.sp,
+                )
             }
         }
     }
@@ -2535,75 +2837,145 @@ fun KeyChip(label: String) {
     }
 }
 
-/** Quick-select episode card for the Episodes sheet (design pack): E-cap +
-    real name/meta, selection ring in accent tint. Clicking plays it. */
+/** Episode card for the Episodes sheet (design pack): real still + NOW
+    PLAYING / RESUME / UNWATCHED / COMING SOON state, runtime, synopsis and
+    TMDB rating - nothing invented, unaired stays a schedule row. */
 @Composable
 private fun QuickEpCard(
     ep: Ep,
     big: Boolean,
     selected: Boolean,
+    resume: Progress?,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
         modifier = modifier
             .focusRing(RoundedCornerShape(14.dp))
             .background(if (selected) Color(0x1A00F0B5) else Pill, RoundedCornerShape(14.dp))
             // Unaired episodes are schedule rows, not play targets.
             .then(if (ep.aired) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 10.dp, vertical = 10.dp),
+            .padding(10.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(if (big) 44.dp else 38.dp)
-                .background(Card, RoundedCornerShape(10.dp)),
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Card),
         ) {
-            Text(
-                "E" + ep.n,
-                color = Accent,
-                fontWeight = FontWeight.Black,
-                fontSize = if (big) 13.sp else 11.sp,
-            )
+            if (ep.still != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(ep.still).crossfade(100).build(),
+                    contentDescription = ep.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("E" + ep.n, color = Dim, fontWeight = FontWeight.Black, fontSize = if (big) 20.sp else 16.sp)
+                }
+            }
+            // Status chip (design pack card caps).
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .background(Color(0xE60B111E), RoundedCornerShape(50))
+                    .padding(horizontal = 7.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    when {
+                        !ep.aired -> "COMING SOON"
+                        selected -> "NOW PLAYING"
+                        resume != null -> "RESUME"
+                        else -> "UNWATCHED"
+                    },
+                    color = when {
+                        !ep.aired -> Amber
+                        selected || resume != null -> Accent
+                        else -> Soft
+                    },
+                    fontWeight = FontWeight.Black,
+                    fontSize = 8.sp,
+                    letterSpacing = 1.sp,
+                )
+            }
+            if (ep.runtime > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .background(Color(0xE60B111E), RoundedCornerShape(50))
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        ep.runtime.toString() + "m",
+                        color = Soft,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp,
+                    )
+                }
+            }
+            if (resume != null && resume.dur > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth(fraction = (resume.cur / resume.dur).coerceIn(0.05f, 1f))
+                        .height(3.dp)
+                        .background(Accent),
+                )
+            }
         }
-        Spacer(modifier = Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            "EPISODE " + ep.n.toString().padStart(2, '0'),
+            color = Dim,
+            fontWeight = FontWeight.Bold,
+            fontSize = 8.sp,
+            letterSpacing = 1.5.sp,
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            if (ep.name.isNotBlank() && ep.name != "Episode " + ep.n) ep.name else "Episode " + ep.n,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (big) 13.sp else 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (ep.overview.isNotBlank()) {
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
-                if (ep.name.isNotBlank() && ep.name != "Episode " + ep.n) ep.name else "Episode " + ep.n,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = if (big) 13.sp else 11.sp,
-                maxLines = 1,
+                ep.overview,
+                color = Dim,
+                fontFamily = BodyFont,
+                fontSize = 10.sp,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                when {
-                    ep.runtime > 0 -> ep.runtime.toString() + "m"
-                    ep.year > 0 -> ep.year.toString()
-                    else -> ""
-                },
-                color = Dim,
-                fontSize = 10.sp,
-                maxLines = 1,
-            )
         }
-        if (!ep.aired) {
-            Text(
-                "COMING SOON",
-                color = Amber,
-                fontWeight = FontWeight.Bold,
-                fontSize = 9.sp,
-                letterSpacing = 1.sp,
-            )
-        } else if (selected) {
-            Text(
-                "SELECTED",
-                color = Accent,
-                fontWeight = FontWeight.Bold,
-                fontSize = 9.sp,
-                letterSpacing = 1.sp,
-            )
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (ep.vote > 0) {
+                Icon(Icons.Filled.Star, contentDescription = null, tint = Accent, modifier = Modifier.size(11.dp))
+                Spacer(modifier = Modifier.width(3.dp))
+                Text(
+                    String.format("%.1f", ep.vote),
+                    color = Soft,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp,
+                )
+            }
+            if (resume != null && resume.dur > 0) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    fmt((resume.dur - resume.cur).coerceAtLeast(0f)) + " left",
+                    color = Accent,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp,
+                )
+            }
         }
     }
 }
