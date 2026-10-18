@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -88,6 +89,7 @@ import com.streambox.nativeapp.AppEnv
 import com.streambox.nativeapp.api.Api
 import com.streambox.nativeapp.api.Backups
 import com.streambox.nativeapp.api.Cue
+import com.streambox.nativeapp.api.Ep
 import com.streambox.nativeapp.api.IntroDb
 import com.streambox.nativeapp.api.SkipTimes
 import com.streambox.nativeapp.api.SubFile
@@ -858,6 +860,20 @@ fun PlayerScreen(
                 h.end?.let { e -> cur = e; load(startAt = e) }
             }
             else -> h.end?.let { seekTo(it) }
+        }
+    }
+
+    // Quick-select rail for the Episodes sheet (design pack): real TMDB
+    // season episodes, fetched when the sheet opens.
+    var epsList by remember { mutableStateOf(listOf<Ep>()) }
+    var epsBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(showEps, epSeason, title.id) {
+        if (showEps && title.type != "movie") {
+            epsBusy = true
+            epsList = withContext(Dispatchers.IO) {
+                runCatching { Api.season(title.id, epSeason) }.getOrDefault(listOf())
+            }
+            epsBusy = false
         }
     }
 
@@ -1768,7 +1784,9 @@ fun PlayerScreen(
         }
         }
 
-        // Episodes sheet (website-style episode switcher).
+        // Episodes sheet (design pack "Go to episode"): glass modal with the
+        // labeled S/E HUD steppers, a quick-select rail of real season
+        // episodes, and the auto-skip toggle.
         if (showEps) {
             Box(
                 modifier = Modifier
@@ -1782,41 +1800,184 @@ fun PlayerScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .padding(24.dp)
-                        .background(Card, RoundedCornerShape(18.dp))
+                        .widthIn(max = if (big) 880.dp else 560.dp)
+                        .background(Card, RoundedCornerShape(20.dp))
                         .padding(20.dp),
                 ) {
-                    Text("Go to episode", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(if (big) 46.dp else 40.dp)
+                                .focusRing(RoundedCornerShape(12.dp))
+                                .background(Color(0x2600F0B5), RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Filled.Menu,
+                                contentDescription = null,
+                                tint = Accent,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Go to episode",
+                                color = Color.White,
+                                fontWeight = FontWeight.Black,
+                                fontSize = if (big) 21.sp else 18.sp,
+                            )
+                            Text(
+                                title.name + (if (title.type != "movie") "  \u2022  Season " + epSeason else ""),
+                                color = Dim,
+                                fontFamily = BodyFont,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        BarPill("Close", big) { showEps = false }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
                     if (title.type != "movie") {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            BarPill("S -", big) { epSeason = (epSeason - 1).coerceAtLeast(1) }
-                            Text("Season " + epSeason, color = Color.White, fontWeight = FontWeight.Bold)
-                            BarPill("S +", big) { epSeason += 1 }
+                        // Labeled HUD steppers (design pack): tiny tracked
+                        // label over the control pair.
+                        Text(
+                            "CURRENT SEASON",
+                            color = Dim,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            letterSpacing = 1.5.sp,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            BarPill("S  -", big) { epSeason = (epSeason - 1).coerceAtLeast(1) }
+                            Text(
+                                "Season " + epSeason,
+                                color = Color.White,
+                                fontWeight = FontWeight.Black,
+                                fontSize = if (big) 17.sp else 15.sp,
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Center,
+                            )
+                            BarPill("S  +", big) { epSeason += 1 }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "SELECTED",
+                            color = Dim,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            letterSpacing = 1.5.sp,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            BarPill("E  -", big) { epNumber = (epNumber - 1).coerceAtLeast(1) }
+                            Text(
+                                "Episode " + epNumber,
+                                color = Accent,
+                                fontWeight = FontWeight.Black,
+                                fontSize = if (big) 17.sp else 15.sp,
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Center,
+                            )
+                            BarPill("E  +", big) { epNumber += 1 }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        // Quick-select window: 12 episodes around the current
+                        // one - the sheet stays smooth on 1,400-episode seas.
+                        val total = epsList.size
+                        val win = if (total <= 12) epsList else {
+                            val idx = epsList.indexOfFirst { it.n == epNumber }.let { if (it < 0) 0 else it }
+                            val start = (idx - 3).coerceIn(0, (total - 12).coerceAtLeast(0))
+                            epsList.subList(start, start + 12)
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                "Quick Select Episodes" + if (total > 0) " (" + total + ")" else "",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = if (big) 14.sp else 12.sp,
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            Text(
+                                if (total > 0) "Showing " + (win.firstOrNull()?.n ?: 0) + "-" + (win.lastOrNull()?.n ?: 0) + " of " + total
+                                else if (epsBusy) "Loading..." else "No episode data",
+                                color = Dim,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp,
+                                letterSpacing = 1.sp,
+                            )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            BarPill("E -", big) { epNumber = (epNumber - 1).coerceAtLeast(1) }
-                            Text("Episode " + epNumber, color = Color.White, fontWeight = FontWeight.Bold)
-                            BarPill("E +", big) { epNumber += 1 }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = if (big) 360.dp else 300.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            if (epsBusy && epsList.isEmpty()) {
+                                CircularProgressIndicator(
+                                    color = Accent,
+                                    modifier = Modifier.padding(16.dp).size(if (big) 36.dp else 26.dp),
+                                )
+                            }
+                            win.chunked(2).forEach { pair ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    pair.forEach { ep ->
+                                        QuickEpCard(
+                                            ep = ep,
+                                            big = big,
+                                            selected = ep.n == epNumber,
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            epNumber = ep.n
+                                            showEps = false
+                                            save(0f, dur)
+                                            cur = 0f
+                                            playing = true
+                                            load()
+                                        }
+                                    }
+                                    if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
                         }
-                        Spacer(modifier = Modifier.height(14.dp))
-                    }
-                    if (title.type != "movie") {
                         Spacer(modifier = Modifier.height(10.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Auto-skip", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.width(84.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Pill, RoundedCornerShape(14.dp))
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                        ) {
+                            Text("Auto-skip", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Spacer(modifier = Modifier.width(10.dp))
                             BarPill(if (autoSkip) "ON" else "OFF", big) {
                                 autoSkip = !autoSkip
                                 Store.setAutoSkip(ctx, autoSkip)
                             }
+                            Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                "  intros/recaps skip themselves",
+                                "intros/recaps skip themselves",
                                 color = Dim,
                                 fontFamily = BodyFont,
                                 fontSize = 11.sp,
                             )
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         PillButton("Load", big, accent = true, modifier = Modifier.focusRequester(epsFirstFR)) {
@@ -1827,6 +1988,19 @@ fun PlayerScreen(
                             load()
                         }
                         PillButton("Close", big) { showEps = false }
+                    }
+                    if (big) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            KeyChip("\u25C0  \u25B6")
+                            Text("Navigate", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            KeyChip("OK")
+                            Text("Play Episode", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            KeyChip("BACK")
+                            Text("Resume Current", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -1979,78 +2153,173 @@ fun PlayerScreen(
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Position", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.width(74.dp))
-                        BarPill("<", big) {
-                            // "<" moves captions UP the screen (site rule)
-                            val order = listOf("bottom", "center", "top")
-                            val i = order.indexOf(subPos).let { if (it < 0) 0 else it }
-                            subPos = order[(i + 1) % order.size]
-                            Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
-                        }
+                    // STYLING & SYNC TUNING (design pack panel): one glass
+                    // island for every caption taste, all device-local.
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Pill, RoundedCornerShape(16.dp))
+                            .padding(14.dp),
+                    ) {
                         Text(
-                            subPos.replaceFirstChar { it.uppercase() },
-                            color = Color.White,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(horizontal = 12.dp),
+                            "STYLING & SYNC TUNING",
+                            color = Dim,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            letterSpacing = 1.5.sp,
                         )
-                        BarPill(">", big) {
-                            val order = listOf("bottom", "center", "top")
-                            val i = order.indexOf(subPos).let { if (it < 0) 0 else it }
-                            subPos = order[(i + 2) % order.size]
-                            Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("TEXT SIZE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(96.dp))
+                            BarPill("A -", big) {
+                                subStyle = subStyle.copy(size = (subStyle.size - 2).coerceIn(12, 26))
+                                Store.saveSubStyle(ctx, subStyle)
+                            }
+                            Text(
+                                subStyle.size.toString() + "sp",
+                                color = Accent,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                            )
+                            BarPill("A +", big) {
+                                subStyle = subStyle.copy(size = (subStyle.size + 2).coerceIn(12, 26))
+                                Store.saveSubStyle(ctx, subStyle)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("TIMING SYNC", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(96.dp))
+                            BarPill(" - ", big) {
+                                val o = Math.round((subOffset - 0.5f) * 10) / 10f
+                                subOffset = o.coerceIn(-30f, 30f)
+                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                            }
+                            Text(
+                                subOffset.let { (if (it >= 0) "+" else "") + String.format("%.1f", it) + "s" },
+                                color = Accent,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                            )
+                            BarPill(" + ", big) {
+                                val o = Math.round((subOffset + 0.5f) * 10) / 10f
+                                subOffset = o.coerceIn(-30f, 30f)
+                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("POSITION", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(96.dp))
+                            BarPill("<", big) {
+                                // "<" moves captions UP the screen (site rule)
+                                val order = listOf("bottom", "center", "top")
+                                val i = order.indexOf(subPos).let { if (it < 0) 0 else it }
+                                subPos = order[(i + 1) % order.size]
+                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                            }
+                            Text(
+                                subPos.replaceFirstChar { it.uppercase() },
+                                color = Color.White,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                            )
+                            BarPill(">", big) {
+                                val order = listOf("bottom", "center", "top")
+                                val i = order.indexOf(subPos).let { if (it < 0) 0 else it }
+                                subPos = order[(i + 2) % order.size]
+                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("TEXT COLOR", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(96.dp))
+                            listOf(0 to "White", 1 to "Yellow", 2 to "Cyan").forEach { (idx, name) ->
+                                val on = subStyle.color == idx
+                                Box(
+                                    modifier = Modifier
+                                        .padding(end = 8.dp)
+                                        .focusRing(RoundedCornerShape(50), pop = false)
+                                        .background(if (on) Accent else Card, RoundedCornerShape(50))
+                                        .clickable {
+                                            subStyle = subStyle.copy(color = idx)
+                                            Store.saveSubStyle(ctx, subStyle)
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                                ) {
+                                    Text(
+                                        name,
+                                        color = if (on) Ink else when (idx) {
+                                            1 -> Color(0xFFFFE066)
+                                            2 -> Color(0xFF7FE7F5)
+                                            else -> Color.White
+                                        },
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("BG PLATE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(96.dp))
+                            listOf(0 to "None", 60 to "Semi", 100 to "Solid").forEach { (v, name) ->
+                                val on = subStyle.bg == v
+                                Box(
+                                    modifier = Modifier
+                                        .padding(end = 8.dp)
+                                        .focusRing(RoundedCornerShape(50), pop = false)
+                                        .background(if (on) Accent else Card, RoundedCornerShape(50))
+                                        .clickable {
+                                            subStyle = subStyle.copy(bg = v)
+                                            Store.saveSubStyle(ctx, subStyle)
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                                ) {
+                                    Text(
+                                        name,
+                                        color = if (on) Ink else Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                    )
+                                }
+                            }
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    // Live preview - the caption exactly as it rides the
+                    // player (design pack's preview line).
+                    Spacer(modifier = Modifier.height(12.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Sync", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.width(74.dp))
-                        BarPill("-", big) {
-                            val o = Math.round((subOffset - 0.5f) * 10) / 10f
-                            subOffset = o.coerceIn(-30f, 30f)
-                            Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
-                        }
-                        Text(
-                            subOffset.let { (if (it >= 0) "+" else "") + String.format("%.1f", it) + "s" },
-                            color = Accent,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                        )
-                        BarPill("+", big) {
-                            val o = Math.round((subOffset + 0.5f) * 10) / 10f
-                            subOffset = o.coerceIn(-30f, 30f)
-                            Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Style", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.width(74.dp))
-                        BarPill("A-", big) {
-                            subStyle = subStyle.copy(size = (subStyle.size - 2).coerceIn(12, 26))
-                            Store.saveSubStyle(ctx, subStyle)
-                        }
-                        Text(
-                            subStyle.size.toString() + "sp",
-                            color = Color.White,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(horizontal = 10.dp),
-                        )
-                        BarPill("A+", big) {
-                            subStyle = subStyle.copy(size = (subStyle.size + 2).coerceIn(12, 26))
-                            Store.saveSubStyle(ctx, subStyle)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Spacer(modifier = Modifier.width(74.dp))
-                        BarPill("Color", big) {
-                            subStyle = subStyle.copy(color = (subStyle.color + 1) % 3)
-                            Store.saveSubStyle(ctx, subStyle)
-                        }
+                        Box(modifier = Modifier.size(7.dp).background(Accent, CircleShape))
                         Spacer(modifier = Modifier.width(8.dp))
-                        BarPill("BG " + subStyle.bg + "%", big) {
-                            subStyle = subStyle.copy(bg = (subStyle.bg + 30) % 120)
-                            Store.saveSubStyle(ctx, subStyle)
-                        }
+                        Text(
+                            "LIVE SUBTITLE PREVIEW",
+                            color = Dim,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            letterSpacing = 1.5.sp,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF000000).copy(alpha = subStyle.bg / 100f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "Sample: StreamBox captions ride in this exact style.",
+                            color = when (subStyle.color) {
+                                1 -> Color(0xFFFFE066)
+                                2 -> Color(0xFF7FE7F5)
+                                else -> Color.White
+                            },
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            fontSize = subStyle.size.sp,
+                        )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     // AniPM's own subtitle tracks (player-side), website
@@ -2186,5 +2455,69 @@ fun KeyChip(label: String) {
             fontSize = 10.sp,
             letterSpacing = 0.5.sp,
         )
+    }
+}
+
+/** Quick-select episode card for the Episodes sheet (design pack): E-cap +
+    real name/meta, selection ring in accent tint. Clicking plays it. */
+@Composable
+private fun QuickEpCard(
+    ep: Ep,
+    big: Boolean,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .focusRing(RoundedCornerShape(14.dp))
+            .background(if (selected) Color(0x1A00F0B5) else Pill, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(if (big) 44.dp else 38.dp)
+                .background(Card, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "E" + ep.n,
+                color = Accent,
+                fontWeight = FontWeight.Black,
+                fontSize = if (big) 13.sp else 11.sp,
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                if (ep.name.isNotBlank() && ep.name != "Episode " + ep.n) ep.name else "Episode " + ep.n,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (big) 13.sp else 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                when {
+                    ep.runtime > 0 -> ep.runtime.toString() + "m"
+                    ep.year > 0 -> ep.year.toString()
+                    else -> ""
+                },
+                color = Dim,
+                fontSize = 10.sp,
+                maxLines = 1,
+            )
+        }
+        if (selected) {
+            Text(
+                "SELECTED",
+                color = Accent,
+                fontWeight = FontWeight.Bold,
+                fontSize = 9.sp,
+                letterSpacing = 1.sp,
+            )
+        }
     }
 }
