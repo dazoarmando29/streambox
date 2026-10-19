@@ -215,6 +215,56 @@ object Api {
             typeOverride
         )
 
+    private val genreCache = java.util.Collections.synchronizedMap(HashMap<String, List<Pair<Int, String>>>())
+
+    /** Real TMDB genre names (/genre/movie|tv/list) for the BROWSE BY GENRE
+        chips - cached for the session, empty when TMDB is unreachable. */
+    fun genres(kind: String): List<Pair<Int, String>> {
+        val k = if (kind == "movie") "movie" else "tv"
+        genreCache[k]?.let { return it }
+        val out = ArrayList<Pair<Int, String>>()
+        try {
+            val arr = get("/api/tmdb/3/genre/" + k + "/list").optJSONArray("genres")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val id = o.optInt("id", -1)
+                    val name = o.optString("name", "")
+                    if (id >= 0 && name.isNotBlank() && name != "null") out.add(id to name)
+                }
+            }
+        } catch (e: Exception) {
+        }
+        genreCache[k] = out
+        return out
+    }
+
+    /** Genre browse rows (real discover data): popular + top-rated picks
+        for one genre. topRated carries the vote_count floor so 10.0-with-
+        1-vote noise can never top the row. */
+    fun genreMovies(genreId: Int, topRated: Boolean): List<Title> =
+        titlesFrom(
+            get(
+                "/api/tmdb/3/discover/movie?with_genres=" + genreId +
+                    (if (topRated) "&sort_by=vote_average.desc&vote_count.gte=80" else "&sort_by=popularity.desc")
+            ).getJSONArray("results"),
+            "movie"
+        )
+
+    /** Genre browse rows for shows; anime narrows to Japanese animation
+        (genre 16 AND the genre pick, comma = AND in discover). */
+    fun genreTv(genreId: Int, topRated: Boolean, anime: Boolean): List<Title> {
+        val g = if (anime) (if (genreId == 16) "16" else "16," + genreId) else genreId.toString()
+        return titlesFrom(
+            get(
+                "/api/tmdb/3/discover/tv?with_genres=" + g +
+                    (if (anime) "&with_original_language=ja" else "") +
+                    (if (topRated) "&sort_by=vote_average.desc&vote_count.gte=80" else "&sort_by=popularity.desc")
+            ).getJSONArray("results"),
+            if (anime) "anime" else "tv"
+        )
+    }
+
     /** TMDB -> IMDb id (SkipDB is keyed by IMDb). Anime rows are TMDB tv;
         the other kind is tried once for anime movies / mixed results. */
     fun imdbId(type: String, id: Int): String? {

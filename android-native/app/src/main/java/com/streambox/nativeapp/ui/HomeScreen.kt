@@ -93,8 +93,14 @@ private object BrowseCache {
 }
 
 /** The canonical row plan per section - shared by the loader and the
-    incremental painter so rows never reorder as they land. */
-private fun rowPlan(section: Section): List<Pair<String, () -> List<Title>>> = when (section) {
+    incremental painter so rows never reorder as they land. A genre pick
+    swaps the section's rows for that genre's real discover rows (BROWSE BY
+    GENRE, 0.39). */
+private fun rowPlan(
+    section: Section,
+    genre: Int? = null,
+    gName: String = "",
+): List<Pair<String, () -> List<Title>>> = when (section) {
     Section.HOME -> listOf(
         "Trending Now" to { Api.trending() },
         "Popular Movies" to { Api.popularMovies() },
@@ -102,18 +108,27 @@ private fun rowPlan(section: Section): List<Pair<String, () -> List<Title>>> = w
         "Top Rated Movies" to { Api.topRatedMovies() },
         "Top Rated Shows" to { Api.topRatedTv() },
     )
-    Section.MOVIES -> listOf(
+    Section.MOVIES -> if (genre != null) listOf(
+        "Popular " + gName + " Movies" to { Api.genreMovies(genre, false) },
+        "Top Rated " + gName + " Movies" to { Api.genreMovies(genre, true) },
+    ) else listOf(
         "Trending Movies" to { Api.trending().filter { it.type == "movie" } },
         "Popular Movies" to { Api.popularMovies() },
         "Top Rated Movies" to { Api.topRatedMovies() },
     )
-    Section.TV -> listOf(
+    Section.TV -> if (genre != null) listOf(
+        "Popular " + gName + " Shows" to { Api.genreTv(genre, false, false).filter { !it.isAnime } },
+        "Top Rated " + gName + " Shows" to { Api.genreTv(genre, true, false).filter { !it.isAnime } },
+    ) else listOf(
         "New Episodes" to { Api.newEpisodes(false).filter { !it.isAnime } },
         "Trending Shows" to { Api.trending().filter { it.type != "movie" && !it.isAnime } },
         "Popular Shows" to { Api.popularTv().filter { !it.isAnime } },
         "Top Rated Shows" to { Api.topRatedTv().filter { !it.isAnime } },
     )
-    Section.ANIME -> listOf(
+    Section.ANIME -> if (genre != null) listOf(
+        "Popular " + gName + " Anime" to { Api.genreTv(genre, false, true) },
+        "Top Rated " + gName + " Anime" to { Api.genreTv(genre, true, true) },
+    ) else listOf(
         "New Episodes" to { Api.newEpisodes(true) },
         "Popular Anime" to { Api.anime() },
         "Top Rated Anime" to { Api.animeTop() },
@@ -127,11 +142,13 @@ private fun rowPlan(section: Section): List<Pair<String, () -> List<Title>>> = w
     sink the page - it just comes back empty. */
 private suspend fun fetchRows(
     section: Section,
+    genre: Int?,
+    gName: String,
     onProgress: (List<Pair<String, List<Title>>>) -> Unit,
 ): List<Pair<String, List<Title>>> =
     withContext(Dispatchers.IO) {
         coroutineScope {
-            val plan = rowPlan(section)
+            val plan = rowPlan(section, genre, gName)
             val order = plan.map { it.first }
             val done = java.util.Collections.synchronizedMap(HashMap<String, List<Title>>())
             plan.map { (label, f) ->
@@ -168,12 +185,31 @@ fun BrowseScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var loadedKey by remember { mutableStateOf("") }
+    // BROWSE BY GENRE (0.39): real TMDB genre names for the chip row; the
+    // pick swaps the section's rows for that genre's discover rows.
+    var genreSel by remember { mutableStateOf<Int?>(null) }
+    var genreList by remember { mutableStateOf(listOf<Pair<Int, String>>()) }
 
-    LaunchedEffect(section, submitted, searchMode) {
+    LaunchedEffect(section) {
+        genreSel = null
+        if (section == Section.MOVIES || section == Section.TV || section == Section.ANIME) {
+            genreList = withContext(Dispatchers.IO) {
+                runCatching {
+                    Api.genres(if (section == Section.MOVIES) "movie" else "tv")
+                }.getOrDefault(listOf())
+            }
+        } else {
+            genreList = listOf()
+        }
+    }
+
+    LaunchedEffect(section, submitted, searchMode, genreSel) {
         cont = Store.progressList(ctx)
         myList = Store.listItems(ctx)
         val isSearch = searchMode && submitted.isNotBlank()
-        val key = if (isSearch) "s:" + submitted.trim().lowercase() + ":" + section else "r:" + section
+        val gName = genreList.firstOrNull { it.first == genreSel }?.second ?: ""
+        val key = if (isSearch) "s:" + submitted.trim().lowercase() + ":" + section
+        else "r:" + section + ":" + (genreSel ?: 0)
         // Stale-while-revalidate: cached content paints immediately and is
         // refreshed in the background - Back-from-player is instant now.
         val hitRows = BrowseCache.rows[key]
@@ -199,7 +235,7 @@ fun BrowseScreen(
                 // Rows paint as they land - hero first, rest stream in.
                 // Over a cached paint we revalidate silently (no flicker
                 // back to partial rows) and swap once complete.
-                rows = fetchRows(section) { partial -> if (hitRows == null) rows = partial }
+                rows = fetchRows(section, genreSel, gName) { partial -> if (hitRows == null) rows = partial }
                 results = listOf()
                 BrowseCache.rows[key] = rows
             }
@@ -225,6 +261,11 @@ fun BrowseScreen(
                     onInput = { input = it },
                     onSubmit = { submitted = input },
                 )
+            }
+            // BROWSE BY GENRE (design pack language): the chip row rides
+            // over the movies / shows / anime feeds only.
+            if (!searchMode && genreList.isNotEmpty()) {
+                GenreBar(genreList, genreSel, big) { genreSel = it }
             }
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
@@ -688,6 +729,60 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                 }
             }
         }
+    }
+}
+
+/** BROWSE BY GENRE strip (design pack chips): tracked label + pill row,
+    All plus the section's real TMDB genres. A pick drives discover rows. */
+@Composable
+private fun GenreBar(
+    genres: List<Pair<Int, String>>,
+    sel: Int?,
+    big: Boolean,
+    onPick: (Int?) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            "BROWSE BY GENRE",
+            color = Dim,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (big) 10.sp else 9.sp,
+            letterSpacing = 1.5.sp,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp),
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item { GenreChip("All", sel == null, big) { onPick(null) } }
+            items(genres.size) { i ->
+                GenreChip(genres[i].second, sel == genres[i].first, big) {
+                    onPick(genres[i].first)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+    }
+}
+
+@Composable
+private fun GenreChip(label: String, on: Boolean, big: Boolean, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .focusRing(RoundedCornerShape(50), pop = false)
+            .background(if (on) Accent else Pill, RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = if (big) 16.dp else 12.dp, vertical = if (big) 12.dp else 8.dp),
+    ) {
+        Text(
+            label,
+            color = if (on) Ink else Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (big) 13.sp else 11.sp,
+            maxLines = 1,
+        )
     }
 }
 
