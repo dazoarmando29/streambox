@@ -65,7 +65,20 @@
        the player was already talking)
     28 silent-start kicks: a VidBolt/VidZen frame that reports nothing gets
        an explicit play nudge before the 30s idle watchdog hops away
-       (website _playKickT parity - TV WebViews can swallow autoplay) */
+       (website _playKickT parity - TV WebViews can swallow autoplay)
+    29 Japanese animation types as ANIME with no override: search/multi and
+       trending land in titlesFrom too, and a plain "tv" type there sent
+       'My Happy Marriage' to the TV default player instead of AniPM
+    30 screens are keyed per title / play session: un-keyed remember kept
+       the PREVIOUS title's season/episode/saved/ids across detail-similar
+       navigation and replays ('episode 1' opened S2 E1), the episode rail
+       clears before every season fetch (no stale rail), and a season that
+       does not exist on the title snaps back to a real one
+    31 the TV hero tells the whole story: overview never clamps and the
+       hero box grows with its content (the 3-line cut hid the synopsis)
+    32 poster captions ride the focus bounds on TV: the ring/click wraps
+       artwork + name so bringIntoView scrolls the name clear of the
+       bottom bar (phone keeps the artwork-only tap target) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -515,6 +528,68 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("silent-start kicks nudge VidBolt/VidZen before the 30s idle hop (website parity)");
   } else {
     bad("silent-start kicks missing - a TV WebView that swallows autoplay strands the player until the watchdog hops");
+  }
+}
+
+/* ---------- 29. Japanese animation types as ANIME without an override ---------- */
+{
+  const apiP = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt");
+  const apiS = fs.existsSync(apiP) ? fs.readFileSync(apiP, "utf8") : "";
+  if (!apiS) bad("Api.kt missing - anime typing cannot be verified");
+  else if (/val isAnime = 16 in genIds && lang == "ja"/.test(apiS) &&
+           /else if \(isAnime\) "anime" else "tv"/.test(apiS)) {
+    ok("search/multi + trending type Japanese animation as anime (AniPM routing)");
+  } else {
+    bad("titlesFrom must map genre 16 + ja to \"anime\" even with no override - plain \"tv\" sent anime to the TV default player");
+  }
+}
+
+/* ---------- 30. screens keyed per title / play session ---------- */
+{
+  const appP = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt");
+  const appS = fs.existsSync(appP) ? fs.readFileSync(appP, "utf8") : "";
+  const detPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt");
+  const det = fs.existsSync(detPath) ? fs.readFileSync(detPath, "utf8") : "";
+  if (!appS || !det) bad("App.kt/DetailScreen.kt missing - stale-state rules cannot be verified");
+  else {
+    if (/is Screen\.Detail -> key\(s\.title\.id, s\.title\.type\)/.test(appS) &&
+        /is Screen\.Player -> key\(s\.title\.id, s\.title\.type, s\.season, s\.episode/.test(appS)) {
+      ok("Detail/Player compose under key() per title and play session");
+    } else {
+      bad("Detail/Player must wrap in key(...) - un-keyed remember kept the previous title's season/episode ('episode 1' opened S2 E1)");
+    }
+    if (/episodes = listOf\(\)\n[\s\S]{0,200}Api\.season\(title\.id, season\)/.test(det) &&
+        /det\.seasons\.none \{ it\.n == season \}/.test(det)) {
+      ok("episode rail clears on season switch and stale seasons snap back");
+    } else {
+      bad("DetailScreen must clear the episode rail before every season fetch and snap invalid seasons back to a real one");
+    }
+  }
+}
+
+/* ---------- 31. TV hero tells the whole story ---------- */
+{
+  const hsP = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt");
+  const hs = fs.existsSync(hsP) ? fs.readFileSync(hsP, "utf8") : "";
+  if (!hs) bad("HomeScreen.kt missing - hero rules cannot be verified");
+  else if (/heightIn\(min = if \(big\) 420\.dp else 260\.dp\)/.test(hs) &&
+           /maxLines = if \(big\) Int\.MAX_VALUE else 3/.test(hs)) {
+    ok("TV hero grows with its content and the overview is never clamped");
+  } else {
+    bad("TV hero must use heightIn(min) + an unclamped overview - the 3-line cut hid the synopsis");
+  }
+}
+
+/* ---------- 32. poster captions ride the TV focus bounds ---------- */
+{
+  const hs2 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  if (!hs2) bad("HomeScreen.kt missing - poster caption rules cannot be verified");
+  else if (/width\(if \(tv\) 170\.dp else 128\.dp\)[\s\S]{0,420}if \(tv\) Modifier\s*\.focusRing\(plate\)/.test(hs2) &&
+           /contentPadding = PaddingValues\(bottom = if \(big\) 76\.dp else 20\.dp\)/.test(hs2)) {
+    ok("poster ring wraps artwork + name on TV and the feed clears the bottom bar");
+  } else {
+    bad("PosterCard must wrap artwork + caption in the TV focus target (names hidden under the legend otherwise) and the feed must pad past the TV bottom bar");
   }
 }
 

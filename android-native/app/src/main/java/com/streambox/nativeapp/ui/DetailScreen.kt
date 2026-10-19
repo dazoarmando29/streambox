@@ -121,10 +121,23 @@ fun DetailScreen(
     LaunchedEffect(title.id, title.type, season) {
         if (title.type != "movie") {
             epsBusy = true
+            // Clear first (0.48): a stale rail from the previous season made
+            // 'episode 1' click ANOTHER season's E1 while the fetch ran.
+            episodes = listOf()
             episodes = withContext(Dispatchers.IO) {
                 runCatching { Api.season(title.id, season) }.getOrDefault(listOf())
             }
             epsBusy = false
+        }
+    }
+
+    // Season sanity (0.48): whatever the entry path, the selected season
+    // must exist on THIS title - a stale pick snaps to the first real
+    // season (specials/season 0 never win) and the rail restarts at E1.
+    LaunchedEffect(det) {
+        if (det.seasons.isNotEmpty() && det.seasons.none { it.n == season }) {
+            season = det.seasons.firstOrNull { it.n >= 1 }?.n ?: 1
+            episode = 1
         }
     }
 
@@ -359,7 +372,7 @@ fun DetailScreen(
                             color = Soft,
                             fontFamily = BodyFont,
                             fontSize = if (big) 16.sp else 13.sp,
-                            maxLines = if (expanded) 12 else 3,
+                            maxLines = if (expanded) Int.MAX_VALUE else 3,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.widthIn(max = if (big) 860.dp else 560.dp),
                         )

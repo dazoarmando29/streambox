@@ -849,8 +849,11 @@ fun PlayerScreen(
     var cinesrcQ by remember { mutableStateOf("") }
     var scrub by remember { mutableFloatStateOf(-1f) }
     var showEps by remember { mutableStateOf(false) }
-    var epSeason by remember { mutableIntStateOf(season) }
-    var epNumber by remember { mutableIntStateOf(episode) }
+    // Keyed per title/play session (0.48): un-keyed remember silently kept
+    // the previous playback's season/episode when a new play arrived at the
+    // same call site - belt and braces under App.kt's key() wrapper.
+    var epSeason by remember(title.id, title.type, season, episode) { mutableIntStateOf(season) }
+    var epNumber by remember(title.id, title.type, season, episode) { mutableIntStateOf(episode) }
     var skips by remember { mutableStateOf(IntroDb.Skips(listOf(), listOf(), listOf())) }
     var web by remember { mutableStateOf<WebView?>(null) }
     // Direct HLS slot (pre-build): the Media3 engine is created ONLY when

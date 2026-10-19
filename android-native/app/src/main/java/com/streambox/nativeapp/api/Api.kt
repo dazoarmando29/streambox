@@ -129,17 +129,23 @@ object Api {
             val id = o.optInt("id", 0)
             if (id == 0) continue
             val mediaType = o.optString("media_type", "")
-            val type = typeOverride
-                ?: if (o.has("title") && !o.has("name")) "movie"
-                else if (mediaType == "movie") "movie" else "tv"
             val gArr = o.optJSONArray("genre_ids")
             val genIds = ArrayList<Int>()
             if (gArr != null) {
                 for (g in 0 until gArr.length()) {
-                    val id = gArr.optInt(g, -1)
-                    if (id >= 0) genIds.add(id)
+                    val gid = gArr.optInt(g, -1)
+                    if (gid >= 0) genIds.add(gid)
                 }
             }
+            val lang = o.optString("original_language", "")
+            val isAnime = 16 in genIds && lang == "ja"
+            // Japanese animation is ANIME everywhere it lands - search/multi
+            // and trending included (0.48: 'My Happy Marriage' searched as
+            // plain TV and rode the TV default player instead of AniPM).
+            val type = typeOverride
+                ?: if (o.has("title") && !o.has("name")) "movie"
+                else if (mediaType == "movie") "movie"
+                else if (isAnime) "anime" else "tv"
             out.add(
                 Title(
                     id = id,
@@ -152,7 +158,7 @@ object Api {
                     vote = o.optDouble("vote_average", 0.0),
                     adult = o.optBoolean("adult", false),
                     genreIds = genIds,
-                    lang = o.optString("original_language", ""),
+                    lang = lang,
                 )
             )
         }

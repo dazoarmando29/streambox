@@ -32,6 +32,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -150,22 +151,30 @@ fun StreamBoxApp() {
                     }
                 }
 
-                is Screen.Detail -> DetailScreen(
-                    title = s.title,
-                    onBack = { screen = Screen.Browse(section) },
-                    onPlay = { season, episode, mal, ani, lang -> play(s.title, season, episode, mal, ani, lang) },
-                    onOpen = { screen = Screen.Detail(it) },
-                )
+                // key() per title / play session (0.48): un-keyed remember
+                // kept the PREVIOUS title's season/episode/saved/ids when
+                // navigating detail-to-similar or replaying - 'episode 1'
+                // opened S2 E1 of the wrong context. A new key = fresh state.
+                is Screen.Detail -> key(s.title.id, s.title.type) {
+                    DetailScreen(
+                        title = s.title,
+                        onBack = { screen = Screen.Browse(section) },
+                        onPlay = { season, episode, mal, ani, lang -> play(s.title, season, episode, mal, ani, lang) },
+                        onOpen = { screen = Screen.Detail(it) },
+                    )
+                }
 
-                is Screen.Player -> PlayerScreen(
-                    title = s.title,
-                    season = s.season,
-                    episode = s.episode,
-                    mal = s.mal,
-                    ani = s.ani,
-                    lang = s.lang,
-                    onHome = { screen = Screen.Browse(section) },
-                )
+                is Screen.Player -> key(s.title.id, s.title.type, s.season, s.episode, s.lang ?: "") {
+                    PlayerScreen(
+                        title = s.title,
+                        season = s.season,
+                        episode = s.episode,
+                        mal = s.mal,
+                        ani = s.ani,
+                        lang = s.lang,
+                        onHome = { screen = Screen.Browse(section) },
+                    )
+                }
             }
         }
         }

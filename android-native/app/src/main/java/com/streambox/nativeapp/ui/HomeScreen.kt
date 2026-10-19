@@ -521,7 +521,9 @@ private fun Feed(
     }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 20.dp),
+        // TV: the bottom bar (legend/status) overlays the feed - pad past it
+        // so the last row's captions can scroll fully clear (0.48).
+        contentPadding = PaddingValues(bottom = if (big) 76.dp else 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         if (hero != null) {
@@ -543,7 +545,10 @@ private fun Feed(
 
 @Composable
 private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> Unit, onOpen: (Title) -> Unit) {
-    Box(modifier = Modifier.fillMaxWidth().height(if (big) 420.dp else 260.dp)) {
+    // TV hero (0.48): the box GROWS with its content and the overview is
+    // never clamped - the design ask is 'details in full' (the 3-line cut
+    // hid the rest of the synopsis and a long block pushed the title out).
+    Box(modifier = Modifier.fillMaxWidth().heightIn(min = if (big) 420.dp else 260.dp)) {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(100).build(),
             contentDescription = t.name,
@@ -591,7 +596,7 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                 t.name,
                 fontSize = if (big) 44.sp else 28.sp,
                 fontWeight = FontWeight.Black,
-                maxLines = 2,
+                maxLines = if (big) 3 else 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(modifier = Modifier.height(4.dp))
@@ -612,7 +617,9 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                     color = Soft,
                     fontFamily = BodyFont,
                     fontSize = if (big) 15.sp else 13.sp,
-                    maxLines = 3,
+                    // TV reads the whole story (0.48 'details in full');
+                    // phone keeps the compact 3-line hero.
+                    maxLines = if (big) Int.MAX_VALUE else 3,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = if (big) 720.dp else 520.dp),
                 )
@@ -862,20 +869,39 @@ private fun PosterRow(label: String, titles: List<Title>, newIds: Set<Int>, onOp
 
 @Composable
 fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false) {
+    val tv = AppEnv.isTv
+    val plate = RoundedCornerShape(12.dp)
+    // TV (0.48): the ring/click wraps the WHOLE card (artwork + name) so the
+    // caption sits inside the focus bounds - bringIntoView then scrolls the
+    // name into view with the poster (bottom-edge rows used to hide every
+    // name under the legend). Phone keeps the artwork-only target: a tap
+    // should feel like the poster, not a tall box.
     Column(
-        modifier = Modifier.width(if (AppEnv.isTv) 170.dp else 128.dp),
+        modifier = Modifier
+            .width(if (tv) 170.dp else 128.dp)
+            .then(
+                if (tv) Modifier
+                    .focusRing(plate)
+                    .clip(plate)
+                    .background(Card)
+                    .clickable { onOpen(t) }
+                else Modifier
+            ),
     ) {
-        // The ARTWORK is the button: ring, pop and click all hug the poster.
-        // The caption below is decoration, never part of the target (the old
-        // whole-column box is what made picking feel like a square box).
+        // The ARTWORK is the button on phone: ring, pop and click hug the
+        // poster. On TV the whole card is the target (caption visibility).
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .focusRing(RoundedCornerShape(12.dp))
-                .clip(RoundedCornerShape(12.dp))
-                .background(Card)
-                .clickable { onOpen(t) },
+                .then(
+                    if (tv) Modifier
+                    else Modifier
+                        .focusRing(plate)
+                        .clip(plate)
+                        .background(Card)
+                        .clickable { onOpen(t) }
+                ),
         ) {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(100).build(),
