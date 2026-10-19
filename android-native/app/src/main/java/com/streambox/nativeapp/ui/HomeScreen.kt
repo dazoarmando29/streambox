@@ -121,7 +121,17 @@ private fun rowPlan(
     }
     Section.TV -> {
         val g = genre?.toIntOrNull()
-        if (g != null) listOf(
+        if (genre == "kdrama") listOf(
+            // Korean-language TV from real discover data - rows keep lang
+            // "ko" so every card routes to VidBolt (0.42). The kind rows
+            // are the genre slices TMDB can actually filter.
+            "Popular K-Dramas" to { Api.kdramas(null, false) },
+            "Top Rated K-Dramas" to { Api.kdramas(null, true) },
+            "Mystery K-Dramas" to { Api.kdramas(9648, false) },
+            "Comedy K-Dramas" to { Api.kdramas(35, false) },
+            "Action K-Dramas" to { Api.kdramas(10759, false) },
+            "Fantasy K-Dramas" to { Api.kdramas(10765, false) },
+        ) else if (g != null) listOf(
             "Popular " + gName + " Shows" to { Api.genreTv(g, false, false).filter { !it.isAnime } },
             "Top Rated " + gName + " Shows" to { Api.genreTv(g, true, false).filter { !it.isAnime } },
         ) else listOf(
@@ -206,7 +216,10 @@ fun BrowseScreen(
                 when (section) {
                     Section.ANIME -> Api.animeGenres()
                     Section.MOVIES -> Api.genres("movie").map { it.first.toString() to it.second }
-                    Section.TV -> Api.genres("tv").map { it.first.toString() to it.second }
+                    // The TV strip leads with K-Drama (0.42): its own
+                    // listing plus the different KINDS inside it.
+                    Section.TV -> listOf("kdrama" to "K-Drama") +
+                        Api.genres("tv").map { it.first.toString() to it.second }
                     else -> listOf()
                 }
             }.getOrDefault(listOf())

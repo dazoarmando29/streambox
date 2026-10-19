@@ -322,6 +322,20 @@ object Api {
         )
     }
 
+    /** K-Drama rows (0.42): Korean-language TV from discover, optionally
+        narrowed to one genre so the listing shows the different KINDS of
+        kdramas (mystery, comedy, action, ...). Rows keep lang "ko" so they
+        route to VidBolt. */
+    fun kdramas(genreId: Int?, top: Boolean): List<Title> =
+        titlesFrom(
+            get(
+                "/api/tmdb/3/discover/tv?with_original_language=ko" +
+                    (genreId?.let { "&with_genres=" + it } ?: "") +
+                    (if (top) "&sort_by=vote_average.desc&vote_count.gte=80" else "&sort_by=popularity.desc")
+            ).getJSONArray("results"),
+            "tv"
+        )
+
     /** TMDB -> IMDb id (SkipDB is keyed by IMDb). Anime rows are TMDB tv;
         the other kind is tried once for anime movies / mixed results. */
     fun imdbId(type: String, id: Int): String? {

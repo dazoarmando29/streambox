@@ -535,6 +535,8 @@ private val SB_HOOK = """
     rate: function(r){
       var v=document.querySelector('video'); if(v) v.playbackRate=r;
       if (ANIPM) anipmSend('setPlaybackRate', {rate: r});
+      // VidBolt speaks speed through its mobile-option contract (0.42).
+      if (VB) post({type:'mobile-option', option:'speed', value:r});
       try{window.postMessage({type:'cinesrc:command',command:'setPlaybackRate',args:[r]},'*');}catch(e){}
     },
     q: function(n){ if(ANIPM) anipmSend('setQuality', {height: n}); },
@@ -2014,10 +2016,11 @@ fun PlayerScreen(
                     }
                 }
                 // Mute + rate exist only on mirrors we can actually drive
-                // (website: no dead buttons - VidRift/VidZen/VidBolt expose
-                // neither a volume nor a rate command). The HLS slot is
-                // fully ours, so it gets both.
-                if (mirror == "cinesrc" || mirror == "anipm" || mirror == "hls") {
+                // (website: no dead buttons - VidRift/VidZen expose neither
+                // a volume nor a rate command). The HLS slot is fully ours,
+                // and VidBolt speaks volume + speed through its own
+                // message contract (0.41/0.42).
+                if (mirror == "cinesrc" || mirror == "anipm" || mirror == "hls" || mirror == "vidbolt") {
                 Box(
                     modifier = Modifier
                         .size(if (big) 56.dp else 48.dp)
