@@ -61,14 +61,234 @@ async function route(request, env) {
   const url = new URL(request.url);
   if (url.pathname === "/healthz") return json({ ok: true, name: "streambox-api" }, 200, origin);
   if (url.pathname === "/api/anime-map") return animeMap(url, env, origin);
+  if (url.pathname === "/api/anime/genres") {
+    return json({ data: ANIME_GENRES.map((g) => ({ id: g, name: g })) }, 200, origin);
+  }
+  if (url.pathname === "/api/anime/browse") return animeBrowse(url, env, origin);
   if (url.pathname === "/api/wyz/search") return wyzSearch(url, env, origin);
   if (url.pathname === "/api/bs-subs") return bsSubs(url, env, origin);
   if (url.pathname.startsWith("/api/tmdb/")) return tmdbProxy(url, env, request, origin);
   return json({ error: "not_found" }, 404, origin);
 }
 
+/* ---------- AniList genre browse (0.40) ----------
+   The Anime area browses with ANILIST's genre taxonomy (Romance, Slice of
+   Life, Mecha, ...) - TMDB's TV genres have no Romance at all. Rows come
+   from AniList GraphQL and are resolved to TMDB tv ids SERVER-SIDE (TMDB
+   search by title + year) so the app keeps one catalog surface and every
+   detail/season/playback path stays intact. Titles TMDB cannot resolve
+   are DROPPED, never faked. */
+const ANIME_GENRES = [
+  "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror",
+  "Mahou Shoujo", "Mecha", "Music", "Mystery", "Psychological",
+  "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller",
+];
+
+async function animeBrowse(url, env, origin) {
+  const genre = (url.searchParams.get("genre") || "").trim();
+  const top = url.searchParams.get("top") === "1";
+  if (!ANIME_GENRES.includes(genre)) return json({ error: "bad_genre" }, 400, origin);
+
+  const key = cacheKey("anime-browse", { genre, top: top ? "1" : "0" });
+  const cached = await cacheGet(key);
+  if (cached) return json({ ...cached, cached: true }, 200, origin);
+
+  // Normalized rows {name, year, poster, backdrop, overview, vote} - then
+  // ONE TMDB-resolution path. AniList primary, Kitsu fallback (its genre
+  // slugs mirror the AniList taxonomy exactly, so the chips never change).
+  let media = [];
+  let source = "anilist";
+  try {
+    media = await anilistGenreBrowse(genre, top);
+    if (!media.length) throw new Error("empty");
+  } catch (e) {
+    source = "kitsu";
+    try {
+      media = await kitsuGenreBrowse(genre, top);
+    } catch (e2) {
+      return json(
+        {
+          error: "genre_browse_failed",
+          detail: String((e2 && e2.message) || e2),
+          anilist_detail: String((e && e.message) || e),
+        },
+        502,
+        origin
+      );
+    }
+  }
+
+  // Dedupe by TMDB id: season-split entries (Code Geass + R2) can resolve
+  // to the same TMDB show - one card per title, never doubles.
+  const seen = new Set();
+  const rows = (
+    await Promise.all(
+      media.slice(0, 20).map(async (m) => {
+        const tmdbId = await tmdbTvResolve(m.name, m.year, env);
+        if (!tmdbId) return null;
+        return {
+          id: tmdbId,
+          type: "anime",
+          name: m.name,
+          poster: m.poster || null,
+          backdrop: m.backdrop || null,
+          year: m.year || 0,
+          overview: m.overview || "",
+          vote: m.vote || 0,
+          adult: !!m.adult,
+          genreIds: [16],
+          lang: "ja",
+        };
+      })
+    )
+  )
+    .filter(Boolean)
+    .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+
+  const out = { data: rows, requested: media.length, resolved: rows.length, source };
+  cachePut(key, out, 3600);
+  return json(out, 200, origin);
+}
+
+/* AniList GraphQL genre browse (primary carrier). */
+async function anilistGenreBrowse(genre, top) {
+  const query = `query ($g: String, $s: [MediaSort]) {
+    Page(page: 1, perPage: 20) {
+      media(type: ANIME, genre_in: [$g], sort: $s, isAdult: false) {
+        id
+        title { romaji english }
+        coverImage { extraLarge large }
+        bannerImage
+        description
+        averageScore
+        startDate { year }
+      }
+    }
+  }`;
+  const res = await fetch("https://graphql.anilist.co", {
+    method: "POST",
+    headers: ANILIST_HEADERS,
+    body: JSON.stringify({
+      query,
+      variables: {
+        g: genre,
+        s: top ? ["SCORE_DESC", "POPULARITY_DESC"] : ["POPULARITY_DESC"],
+      },
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error("anilist_http_" + res.status);
+  const data = await res.json();
+  const media = (((data || {}).data || {}).Page || {}).media || [];
+  return media.map((m) => ({
+    name: ((m.title && (m.title.english || m.title.romaji)) || "").trim(),
+    year: (m.startDate && m.startDate.year) || 0,
+    poster: (m.coverImage && (m.coverImage.extraLarge || m.coverImage.large)) || null,
+    backdrop: m.bannerImage || null,
+    overview: stripTags(m.description || ""),
+    vote: m.averageScore ? Math.round(m.averageScore) / 10 : 0,
+  }));
+}
+
+/* Kitsu fallback: genre slugs mirror AniList's taxonomy 1:1 (sci-fi,
+   slice-of-life, mahou-shoujo, ...) so the same chips keep working when
+   AniList 403s the Workers fetch signature. Kitsu has no nsfw filter
+   param (it 400s) - R-rated rows are marked adult and ride the app's
+   adult gate instead. */
+async function kitsuGenreBrowse(genre, top) {
+  const slug = genre.toLowerCase().replace(/\s+/g, "-");
+  const q = new URLSearchParams({
+    "filter[genres]": slug,
+    // popularityRank is a RANKING POSITION (lower = more popular), so the
+    // popular sort is ascending; -averageRating is a plain score.
+    sort: top ? "-averageRating" : "popularityRank",
+    "page[limit]": "20",
+  });
+  const res = await fetch("https://kitsu.io/api/edge/anime?" + q.toString(), {
+    headers: { accept: "application/vnd.api+json", "user-agent": UA },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error("kitsu_http_" + res.status);
+  const data = await res.json();
+  return (data.data || [])
+    .filter((x) => x && x.attributes)
+    .map((x) => ({
+      name: String(
+        x.attributes.canonicalTitle ||
+          (x.attributes.titles && (x.attributes.titles.en_jp || x.attributes.titles.en)) ||
+          ""
+      ).trim(),
+      year: (x.attributes.startDate && parseInt(String(x.attributes.startDate).slice(0, 4), 10)) || 0,
+      poster: (x.attributes.posterImage && (x.attributes.posterImage.large || x.attributes.posterImage.medium)) || null,
+      backdrop: (x.attributes.coverImage && (x.attributes.coverImage.large || x.attributes.coverImage.original)) || null,
+      overview: stripTags(x.attributes.synopsis || ""),
+      vote: x.attributes.averageRating ? Math.round(parseFloat(x.attributes.averageRating)) / 10 : 0,
+      adult: String(x.attributes.ageRating || "") === "R",
+    }))
+    .filter((x) => x.name);
+}
+
+/* Browser-ish headers for AniList: the Workers fetch signature gets 403d
+   without them (seen live again at 0.40). */
+const ANILIST_HEADERS = {
+  "content-type": "application/json",
+  accept: "application/json",
+  "user-agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  origin: "https://anilist.co",
+  referer: "https://anilist.co/",
+  "accept-language": "en-US,en;q=0.9",
+};
+
+/* TMDB tv-id resolution for an AniList title: search by title, prefer the
+   year match, then the exact normalized name, then first. */
+async function tmdbTvResolve(name, year, env) {
+  const key = env && env.TMDB_API_KEY;
+  if (!key || !name) return null;
+  const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const want = norm(name);
+  const tryFind = async (useYear) => {
+    const q = new URLSearchParams({ api_key: key, query: name });
+    if (useYear && year) q.set("first_air_date_year", String(year));
+    const res = await fetch("https://api.themoviedb.org/3/search/tv?" + q.toString(), {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const results = (data && data.results) || [];
+    if (!results.length) return null;
+    const byYear =
+      useYear && year
+        ? results.filter((r) => String(r.first_air_date || "").startsWith(String(year)))
+        : results;
+    const pool = byYear.length ? byYear : results;
+    const exact = pool.find((r) => norm(r.name) === want) || results.find((r) => norm(r.name) === want);
+    const pick = exact || pool[0];
+    return pick && pick.id ? pick.id : null;
+  };
+  try {
+    return (await tryFind(true)) || (await tryFind(false));
+  } catch (e) {
+    return null;
+  }
+}
+
+function stripTags(s) {
+  return String(s || "")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<\/?[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /* ---------- cache helpers (Workers Cache API; no bindings) ---------- */
-const CACHE_VER = "v1";
+const CACHE_VER = "v2";
 function cacheKey(scope, params) {
   return new Request("https://sb-cache.internal/" + CACHE_VER + "/" + scope + "?" + new URLSearchParams(params));
 }
@@ -216,12 +436,7 @@ async function anilistSearch(title) {
   }`;
   const res = await fetch("https://graphql.anilist.co", {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json",
-      "user-agent": UA,
-      "accept-language": "en-US,en;q=0.9",
-    },
+    headers: ANILIST_HEADERS,
     body: JSON.stringify({ query, variables: { s: title, n: 25 } }),
     signal: AbortSignal.timeout(8000),
   });

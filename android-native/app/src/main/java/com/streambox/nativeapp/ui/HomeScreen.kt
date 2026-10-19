@@ -98,7 +98,7 @@ private object BrowseCache {
     GENRE, 0.39). */
 private fun rowPlan(
     section: Section,
-    genre: Int? = null,
+    genre: String? = null,
     gName: String = "",
 ): List<Pair<String, () -> List<Title>>> = when (section) {
     Section.HOME -> listOf(
@@ -108,26 +108,33 @@ private fun rowPlan(
         "Top Rated Movies" to { Api.topRatedMovies() },
         "Top Rated Shows" to { Api.topRatedTv() },
     )
-    Section.MOVIES -> if (genre != null) listOf(
-        "Popular " + gName + " Movies" to { Api.genreMovies(genre, false) },
-        "Top Rated " + gName + " Movies" to { Api.genreMovies(genre, true) },
-    ) else listOf(
-        "Trending Movies" to { Api.trending().filter { it.type == "movie" } },
-        "Popular Movies" to { Api.popularMovies() },
-        "Top Rated Movies" to { Api.topRatedMovies() },
-    )
-    Section.TV -> if (genre != null) listOf(
-        "Popular " + gName + " Shows" to { Api.genreTv(genre, false, false).filter { !it.isAnime } },
-        "Top Rated " + gName + " Shows" to { Api.genreTv(genre, true, false).filter { !it.isAnime } },
-    ) else listOf(
-        "New Episodes" to { Api.newEpisodes(false).filter { !it.isAnime } },
-        "Trending Shows" to { Api.trending().filter { it.type != "movie" && !it.isAnime } },
-        "Popular Shows" to { Api.popularTv().filter { !it.isAnime } },
-        "Top Rated Shows" to { Api.topRatedTv().filter { !it.isAnime } },
-    )
+    Section.MOVIES -> {
+        val g = genre?.toIntOrNull()
+        if (g != null) listOf(
+            "Popular " + gName + " Movies" to { Api.genreMovies(g, false) },
+            "Top Rated " + gName + " Movies" to { Api.genreMovies(g, true) },
+        ) else listOf(
+            "Trending Movies" to { Api.trending().filter { it.type == "movie" } },
+            "Popular Movies" to { Api.popularMovies() },
+            "Top Rated Movies" to { Api.topRatedMovies() },
+        )
+    }
+    Section.TV -> {
+        val g = genre?.toIntOrNull()
+        if (g != null) listOf(
+            "Popular " + gName + " Shows" to { Api.genreTv(g, false, false).filter { !it.isAnime } },
+            "Top Rated " + gName + " Shows" to { Api.genreTv(g, true, false).filter { !it.isAnime } },
+        ) else listOf(
+            "New Episodes" to { Api.newEpisodes(false).filter { !it.isAnime } },
+            "Trending Shows" to { Api.trending().filter { it.type != "movie" && !it.isAnime } },
+            "Popular Shows" to { Api.popularTv().filter { !it.isAnime } },
+            "Top Rated Shows" to { Api.topRatedTv().filter { !it.isAnime } },
+        )
+    }
+    // Anime genre picks ride ANILIST (Romance, Slice of Life, Mecha, ...).
     Section.ANIME -> if (genre != null) listOf(
-        "Popular " + gName + " Anime" to { Api.genreTv(genre, false, true) },
-        "Top Rated " + gName + " Anime" to { Api.genreTv(genre, true, true) },
+        "Popular " + gName + " Anime" to { Api.animeGenreBrowse(genre, false) },
+        "Top Rated " + gName + " Anime" to { Api.animeGenreBrowse(genre, true) },
     ) else listOf(
         "New Episodes" to { Api.newEpisodes(true) },
         "Popular Anime" to { Api.anime() },
@@ -142,7 +149,7 @@ private fun rowPlan(
     sink the page - it just comes back empty. */
 private suspend fun fetchRows(
     section: Section,
-    genre: Int?,
+    genre: String?,
     gName: String,
     onProgress: (List<Pair<String, List<Title>>>) -> Unit,
 ): List<Pair<String, List<Title>>> =
@@ -186,20 +193,23 @@ fun BrowseScreen(
     var loading by remember { mutableStateOf(false) }
     var loadedKey by remember { mutableStateOf("") }
     // BROWSE BY GENRE (0.39): real TMDB genre names for the chip row; the
-    // pick swaps the section's rows for that genre's discover rows.
-    var genreSel by remember { mutableStateOf<Int?>(null) }
-    var genreList by remember { mutableStateOf(listOf<Pair<Int, String>>()) }
+    // pick swaps the section's rows for that genre's discover rows. Anime
+    // uses the ANILIST taxonomy instead (0.40 - Romance, Slice of Life,
+    // Mecha, ... that TMDB's TV genres do not have).
+    var genreSel by remember { mutableStateOf<String?>(null) }
+    var genreList by remember { mutableStateOf(listOf<Pair<String, String>>()) }
 
     LaunchedEffect(section) {
         genreSel = null
-        if (section == Section.MOVIES || section == Section.TV || section == Section.ANIME) {
-            genreList = withContext(Dispatchers.IO) {
-                runCatching {
-                    Api.genres(if (section == Section.MOVIES) "movie" else "tv")
-                }.getOrDefault(listOf())
-            }
-        } else {
-            genreList = listOf()
+        genreList = withContext(Dispatchers.IO) {
+            runCatching {
+                when (section) {
+                    Section.ANIME -> Api.animeGenres()
+                    Section.MOVIES -> Api.genres("movie").map { it.first.toString() to it.second }
+                    Section.TV -> Api.genres("tv").map { it.first.toString() to it.second }
+                    else -> listOf()
+                }
+            }.getOrDefault(listOf())
         }
     }
 
@@ -209,7 +219,7 @@ fun BrowseScreen(
         val isSearch = searchMode && submitted.isNotBlank()
         val gName = genreList.firstOrNull { it.first == genreSel }?.second ?: ""
         val key = if (isSearch) "s:" + submitted.trim().lowercase() + ":" + section
-        else "r:" + section + ":" + (genreSel ?: 0)
+        else "r:" + section + ":" + (genreSel ?: "")
         // Stale-while-revalidate: cached content paints immediately and is
         // refreshed in the background - Back-from-player is instant now.
         val hitRows = BrowseCache.rows[key]
@@ -736,10 +746,10 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
     All plus the section's real TMDB genres. A pick drives discover rows. */
 @Composable
 private fun GenreBar(
-    genres: List<Pair<Int, String>>,
-    sel: Int?,
+    genres: List<Pair<String, String>>,
+    sel: String?,
     big: Boolean,
-    onPick: (Int?) -> Unit,
+    onPick: (String?) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(

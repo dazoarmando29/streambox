@@ -217,6 +217,63 @@ object Api {
 
     private val genreCache = java.util.Collections.synchronizedMap(HashMap<String, List<Pair<Int, String>>>())
 
+    /** AniList genre taxonomy for the Anime area (Romance, Slice of Life,
+        Mecha, ... - TMDB's TV genres have no Romance at all). Real AniList
+        Genre enum names served by the Worker (0.40). */
+    fun animeGenres(): List<Pair<String, String>> {
+        return try {
+            val arr = get("/api/anime/genres").optJSONArray("data") ?: return listOf()
+            val out = ArrayList<Pair<String, String>>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val id = o.optString("id", "")
+                val name = o.optString("name", "")
+                if (id.isNotBlank() && id != "null" && name.isNotBlank() && name != "null") out.add(id to name)
+            }
+            out
+        } catch (e: Exception) {
+            listOf()
+        }
+    }
+
+    /** AniList-genre browse rows: the Worker bridges AniList (Kitsu
+        fallback) and resolves each title to its TMDB id, so every row is a
+        normal playable Title and nothing is ever invented. */
+    fun animeGenreBrowse(genre: String, top: Boolean): List<Title> {
+        return try {
+            val arr = get(
+                "/api/anime/browse?genre=" + java.net.URLEncoder.encode(genre, "UTF-8") +
+                    "&top=" + (if (top) "1" else "0")
+            ).optJSONArray("data") ?: return listOf()
+            val out = ArrayList<Title>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val id = o.optInt("id", 0)
+                if (id == 0) continue
+                val poster = o.optString("poster", "")
+                val backdrop = o.optString("backdrop", "")
+                out.add(
+                    Title(
+                        id = id,
+                        type = "anime",
+                        name = o.optString("name", ""),
+                        poster = if (poster.isBlank() || poster == "null") null else poster,
+                        backdrop = if (backdrop.isBlank() || backdrop == "null") null else backdrop,
+                        year = o.optInt("year", 0),
+                        overview = o.optString("overview", ""),
+                        vote = o.optDouble("vote", 0.0),
+                        adult = o.optBoolean("adult", false),
+                        genreIds = listOf(16),
+                        lang = "ja",
+                    )
+                )
+            }
+            out
+        } catch (e: Exception) {
+            listOf()
+        }
+    }
+
     /** Real TMDB genre names (/genre/movie|tv/list) for the BROWSE BY GENRE
         chips - cached for the session, empty when TMDB is unreachable. */
     fun genres(kind: String): List<Pair<Int, String>> {
