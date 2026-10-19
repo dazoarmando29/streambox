@@ -651,7 +651,31 @@ private val SB_HOOK = """
       }, function(){});
     } catch(e){}
   }
+  // VidBolt only REGISTER its mobile-option command listener (audio,
+  // subtitles, speed) when its narrow-viewport check passes - on a TV the
+  // listener never exists and every command dies silently (0.44 fix: the
+  // tracks listed but taps never changed the audio). We shim matchMedia
+  // INSIDE the same-origin iframe before their module evaluates Bt() -
+  // the module is a network fetch, so this poll always wins the race.
+  function vbNarrowShim(){
+    var tries = 0;
+    var iv = setInterval(function(){
+      tries++;
+      try {
+        var fw = window.frames[0];
+        var doc = fw && fw.document;
+        if (doc && doc.head) {
+          var s = doc.createElement("script");
+          s.textContent = "try{var o=window.matchMedia;window.matchMedia=function(q){try{if(typeof q==='string'&&q.indexOf('max-width')>=0)return{matches:true,media:q,onchange:null,addListener:function(){},removeListener:function(){},addEventListener:function(){},removeEventListener:function(){},dispatchEvent:function(){return false}};}catch(e){}return o.call(window,q);};}catch(e){}";
+          doc.head.appendChild(s);
+          clearInterval(iv);
+        }
+      } catch(e){}
+      if (tries > 600) clearInterval(iv);
+    }, 5);
+  }
   if (VB) {
+    vbNarrowShim();
     vbTracks();
     setTimeout(vbTracks, 5000);
     setTimeout(vbTracks, 15000);

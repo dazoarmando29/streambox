@@ -451,8 +451,8 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     else ok("no sandbox attribute in the wrapper (VidBolt plays)");
     if (/ext in MEDIA_EXTS[\s\S]{0,480}isAdHost/.test(psVb)) ok("Ad Shield checks media before ad blocks (playback always wins)");
     else bad("Ad Shield must check media extensions BEFORE ad-host blocks");
-    if (/vb:tracks/.test(psVb)) ok("VidBolt track plumbing present (real audio/subtitle labels)");
-    else bad("VidBolt track plumbing missing");
+    if (/vb:tracks/.test(psVb) && /vbNarrowShim/.test(psVb)) ok("VidBolt track plumbing present (real audio/subtitle labels + command gate shim)");
+    else bad("VidBolt track plumbing missing (vb:tracks / vbNarrowShim - the command listener is narrow-viewport gated)");
   }
 }
 
