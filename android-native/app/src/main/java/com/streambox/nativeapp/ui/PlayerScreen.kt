@@ -343,6 +343,51 @@ private fun hitAt(cur: Float, skips: IntroDb.Skips): SkipHit? {
     match - never spelled as dotted literals, see the Ad Shield hook). */
 private val MEDIA_EXTS = setOf("m3u8", "mpd", "ts", "m4s", "mp4", "webm", "aac", "m4a")
 
+/** VidBolt's mobile-option command listener (audio/subtitles/speed) only
+    registers when its NARROW-VIEWPORT gate passes - the phone works natively,
+    a TV never got the listener and every tap died silently (0.44/0.45 bug).
+    Their player modules get this matchMedia shim PREPENDED so the gate opens
+    on every screen; the command values are proven by the phone. */
+private val VB_MATCHMEDIA_SHIM =
+    "try{var o=window.matchMedia;window.matchMedia=function(q){try{" +
+        "if(typeof q==='string'&&q.indexOf('max-width')>=0)return{matches:true,media:q,onchange:null," +
+        "addListener:function(){},removeListener:function(){},addEventListener:function(){}," +
+        "removeEventListener:function(){},dispatchEvent:function(){return false}};}catch(e){}" +
+        "return o.call(window,q);};}catch(e){}"
+
+private val VB_JS_CACHE = java.util.Collections.synchronizedMap(HashMap<String, String>())
+
+/** Serve a VidBolt player module with the gate shim prepended (cached by
+    content-hashed URL). Null falls through to the network untouched. */
+private fun patchedVbJs(url: String): android.webkit.WebResourceResponse? {
+    return try {
+        var body = VB_JS_CACHE[url]
+        if (body == null) {
+            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 10000
+            conn.readTimeout = 15000
+            conn.setRequestProperty(
+                "user-agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            )
+            conn.setRequestProperty("accept", "application/javascript,*/*")
+            val src = try {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } finally {
+                conn.disconnect()
+            }
+            body = VB_MATCHMEDIA_SHIM + "\n" + src
+            VB_JS_CACHE[url] = body
+        }
+        android.webkit.WebResourceResponse(
+            "application/javascript", "utf-8",
+            java.io.ByteArrayInputStream(body.toByteArray(Charsets.UTF_8)),
+        )
+    } catch (e: Exception) {
+        null
+    }
+}
+
 /** JS shim: hooks the embed's <video>, forwards its events to Kotlin, and
     exposes window.__sb commands. Direct video driving PLUS the provider's
     own postMessage contract - belt and braces, so our bar always answers.
@@ -1524,7 +1569,8 @@ fun PlayerScreen(
                             request: android.webkit.WebResourceRequest?,
                         ): android.webkit.WebResourceResponse? {
                             try {
-                                val ext = (request?.url?.path ?: "")
+                                val rawPath = request?.url?.path ?: ""
+                                val ext = rawPath
                                     .lowercase(java.util.Locale.US)
                                     .substringAfterLast('.', "")
                                 // Media NEVER gets blocked (0.41 VidBolt
@@ -1535,6 +1581,19 @@ fun PlayerScreen(
                                     main.post { lastMediaAt = System.currentTimeMillis() }
                                 } else {
                                     val host = (request?.url?.host ?: "").lowercase(java.util.Locale.US)
+                                    val lp = rawPath.lowercase(java.util.Locale.US)
+                                    // VidBolt player modules get the
+                                    // command-gate shim prepended (0.45) so
+                                    // audio/subtitle/speed taps work on TV
+                                    // exactly like on the phone.
+                                    if ((host == "vidbolt.pro" || host.endsWith(".vidbolt.pro")) &&
+                                        lp.startsWith("/player/") && lp.endsWith(".js")
+                                    ) {
+                                        val target = request?.url?.toString()
+                                        if (target != null) {
+                                            patchedVbJs(target)?.let { return it }
+                                        }
+                                    }
                                     if (isAdHost(host)) {
                                         return android.webkit.WebResourceResponse(
                                             "text/plain", "utf-8",
