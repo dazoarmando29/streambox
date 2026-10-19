@@ -117,10 +117,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /* Mirror routing (website rules): movies/TV default CineSrc, anime AniPM.
-   ANIME_BAD_CATALOG keeps Doraemon away from VidBolt (it serves FMA:B for
-   the right id). VidRift is TMDB-direct (works for anime when the AniPM
-   mapping is missing). VidZen has no anime routes. Mid-session switches
-   never change the next title's primary. */
+   Korean dramas default VidBolt (0.41 request) - its /tv route carries the
+   multi-audio Korean releases and our sheet drives its real audio/subtitle
+   tracks. ANIME_BAD_CATALOG keeps Doraemon away from VidBolt (it serves
+   FMA:B for the right id). VidRift is TMDB-direct (works for anime when the
+   AniPM mapping is missing). VidZen has no anime routes. Mid-session
+   switches never change the next title's primary. */
 private val MIRROR_NAMES = mapOf(
     "cinesrc" to "CineSrc",
     "anipm" to "AniPM",
@@ -152,8 +154,11 @@ private fun mirrorsFor(title: Title, mal: Int?, ani: Int?): List<String> = when 
     )
 }
 
-private fun defaultMirror(title: Title, mal: Int?, ani: Int?): String = when (title.type) {
-    "anime" -> if (mal != null || ani != null) "anipm" else "vidrift"
+private fun defaultMirror(title: Title, mal: Int?, ani: Int?): String = when {
+    title.type == "anime" -> if (mal != null || ani != null) "anipm" else "vidrift"
+    // Korean dramas ride VidBolt (0.41): its TV route carries the
+    // multi-audio Korean releases and our sheet drives its real tracks.
+    title.lang == "ko" -> "vidbolt"
     else -> "cinesrc"
 }
 
@@ -477,6 +482,7 @@ private val SB_HOOK = """
       if (m.type === "play" || m.type === "playing") { window.__sbBoltOn = true; send("play", {}); return; }
       if (m.type === "pause" || m.type === "paused") { send("pause", {}); return; }
       if (m.type === "ended") { send("ended", {}); return; }
+      if (m.type === "episodechange") { send("mirror:episode", {season: m.season, episode: m.episode}); return; }
     }
   });
   function hook(){
@@ -522,6 +528,8 @@ private val SB_HOOK = """
     mute: function(m){
       var v=document.querySelector('video'); if(v) v.muted=!!m;
       if (ANIPM) anipmSend('setMuted', {muted: !!m});
+      // VidBolt speaks volume (its message contract): 0 mutes, 1 restores.
+      if (VB) post({type:'volume', volume: m?0:1});
       try{window.postMessage({type:'cinesrc:command',command:'setMuted',args:[!!m]},'*');}catch(e){}
     },
     rate: function(r){
@@ -532,9 +540,67 @@ private val SB_HOOK = """
     q: function(n){ if(ANIPM) anipmSend('setQuality', {height: n}); },
     lang: function(l){ if(ANIPM) anipmSend('setLanguage', {lang: l}); },
     subs: function(on, label){ if(ANIPM) anipmSend('setSubtitles', on ? {enabled: true, label: label||''} : {enabled: false}); },
+    // VidBolt audio + subtitle tracks (0.41): its own mobile-option message
+    // contract - audio matches by LABEL, subtitles by INDEX into its track
+    // list. vbsub also flips the textTrack modes so the change SHOWS even
+    // if the index lands on the lazy-loaded half of the list.
+    vbaudio: function(label){
+      try{ for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({type:'mobile-option', option:'audio', value:String(label)}, '*'); }catch(e){}
+    },
+    vbsub: function(idx){
+      try{ for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({type:'mobile-option', option:'subtitles', value: idx}, '*'); }catch(e){}
+      try{
+        var fw = window.frames[0];
+        var v = fw && fw.document && fw.document.querySelector('video');
+        if (v && v.textTracks) {
+          for (var j = 0; j < v.textTracks.length; j++) {
+            v.textTracks[j].mode = (idx >= 0 && j === idx) ? 'showing' : 'hidden';
+            if (idx < 0) v.textTracks[j].mode = 'disabled';
+          }
+        }
+      }catch(e){}
+    },
     autoNext: function(on){ if(ANIPM) anipmSend('setAutoNext', {on: !!on}); },
     autoSkip: function(on){ if(ANIPM) anipmSend('setAutoSkip', {on: !!on}); }
   };
+  // VidBolt track discovery (0.41): the wrapper page and the player iframe
+  // share origin (both vidbolt.pro), so we can read the player's own
+  // resolved stream for its audio languages + subtitle labels - REAL names
+  // only, no stream URLs ever leave the WebView.
+  function vbTracks(){
+    try {
+      var fw = window.frames[0];
+      var st = fw && fw.__vbStream;
+      if (!st || !st.then) return;
+      st.then(function(s){
+        try {
+          var audios = [], subs = [];
+          var v = fw.document && fw.document.querySelector('video');
+          if (v && v.textTracks) {
+            for (var i = 0; i < v.textTracks.length; i++) {
+              var tr = v.textTracks[i];
+              var lb = tr && (tr.label || tr.language);
+              if (lb && subs.indexOf(lb) < 0) subs.push(lb);
+            }
+          }
+          ((s && s.sources) || []).forEach(function(n){
+            var l = n && n.language;
+            if (l && audios.indexOf(l) < 0) audios.push(l);
+          });
+          ((s && s.subtitles) || []).forEach(function(n){
+            var l = n && n.label;
+            if (l && subs.indexOf(l) < 0) subs.push(l);
+          });
+          if (audios.length || subs.length) send("vb:tracks", {audios: audios, subs: subs});
+        } catch(e){}
+      });
+    } catch(e){}
+  }
+  if (VB) {
+    vbTracks();
+    setTimeout(vbTracks, 5000);
+    setTimeout(vbTracks, 15000);
+  }
   if (ANIPM) {
     hello();
     var tries = 0;
@@ -578,6 +644,8 @@ private val AD_HOSTS = setOf(
     "amazon-adsystem.com", "scorecardresearch.com", "outbrain.com", "taboola.com",
     "trafficjunky.net", "trafficjunky.com", "a-ads.com", "ads-mrg.com", "onclickmax.com",
     "adblokkster.com", "bc.vc", "bc-ads.com", "tsyndicate.com", "syndicat-france.com",
+    // VidBolt's own injected ad rotator (seen live 0.41: do.miscoinbrassic).
+    "miscoinbrassic.com",
 )
 
 private fun isAdHost(host: String): Boolean {
@@ -714,6 +782,12 @@ fun PlayerScreen(
     }
     var anipmSubLabels by remember { mutableStateOf(listOf<String>()) }
     var anipmSubIdx by remember { mutableIntStateOf(-1) } // -1 = player subs off
+    // VidBolt real tracks (0.41): the labels the player's own resolved
+    // stream reports via the same-origin wrapper hook - never invented.
+    var vbAudios by remember { mutableStateOf(listOf<String>()) }
+    var vbSubs by remember { mutableStateOf(listOf<String>()) }
+    var vbSubIdx by remember { mutableIntStateOf(-1) }
+    var vbAudioSel by remember { mutableStateOf("") }
 
     fun setSub(name: String, lang: String, cues: List<Cue>) {
         if (cues.isEmpty()) {
@@ -776,7 +850,7 @@ fun PlayerScreen(
         try {
             Store.saveProgress(
                 ctx,
-                Progress(title.type, title.id, title.name, title.poster, epSeason, epNumber, c, d, System.currentTimeMillis(), mal, ani),
+                Progress(title.type, title.id, title.name, title.poster, epSeason, epNumber, c, d, System.currentTimeMillis(), mal, ani, title.lang),
             )
         } catch (e: Exception) {
         }
@@ -1370,25 +1444,23 @@ fun PlayerScreen(
                             request: android.webkit.WebResourceRequest?,
                         ): android.webkit.WebResourceResponse? {
                             try {
-                                val host = (request?.url?.host ?: "").lowercase(java.util.Locale.US)
-                                if (isAdHost(host)) {
-                                    return android.webkit.WebResourceResponse(
-                                        "text/plain", "utf-8",
-                                        java.io.ByteArrayInputStream(ByteArray(0)),
-                                    )
-                                }
-                                // Media-traffic liveness (0.37 watchdog fix):
-                                // real manifest/segment fetches prove a stream
-                                // is coming up even before a wrapped player's
-                                // events surface - the watchdog stays patient.
-                                // Extensions are matched suffix-style so no
-                                // stream-URL literal can live in this file
-                                // (qa: the only stream URL is the HLS slot).
                                 val ext = (request?.url?.path ?: "")
                                     .lowercase(java.util.Locale.US)
                                     .substringAfterLast('.', "")
+                                // Media NEVER gets blocked (0.41 VidBolt
+                                // rule): the shield kills ad/tracker hosts
+                                // only and never sandboxes the player -
+                                // playback always wins.
                                 if (ext in MEDIA_EXTS) {
                                     main.post { lastMediaAt = System.currentTimeMillis() }
+                                } else {
+                                    val host = (request?.url?.host ?: "").lowercase(java.util.Locale.US)
+                                    if (isAdHost(host)) {
+                                        return android.webkit.WebResourceResponse(
+                                            "text/plain", "utf-8",
+                                            java.io.ByteArrayInputStream(ByteArray(0)),
+                                        )
+                                    }
                                 }
                             } catch (e: Exception) {
                             }
@@ -1531,6 +1603,28 @@ fun PlayerScreen(
                                             epNumber = e
                                             cur = 0f
                                         }
+                                    }
+                                    "vb:tracks" -> {
+                                        // VidBolt reports its REAL audio
+                                        // languages + subtitle labels (0.41).
+                                        val aArr = o.optJSONArray("audios")
+                                        val sArr = o.optJSONArray("subs")
+                                        val al = mutableListOf<String>()
+                                        val sl = mutableListOf<String>()
+                                        if (aArr != null) {
+                                            for (i in 0 until aArr.length()) {
+                                                val v = aArr.optString(i, "")
+                                                if (v.isNotBlank() && v != "null") al.add(v)
+                                            }
+                                        }
+                                        if (sArr != null) {
+                                            for (i in 0 until sArr.length()) {
+                                                val v = sArr.optString(i, "")
+                                                if (v.isNotBlank() && v != "null") sl.add(v)
+                                            }
+                                        }
+                                        vbAudios = al
+                                        vbSubs = sl
                                     }
                                     "anipm:autoplay" -> {
                                         // Real playback kick - NEVER the
@@ -2357,6 +2451,35 @@ fun PlayerScreen(
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
                                 }
+                            } else if (mirror == "vidbolt") {
+                                // VidBolt's REAL audio tracks (0.41): the
+                                // labels its resolved stream reports. Until
+                                // the stream lands there is nothing to pick,
+                                // so we say so instead of dead buttons.
+                                if (vbAudios.isEmpty()) {
+                                    OptRow(
+                                        label = "Original Audio",
+                                        detail = "VidBolt tracks appear once the stream loads",
+                                        chip = "DEFAULT",
+                                        active = true,
+                                        big = big,
+                                    )
+                                } else {
+                                    vbAudios.forEach { lbl ->
+                                        val on = vbAudioSel == lbl
+                                        OptRow(
+                                            label = lbl,
+                                            detail = "VidBolt audio track",
+                                            chip = if (on) "ACTIVE" else "",
+                                            active = on,
+                                            big = big,
+                                        ) {
+                                            vbAudioSel = lbl
+                                            cmd("window.__sb && window.__sb.vbaudio('" + lbl.replace("'", "") + "')")
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                    }
+                                }
                             } else {
                                 OptRow(
                                     label = "Original Audio",
@@ -2490,6 +2613,38 @@ fun PlayerScreen(
                                     ) {
                                         anipmSubIdx = i
                                         cmd("window.__sb && window.__sb.subs(true, '" + lbl.replace("'", "") + "')")
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
+                            }
+                            // VidBolt's own subtitle tracks (0.41): real
+                            // labels from the stream - Off first, then each
+                            // provider track.
+                            if (mirror == "vidbolt" && vbSubs.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                PanelColTitle("VIDBOLT TRACKS")
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OptRow(
+                                    label = "Off",
+                                    detail = "Provider captions off",
+                                    chip = if (vbSubIdx < 0) "ACTIVE" else "",
+                                    active = vbSubIdx < 0,
+                                    big = big,
+                                ) {
+                                    vbSubIdx = -1
+                                    cmd("window.__sb && window.__sb.vbsub(-1)")
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                vbSubs.forEachIndexed { i, lbl ->
+                                    OptRow(
+                                        label = lbl,
+                                        detail = "Provider track",
+                                        chip = if (vbSubIdx == i) "ACTIVE" else "",
+                                        active = vbSubIdx == i,
+                                        big = big,
+                                    ) {
+                                        vbSubIdx = i
+                                        cmd("window.__sb && window.__sb.vbsub(" + i + ")")
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
                                 }

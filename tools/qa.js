@@ -48,7 +48,11 @@
       fixed 30s timer threw slow AniPM/CineSrc loads over to VidRift
    24 every TMDB date read goes through dateOf: org.json optString renders
       JSON null as the literal "null", which sorts AFTER today and stamped
-      old One Piece seasons as COMING SOON (0.38 fix) */
+      old One Piece seasons as COMING SOON (0.38 fix)
+   25 VidBolt plays unsandboxed and media is never blocked: the wrapper
+      iframe must never carry a sandbox attribute (VidBolt renders
+      "Playback disabled" when sandboxed) and the Ad Shield must check
+      media extensions BEFORE any ad-host block - playback always wins */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -435,6 +439,20 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     } else {
       rawDates.forEach((m) => bad("raw date read in Api.kt: " + m[0] + " - use dateOf() or dates sort as the string null"));
     }
+  }
+}
+
+/* ---------- 25. VidBolt unsandboxed + media never blocked ---------- */
+{
+  const psVb = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psVb) bad("PlayerScreen.kt missing - VidBolt rules cannot be verified");
+  else {
+    if (/sandbox\s*=/.test(psVb)) bad("sandbox attribute in PlayerScreen - VidBolt renders Playback disabled when sandboxed");
+    else ok("no sandbox attribute in the wrapper (VidBolt plays)");
+    if (/ext in MEDIA_EXTS[\s\S]{0,480}isAdHost/.test(psVb)) ok("Ad Shield checks media before ad blocks (playback always wins)");
+    else bad("Ad Shield must check media extensions BEFORE ad-host blocks");
+    if (/vb:tracks/.test(psVb)) ok("VidBolt track plumbing present (real audio/subtitle labels)");
+    else bad("VidBolt track plumbing missing");
   }
 }
 

@@ -134,7 +134,7 @@ fun StreamBoxApp() {
                         },
                         onResume = { p ->
                             play(
-                                Title(p.id, p.type, p.name, p.poster, null, 0, "", 0.0),
+                                Title(p.id, p.type, p.name, p.poster, null, 0, "", 0.0, lang = p.lang),
                                 p.season, p.episode, p.mal, p.ani,
                             )
                         },

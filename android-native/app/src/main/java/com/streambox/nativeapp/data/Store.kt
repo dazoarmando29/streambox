@@ -17,6 +17,7 @@ data class Progress(
     val at: Long,
     val mal: Int?,
     val ani: Int?,
+    val lang: String = "",
 )
 
 /** Per-title subtitle placement + sync memory (device-local). */
@@ -49,6 +50,7 @@ object Store {
         .put("type", t.type).put("id", t.id).put("name", t.name)
         .put("poster", t.poster).put("backdrop", t.backdrop)
         .put("year", t.year).put("overview", t.overview).put("vote", t.vote)
+        .put("lang", t.lang)
 
     private fun titleFrom(o: JSONObject): Title = Title(
         id = o.optInt("id"),
@@ -59,6 +61,7 @@ object Store {
         year = o.optInt("year"),
         overview = o.optString("overview"),
         vote = o.optDouble("vote"),
+        lang = o.optString("lang", ""),
     )
 
     private fun progressToJson(x: Progress): JSONObject = JSONObject()
@@ -66,6 +69,7 @@ object Store {
         .put("poster", x.poster).put("season", x.season).put("episode", x.episode)
         .put("cur", x.cur.toDouble()).put("dur", x.dur.toDouble()).put("at", x.at)
         .put("mal", x.mal ?: JSONObject.NULL).put("ani", x.ani ?: JSONObject.NULL)
+        .put("lang", x.lang)
 
     private fun progressFrom(o: JSONObject): Progress = Progress(
         type = o.optString("type"),
@@ -74,11 +78,12 @@ object Store {
         poster = if (o.isNull("poster")) null else o.optString("poster"),
         season = o.optInt("season"),
         episode = o.optInt("episode"),
-        cur = o.optDouble("cur").toFloat(),
-        dur = o.optDouble("dur").toFloat(),
+        cur = o.optDouble("cur", 0.0).toFloat(),
+        dur = o.optDouble("dur", 0.0).toFloat(),
         at = o.optLong("at"),
         mal = if (o.isNull("mal")) null else o.optInt("mal"),
         ani = if (o.isNull("ani")) null else o.optInt("ani"),
+        lang = o.optString("lang", ""),
     )
 
     fun progressList(ctx: Context): List<Progress> {
