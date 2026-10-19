@@ -16,7 +16,14 @@ data class Title(
     val overview: String,
     val vote: Double,
     val adult: Boolean = false,
-)
+    val genreIds: List<Int> = listOf(),
+    val lang: String = "",
+) {
+    /** Anime detection for row routing: Japanese animation. TMDB list and
+        discover payloads carry genre_ids + original_language. */
+    val isAnime: Boolean
+        get() = 16 in genreIds && lang == "ja"
+}
 
 data class AnimeIds(val mal: Int?, val ani: Int?)
 
@@ -33,6 +40,7 @@ data class Ep(
     val overview: String,
     val aired: Boolean = true,
     val vote: Double = 0.0,
+    val air: String = "",
 )
 
 /** One cast member (detail rail): name + role + portrait when TMDB has it. */
@@ -93,8 +101,17 @@ object Api {
         return if (p.isNullOrEmpty() || p == "null") null else base + p
     }
 
+    /** JSON date string that is BLANK when TMDB says null. org.json's
+        optString renders JSON null as the literal "null", which sorts AFTER
+        today's date - that stamped old One Piece seasons as COMING SOON
+        (0.38 fix). Every date read goes through here. */
+    private fun dateOf(o: JSONObject, key: String): String {
+        val v = o.optString(key, "")
+        return if (v.isEmpty() || v == "null") "" else v
+    }
+
     private fun yearOf(o: JSONObject): Int {
-        val d = o.optString("release_date", "").ifEmpty { o.optString("first_air_date", "") }
+        val d = dateOf(o, "release_date").ifEmpty { dateOf(o, "first_air_date") }
         return d.take(4).toIntOrNull() ?: 0
     }
 
@@ -115,6 +132,14 @@ object Api {
             val type = typeOverride
                 ?: if (o.has("title") && !o.has("name")) "movie"
                 else if (mediaType == "movie") "movie" else "tv"
+            val gArr = o.optJSONArray("genre_ids")
+            val genIds = ArrayList<Int>()
+            if (gArr != null) {
+                for (g in 0 until gArr.length()) {
+                    val id = gArr.optInt(g, -1)
+                    if (id >= 0) genIds.add(id)
+                }
+            }
             out.add(
                 Title(
                     id = id,
@@ -126,6 +151,8 @@ object Api {
                     overview = o.optString("overview", ""),
                     vote = o.optDouble("vote_average", 0.0),
                     adult = o.optBoolean("adult", false),
+                    genreIds = genIds,
+                    lang = o.optString("original_language", ""),
                 )
             )
         }
@@ -215,7 +242,7 @@ object Api {
             val o = arr.optJSONObject(i) ?: continue
             val n = o.optInt("episode_number", 0)
             if (n <= 0) continue
-            val d = o.optString("air_date", "")
+            val d = dateOf(o, "air_date")
             out.add(
                 Ep(
                     n = n,
@@ -226,6 +253,7 @@ object Api {
                     overview = o.optString("overview", ""),
                     aired = d.isBlank() || d.take(10) <= today,
                     vote = o.optDouble("vote_average", 0.0),
+                    air = d,
                 )
             )
         }
@@ -260,7 +288,7 @@ object Api {
                     val s = sArr.optJSONObject(i) ?: continue
                     val n = s.optInt("season_number", 0)
                     if (n <= 0) continue
-                    seasons.add(SeasonInfo(n, s.optInt("episode_count", 0), s.optString("name", ""), s.optString("air_date", "")))
+                    seasons.add(SeasonInfo(n, s.optInt("episode_count", 0), s.optString("name", ""), dateOf(s, "air_date")))
                 }
             }
             val comp = o.optJSONArray("production_companies")
@@ -285,7 +313,7 @@ object Api {
                 langs = langs,
                 cert = "",
                 videos = listOf(),
-                aired = o.optString("release_date", "").ifEmpty { o.optString("first_air_date", "") }
+                aired = dateOf(o, "release_date").ifEmpty { dateOf(o, "first_air_date") }
                     .let { it.isBlank() || it.take(10) <= today() },
             )
         } catch (e: Exception) {

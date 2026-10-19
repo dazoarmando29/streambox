@@ -1090,6 +1090,22 @@ private fun EpisodeRow(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 Spacer(modifier = Modifier.weight(1f))
+                // "NEW" is reserved for the episode of THIS WEEK (0.38 rule)
+                // - older and future episodes never carry it.
+                val weekAgo = remember {
+                    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                        .format(java.util.Date(System.currentTimeMillis() - 7L * 24 * 3600 * 1000))
+                }
+                if (ep.aired && ep.air.isNotBlank() && ep.air >= weekAgo) {
+                    Text(
+                        "NEW",
+                        color = Accent,
+                        fontWeight = FontWeight.Black,
+                        fontSize = if (big) 11.sp else 9.sp,
+                        letterSpacing = 1.sp,
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                }
                 if (!ep.aired) {
                     Text(
                         "COMING SOON",

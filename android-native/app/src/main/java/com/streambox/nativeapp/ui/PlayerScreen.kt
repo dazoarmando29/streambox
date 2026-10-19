@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -2019,9 +2020,11 @@ fun PlayerScreen(
         }
         }
 
-        // Episodes sheet (design pack "Go to episode"): glass modal with the
-        // labeled S/E HUD steppers, a quick-select rail of real season
-        // episodes, and the auto-skip toggle.
+        // Episodes sheet (design pack episode-picker): series line, season
+        // stepper + Auto-play Next, range tabs and the real episode cards.
+        // Bounded to the screen so the D-pad always lands on something
+        // VISIBLE (0.38 fix: the old bottom-anchored Load pill sat below
+        // the fold and focus escaped to the player behind the sheet).
         if (showEps) {
             Box(
                 modifier = Modifier
@@ -2034,10 +2037,13 @@ fun PlayerScreen(
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
-                        .padding(24.dp)
-                        .widthIn(max = if (big) 880.dp else 560.dp)
+                        .padding(if (big) 24.dp else 12.dp)
+                        .widthIn(max = if (big) 1360.dp else 560.dp)
+                        .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * (if (big) 0.94f else 0.96f))
                         .background(Card, RoundedCornerShape(20.dp))
-                        .padding(20.dp),
+                        .padding(if (big) 20.dp else 16.dp)
+                        .verticalScroll(rememberScrollState())
+                        .focusGroup(),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
@@ -2075,60 +2081,38 @@ fun PlayerScreen(
                         }
                         BarPill("Close", big) { showEps = false }
                     }
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     if (title.type != "movie") {
-                        // Labeled HUD steppers (design pack): tiny tracked
-                        // label over the control pair.
-                        Text(
-                            "CURRENT SEASON",
-                            color = Dim,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            letterSpacing = 1.5.sp,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
+                        // Controls row (design pack): the season stepper and
+                        // the Auto-play Next toggle side by side.
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             BarPill("S  -", big) { epSeason = (epSeason - 1).coerceAtLeast(1) }
+                            Spacer(modifier = Modifier.width(10.dp))
                             Text(
                                 "Season " + epSeason,
                                 color = Color.White,
                                 fontWeight = FontWeight.Black,
                                 fontSize = if (big) 17.sp else 15.sp,
-                                modifier = Modifier.weight(1f),
-                                textAlign = TextAlign.Center,
                             )
+                            Spacer(modifier = Modifier.width(10.dp))
                             BarPill("S  +", big) { epSeason += 1 }
+                            Spacer(modifier = Modifier.weight(1f))
+                            Text(
+                                "Auto-play Next",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            BarPill(if (autoSkip) "ON" else "OFF", big) {
+                                autoSkip = !autoSkip
+                                Store.setAutoSkip(ctx, autoSkip)
+                            }
                         }
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            "SELECTED",
-                            color = Dim,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            letterSpacing = 1.5.sp,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            BarPill("E  -", big) { epNumber = (epNumber - 1).coerceAtLeast(1) }
-                            Text(
-                                "Episode " + epNumber,
-                                color = Accent,
-                                fontWeight = FontWeight.Black,
-                                fontSize = if (big) 17.sp else 15.sp,
-                                modifier = Modifier.weight(1f),
-                                textAlign = TextAlign.Center,
-                            )
-                            BarPill("E  +", big) { epNumber += 1 }
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
                         // Quick-select (design pack): range chips ("Episodes
                         // 1-10", "11-20"...) drive a 10-card window - the
                         // sheet stays smooth on 1,400-episode seasons.
@@ -2210,9 +2194,16 @@ fun PlayerScreen(
                                     modifier = Modifier.padding(16.dp).size(if (big) 36.dp else 26.dp),
                                 )
                             }
-                            win.chunked(2).forEach { pair ->
+                            // Entry focus lands on the CURRENT episode's
+                            // card (or the first in the window) so the D-pad
+                            // starts INSIDE the cards - never on something
+                            // below the fold (0.38 focus-escape fix).
+                            val cols = if (big) 5 else 2
+                            val entryN = if (win.any { it.n == epNumber }) epNumber
+                                else win.firstOrNull()?.n ?: -1
+                            win.chunked(cols).forEach { rowEps ->
                                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    pair.forEach { ep ->
+                                    rowEps.forEach { ep ->
                                         val resumeEp = savedProg?.takeIf {
                                             it.season == epSeason && it.episode == ep.n && it.cur > 5f &&
                                                 !(it.dur > 0 && it.cur >= it.dur * 0.95f)
@@ -2221,8 +2212,11 @@ fun PlayerScreen(
                                             ep = ep,
                                             big = big,
                                             selected = ep.n == epNumber,
+                                            upNext = ep.n == epNumber + 1 && ep.aired,
                                             resume = resumeEp,
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .then(if (ep.n == entryN) Modifier.focusRequester(epsFirstFR) else Modifier),
                                         ) {
                                             val at = resumeEp?.cur ?: 0f
                                             epNumber = ep.n
@@ -2233,53 +2227,27 @@ fun PlayerScreen(
                                             load(startAt = at)
                                         }
                                     }
-                                    if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
+                                    if (rowEps.size < cols) {
+                                        repeat(cols - rowEps.size) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
                                 }
                                 Spacer(modifier = Modifier.height(10.dp))
                             }
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Pill, RoundedCornerShape(14.dp))
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                        ) {
-                            Text("Auto-play Next", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            BarPill(if (autoSkip) "ON" else "OFF", big) {
-                                autoSkip = !autoSkip
-                                Store.setAutoSkip(ctx, autoSkip)
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                "skips intros/recaps and rolls the next episode",
-                                color = Dim,
-                                fontFamily = BodyFont,
-                                fontSize = 11.sp,
-                            )
-                        }
                         Spacer(modifier = Modifier.height(12.dp))
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        PillButton("Load", big, accent = true, modifier = Modifier.focusRequester(epsFirstFR)) {
-                            showEps = false
-                            save(0f, dur)
-                            cur = 0f
-                            playing = true
-                            load()
-                        }
-                        PillButton("Close", big) { showEps = false }
-                    }
+                    // TV legend (design pack episode-picker footer): OK on a
+                    // card plays it, BACK resumes what is on screen now.
                     if (big) {
                         Spacer(modifier = Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            KeyChip("\u25C0  \u25B6")
-                            Text("Navigate", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.width(10.dp))
                             KeyChip("OK")
                             Text("Play Episode", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            KeyChip("\u25C0  \u25B6")
+                            Text("Navigate Episodes", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.width(10.dp))
                             KeyChip("BACK")
                             Text("Resume Current", color = Dim, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -2896,10 +2864,18 @@ private fun QuickEpCard(
     ep: Ep,
     big: Boolean,
     selected: Boolean,
+    upNext: Boolean,
     resume: Progress?,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    // "NEW" is reserved for the episode of THIS WEEK - the only thing that
+    // may ever carry the marker (0.38 rule).
+    val weekAgo = remember {
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            .format(java.util.Date(System.currentTimeMillis() - 7L * 24 * 3600 * 1000))
+    }
+    val isNew = ep.aired && ep.air.isNotBlank() && ep.air >= weekAgo
     Column(
         modifier = modifier
             .focusRing(RoundedCornerShape(14.dp))
@@ -2940,11 +2916,15 @@ private fun QuickEpCard(
                         !ep.aired -> "COMING SOON"
                         selected -> "NOW PLAYING"
                         resume != null -> "RESUME"
+                        upNext -> "UP NEXT"
+                        isNew -> "NEW"
                         else -> "UNWATCHED"
                     },
                     color = when {
                         !ep.aired -> Amber
                         selected || resume != null -> Accent
+                        upNext -> Cyan
+                        isNew -> Accent
                         else -> Soft
                     },
                     fontWeight = FontWeight.Black,

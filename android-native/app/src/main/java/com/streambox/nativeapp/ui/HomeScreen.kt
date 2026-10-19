@@ -108,10 +108,10 @@ private fun rowPlan(section: Section): List<Pair<String, () -> List<Title>>> = w
         "Top Rated Movies" to { Api.topRatedMovies() },
     )
     Section.TV -> listOf(
-        "New Episodes" to { Api.newEpisodes(false) },
-        "Trending Shows" to { Api.trending().filter { it.type != "movie" } },
-        "Popular Shows" to { Api.popularTv() },
-        "Top Rated Shows" to { Api.topRatedTv() },
+        "New Episodes" to { Api.newEpisodes(false).filter { !it.isAnime } },
+        "Trending Shows" to { Api.trending().filter { it.type != "movie" && !it.isAnime } },
+        "Popular Shows" to { Api.popularTv().filter { !it.isAnime } },
+        "Top Rated Shows" to { Api.topRatedTv().filter { !it.isAnime } },
     )
     Section.ANIME -> listOf(
         "New Episodes" to { Api.newEpisodes(true) },

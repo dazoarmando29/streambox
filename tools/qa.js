@@ -45,7 +45,10 @@
       (real player-reported ladders like AniPM heights still render)
    23 the no-media watchdog hops only after 30s of TOTAL silence (media
       traffic + provider protocol keep it patient) - the 0.36 bug where a
-      fixed 30s timer threw slow AniPM/CineSrc loads over to VidRift */
+      fixed 30s timer threw slow AniPM/CineSrc loads over to VidRift
+   24 every TMDB date read goes through dateOf: org.json optString renders
+      JSON null as the literal "null", which sorts AFTER today and stamped
+      old One Piece seasons as COMING SOON (0.38 fix) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -417,6 +420,21 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     else ok("no fixed 30s hop timer");
     if (/t\.startsWith\("anipm:"\)/.test(psW)) ok("provider protocol traffic counts as media life");
     else bad("anipm protocol traffic must count as media life (wrapped players hop away otherwise)");
+  }
+}
+
+/* ---------- 24. TMDB date reads are null-normalized ---------- */
+{
+  const apiPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt");
+  const api = fs.existsSync(apiPath) ? read("android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt") : "";
+  if (!api) bad("Api.kt missing - date normalization cannot be verified");
+  else {
+    const rawDates = [...api.matchAll(/optString\("(?:air_date|release_date|first_air_date)"/g)];
+    if (/private fun dateOf\(/.test(api) && !rawDates.length) {
+      ok("every TMDB date read goes through dateOf (JSON null never becomes \"null\")");
+    } else {
+      rawDates.forEach((m) => bad("raw date read in Api.kt: " + m[0] + " - use dateOf() or dates sort as the string null"));
+    }
   }
 }
 
