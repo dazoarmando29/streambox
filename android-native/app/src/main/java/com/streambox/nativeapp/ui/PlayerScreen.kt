@@ -468,7 +468,7 @@ private val SB_HOOK = """
       return;
     }
     if (VB) {
-      if (m.type === "durationchange") { window.__sbDur = m.duration||0; send("loadedmetadata", {duration: m.duration||0}); return; }
+      if (m.type === "durationchange") { window.__sbDur = m.duration||0; send("loadedmetadata", {duration: m.duration||0}); vbTracks(); return; }
       if (m.type === "timeupdate") {
         window.__sbBoltOn = true;
         if (window.__sbBoltQ != null) {
@@ -478,11 +478,27 @@ private val SB_HOOK = """
         send("timeupdate", {currentTime: m.time||0, duration: window.__sbDur||0});
         return;
       }
-      if (m.type === "ready") { send("ready", {}); return; }
+      if (m.type === "ready") { send("ready", {}); vbTracks(); return; }
       if (m.type === "play" || m.type === "playing") { window.__sbBoltOn = true; send("play", {}); return; }
       if (m.type === "pause" || m.type === "paused") { send("pause", {}); return; }
       if (m.type === "ended") { send("ended", {}); return; }
       if (m.type === "episodechange") { send("mirror:episode", {season: m.season, episode: m.episode}); return; }
+      // Mobile panel delegation (their ?mobileSheets contract): options
+      // carry their own command values + selected flags - echo verbatim.
+      if (m.type === "mobile-panel" && Array.isArray(m.options)) {
+        try {
+          m.options.forEach(function(o){
+            if (!o || typeof o !== "object") return;
+            var lab = String(o.label != null && o.label !== "" ? o.label : (o.value != null ? o.value : ""));
+            var val = String(o.value != null ? o.value : lab);
+            if (!lab) return;
+            if (o.group === "Audio") { VBT.audios[val] = lab; if (o.selected) VBT.audioSel = val; }
+            else if (o.group === "Subtitles") { VBT.subs[val] = lab; if (o.selected) VBT.subSel = val; }
+          });
+          vbPublish();
+        } catch(e){}
+        return;
+      }
     }
   });
   function hook(){
@@ -546,15 +562,16 @@ private val SB_HOOK = """
     // contract - audio matches by LABEL, subtitles by INDEX into its track
     // list. vbsub also flips the textTrack modes so the change SHOWS even
     // if the index lands on the lazy-loaded half of the list.
-    vbaudio: function(label){
-      try{ for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({type:'mobile-option', option:'audio', value:String(label)}, '*'); }catch(e){}
+    vbaudio: function(val){
+      try{ for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({type:'mobile-option', option:'audio', value:String(val)}, '*'); }catch(e){}
     },
-    vbsub: function(idx){
-      try{ for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({type:'mobile-option', option:'subtitles', value: idx}, '*'); }catch(e){}
+    vbsub: function(val){
+      var idx = parseFloat(val);
+      try{ for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({type:'mobile-option', option:'subtitles', value: val}, '*'); }catch(e){}
       try{
         var fw = window.frames[0];
         var v = fw && fw.document && fw.document.querySelector('video');
-        if (v && v.textTracks) {
+        if (v && v.textTracks && Number.isFinite(idx)) {
           for (var j = 0; j < v.textTracks.length; j++) {
             v.textTracks[j].mode = (idx >= 0 && j === idx) ? 'showing' : 'hidden';
             if (idx < 0) v.textTracks[j].mode = 'disabled';
@@ -565,37 +582,73 @@ private val SB_HOOK = """
     autoNext: function(on){ if(ANIPM) anipmSend('setAutoNext', {on: !!on}); },
     autoSkip: function(on){ if(ANIPM) anipmSend('setAutoSkip', {on: !!on}); }
   };
-  // VidBolt track discovery (0.41): the wrapper page and the player iframe
-  // share origin (both vidbolt.pro), so we can read the player's own
-  // resolved stream for its audio languages + subtitle labels - REAL names
-  // only, no stream URLs ever leave the WebView.
+  // VidBolt track discovery (0.41/0.43): the wrapper page and the player
+  // iframe share origin (both vidbolt.pro), so we read the player's own
+  // resolve data for its audio languages + subtitle labels - REAL names
+  // only, no stream URL ever leaves the WebView. The player's own
+  // mobile-panel delegation (narrow viewports) merges into the same
+  // snapshot with its exact command values.
+  var VBT = { audios: {}, subs: {}, audioSel: "", subSel: "" };
+  function vbPublish(){
+    var au = Object.keys(VBT.audios), su = Object.keys(VBT.subs);
+    if (!au.length && !su.length) return;
+    send("vb:tracks", {
+      audios: au.map(function(v){ return { label: VBT.audios[v] || v, value: v }; }),
+      subs: su.map(function(v){ return { label: VBT.subs[v] || v, value: v }; }),
+      audioSel: VBT.audioSel || "",
+      subSel: VBT.subSel || ""
+    });
+  }
+  function vbLabelOf(track, i){
+    try {
+      var nm = track && track.label;
+      if (nm && !/^(native|original|default|und|track \d+)$/i.test(nm)) return nm;
+      if (track && track.language) {
+        try {
+          var dn = new Intl.DisplayNames(["en"], {type: "language"});
+          var got = dn.of(track.language);
+          if (got) return got;
+        } catch(e2){}
+        return track.language;
+      }
+    } catch(e){}
+    return "Track " + (i + 1);
+  }
   function vbTracks(){
     try {
       var fw = window.frames[0];
-      var st = fw && fw.__vbStream;
-      if (!st || !st.then) return;
-      st.then(function(s){
+      var bt = fw && fw.__VB__ && fw.__VB__.title;
+      if (!bt) return;
+      var q = "type=" + encodeURIComponent(bt.type || "tv") + "&id=" + encodeURIComponent(bt.id || "");
+      if (bt.type === "tv" && bt.season) q += "&season=" + encodeURIComponent(bt.season);
+      if (bt.episode) q += "&episode=" + encodeURIComponent(bt.episode);
+      fetch("/api/resolve?" + q).then(function(r){ return r.ok ? r.json() : {}; }).then(function(j){
         try {
-          var audios = [], subs = [];
-          var v = fw.document && fw.document.querySelector('video');
-          if (v && v.textTracks) {
-            for (var i = 0; i < v.textTracks.length; i++) {
-              var tr = v.textTracks[i];
-              var lb = tr && (tr.label || tr.language);
-              if (lb && subs.indexOf(lb) < 0) subs.push(lb);
-            }
-          }
+          var s = (j && j.stream) || null;
+          var anime = bt.type === "anime";
           ((s && s.sources) || []).forEach(function(n){
             var l = n && n.language;
-            if (l && audios.indexOf(l) < 0) audios.push(l);
+            if (!l) return;
+            // their audio labels: en() maps only for anime routes
+            var lab = anime ? (/^japanese$/i.test(l) ? "Japanese (Sub)" : /^english$/i.test(l) ? "English (Dub)" : l) : l;
+            VBT.audios[lab] = lab;
           });
+          try {
+            var v = fw.document && fw.document.querySelector("video");
+            if (v && v.textTracks) {
+              for (var i = 0; i < v.textTracks.length; i++) {
+                var lb = vbLabelOf(v.textTracks[i], i);
+                VBT.subs[lb] = lb;
+              }
+            }
+          } catch(e2){}
           ((s && s.subtitles) || []).forEach(function(n){
             var l = n && n.label;
-            if (l && subs.indexOf(l) < 0) subs.push(l);
+            if (l) VBT.subs[l] = l;
           });
-          if (audios.length || subs.length) send("vb:tracks", {audios: audios, subs: subs});
-        } catch(e){}
-      });
+          vbPublish();
+        } catch(e2){}
+      }, function(){});
     } catch(e){}
   }
   if (VB) {
@@ -784,12 +837,13 @@ fun PlayerScreen(
     }
     var anipmSubLabels by remember { mutableStateOf(listOf<String>()) }
     var anipmSubIdx by remember { mutableIntStateOf(-1) } // -1 = player subs off
-    // VidBolt real tracks (0.41): the labels the player's own resolved
-    // stream reports via the same-origin wrapper hook - never invented.
-    var vbAudios by remember { mutableStateOf(listOf<String>()) }
-    var vbSubs by remember { mutableStateOf(listOf<String>()) }
-    var vbSubIdx by remember { mutableIntStateOf(-1) }
+    // VidBolt real tracks (0.41/0.43): label + command VALUE pairs the
+    // player's own data reports - the value is echoed verbatim into its
+    // mobile-option contract so picks always land on the right track.
+    var vbAudios by remember { mutableStateOf(listOf<Pair<String, String>>()) }
+    var vbSubs by remember { mutableStateOf(listOf<Pair<String, String>>()) }
     var vbAudioSel by remember { mutableStateOf("") }
+    var vbSubSel by remember { mutableStateOf("") }
 
     fun setSub(name: String, lang: String, cues: List<Cue>) {
         if (cues.isEmpty()) {
@@ -1608,25 +1662,25 @@ fun PlayerScreen(
                                     }
                                     "vb:tracks" -> {
                                         // VidBolt reports its REAL audio
-                                        // languages + subtitle labels (0.41).
-                                        val aArr = o.optJSONArray("audios")
-                                        val sArr = o.optJSONArray("subs")
-                                        val al = mutableListOf<String>()
-                                        val sl = mutableListOf<String>()
-                                        if (aArr != null) {
-                                            for (i in 0 until aArr.length()) {
-                                                val v = aArr.optString(i, "")
-                                                if (v.isNotBlank() && v != "null") al.add(v)
+                                        // languages + subtitle labels with
+                                        // their exact command values (0.43).
+                                        fun parseTracks(arr: org.json.JSONArray?): List<Pair<String, String>> {
+                                            val out = mutableListOf<Pair<String, String>>()
+                                            if (arr == null) return out
+                                            for (i in 0 until arr.length()) {
+                                                val t = arr.optJSONObject(i) ?: continue
+                                                val v = t.optString("value", "")
+                                                val l = t.optString("label", "").ifEmpty { v }
+                                                if (v.isNotBlank() && v != "null") out.add(l to v)
                                             }
+                                            return out
                                         }
-                                        if (sArr != null) {
-                                            for (i in 0 until sArr.length()) {
-                                                val v = sArr.optString(i, "")
-                                                if (v.isNotBlank() && v != "null") sl.add(v)
-                                            }
-                                        }
-                                        vbAudios = al
-                                        vbSubs = sl
+                                        val aSel = o.optString("audioSel", "")
+                                        val sSel = o.optString("subSel", "")
+                                        vbAudios = parseTracks(o.optJSONArray("audios"))
+                                        vbSubs = parseTracks(o.optJSONArray("subs"))
+                                        if (aSel.isNotBlank() && aSel != "null") vbAudioSel = aSel
+                                        if (sSel.isNotBlank() && sSel != "null") vbSubSel = sSel
                                     }
                                     "anipm:autoplay" -> {
                                         // Real playback kick - NEVER the
@@ -2468,8 +2522,8 @@ fun PlayerScreen(
                                         big = big,
                                     )
                                 } else {
-                                    vbAudios.forEach { lbl ->
-                                        val on = vbAudioSel == lbl
+                                    vbAudios.forEach { (lbl, value) ->
+                                        val on = vbAudioSel == value
                                         OptRow(
                                             label = lbl,
                                             detail = "VidBolt audio track",
@@ -2477,8 +2531,8 @@ fun PlayerScreen(
                                             active = on,
                                             big = big,
                                         ) {
-                                            vbAudioSel = lbl
-                                            cmd("window.__sb && window.__sb.vbaudio('" + lbl.replace("'", "") + "')")
+                                            vbAudioSel = value
+                                            cmd("window.__sb && window.__sb.vbaudio('" + value.replace("'", "") + "')")
                                         }
                                         Spacer(modifier = Modifier.height(6.dp))
                                     }
@@ -2620,9 +2674,9 @@ fun PlayerScreen(
                                     Spacer(modifier = Modifier.height(6.dp))
                                 }
                             }
-                            // VidBolt's own subtitle tracks (0.41): real
-                            // labels from the stream - Off first, then each
-                            // provider track.
+                            // VidBolt's own subtitle tracks (0.41/0.43): real
+                            // labels + command values from the stream - Off
+                            // first, then each provider track.
                             if (mirror == "vidbolt" && vbSubs.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 PanelColTitle("VIDBOLT TRACKS")
@@ -2630,24 +2684,25 @@ fun PlayerScreen(
                                 OptRow(
                                     label = "Off",
                                     detail = "Provider captions off",
-                                    chip = if (vbSubIdx < 0) "ACTIVE" else "",
-                                    active = vbSubIdx < 0,
+                                    chip = if (vbSubSel.isEmpty() || vbSubSel == "-1") "ACTIVE" else "",
+                                    active = vbSubSel.isEmpty() || vbSubSel == "-1",
                                     big = big,
                                 ) {
-                                    vbSubIdx = -1
+                                    vbSubSel = "-1"
                                     cmd("window.__sb && window.__sb.vbsub(-1)")
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
-                                vbSubs.forEachIndexed { i, lbl ->
+                                vbSubs.forEach { (lbl, value) ->
+                                    val on = vbSubSel == value
                                     OptRow(
                                         label = lbl,
                                         detail = "Provider track",
-                                        chip = if (vbSubIdx == i) "ACTIVE" else "",
-                                        active = vbSubIdx == i,
+                                        chip = if (on) "ACTIVE" else "",
+                                        active = on,
                                         big = big,
                                     ) {
-                                        vbSubIdx = i
-                                        cmd("window.__sb && window.__sb.vbsub(" + i + ")")
+                                        vbSubSel = value
+                                        cmd("window.__sb && window.__sb.vbsub('" + value.replace("'", "") + "')")
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
                                 }
