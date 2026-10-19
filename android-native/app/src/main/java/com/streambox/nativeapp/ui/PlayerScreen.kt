@@ -192,12 +192,24 @@ private fun mirrorBase(m: String): String = when (m) {
 }
 
 /** Load the provider the way the website does: embed URL in our own shell
-    page's iframe (postMessage contract flows both ways via SB_HOOK). */
+    page's iframe (postMessage contract flows both ways via SB_HOOK). For
+    VidBolt the shell runs the gate shim FIRST - before the iframe element
+    even exists - so its command listener (audio/subtitles/speed) registers
+    on TVs too (0.46: the phone-only viewport gate made taps silent there). */
 private fun loadMirror(w: WebView, embedUrl: String, m: String) {
     if (m in WRAPPED) {
+        val shimBlock = if (m == "vidbolt") {
+            "<script>(function(){var t=0,iv=setInterval(function(){t++;try{" +
+                "var f=document.querySelector('iframe'),fw=f&&f.contentWindow,d=fw&&fw.document;" +
+                "if(d&&d.head){var s=d.createElement('script');s.textContent=" +
+                org.json.JSONObject.quote(VB_MATCHMEDIA_SHIM) + ";" +
+                "d.head.appendChild(s);clearInterval(iv);}}" +
+                "catch(e){}if(t>3000)clearInterval(iv);},2);})();</script>"
+        } else ""
         val html = "<!DOCTYPE html><html><head>" +
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
             "</head><body style=\"margin:0;background:#000;overflow:hidden\">" +
+            shimBlock +
             "<iframe src=\"" + embedUrl + "\" " +
             "style=\"border:0;position:fixed;inset:0;width:100%;height:100%\" " +
             "allow=\"autoplay; encrypted-media; fullscreen; picture-in-picture\" " +
@@ -357,8 +369,11 @@ private val VB_MATCHMEDIA_SHIM =
 
 private val VB_JS_CACHE = java.util.Collections.synchronizedMap(HashMap<String, String>())
 
-/** Serve a VidBolt player module with the gate shim prepended (cached by
-    content-hashed URL). Null falls through to the network untouched. */
+/** Serve a VidBolt player module with the gate shim prepended. FAIL-SAFE
+    (0.46): gzip/deflate are decoded, anything that does not look like real
+    JavaScript is refused and falls through to the plain network - a bad
+    patch must never keep the player from loading (0.45 shipped a poisoned
+    module and the video never started). Only good bodies are cached. */
 private fun patchedVbJs(url: String): android.webkit.WebResourceResponse? {
     return try {
         var body = VB_JS_CACHE[url]
@@ -371,11 +386,27 @@ private fun patchedVbJs(url: String): android.webkit.WebResourceResponse? {
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             )
             conn.setRequestProperty("accept", "application/javascript,*/*")
-            val src = try {
-                conn.inputStream.bufferedReader().use { it.readText() }
+            conn.setRequestProperty("accept-encoding", "identity")
+            val enc = (conn.contentEncoding ?: "").lowercase(java.util.Locale.US)
+            val raw = try {
+                conn.inputStream.readBytes()
             } finally {
                 conn.disconnect()
             }
+            val bytes = when {
+                enc.contains("gzip") -> java.util.zip.GZIPInputStream(raw.inputStream()).readBytes()
+                enc.contains("deflate") -> java.util.zip.InflaterInputStream(raw.inputStream()).readBytes()
+                else -> raw
+            }
+            val src = bytes.toString(Charsets.UTF_8)
+            // Real module or bust: too short / HTML page / binary garbage /
+            // nothing player-shaped means pass the request through untouched.
+            val looksJs = src.length > 500 &&
+                !src.trimStart().startsWith("<") &&
+                src.indexOf(0.toChar()) < 0 &&
+                (src.contains("function") || src.contains("=>")) &&
+                src.contains("postMessage")
+            if (!looksJs) return null
             body = VB_MATCHMEDIA_SHIM + "\n" + src
             VB_JS_CACHE[url] = body
         }

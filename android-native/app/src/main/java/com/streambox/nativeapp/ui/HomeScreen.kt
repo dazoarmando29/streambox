@@ -292,7 +292,11 @@ fun BrowseScreen(
             }
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
-                    loading -> Box(
+                    // Rows paint the moment they land (0.32) - the spinner
+                    // only shows while NOTHING has arrived (0.46 fix: it
+                    // used to cover the progressive rows all the way to the
+                    // slowest request, which made the TV section feel dead).
+                    loading && rows.isEmpty() && results.isEmpty() -> Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) { CircularProgressIndicator(color = Accent) }

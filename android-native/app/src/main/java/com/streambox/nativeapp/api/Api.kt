@@ -275,25 +275,31 @@ object Api {
     }
 
     /** Real TMDB genre names (/genre/movie|tv/list) for the BROWSE BY GENRE
-        chips - cached for the session, empty when TMDB is unreachable. */
+        chips - cached for the session. Failures are NEVER cached (0.46: one
+        cold timeout froze the strip at All only) and get one retry. */
     fun genres(kind: String): List<Pair<Int, String>> {
         val k = if (kind == "movie") "movie" else "tv"
         genreCache[k]?.let { return it }
-        val out = ArrayList<Pair<Int, String>>()
-        try {
-            val arr = get("/api/tmdb/3/genre/" + k + "/list").optJSONArray("genres")
-            if (arr != null) {
-                for (i in 0 until arr.length()) {
-                    val o = arr.optJSONObject(i) ?: continue
-                    val id = o.optInt("id", -1)
-                    val name = o.optString("name", "")
-                    if (id >= 0 && name.isNotBlank() && name != "null") out.add(id to name)
+        repeat(2) {
+            val out = ArrayList<Pair<Int, String>>()
+            try {
+                val arr = get("/api/tmdb/3/genre/" + k + "/list").optJSONArray("genres")
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        val o = arr.optJSONObject(i) ?: continue
+                        val id = o.optInt("id", -1)
+                        val name = o.optString("name", "")
+                        if (id >= 0 && name.isNotBlank() && name != "null") out.add(id to name)
+                    }
                 }
+            } catch (e: Exception) {
             }
-        } catch (e: Exception) {
+            if (out.isNotEmpty()) {
+                genreCache[k] = out
+                return out
+            }
         }
-        genreCache[k] = out
-        return out
+        return listOf()
     }
 
     /** Genre browse rows (real discover data): popular + top-rated picks
