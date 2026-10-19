@@ -192,22 +192,27 @@ private fun mirrorBase(m: String): String = when (m) {
 }
 
 /** Load the provider the way the website does: embed URL in our own shell
-    page's iframe (postMessage contract flows both ways via SB_HOOK). For
-    VidBolt the shell runs the gate shim FIRST - before the iframe element
-    even exists - so its command listener (audio/subtitles/speed) registers
-    on TVs too (0.46: the phone-only viewport gate made taps silent there). */
+    page's iframe (postMessage contract flows both ways via SB_HOOK). The
+    hook rides the shell MARKUP so it is attached before the iframe can emit
+    anything (0.47: onPageFinished injection could land after the player was
+    already talking). For VidBolt the shell ALSO runs a gate-shim injector
+    that only touches the iframe's REAL http document - the transient
+    about:blank doc has a head too and 0.46 lost the race there, so the shim
+    never landed and TV taps stayed dead. */
 private fun loadMirror(w: WebView, embedUrl: String, m: String) {
     if (m in WRAPPED) {
         val shimBlock = if (m == "vidbolt") {
-            "<script>(function(){var t=0,iv=setInterval(function(){t++;try{" +
+            "<script>(function(){var iv=setInterval(function(){try{" +
                 "var f=document.querySelector('iframe'),fw=f&&f.contentWindow,d=fw&&fw.document;" +
-                "if(d&&d.head){var s=d.createElement('script');s.textContent=" +
+                "if(d&&d.head&&!d.__sbGate&&(''+(d.location&&d.location.href||'')).indexOf('http')===0){" +
+                "var s=d.createElement('script');s.textContent=" +
                 org.json.JSONObject.quote(VB_MATCHMEDIA_SHIM) + ";" +
-                "d.head.appendChild(s);clearInterval(iv);}}" +
-                "catch(e){}if(t>3000)clearInterval(iv);},2);})();</script>"
+                "d.head.appendChild(s);}" +
+                "}catch(e){}},2);setTimeout(function(){clearInterval(iv);},30000);})();</script>"
         } else ""
         val html = "<!DOCTYPE html><html><head>" +
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+            "<script>" + SB_HOOK + "</script>" +
             "</head><body style=\"margin:0;background:#000;overflow:hidden\">" +
             shimBlock +
             "<iframe src=\"" + embedUrl + "\" " +
@@ -358,61 +363,55 @@ private val MEDIA_EXTS = setOf("m3u8", "mpd", "ts", "m4s", "mp4", "webm", "aac",
 /** VidBolt's mobile-option command listener (audio/subtitles/speed) only
     registers when its NARROW-VIEWPORT gate passes - the phone works natively,
     a TV never got the listener and every tap died silently (0.44/0.45 bug).
-    Their player modules get this matchMedia shim PREPENDED so the gate opens
-    on every screen; the command values are proven by the phone. */
+    This matchMedia shim opens the gate on every screen and is injected into
+    the player DOCUMENT before their module evaluates (vbShimmedDoc + the
+    shell injector in loadMirror). Player JS bodies are NEVER rewritten -
+    0.45/0.46 intercepted the module and the video stuck on the play screen. */
 private val VB_MATCHMEDIA_SHIM =
-    "try{var o=window.matchMedia;window.matchMedia=function(q){try{" +
+    "document.__sbGate=1;try{var o=window.matchMedia;window.matchMedia=function(q){try{" +
         "if(typeof q==='string'&&q.indexOf('max-width')>=0)return{matches:true,media:q,onchange:null," +
         "addListener:function(){},removeListener:function(){},addEventListener:function(){}," +
         "removeEventListener:function(){},dispatchEvent:function(){return false}};}catch(e){}" +
         "return o.call(window,q);};}catch(e){}"
 
-private val VB_JS_CACHE = java.util.Collections.synchronizedMap(HashMap<String, String>())
+private const val VB_UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
-/** Serve a VidBolt player module with the gate shim prepended. FAIL-SAFE
-    (0.46): gzip/deflate are decoded, anything that does not look like real
-    JavaScript is refused and falls through to the plain network - a bad
-    patch must never keep the player from loading (0.45 shipped a poisoned
-    module and the video never started). Only good bodies are cached. */
-private fun patchedVbJs(url: String): android.webkit.WebResourceResponse? {
+/** Serve the VidBolt embed PAGE with the gate shim as its first inline
+    script - deterministic: the shim is in the document before their module
+    can evaluate, so the command listener registers on TVs too. FAIL-SAFE:
+    any fetch, decode or shape problem falls through to the plain network
+    page - the gate may stay shut but PLAYBACK never depends on this
+    (0.45/0.46 froze the play screen by touching their module body). */
+private fun vbShimmedDoc(url: String): android.webkit.WebResourceResponse? {
     return try {
-        var body = VB_JS_CACHE[url]
-        if (body == null) {
-            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-            conn.connectTimeout = 10000
-            conn.readTimeout = 15000
-            conn.setRequestProperty(
-                "user-agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-            )
-            conn.setRequestProperty("accept", "application/javascript,*/*")
-            conn.setRequestProperty("accept-encoding", "identity")
-            val enc = (conn.contentEncoding ?: "").lowercase(java.util.Locale.US)
-            val raw = try {
-                conn.inputStream.readBytes()
-            } finally {
-                conn.disconnect()
-            }
-            val bytes = when {
-                enc.contains("gzip") -> java.util.zip.GZIPInputStream(raw.inputStream()).readBytes()
-                enc.contains("deflate") -> java.util.zip.InflaterInputStream(raw.inputStream()).readBytes()
-                else -> raw
-            }
-            val src = bytes.toString(Charsets.UTF_8)
-            // Real module or bust: too short / HTML page / binary garbage /
-            // nothing player-shaped means pass the request through untouched.
-            val looksJs = src.length > 500 &&
-                !src.trimStart().startsWith("<") &&
-                src.indexOf(0.toChar()) < 0 &&
-                (src.contains("function") || src.contains("=>")) &&
-                src.contains("postMessage")
-            if (!looksJs) return null
-            body = VB_MATCHMEDIA_SHIM + "\n" + src
-            VB_JS_CACHE[url] = body
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        conn.connectTimeout = 4000
+        conn.readTimeout = 6000
+        conn.setRequestProperty("user-agent", VB_UA)
+        conn.setRequestProperty("accept", "text/html,*/*")
+        conn.setRequestProperty("accept-encoding", "gzip")
+        val enc = (conn.contentEncoding ?: "").lowercase(java.util.Locale.US)
+        val raw = try {
+            conn.inputStream.readBytes()
+        } finally {
+            conn.disconnect()
         }
+        val bytes = when {
+            enc.contains("gzip") -> java.util.zip.GZIPInputStream(raw.inputStream()).readBytes()
+            enc.contains("deflate") -> java.util.zip.InflaterInputStream(raw.inputStream()).readBytes()
+            else -> raw
+        }
+        val src = bytes.toString(Charsets.UTF_8)
+        val idx = src.indexOf("<head", ignoreCase = true)
+        val gt = if (idx >= 0) src.indexOf('>', idx) else -1
+        if (gt < 0 || src.length < 200) return null
+        val out = src.substring(0, gt + 1) +
+            "<script>" + VB_MATCHMEDIA_SHIM + "</script>" +
+            src.substring(gt + 1)
         android.webkit.WebResourceResponse(
-            "application/javascript", "utf-8",
-            java.io.ByteArrayInputStream(body.toByteArray(Charsets.UTF_8)),
+            "text/html", "utf-8",
+            java.io.ByteArrayInputStream(out.toByteArray(Charsets.UTF_8)),
         )
     } catch (e: Exception) {
         null
@@ -727,31 +726,12 @@ private val SB_HOOK = """
       }, function(){});
     } catch(e){}
   }
-  // VidBolt only REGISTER its mobile-option command listener (audio,
-  // subtitles, speed) when its narrow-viewport check passes - on a TV the
-  // listener never exists and every command dies silently (0.44 fix: the
-  // tracks listed but taps never changed the audio). We shim matchMedia
-  // INSIDE the same-origin iframe before their module evaluates Bt() -
-  // the module is a network fetch, so this poll always wins the race.
-  function vbNarrowShim(){
-    var tries = 0;
-    var iv = setInterval(function(){
-      tries++;
-      try {
-        var fw = window.frames[0];
-        var doc = fw && fw.document;
-        if (doc && doc.head) {
-          var s = doc.createElement("script");
-          s.textContent = "try{var o=window.matchMedia;window.matchMedia=function(q){try{if(typeof q==='string'&&q.indexOf('max-width')>=0)return{matches:true,media:q,onchange:null,addListener:function(){},removeListener:function(){},addEventListener:function(){},removeEventListener:function(){},dispatchEvent:function(){return false}};}catch(e){}return o.call(window,q);};}catch(e){}";
-          doc.head.appendChild(s);
-          clearInterval(iv);
-        }
-      } catch(e){}
-      if (tries > 600) clearInterval(iv);
-    }, 5);
-  }
+  // VidBolt's narrow-viewport gate (Bt) is opened by the matchMedia shim the
+  // wrapper injects into the player DOCUMENT before their module evaluates
+  // (vbShimmedDoc + the shell injector). 0.47: a runtime poll here kept
+  // landing in the iframe's transient about:blank doc (it has a head too)
+  // and the shim never reached the real player, so TV taps stayed dead.
   if (VB) {
-    vbNarrowShim();
     vbTracks();
     setTimeout(vbTracks, 5000);
     setTimeout(vbTracks, 15000);
@@ -1073,13 +1053,24 @@ fun PlayerScreen(
     // VidRift while the video was already coming up. Real media traffic
     // (segment fetches) or provider protocol messages keep it patient; a
     // genuinely dead embed still hops so the TV is never stuck.
+    // Silent-start kicks (0.47, website _playKickT parity): TV WebViews can
+    // swallow autoplay-with-sound, so a VidBolt/VidZen frame that has not
+    // reported anything gets an explicit play nudge (8s, then 18s) before
+    // the watchdog gives up - a no-op once frames are flowing.
     LaunchedEffect(mirror, epSeason, epNumber) {
         gotMedia = false
         val start = System.currentTimeMillis()
+        var kicked = 0
         while (true) {
             delay(5000)
             if (gotMedia) break
             val idleFor = System.currentTimeMillis() - maxOf(start, lastMediaAt)
+            if ((mirror == "vidbolt" || mirror == "vidzen") && kicked < 2 &&
+                idleFor >= (if (kicked == 0) 8000L else 18000L)
+            ) {
+                kicked += 1
+                cmd("window.__sb && window.__sb.play()")
+            }
             if (idleFor >= 30000) {
                 hopMirror()
                 break
@@ -1613,16 +1604,29 @@ fun PlayerScreen(
                                 } else {
                                     val host = (request?.url?.host ?: "").lowercase(java.util.Locale.US)
                                     val lp = rawPath.lowercase(java.util.Locale.US)
-                                    // VidBolt player modules get the
-                                    // command-gate shim prepended (0.45) so
-                                    // audio/subtitle/speed taps work on TV
-                                    // exactly like on the phone.
-                                    if ((host == "vidbolt.pro" || host.endsWith(".vidbolt.pro")) &&
-                                        lp.startsWith("/player/") && lp.endsWith(".js")
+                                    // VidBolt embed PAGES get the gate shim
+                                    // inline before their module evaluates
+                                    // (0.47). Player JS bodies are NEVER
+                                    // rewritten - 0.45/0.46 intercepting the
+                                    // module froze the play screen (the
+                                    // poster never went away). Real
+                                    // navigations only: SPA/RSC subfetches
+                                    // and every other resource fall through.
+                                    if ((host == "vidbolt.pro" || host.endsWith(".vidbolt.pro") ||
+                                        host == "vidbolt.xyz" || host.endsWith(".vidbolt.xyz")) &&
+                                        (lp == "/tv" || lp.startsWith("/tv/") ||
+                                            lp == "/movie" || lp.startsWith("/movie/") ||
+                                            lp == "/anime" || lp.startsWith("/anime/"))
                                     ) {
+                                        val hdrs = request?.requestHeaders ?: emptyMap()
+                                        val dest = hdrs.entries
+                                            .firstOrNull { it.key.equals("sec-fetch-dest", true) }?.value ?: ""
+                                        val rsc = hdrs.keys.any { it.equals("RSC", true) }
                                         val target = request?.url?.toString()
-                                        if (target != null) {
-                                            patchedVbJs(target)?.let { return it }
+                                        if (!rsc && (dest.isEmpty() || dest.equals("document", true)) &&
+                                            request?.method.equals("GET", true) && target != null
+                                        ) {
+                                            vbShimmedDoc(target)?.let { return it }
                                         }
                                     }
                                     if (isAdHost(host)) {

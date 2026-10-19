@@ -49,10 +49,23 @@
    24 every TMDB date read goes through dateOf: org.json optString renders
       JSON null as the literal "null", which sorts AFTER today and stamped
       old One Piece seasons as COMING SOON (0.38 fix)
-   25 VidBolt plays unsandboxed and media is never blocked: the wrapper
-      iframe must never carry a sandbox attribute (VidBolt renders
-      "Playback disabled" when sandboxed) and the Ad Shield must check
-      media extensions BEFORE any ad-host block - playback always wins */
+    25 VidBolt plays unsandboxed and media is never blocked: the wrapper
+       iframe must never carry a sandbox attribute (VidBolt renders
+       "Playback disabled" when sandboxed) and the Ad Shield must check
+       media extensions BEFORE any ad-host block - playback always wins
+    26 VidBolt gate shim is document-level and player JS bodies are NEVER
+       rewritten: 0.45/0.46 intercepted the player MODULE and the video
+       stuck on the play screen (poster never went away). The shim rides
+       vbShimmedDoc (inline, before their module evaluates) plus the shell
+       injector - both race-safe (real-http-document guard + __sbGate
+       marker; the iframe's transient about:blank doc has a head too and
+       swallowed the old poll)
+    27 SB_HOOK rides the wrapped shell MARKUP so it is attached before the
+       iframe can emit anything (onPageFinished injection could land after
+       the player was already talking)
+    28 silent-start kicks: a VidBolt/VidZen frame that reports nothing gets
+       an explicit play nudge before the 30s idle watchdog hops away
+       (website _playKickT parity - TV WebViews can swallow autoplay) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -449,13 +462,59 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   else {
     if (/sandbox\s*=/.test(psVb)) bad("sandbox attribute in PlayerScreen - VidBolt renders Playback disabled when sandboxed");
     else ok("no sandbox attribute in the wrapper (VidBolt plays)");
-    if (/ext in MEDIA_EXTS[\s\S]{0,1600}isAdHost/.test(psVb)) ok("Ad Shield checks media before ad blocks (playback always wins)");
+    if (/ext in MEDIA_EXTS[\s\S]{0,3200}isAdHost/.test(psVb)) ok("Ad Shield checks media before ad blocks (playback always wins)");
     else bad("Ad Shield must check media extensions BEFORE ad-host blocks");
-    if (/vb:tracks/.test(psVb) && /vbNarrowShim/.test(psVb) && /VB_MATCHMEDIA_SHIM/.test(psVb)) {
-      ok("VidBolt track plumbing present (labels + command gate shim + module patch)");
+    if (/vb:tracks/.test(psVb) && /VB_MATCHMEDIA_SHIM/.test(psVb)) {
+      ok("VidBolt track plumbing present (labels + command gate shim)");
     } else {
-      bad("VidBolt track plumbing missing (vb:tracks / vbNarrowShim / VB_MATCHMEDIA_SHIM - the command listener is narrow-viewport gated)");
+      bad("VidBolt track plumbing missing (vb:tracks / VB_MATCHMEDIA_SHIM - the command listener is narrow-viewport gated)");
     }
+  }
+}
+
+/* ---------- 26. VidBolt gate shim is document-level, JS bodies untouched ---------- */
+{
+  const psG = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psG) bad("PlayerScreen.kt missing - VidBolt gate rules cannot be verified");
+  else {
+    if (/patchedVbJs|VB_JS_CACHE/.test(psG)) {
+      bad("player JS body rewriting is BACK (patchedVbJs/VB_JS_CACHE) - intercepting the VidBolt module froze the play screen (0.45/0.46); the gate shim must ride the DOCUMENT");
+    } else {
+      ok("player JS bodies are never rewritten (module patch stays dead)");
+    }
+    if (/private fun vbShimmedDoc\(/.test(psG) && /<script>" \+ VB_MATCHMEDIA_SHIM \+ "<\/script>"/.test(psG)) {
+      ok("gate shim rides vbShimmedDoc (inline in the player document, before their module)");
+    } else {
+      bad("vbShimmedDoc gate-shim document injector missing - TV audio/subtitle taps die without it");
+    }
+    if (/document\.__sbGate=1/.test(psG) &&
+        /!d\.__sbGate&&\(''\+\(d\.location&&d\.location\.href\|\|''\)\)\.indexOf\('http'\)===0/.test(psG)) {
+      ok("gate shim injections are race-safe (real-http-document guard + __sbGate marker)");
+    } else {
+      bad("gate shim lost the about:blank race guard - the iframe's transient doc has a head and swallows the shim");
+    }
+  }
+}
+
+/* ---------- 27. SB_HOOK rides the wrapped shell markup ---------- */
+{
+  const psH = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psH) bad("PlayerScreen.kt missing - shell hook embed cannot be verified");
+  else if (/"<script>" \+ SB_HOOK \+ "<\/script>"/.test(psH)) {
+    ok("SB_HOOK rides the wrapped shell markup (attached before the iframe speaks)");
+  } else {
+    bad("SB_HOOK must be embedded in loadMirror's shell HTML - onPageFinished injection can land after the player is already talking");
+  }
+}
+
+/* ---------- 28. silent-start kicks before the watchdog hops ---------- */
+{
+  const psK = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psK) bad("PlayerScreen.kt missing - start kicks cannot be verified");
+  else if (/mirror == "vidbolt" \|\| mirror == "vidzen"\) && kicked < 2[\s\S]{0,240}window\.__sb && window\.__sb\.play\(\)/.test(psK)) {
+    ok("silent-start kicks nudge VidBolt/VidZen before the 30s idle hop (website parity)");
+  } else {
+    bad("silent-start kicks missing - a TV WebView that swallows autoplay strands the player until the watchdog hops");
   }
 }
 
