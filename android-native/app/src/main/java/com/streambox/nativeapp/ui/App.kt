@@ -275,6 +275,9 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.59" to listOf(
+        "Episode status sits in one fixed spot on every row - no more drifting labels",
+    ),
     "0.58" to listOf(
         "The zigzag is really gone this time - smooth rows everywhere",
         "Browse is back on the rail (every tab fits now) and KDrama shows a single All chip",
