@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -83,6 +84,9 @@ enum class Section(val label: String, val icon: ImageVector) {
     MOVIES("Movies", Icons.Filled.Movie),
     TV("TV", Icons.Filled.LiveTv),
     ANIME("Anime", Icons.Filled.AutoAwesome),
+    // Korean dramas get their own tab beside Anime (0.57): the old
+    // TV Shows K-Drama strip moved here.
+    KDRAMA("KDrama", Icons.Filled.Star),
     MYLIST("My List", Icons.Filled.Favorite),
     // Browse everything (0.55): pick movie / TV / anime, then genre + year
     // chips over the FULL paginated catalog.
@@ -271,6 +275,11 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.57" to listOf(
+        "New KDrama tab beside Anime - Korean dramas out of the TV Shows strip",
+        "Coming Soon episodes show their PH air date with a live countdown",
+        "Consistent episode status zone + smooth rows everywhere (the zigzag is gone)",
+    ),
     "0.56" to listOf(
         "Browse tab grows K-Dramas - Korean dramas by genre and year, straight to VidBolt",
     ),

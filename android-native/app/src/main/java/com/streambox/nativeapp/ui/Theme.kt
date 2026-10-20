@@ -12,6 +12,9 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -147,4 +150,19 @@ fun Modifier.focusRingCircle(pop: Boolean = true): Modifier = composed {
                 trace(2.5.dp, 0.95f)
             }
         }
+}
+
+/** Row navigation lock (0.57, the zigzag fix): Left/Right may never LEAVE
+    a card row or chip rail. The spatial search used to yank focus up to the
+    chip strip and back down while walking a row (right goes up, right again
+    goes down) - every screen with a chip rail had it, Home (no rail) never
+    did. Up/Down still walk between rails and rows freely. */
+fun Modifier.rowNavLock(): Modifier = focusProperties {
+    exit = { d ->
+        if (d == FocusDirection.Left || d == FocusDirection.Right) {
+            FocusRequester.Cancel
+        } else {
+            FocusRequester.Default
+        }
+    }
 }

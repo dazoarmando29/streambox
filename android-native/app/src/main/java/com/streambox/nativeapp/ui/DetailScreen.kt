@@ -106,6 +106,14 @@ fun DetailScreen(
     var saved by remember {
         mutableStateOf(Store.progressList(ctx).firstOrNull { it.type == title.type && it.id == title.id })
     }
+    // Coming Soon clock (0.57): the PH air countdown ticks with the minute.
+    var tickMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(60000)
+            tickMs = System.currentTimeMillis()
+        }
+    }
     // AniPM start language (design pack SUB|DUB chips): the house default
     // stands - Dragon Ball starts on the Faulconer English dub, everything
     // else on sub - and the chips only override per play.
@@ -551,7 +559,10 @@ fun DetailScreen(
                         // future is a COMING SOON schedule entry.
                         val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
                             .format(java.util.Date())
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LazyRow(
+                            modifier = Modifier.rowNavLock(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
                             items(det.seasons.size) { i ->
                                 val s = det.seasons[i]
                                 val on = s.n == season
@@ -633,6 +644,7 @@ fun DetailScreen(
                     current = cur,
                     savedCur = if (cur) p!!.cur else 0f,
                     savedDur = if (cur) p!!.dur else 0f,
+                    tickMs = tickMs,
                 ) {
                     episode = ep.n
                     if (title.type != "anime" || mapping != "loading") {
@@ -792,6 +804,7 @@ fun DetailScreen(
                         )
                     }
                     LazyRow(
+                        modifier = Modifier.rowNavLock(),
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
@@ -911,7 +924,7 @@ fun DetailScreen(
                 // navigation stays smooth (per-card reveals zigzagged).
                 val rowBring = remember { BringIntoViewRequester() }
                 val rowScope = rememberCoroutineScope()
-                Column(modifier = Modifier.bringIntoViewRequester(rowBring)) {
+                Column(modifier = Modifier.bringIntoViewRequester(rowBring).rowNavLock()) {
                     SectionHeader("More Like This")
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp),
@@ -986,6 +999,43 @@ private fun openTrailer(ctx: android.content.Context, key: String) {
     }
 }
 
+/** Coming Soon clock (0.57): air dates shown and counted down in Philippine
+    time (Asia/Manila) - the family clock. TMDB air dates are date-only, so
+    an episode flips available at 00:00 PH of its air date. */
+private fun phTz(): java.util.TimeZone = java.util.TimeZone.getTimeZone("Asia/Manila")
+
+private fun phAirLabel(air: String): String {
+    return try {
+        val parse = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        val out = java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.US)
+        out.timeZone = phTz()
+        out.format(parse.parse(air) ?: return air)
+    } catch (e: Exception) {
+        air
+    }
+}
+
+private fun phCountdown(air: String, nowMs: Long): String {
+    return try {
+        val p = air.split("-")
+        val cal = java.util.Calendar.getInstance(phTz())
+        cal.set(p[0].toInt(), p[1].toInt() - 1, p[2].toInt(), 0, 0, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        val diff = cal.timeInMillis - nowMs
+        if (diff <= 0) return "available now"
+        val days = diff / 86400000L
+        val hours = (diff % 86400000L) / 3600000L
+        val mins = (diff % 3600000L) / 60000L
+        when {
+            days > 0 -> "in " + days + "d " + hours + "h"
+            hours > 0 -> "in " + hours + "h " + mins + "m"
+            else -> "in " + maxOf(1L, mins) + "m"
+        }
+    } catch (e: Exception) {
+        ""
+    }
+}
+
 /** One episode row: 16:9 still (or E-number plate when TMDB has none),
     play overlay, title + real meta, synopsis, and a Continue marker on the
     saved ep (design pack rows). */
@@ -996,6 +1046,7 @@ private fun EpisodeRow(
     current: Boolean,
     savedCur: Float,
     savedDur: Float,
+    tickMs: Long,
     onClick: () -> Unit,
 ) {
     Row(
@@ -1003,6 +1054,7 @@ private fun EpisodeRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = if (big) 28.dp else 16.dp, vertical = 5.dp)
+            .rowNavLock()
             .focusRing(RoundedCornerShape(16.dp))
             .background(if (current) Color(0x1400F0B5) else Card, RoundedCornerShape(16.dp))
             // Unaired rows stay visible but are NOT play targets (no dead
@@ -1116,44 +1168,53 @@ private fun EpisodeRow(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 Spacer(modifier = Modifier.weight(1f))
-                // "NEW" is reserved for the episode of THIS WEEK (0.38 rule)
-                // - older and future episodes never carry it.
+                // Status zone (0.57): ONE consistent right-aligned block on
+                // every row - status label on top (NEW / COMING SOON) and the
+                // time line under it (remaining when in progress, runtime
+                // otherwise; Coming Soon carries the PH air date + countdown).
+                // "NEW" stays reserved for the episode of THIS WEEK (0.38).
                 val weekAgo = remember {
                     java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
                         .format(java.util.Date(System.currentTimeMillis() - 7L * 24 * 3600 * 1000))
                 }
-                if (ep.aired && ep.air.isNotBlank() && ep.air >= weekAgo) {
-                    Text(
-                        "NEW",
-                        color = Accent,
-                        fontWeight = FontWeight.Black,
-                        fontSize = if (big) 11.sp else 9.sp,
-                        letterSpacing = 1.sp,
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                }
-                if (!ep.aired) {
-                    Text(
-                        "COMING SOON",
-                        color = Amber,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = if (big) 11.sp else 9.sp,
-                        letterSpacing = 1.sp,
-                    )
-                } else if (current && savedDur > 0 && savedCur > 5) {
-                    Text(
-                        fmtMin(((savedDur - savedCur) / 60).toInt().coerceAtLeast(1)) + " left",
-                        color = Accent,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = if (big) 12.sp else 10.sp,
-                    )
-                } else if (ep.runtime > 0) {
-                    Text(
-                        fmtMin(ep.runtime),
-                        color = Dim,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = if (big) 12.sp else 10.sp,
-                    )
+                val isNew = ep.aired && ep.air.isNotBlank() && ep.air >= weekAgo
+                val inProgress = ep.aired && current && savedDur > 0 && savedCur > 5
+                Column(horizontalAlignment = Alignment.End) {
+                    if (!ep.aired) {
+                        Text(
+                            "COMING SOON",
+                            color = Amber,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = if (big) 11.sp else 9.sp,
+                            letterSpacing = 1.sp,
+                        )
+                    } else if (isNew) {
+                        Text(
+                            "NEW",
+                            color = Accent,
+                            fontWeight = FontWeight.Black,
+                            fontSize = if (big) 11.sp else 9.sp,
+                            letterSpacing = 1.sp,
+                        )
+                    }
+                    val timeLine = when {
+                        !ep.aired ->
+                            if (ep.air.isNotBlank()) {
+                                phAirLabel(ep.air) + " (PH)  \u00b7  " + phCountdown(ep.air, tickMs)
+                            } else ""
+                        inProgress -> fmtMin(((savedDur - savedCur) / 60).toInt().coerceAtLeast(1)) + " left"
+                        ep.runtime > 0 -> fmtMin(ep.runtime)
+                        else -> ""
+                    }
+                    if (timeLine.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            timeLine,
+                            color = if (!ep.aired) Soft else if (inProgress) Accent else Dim,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = if (big) 12.sp else 10.sp,
+                        )
+                    }
                 }
             }
             if (ep.overview.isNotBlank()) {

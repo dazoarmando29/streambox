@@ -123,17 +123,7 @@ private fun rowPlan(
     }
     Section.TV -> {
         val g = genre?.toIntOrNull()
-        if (genre == "kdrama") listOf(
-            // Korean-language TV from real discover data - rows keep lang
-            // "ko" so every card routes to VidBolt (0.42). The kind rows
-            // are the genre slices TMDB can actually filter.
-            "Popular K-Dramas" to { Api.kdramas(null, false) },
-            "Top Rated K-Dramas" to { Api.kdramas(null, true) },
-            "Mystery K-Dramas" to { Api.kdramas(9648, false) },
-            "Comedy K-Dramas" to { Api.kdramas(35, false) },
-            "Action K-Dramas" to { Api.kdramas(10759, false) },
-            "Fantasy K-Dramas" to { Api.kdramas(10765, false) },
-        ) else if (g != null) listOf(
+        if (g != null) listOf(
             "Popular " + gName + " Shows" to { Api.genreTv(g, false, false).filter { !it.isAnime } },
             "Top Rated " + gName + " Shows" to { Api.genreTv(g, true, false).filter { !it.isAnime } },
         ) else listOf(
@@ -141,6 +131,24 @@ private fun rowPlan(
             "Trending Shows" to { Api.trending().filter { it.type != "movie" && !it.isAnime } },
             "Popular Shows" to { Api.popularTv().filter { !it.isAnime } },
             "Top Rated Shows" to { Api.topRatedTv().filter { !it.isAnime } },
+        )
+    }
+    // Korean dramas live in their own tab now (0.57): rows keep lang "ko"
+    // so every card routes to VidBolt's multi-audio releases. The All pick
+    // shows the full lineup + the KIND slices TMDB can really filter; a
+    // genre pick narrows to that genre.
+    Section.KDRAMA -> {
+        val g = genre?.toIntOrNull()
+        if (genre == "kdrama" || genre == null) listOf(
+            "Popular K-Dramas" to { Api.kdramas(null, false) },
+            "Top Rated K-Dramas" to { Api.kdramas(null, true) },
+            "Mystery K-Dramas" to { Api.kdramas(9648, false) },
+            "Comedy K-Dramas" to { Api.kdramas(35, false) },
+            "Action K-Dramas" to { Api.kdramas(10759, false) },
+            "Fantasy K-Dramas" to { Api.kdramas(10765, false) },
+        ) else listOf(
+            "Popular " + gName + " K-Dramas" to { Api.kdramas(g, false) },
+            "Top Rated " + gName + " K-Dramas" to { Api.kdramas(g, true) },
         )
     }
     // Anime genre picks ride ANILIST (Romance, Slice of Life, Mecha, ...).
@@ -226,9 +234,9 @@ fun BrowseScreen(
                 when (section) {
                     Section.ANIME -> Api.animeGenres()
                     Section.MOVIES -> Api.genres("movie").map { it.first.toString() to it.second }
-                    // The TV strip leads with K-Drama (0.42): its own
-                    // listing plus the different KINDS inside it.
-                    Section.TV -> listOf("kdrama" to "K-Drama") +
+                    Section.TV -> Api.genres("tv").map { it.first.toString() to it.second }
+                    // The KDrama tab (0.57): All plus the real TV genres.
+                    Section.KDRAMA -> listOf("kdrama" to "All") +
                         Api.genres("tv").map { it.first.toString() to it.second }
                     else -> listOf()
                 }
@@ -238,11 +246,13 @@ fun BrowseScreen(
 
     LaunchedEffect(section, searchSubmitted, searchMode, genreSel) {
         // Continue Watching is TAB-SCOPED (0.50): the anime tab never shows
-        // movie/TV progress and vice versa; Home and My List show everything.
+        // movie/TV progress and vice versa; Korean dramas follow their own
+        // tab (0.57); Home and My List show everything.
         cont = Store.progressList(ctx).let { all ->
             when (section) {
                 Section.MOVIES -> all.filter { it.type == "movie" }
-                Section.TV -> all.filter { it.type == "tv" }
+                Section.TV -> all.filter { it.type == "tv" && it.lang != "ko" }
+                Section.KDRAMA -> all.filter { it.type == "tv" && it.lang == "ko" }
                 Section.ANIME -> all.filter { it.type == "anime" }
                 else -> all
             }
@@ -744,6 +754,7 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
             right = if (cont.size > 1) cont.size.toString() + " IN PROGRESS" else null,
         )
         LazyRow(
+            modifier = Modifier.rowNavLock(),
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -863,6 +874,7 @@ private fun GenreBar(
         )
         Spacer(modifier = Modifier.height(6.dp))
         LazyRow(
+            modifier = Modifier.rowNavLock(),
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -937,7 +949,7 @@ private fun PosterRow(label: String, titles: List<Title>, newIds: Set<Int>, onOp
     // still scrolls fully into view on first focus, names included.
     val rowBring = remember { BringIntoViewRequester() }
     val rowScope = rememberCoroutineScope()
-    Column(modifier = Modifier.bringIntoViewRequester(rowBring)) {
+    Column(modifier = Modifier.bringIntoViewRequester(rowBring).rowNavLock()) {
         SectionHeader(label)
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -1110,6 +1122,7 @@ private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
         )
         Spacer(modifier = Modifier.height(6.dp))
         LazyRow(
+            modifier = Modifier.rowNavLock(),
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -1141,6 +1154,7 @@ private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
         )
         Spacer(modifier = Modifier.height(6.dp))
         LazyRow(
+            modifier = Modifier.rowNavLock(),
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -1165,7 +1179,7 @@ private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().rowNavLock(),
                 ) {
                     items(results, key = { "b-" + it.type + "-" + it.id }) { t ->
                         val cellBring = remember { BringIntoViewRequester() }
@@ -1208,7 +1222,7 @@ private fun SearchGrid(titles: List<Title>, adultOpen: Boolean, onOpen: (Title) 
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().rowNavLock(),
     ) {
         items(shown, key = { it.type + "-" + it.id }) { t ->
             // Grid cells keep a per-cell reveal (0.53): a VERTICAL grid
@@ -1301,7 +1315,7 @@ private fun MyListView(
         }
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).rowNavLock(),
         ) {
             listOf("all" to "All", "movie" to "Movies", "tv" to "TV Shows", "anime" to "Anime").forEach { (key, label) ->
                 val on = filter == key
@@ -1360,7 +1374,7 @@ private fun MyListView(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().rowNavLock(),
             ) {
                 items(filtered, key = { it.type + "-" + it.id }) { t ->
                     val p = cont.firstOrNull { it.type == t.type && it.id == t.id }
@@ -1371,7 +1385,7 @@ private fun MyListView(
             LazyColumn(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().rowNavLock(),
             ) {
                 items(filtered, key = { it.type + "-" + it.id }) { t ->
                     MyListRow(t, big, onOpen, onPlay, onRemove)

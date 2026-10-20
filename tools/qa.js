@@ -136,7 +136,16 @@
        saved titles keep their genreIds, and a restored Japanese-animation
        title re-types itself anime
     49 player routing honors isAnime - Japanese animation rides the anime
-       route even when an old stored label says tv */
+       route even when an old stored label says tv
+    50 episode rows carry ONE consistent right-aligned status zone: the
+       label (NEW / COMING SOON) on top and the time line under it - and
+       Coming Soon shows the air date + live countdown in Philippine time
+       (Asia/Manila, 00:00 PH flips availability)
+    51 Korean dramas live in their own KDrama tab beside Anime - the TV
+       Shows strip never carries a K-Drama chip again
+    52 the zigzag lock: Left/Right may never leave a card row or chip rail
+       (focus used to yank up to the chips and back - every screen with a
+       rail had it while Home never did); Up/Down stay free */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -776,15 +785,68 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   }
 }
 
+/* ---------- 50. episode status zone + PH Coming Soon clock ---------- */
+{
+  const dsP = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"), "utf8") : "";
+  if (!dsP) bad("DetailScreen.kt missing - episode status rules cannot be verified");
+  else if (/private fun phAirLabel\(/.test(dsP) &&
+           /private fun phCountdown\(/.test(dsP) &&
+           /Asia\/Manila/.test(dsP) &&
+           /phCountdown\(ep\.air, tickMs\)/.test(dsP) &&
+           /Column\(horizontalAlignment = Alignment\.End\)/.test(dsP)) {
+    ok("episode rows share one status zone and Coming Soon counts down in PH time");
+  } else {
+    bad("episode rows need the consistent right-aligned status zone with a PH air date + countdown (phAirLabel/phCountdown)");
+  }
+}
+
+/* ---------- 51. Korean dramas live in the KDrama tab ---------- */
+{
+  const appK = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
+  const hsK = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  if (!appK || !hsK) bad("App.kt/HomeScreen.kt missing - KDrama tab cannot be verified");
+  else if (/KDRAMA\("KDrama"/.test(appK) &&
+           /Section\.KDRAM[A-Z]* -> \{[\s\S]{0,220}Popular K-Dramas/.test(hsK) &&
+           /listOf\("kdrama" to "All"\)/.test(hsK) &&
+           !/listOf\("kdrama" to "K-Drama"\)/.test(hsK)) {
+    ok("KDrama tab beside Anime holds the K-Drama rows; the TV Shows strip is clean");
+  } else {
+    bad("Korean dramas must live in the KDrama tab (Section.KDRAMA rows) with no K-Drama chip left on the TV strip");
+  }
+}
+
+/* ---------- 52. the zigzag lock ---------- */
+{
+  const thZ = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"), "utf8") : "";
+  const hsZ = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  const dsZ = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"), "utf8") : "";
+  const uses = ((hsZ + dsZ).match(/rowNavLock\(\)/g) || []).length;
+  if (!thZ || !hsZ || !dsZ) bad("Theme/HomeScreen/DetailScreen missing - zigzag lock cannot be verified");
+  else if (/fun Modifier\.rowNavLock\(\)/.test(thZ) &&
+           /FocusDirection\.Left \|\| d == FocusDirection\.Right/.test(thZ) &&
+           uses >= 10) {
+    ok("zigzag lock: L/R never leaves a card row or chip rail (applied at " + uses + " containers)");
+  } else {
+    bad("rowNavLock must exist in Theme.kt and wrap every card row and chip rail (L/R used to yank up to the chips)");
+  }
+}
+
 /* ---------- 33. Continue Watching is tab-scoped ---------- */
 {
   const hs3 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
     ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!hs3) bad("HomeScreen.kt missing - Continue Watching scoping cannot be verified");
   else if (/Section\.MOVIES -> all\.filter \{ it\.type == "movie" \}/.test(hs3) &&
-           /Section\.TV -> all\.filter \{ it\.type == "tv" \}/.test(hs3) &&
+           /Section\.TV -> all\.filter \{ it\.type == "tv" && it\.lang != "ko" \}/.test(hs3) &&
+           /Section\.KDRAMA -> all\.filter \{ it\.type == "tv" && it\.lang == "ko" \}/.test(hs3) &&
            /Section\.ANIME -> all\.filter \{ it\.type == "anime" \}/.test(hs3)) {
-    ok("Continue Watching is tab-scoped (Home + My List keep everything)");
+    ok("Continue Watching is tab-scoped (KDrama split from TV; Home + My List keep everything)");
   } else {
     bad("Continue Watching must filter by the tab's type - anime progress never shows in the movie/TV tabs");
   }
