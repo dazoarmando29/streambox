@@ -94,7 +94,15 @@
     35 VidBolt quality plumbing is provider-reported only: rows come from
        its mobile-panel delegation (option + value echoed verbatim) or its
        resolve files per language (sourceQuality by the exact label) - no
-       invented ladder is ever built (qa #22 keeps fake 4K chips dead) */
+       invented ladder is ever built (qa #22 keeps fake 4K chips dead)
+    36 every preview build signs with the SAME committed keystore: CI used
+       to mint a fresh debug key per run, so each APK had a new signature
+       and 'update' failed with an install error
+    37 native versionCode stays FROZEN at 50 so any build installs over any
+       other one - forward updates AND rolling back to an older APK work
+       from the package installer (the feature version lives in versionName)
+    38 the app boots through a cinematic splash and opens a What's New card
+       ONCE per fresh update (Store.lastSeenVersion vs VERSION_NAME) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -661,6 +669,52 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("VidBolt quality rows are provider-reported and echoed verbatim (sourceQuality / quality)");
   } else {
     bad("VidBolt quality plumbing missing (vbqual command + Quality panel rows + per-language resolve ladder)");
+  }
+}
+
+/* ---------- 36. stable preview signing (updates install in place) ---------- */
+{
+  const ks = path.join(ROOT, "android-native/preview.keystore");
+  const gradle = fs.existsSync(path.join(ROOT, "android-native/app/build.gradle.kts"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/build.gradle.kts"), "utf8") : "";
+  if (!fs.existsSync(ks)) {
+    bad("android-native/preview.keystore missing - without a stable key every APK re-signs and 'update' fails to install");
+  } else if (/signingConfigs/.test(gradle) &&
+             /storeFile = rootProject\.file\("preview\.keystore"\)/.test(gradle) &&
+             /signingConfig = signingConfigs\.getByName\("preview"\)/.test(gradle)) {
+    ok("every build signs with the committed preview keystore (update installs in place)");
+  } else {
+    bad("build.gradle.kts must wire BOTH build types to the preview keystore signingConfig");
+  }
+}
+
+/* ---------- 37. versionCode frozen for cross-build installs ---------- */
+{
+  const gradleV = fs.existsSync(path.join(ROOT, "android-native/app/build.gradle.kts"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/build.gradle.kts"), "utf8") : "";
+  if (!gradleV) bad("build.gradle.kts missing - versionCode freeze cannot be verified");
+  else if (/versionCode = 50/.test(gradleV)) {
+    ok("versionCode frozen at 50 (any build installs over any other; versionName carries the feature)");
+  } else {
+    bad("native versionCode must STAY 50 - bumping it blocks rolling back to older APKs (0.50 request)");
+  }
+}
+
+/* ---------- 38. cinematic splash + one-time What's New ---------- */
+{
+  const appB = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
+  const storeB = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
+  if (!appB || !storeB) bad("App.kt/Store.kt missing - splash and What's New cannot be verified");
+  else if (/private fun SplashScreen\(\)/.test(appB) &&
+           /private fun WhatsNewDialog\(/.test(appB) &&
+           /Store\.lastSeenVersion\(appCtx\)/.test(appB) &&
+           /BuildConfig\.VERSION_NAME/.test(appB) &&
+           /fun lastSeenVersion\(ctx: Context\)/.test(storeB)) {
+    ok("boot splash + What's New card fire once per fresh update");
+  } else {
+    bad("App.kt must boot through SplashScreen and gate WhatsNewDialog on Store.lastSeenVersion vs BuildConfig.VERSION_NAME");
   }
 }
 

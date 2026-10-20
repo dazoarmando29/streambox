@@ -1,6 +1,14 @@
 package com.streambox.nativeapp.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
@@ -16,6 +24,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -23,6 +33,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -38,18 +50,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.streambox.nativeapp.AppEnv
+import com.streambox.nativeapp.BuildConfig
 import com.streambox.nativeapp.api.Title
+import com.streambox.nativeapp.data.Store
+import kotlinx.coroutines.delay
 
 /* Design tokens live in Theme.kt (Obsidian Glow Cinematic). */
 enum class Section(val label: String, val icon: ImageVector) {
@@ -122,6 +142,23 @@ fun StreamBoxApp() {
         screen = Screen.Player(t, season, episode, mal, ani, lang)
     }
 
+    // Boot splash + What's New (0.51): a cinematic start over the warm-up,
+    // then a ONE-TIME card after every fresh update (first opening only -
+    // lastSeenVersion remembers what you have already seen).
+    val appCtx = LocalContext.current
+    var splashDone by remember { mutableStateOf(false) }
+    var whatsNew by remember { mutableStateOf<Pair<String, List<String>>?>(null) }
+    LaunchedEffect(Unit) {
+        delay(1700)
+        splashDone = true
+        val v = BuildConfig.VERSION_NAME
+        val prev = Store.lastSeenVersion(appCtx)
+        if (prev != v) {
+            whatsNew = v to whatsNewBullets(prev, v)
+            Store.setLastSeenVersion(appCtx, v)
+        }
+    }
+
     // Space Grotesk is the house voice (titles, labels, numerics): every
     // Text inherits it; long-form copy opts into BodyFont at the call site.
     MaterialTheme(colorScheme = StreamColors) {
@@ -134,80 +171,246 @@ fun StreamBoxApp() {
             LocalIndication provides NoIndication,
         ) {
         Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
-            when (val s = screen) {
-                is Screen.Browse -> Column(modifier = Modifier.fillMaxSize()) {
-                    BrowseScreen(
-                        section = section,
-                        onSection = {
-                            section = it
-                            // A fresh tab never inherits the search bar.
-                            clearSearch()
-                            screen = Screen.Browse(it)
-                        },
-                        onOpen = { screen = Screen.Detail(it) },
-                        onPlay = { t ->
-                            if (t.type == "movie") play(t, 1, 1, null, null)
-                            else screen = Screen.Detail(t)
-                        },
-                        onResume = { p ->
-                            play(
-                                Title(p.id, p.type, p.name, p.poster, null, 0, "", 0.0, lang = p.lang),
-                                p.season, p.episode, p.mal, p.ani,
+            Crossfade(targetState = splashDone, label = "boot") { done ->
+                if (!done) {
+                    SplashScreen()
+                } else {
+                    when (val s = screen) {
+                        is Screen.Browse -> Column(modifier = Modifier.fillMaxSize()) {
+                            BrowseScreen(
+                                section = section,
+                                onSection = {
+                                    section = it
+                                    // A fresh tab never inherits the search bar.
+                                    clearSearch()
+                                    screen = Screen.Browse(it)
+                                },
+                                onOpen = { screen = Screen.Detail(it) },
+                                onPlay = { t ->
+                                    if (t.type == "movie") play(t, 1, 1, null, null)
+                                    else screen = Screen.Detail(t)
+                                },
+                                onResume = { p ->
+                                    play(
+                                        Title(p.id, p.type, p.name, p.poster, null, 0, "", 0.0, lang = p.lang),
+                                        p.season, p.episode, p.mal, p.ani,
+                                    )
+                                },
+                                searchMode = searchMode,
+                                searchInput = searchInput,
+                                searchSubmitted = searchSubmitted,
+                                onSearchToggle = {
+                                    searchMode = !searchMode
+                                    searchInput = ""
+                                    searchSubmitted = ""
+                                },
+                                onSearchInput = { searchInput = it },
+                                onSearchSubmit = { searchSubmitted = it },
+                                modifier = Modifier.weight(1f),
                             )
-                        },
-                        searchMode = searchMode,
-                        searchInput = searchInput,
-                        searchSubmitted = searchSubmitted,
-                        onSearchToggle = {
-                            searchMode = !searchMode
-                            searchInput = ""
-                            searchSubmitted = ""
-                        },
-                        onSearchInput = { searchInput = it },
-                        onSearchSubmit = { searchSubmitted = it },
-                        modifier = Modifier.weight(1f),
-                    )
-                    // TV uses the website-style top tab bar instead - the
-                    // bottom nav is a phone pattern (design split rule).
-                    if (!AppEnv.isTv) {
-                        BottomNav(current = section) {
-                            section = it
-                            screen = Screen.Browse(it)
+                            // TV uses the website-style top tab bar instead -
+                            // the bottom nav is a phone pattern (design split).
+                            if (!AppEnv.isTv) {
+                                BottomNav(current = section) {
+                                    section = it
+                                    screen = Screen.Browse(it)
+                                }
+                            }
+                        }
+
+                        // key() per title / play session (0.48): un-keyed
+                        // remember kept the PREVIOUS title's state - a new
+                        // key = fresh composition.
+                        is Screen.Detail -> key(s.title.id, s.title.type) {
+                            DetailScreen(
+                                title = s.title,
+                                onBack = { screen = Screen.Browse(section) },
+                                onPlay = { season, episode, mal, ani, lang -> play(s.title, season, episode, mal, ani, lang) },
+                                onOpen = { screen = Screen.Detail(it) },
+                            )
+                        }
+
+                        is Screen.Player -> key(s.title.id, s.title.type, s.season, s.episode, s.lang ?: "") {
+                            PlayerScreen(
+                                title = s.title,
+                                season = s.season,
+                                episode = s.episode,
+                                mal = s.mal,
+                                ani = s.ani,
+                                lang = s.lang,
+                                // Back from the player goes home (Netflix
+                                // rule) - never back into the launching
+                                // search.
+                                onHome = {
+                                    clearSearch()
+                                    screen = Screen.Browse(section)
+                                },
+                            )
                         }
                     }
                 }
+            }
+        }
+        whatsNew?.let { (ver, bullets) ->
+            WhatsNewDialog(ver, bullets) { whatsNew = null }
+        }
+        }
+    }
+}
 
-                // key() per title / play session (0.48): un-keyed remember
-                // kept the PREVIOUS title's season/episode/saved/ids when
-                // navigating detail-to-similar or replaying - 'episode 1'
-                // opened S2 E1 of the wrong context. A new key = fresh state.
-                is Screen.Detail -> key(s.title.id, s.title.type) {
-                    DetailScreen(
-                        title = s.title,
-                        onBack = { screen = Screen.Browse(section) },
-                        onPlay = { season, episode, mal, ani, lang -> play(s.title, season, episode, mal, ani, lang) },
-                        onOpen = { screen = Screen.Detail(it) },
-                    )
+/** What's New copy, newest first - add a key per release. The card lists
+    every entry between the version you last saw and the current one. */
+private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.51" to listOf(
+        "Updates install right over older versions - no uninstall needed",
+        "Roll back to any older APK whenever you want",
+        "New cinematic boot splash",
+        "This What's New card opens once per fresh update",
+    ),
+    "0.50" to listOf(
+        "Continue Watching follows your tab (Home shows everything)",
+        "Back from a title's details returns to your search",
+        "VidBolt quality picker in Audio & Subtitles",
+    ),
+)
+
+private fun whatsNewBullets(prev: String, current: String): List<String> {
+    fun num(v: String) = v.substringAfterLast('.').toIntOrNull() ?: 0
+    val p = num(prev)
+    val cur = num(current)
+    val out = ArrayList<String>()
+    for ((ver, items) in WHATS_NEW) {
+        val n = num(ver)
+        if (n in (p + 1)..cur) out.addAll(items)
+    }
+    if (out.isEmpty()) out.addAll(WHATS_NEW[current] ?: emptyList())
+    return out.take(8)
+}
+
+/** Cinematic boot (Obsidian Glow): ink canvas, soft glow blobs, the logo
+    plate breathing over its bloom, wordmark and a sweep bar. */
+@Composable
+private fun SplashScreen() {
+    val big = AppEnv.isTv
+    val loop = rememberInfiniteTransition(label = "boot")
+    val pulse by loop.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "bootPulse",
+    )
+    val fade by animateFloatAsState(targetValue = 1f, animationSpec = tween(650), label = "bootFade")
+    val sweep = (pulse - 0.92f) / 0.16f
+    Box(modifier = Modifier.fillMaxSize().background(Ink)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Brush.verticalGradient(listOf(Color(0xFF0D1422), Color(0xFF0B111E), Ink))),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = if (big) 60.dp else 30.dp)
+                .size(if (big) 420.dp else 280.dp)
+                .background(Brush.radialGradient(listOf(Accent.copy(alpha = 0.16f), Color.Transparent)), CircleShape),
+        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.align(Alignment.Center).alpha(fade),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(if (big) 100.dp else 82.dp)
+                    .scale(pulse)
+                    .glow(RoundedCornerShape(28.dp))
+                    .background(Accent, RoundedCornerShape(28.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    tint = Ink,
+                    modifier = Modifier.size(if (big) 56.dp else 46.dp),
+                )
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+            Row {
+                Text("Stream", color = Color.White, fontWeight = FontWeight.Black, fontSize = if (big) 42.sp else 36.sp)
+                Text("Box", color = Accent, fontWeight = FontWeight.Black, fontSize = if (big) 42.sp else 36.sp)
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                "MOVIES  \u00b7  TV  \u00b7  ANIME",
+                color = Dim,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (big) 13.sp else 11.sp,
+                letterSpacing = 3.sp,
+            )
+            Spacer(modifier = Modifier.height(30.dp))
+            Box(
+                modifier = Modifier
+                    .width(170.dp)
+                    .height(3.dp)
+                    .background(Color(0x22FFFFFF), RoundedCornerShape(2.dp)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction = (0.18f + 0.82f * sweep).coerceIn(0.18f, 1f))
+                        .height(3.dp)
+                        .background(Accent, RoundedCornerShape(2.dp)),
+                )
+            }
+        }
+    }
+}
+
+/** One-time What's New card after a fresh update (design pack glass). */
+@Composable
+private fun WhatsNewDialog(version: String, bullets: List<String>, onDone: () -> Unit) {
+    val big = AppEnv.isTv
+    Dialog(onDismissRequest = onDone) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = if (big) 640.dp else 420.dp)
+                .background(Card, RoundedCornerShape(24.dp))
+                .padding(if (big) 28.dp else 20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .glow(RoundedCornerShape(12.dp))
+                        .background(Accent, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
                 }
-
-                is Screen.Player -> key(s.title.id, s.title.type, s.season, s.episode, s.lang ?: "") {
-                    PlayerScreen(
-                        title = s.title,
-                        season = s.season,
-                        episode = s.episode,
-                        mal = s.mal,
-                        ani = s.ani,
-                        lang = s.lang,
-                        // Back from the player goes home (Netflix rule) -
-                        // never back into the search that launched it.
-                        onHome = {
-                            clearSearch()
-                            screen = Screen.Browse(section)
-                        },
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text("What's New", color = Color.White, fontWeight = FontWeight.Black, fontSize = if (big) 26.sp else 21.sp)
+                    Text(
+                        "VERSION " + version,
+                        color = Dim,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (big) 12.sp else 10.sp,
+                        letterSpacing = 2.sp,
                     )
                 }
             }
-        }
+            Spacer(modifier = Modifier.height(16.dp))
+            bullets.forEach { b ->
+                Row(verticalAlignment = Alignment.Top) {
+                    Box(modifier = Modifier.padding(top = 6.dp).size(7.dp).background(Accent, CircleShape))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(b, color = Soft, fontFamily = BodyFont, fontSize = if (big) 15.sp else 13.sp)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            PillButton(
+                "Start Watching", big, accent = true, icon = Icons.Filled.PlayArrow,
+                modifier = Modifier.fillMaxWidth(),
+            ) { onDone() }
         }
     }
 }

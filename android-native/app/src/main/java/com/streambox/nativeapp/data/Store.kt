@@ -38,6 +38,7 @@ object Store {
     private const val K_PROGRESS = "progress"
     private const val K_LIST = "mylist"
     private const val K_ADULT = "adult_open"
+    private const val K_LAST_SEEN = "last_seen_version"
     private const val K_SUBS_PREF = "subs_pref"
     private const val K_SUB_PICK = "sub_pick"
     private const val K_SUB_STYLE = "sub_style"
@@ -149,6 +150,16 @@ object Store {
 
     fun setAdultOpen(ctx: Context, open: Boolean) {
         prefs(ctx).edit().putBoolean(K_ADULT, open).apply()
+    }
+
+    /** Last app version whose What's New card was seen (device-local). A
+        mismatch with BuildConfig.VERSION_NAME opens the card ONCE per
+        fresh update (0.51). */
+    fun lastSeenVersion(ctx: Context): String =
+        prefs(ctx).getString(K_LAST_SEEN, "") ?: ""
+
+    fun setLastSeenVersion(ctx: Context, v: String) {
+        prefs(ctx).edit().putString(K_LAST_SEEN, v).apply()
     }
 
     fun autoSkip(ctx: Context): Boolean = prefs(ctx).getBoolean(K_AUTO_SKIP, false)

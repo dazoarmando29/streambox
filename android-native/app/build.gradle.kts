@@ -12,8 +12,14 @@ android {
         applicationId = "com.streambox.nativeapp"
         minSdk = 24
         targetSdk = 34
+        // versionCode is FROZEN at 50 (0.50 request): every preview build
+        // installs over every other one - forward updates AND rolling back
+        // to an older APK both work from the package installer. The feature
+        // version lives in versionName. (Before this, each CI run minted a
+        // fresh debug key AND versionCode only moved up, so 'update' errored
+        // and older builds could never be reinstalled.)
         versionCode = 50
-        versionName = "0.50"
+        versionName = "0.51"
         // Backend: Cloudflare Worker (catalog proxy + anime mapping).
         // Provider keys live in the Worker as Wrangler secrets - never here.
         buildConfigField("String", "API_BASE", "\"https://streambox-api.dazoarmando.workers.dev\"")
@@ -38,9 +44,27 @@ android {
         freeCompilerArgs += "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi"
     }
 
+    // ONE preview key for every build, local and CI (0.51): the runner used
+    // to mint a fresh debug keystore per run, so every APK carried a new
+    // signature and 'update' failed with an install error. The keystore is
+    // committed ON PURPOSE - it is the preview channel's identity, not a
+    // secret (provider keys stay in Cloudflare, OAuth stays out of the app).
+    signingConfigs {
+        create("preview") {
+            storeFile = rootProject.file("preview.keystore")
+            storePassword = "streambox"
+            keyAlias = "streambox"
+            keyPassword = "streambox"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("preview")
+        }
+        debug {
+            signingConfig = signingConfigs.getByName("preview")
         }
     }
 }
