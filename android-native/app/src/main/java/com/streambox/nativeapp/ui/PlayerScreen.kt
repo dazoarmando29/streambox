@@ -569,6 +569,13 @@ private val SB_HOOK = """
             if (!lab) return;
             if (o.group === "Audio") { VBT.audios[val] = lab; if (o.selected) VBT.audioSel = val; }
             else if (o.group === "Subtitles") { VBT.subs[val] = lab; if (o.selected) VBT.subSel = val; }
+            else if (o.group === "Quality") {
+              // Their own quality rows (levels by index or files by label) -
+              // option + value are echoed back verbatim later (0.50).
+              var qo = String(o.option || "quality");
+              VBT.quals[qo + "\u0001" + val] = { label: lab, value: val, option: qo };
+              if (o.selected) VBT.qualSel = val;
+            }
           });
           vbPublish();
         } catch(e){}
@@ -654,6 +661,13 @@ private val SB_HOOK = """
         }
       }catch(e){}
     },
+    // VidBolt quality (0.50): sourceQuality by the file's own quality label
+    // (their setFile path) or quality by level index (their setQuality path)
+    // - the option name always travels verbatim with the value.
+    vbqual: function(opt, val){
+      try{ for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({type:'mobile-option', option:String(opt), value:String(val)}, '*'); }catch(e){}
+      VBT.qualSel = String(val); vbPublish();
+    },
     autoNext: function(on){ if(ANIPM) anipmSend('setAutoNext', {on: !!on}); },
     autoSkip: function(on){ if(ANIPM) anipmSend('setAutoSkip', {on: !!on}); }
   };
@@ -663,15 +677,20 @@ private val SB_HOOK = """
   // only, no stream URL ever leaves the WebView. The player's own
   // mobile-panel delegation (narrow viewports) merges into the same
   // snapshot with its exact command values.
-  var VBT = { audios: {}, subs: {}, audioSel: "", subSel: "" };
+  var VBT = { audios: {}, subs: {}, audioSel: "", subSel: "", quals: {}, qualsByLang: {}, qualSel: "" };
   function vbPublish(){
     var au = Object.keys(VBT.audios), su = Object.keys(VBT.subs);
-    if (!au.length && !su.length) return;
+    var qr = Object.keys(VBT.quals).map(function(k){ return VBT.quals[k]; });
+    var qb = Object.keys(VBT.qualsByLang);
+    if (!au.length && !su.length && !qr.length && !qb.length) return;
     send("vb:tracks", {
       audios: au.map(function(v){ return { label: VBT.audios[v] || v, value: v }; }),
       subs: su.map(function(v){ return { label: VBT.subs[v] || v, value: v }; }),
       audioSel: VBT.audioSel || "",
-      subSel: VBT.subSel || ""
+      subSel: VBT.subSel || "",
+      quals: qr,
+      qualsByLang: VBT.qualsByLang,
+      qualSel: VBT.qualSel || ""
     });
   }
   function vbLabelOf(track, i){
@@ -707,6 +726,16 @@ private val SB_HOOK = """
             // their audio labels: en() maps only for anime routes
             var lab = anime ? (/^japanese$/i.test(l) ? "Japanese (Sub)" : /^english$/i.test(l) ? "English (Dub)" : l) : l;
             VBT.audios[lab] = lab;
+            // Quality ladder PER LANGUAGE (0.50): VidBolt's sources are
+            // language x quality files - the picker only lists what the
+            // current language really has (sourceQuality by its exact
+            // quality label). Provider-reported strings verbatim - a stream
+            // without a higher rung never shows one.
+            var qz = n && n.quality ? String(n.quality) : "";
+            if (qz) {
+              if (!VBT.qualsByLang[lab]) VBT.qualsByLang[lab] = [];
+              if (VBT.qualsByLang[lab].indexOf(qz) < 0) VBT.qualsByLang[lab].push(qz);
+            }
           });
           try {
             var v = fw.document && fw.document.querySelector("video");
@@ -927,6 +956,13 @@ fun PlayerScreen(
     var vbSubs by remember { mutableStateOf(listOf<Pair<String, String>>()) }
     var vbAudioSel by remember { mutableStateOf("") }
     var vbSubSel by remember { mutableStateOf("") }
+    // VidBolt quality (0.50): provider-reported labels only. Rows either
+    // come from the player's own mobile-panel delegation (option + value
+    // echoed verbatim) or from its resolve files per language - never an
+    // invented ladder (a stream without a higher rung never shows one).
+    var vbQualRows by remember { mutableStateOf(listOf<Triple<String, String, String>>()) }
+    var vbQualsByLang by remember { mutableStateOf(mapOf<String, List<String>>()) }
+    var vbQualSel by remember { mutableStateOf("") }
 
     fun setSub(name: String, lang: String, cues: List<Cue>) {
         if (cues.isEmpty()) {
@@ -1802,6 +1838,38 @@ fun PlayerScreen(
                                         vbSubs = parseTracks(o.optJSONArray("subs"))
                                         if (aSel.isNotBlank() && aSel != "null") vbAudioSel = aSel
                                         if (sSel.isNotBlank() && sSel != "null") vbSubSel = sSel
+                                        // Quality (0.50): their mobile-panel
+                                        // rows keep option + value verbatim;
+                                        // the per-language map is the
+                                        // resolve-data fallback.
+                                        val qRows = mutableListOf<Triple<String, String, String>>()
+                                        val qArr = o.optJSONArray("quals")
+                                        if (qArr != null) {
+                                            for (qi in 0 until qArr.length()) {
+                                                val qt = qArr.optJSONObject(qi) ?: continue
+                                                val qv = qt.optString("value", "")
+                                                val ql = qt.optString("label", "").ifEmpty { qv }
+                                                val qo = qt.optString("option", "quality").ifEmpty { "quality" }
+                                                if (qv.isNotBlank() && qv != "null") qRows.add(Triple(ql, qv, qo))
+                                            }
+                                        }
+                                        vbQualRows = qRows
+                                        val qMap = mutableMapOf<String, List<String>>()
+                                        val qbl = o.optJSONObject("qualsByLang")
+                                        if (qbl != null) {
+                                            for (k in qbl.keys()) {
+                                                val qa = qbl.optJSONArray(k) ?: continue
+                                                val qs = mutableListOf<String>()
+                                                for (qi2 in 0 until qa.length()) {
+                                                    val q = qa.optString(qi2, "")
+                                                    if (q.isNotBlank() && q != "null") qs.add(q)
+                                                }
+                                                if (qs.isNotEmpty()) qMap[k] = qs
+                                            }
+                                        }
+                                        vbQualsByLang = qMap
+                                        val qSel = o.optString("qualSel", "")
+                                        if (qSel.isNotBlank() && qSel != "null") vbQualSel = qSel
                                     }
                                     "anipm:autoplay" -> {
                                         // Real playback kick - NEVER the
@@ -2605,6 +2673,52 @@ fun PlayerScreen(
                                     showSubs = false
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
+                            }
+                            // QUALITY (0.50): VidBolt's own reported ladder.
+                            // Rows come from its mobile-panel delegation
+                            // (option + value echoed verbatim) or its resolve
+                            // files per language (sourceQuality by the exact
+                            // quality label). Never invented - a stream that
+                            // reports only one rung shows only that rung.
+                            if (mirror == "vidbolt") {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                PanelColTitle("QUALITY")
+                                Spacer(modifier = Modifier.height(6.dp))
+                                val derived = vbQualsByLang[vbAudioSel]
+                                    ?: vbQualsByLang.values.flatten().distinct()
+                                val qualRows: List<Triple<String, String, String>> =
+                                    if (vbQualRows.isNotEmpty()) vbQualRows
+                                    else derived
+                                        .sortedByDescending { q -> q.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
+                                        .map { Triple(it, it, "sourceQuality") }
+                                if (qualRows.isEmpty()) {
+                                    OptRow(
+                                        label = "Auto",
+                                        detail = "VidBolt quality appears once the stream loads",
+                                        chip = "DEFAULT",
+                                        active = true,
+                                        big = big,
+                                    )
+                                } else {
+                                    qualRows.forEach { (lbl, value, option) ->
+                                        val on = vbQualSel == value
+                                        OptRow(
+                                            label = lbl,
+                                            detail = "VidBolt quality - keeps your position",
+                                            chip = if (on) "ACTIVE" else "",
+                                            active = on,
+                                            big = big,
+                                        ) {
+                                            vbQualSel = value
+                                            cmd(
+                                                "window.__sb && window.__sb.vbqual('" +
+                                                    option.replace("'", "") + "','" +
+                                                    value.replace("'", "") + "')"
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                    }
+                                }
                             }
                         }
                         // COLUMN 2: AUDIO (honest only): AniPM drives its

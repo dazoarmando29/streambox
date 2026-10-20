@@ -188,14 +188,20 @@ fun BrowseScreen(
     onOpen: (Title) -> Unit,
     onPlay: (Title) -> Unit,
     onResume: (Progress) -> Unit,
+    // Search state is HOISTED (0.50, StreamBoxApp): it survives opening a
+    // detail so Back lands in your search results, and the app clears it on
+    // tab switches and player exits. Never keep it here.
+    searchMode: Boolean,
+    searchInput: String,
+    searchSubmitted: String,
+    onSearchToggle: () -> Unit,
+    onSearchInput: (String) -> Unit,
+    onSearchSubmit: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
     val big = AppEnv.isTv
 
-    var searchMode by remember { mutableStateOf(false) }
-    var input by remember { mutableStateOf("") }
-    var submitted by remember { mutableStateOf("") }
     var rows by remember { mutableStateOf(listOf<Pair<String, List<Title>>>()) }
     var results by remember { mutableStateOf(listOf<Title>()) }
     var cont by remember { mutableStateOf(listOf<Progress>()) }
@@ -228,12 +234,21 @@ fun BrowseScreen(
         }
     }
 
-    LaunchedEffect(section, submitted, searchMode, genreSel) {
-        cont = Store.progressList(ctx)
+    LaunchedEffect(section, searchSubmitted, searchMode, genreSel) {
+        // Continue Watching is TAB-SCOPED (0.50): the anime tab never shows
+        // movie/TV progress and vice versa; Home and My List show everything.
+        cont = Store.progressList(ctx).let { all ->
+            when (section) {
+                Section.MOVIES -> all.filter { it.type == "movie" }
+                Section.TV -> all.filter { it.type == "tv" }
+                Section.ANIME -> all.filter { it.type == "anime" }
+                else -> all
+            }
+        }
         myList = Store.listItems(ctx)
-        val isSearch = searchMode && submitted.isNotBlank()
+        val isSearch = searchMode && searchSubmitted.isNotBlank()
         val gName = genreList.firstOrNull { it.first == genreSel }?.second ?: ""
-        val key = if (isSearch) "s:" + submitted.trim().lowercase() + ":" + section
+        val key = if (isSearch) "s:" + searchSubmitted.trim().lowercase() + ":" + section
         else "r:" + section + ":" + (genreSel ?: "")
         // Stale-while-revalidate: cached content paints immediately and is
         // refreshed in the background - Back-from-player is instant now.
@@ -250,7 +265,7 @@ fun BrowseScreen(
             if (isSearch) {
                 val fresh = withContext(Dispatchers.IO) {
                     runCatching {
-                        Api.search(submitted, if (section == Section.ANIME) "anime" else null)
+                        Api.search(searchSubmitted, if (section == Section.ANIME) "anime" else null)
                     }.getOrDefault(listOf())
                 }
                 results = fresh
@@ -282,9 +297,9 @@ fun BrowseScreen(
         val body: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
             if (searchMode) {
                 SearchField(
-                    input = input,
-                    onInput = { input = it },
-                    onSubmit = { submitted = input },
+                    input = searchInput,
+                    onInput = onSearchInput,
+                    onSubmit = { onSearchSubmit(searchInput) },
                 )
             }
             // BROWSE BY GENRE (design pack language): the chip row rides
@@ -306,7 +321,7 @@ fun BrowseScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) { Text(error ?: "", color = Dim, fontFamily = BodyFont) }
-                    searchMode && submitted.isNotBlank() -> SearchGrid(results, adultOpen, onOpen)
+                    searchMode && searchSubmitted.isNotBlank() -> SearchGrid(results, adultOpen, onOpen)
                     section == Section.MYLIST -> MyListView(
                         titles = myList,
                         cont = cont,
@@ -335,7 +350,7 @@ fun BrowseScreen(
                 TvRail(
                     section = section,
                     onSection = onSection,
-                    onSearchToggle = { searchMode = !searchMode; submitted = ""; input = "" },
+                    onSearchToggle = onSearchToggle,
                     adultOpen = adultOpen,
                     onAdultToggle = {
                         adultOpen = !adultOpen
@@ -353,7 +368,7 @@ fun BrowseScreen(
                 section = section,
                 onSection = onSection,
                 searchMode = searchMode,
-                onSearchToggle = { searchMode = !searchMode; submitted = ""; input = "" },
+                onSearchToggle = onSearchToggle,
                 adultOpen = adultOpen,
                 onAdultToggle = {
                     adultOpen = !adultOpen

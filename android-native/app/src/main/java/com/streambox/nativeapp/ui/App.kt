@@ -104,6 +104,19 @@ private class NoIndicationNode : Modifier.Node(), DrawModifierNode {
 fun StreamBoxApp() {
     var section by remember { mutableStateOf(Section.HOME) }
     var screen by remember { mutableStateOf<Screen>(Screen.Browse(Section.HOME)) }
+    // Search state lives HERE (0.50): BrowseScreen's own remember died with
+    // its composition when a detail opened, so Back from a search result
+    // dumped you on the home feed instead of back into your search. A tab
+    // switch and the player's Netflix-style exit to home clear it on
+    // purpose - only Detail-back keeps it.
+    var searchMode by remember { mutableStateOf(false) }
+    var searchInput by remember { mutableStateOf("") }
+    var searchSubmitted by remember { mutableStateOf("") }
+    fun clearSearch() {
+        searchMode = false
+        searchInput = ""
+        searchSubmitted = ""
+    }
 
     fun play(t: Title, season: Int, episode: Int, mal: Int?, ani: Int?, lang: String? = null) {
         screen = Screen.Player(t, season, episode, mal, ani, lang)
@@ -127,6 +140,8 @@ fun StreamBoxApp() {
                         section = section,
                         onSection = {
                             section = it
+                            // A fresh tab never inherits the search bar.
+                            clearSearch()
                             screen = Screen.Browse(it)
                         },
                         onOpen = { screen = Screen.Detail(it) },
@@ -140,6 +155,16 @@ fun StreamBoxApp() {
                                 p.season, p.episode, p.mal, p.ani,
                             )
                         },
+                        searchMode = searchMode,
+                        searchInput = searchInput,
+                        searchSubmitted = searchSubmitted,
+                        onSearchToggle = {
+                            searchMode = !searchMode
+                            searchInput = ""
+                            searchSubmitted = ""
+                        },
+                        onSearchInput = { searchInput = it },
+                        onSearchSubmit = { searchSubmitted = it },
                         modifier = Modifier.weight(1f),
                     )
                     // TV uses the website-style top tab bar instead - the
@@ -173,7 +198,12 @@ fun StreamBoxApp() {
                         mal = s.mal,
                         ani = s.ani,
                         lang = s.lang,
-                        onHome = { screen = Screen.Browse(section) },
+                        // Back from the player goes home (Netflix rule) -
+                        // never back into the search that launched it.
+                        onHome = {
+                            clearSearch()
+                            screen = Screen.Browse(section)
+                        },
                     )
                 }
             }

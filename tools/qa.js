@@ -83,7 +83,18 @@
     32 poster captions are visible without changing the look: the ring and
        click stay on the ARTWORK only (0.48's ring-around-everything was
        reverted by request) and the name rides bringIntoView on focus, so
-       bottom-edge rows show their captions */
+       bottom-edge rows show their captions
+    33 Continue Watching is tab-scoped: the anime tab never shows movie/TV
+       progress and the movie/TV tabs never show the others - Home and My
+       List show everything
+    34 search state is hoisted into StreamBoxApp: Back from a detail lands
+       in the search results again (BrowseScreen's own remember died with
+       the composition), while tab switches and the player's Netflix-style
+       exit clear it on purpose
+    35 VidBolt quality plumbing is provider-reported only: rows come from
+       its mobile-panel delegation (option + value echoed verbatim) or its
+       resolve files per language (sourceQuality by the exact label) - no
+       invented ladder is ever built (qa #22 keeps fake 4K chips dead) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -603,6 +614,53 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     } else {
       bad("PosterCard must keep the ring/click on the artwork and reveal the name via bringIntoViewRequester (0.48's whole-card ring is banned)");
     }
+  }
+}
+
+/* ---------- 33. Continue Watching is tab-scoped ---------- */
+{
+  const hs3 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  if (!hs3) bad("HomeScreen.kt missing - Continue Watching scoping cannot be verified");
+  else if (/Section\.MOVIES -> all\.filter \{ it\.type == "movie" \}/.test(hs3) &&
+           /Section\.TV -> all\.filter \{ it\.type == "tv" \}/.test(hs3) &&
+           /Section\.ANIME -> all\.filter \{ it\.type == "anime" \}/.test(hs3)) {
+    ok("Continue Watching is tab-scoped (Home + My List keep everything)");
+  } else {
+    bad("Continue Watching must filter by the tab's type - anime progress never shows in the movie/TV tabs");
+  }
+}
+
+/* ---------- 34. search state is hoisted ---------- */
+{
+  const appH = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
+  const hsH = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  if (!appH || !hsH) bad("App.kt/HomeScreen.kt missing - search hoisting cannot be verified");
+  else if (/var searchMode by remember \{ mutableStateOf\(false\) \}/.test(appH) &&
+           /var searchSubmitted by remember \{ mutableStateOf\(""\) \}/.test(appH) &&
+           /fun clearSearch\(\)/.test(appH) &&
+           !/var searchMode by remember/.test(hsH) &&
+           /searchSubmitted: String,/.test(hsH)) {
+    ok("search state is hoisted (Back from detail lands in the search; tabs and player exit clear it)");
+  } else {
+    bad("search state must live in StreamBoxApp and pass into BrowseScreen - local remember lost the search on detail-back");
+  }
+}
+
+/* ---------- 35. VidBolt quality plumbing is provider-reported only ---------- */
+{
+  const psQ = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psQ) bad("PlayerScreen.kt missing - VidBolt quality rules cannot be verified");
+  else if (/vbqual: function\(opt, val\)/.test(psQ) &&
+           /o\.group === "Quality"/.test(psQ) &&
+           /qualsByLang/.test(psQ) &&
+           /"sourceQuality"/.test(psQ) &&
+           /option:\s*String\(opt\),\s*value:\s*String\(val\)/.test(psQ)) {
+    ok("VidBolt quality rows are provider-reported and echoed verbatim (sourceQuality / quality)");
+  } else {
+    bad("VidBolt quality plumbing missing (vbqual command + Quality panel rows + per-language resolve ladder)");
   }
 }
 
