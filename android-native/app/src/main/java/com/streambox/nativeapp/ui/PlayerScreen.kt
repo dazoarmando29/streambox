@@ -101,6 +101,7 @@ import com.streambox.nativeapp.api.Backups
 import com.streambox.nativeapp.api.Cue
 import com.streambox.nativeapp.api.Ep
 import com.streambox.nativeapp.api.IntroDb
+import com.streambox.nativeapp.api.SeasonInfo
 import com.streambox.nativeapp.api.SkipTimes
 import com.streambox.nativeapp.api.SubFile
 import com.streambox.nativeapp.api.Subs
@@ -260,9 +261,14 @@ fun playerUrl(
     startAt: Float = 0f,
     langOverride: String = "",
     quality: String = "",
+    epBase: Int = 0,
 ): String {
     val m = mirror.ifEmpty { defaultMirror(title, mal, ani) }
     val ep = episode.coerceAtLeast(1)
+    // Anime routes number episodes against the MAL/AniList ENTRY (0.60):
+    // per-season for split franchises (S2 = its own entry, eps start at 1)
+    // and absolute for combined entries (One Piece style) via epBase.
+    val aep = (epBase + episode).coerceAtLeast(1)
     val st = startAt.toInt().coerceAtLeast(0)
     val stq = if (st > 0) "&startAt=" + st else ""
     // Sanitize: the cycle contract is the only quality we ever send.
@@ -279,9 +285,9 @@ fun playerUrl(
                 else -> "sub"
             }
             val base = if (mal != null) {
-                "https://ani.pm/embed/mal/" + mal + "/" + ep + "/" + lang
+                "https://ani.pm/embed/mal/" + mal + "/" + aep + "/" + lang
             } else {
-                "https://ani.pm/embed/ani/" + (ani ?: title.id) + "/" + ep + "/" + lang
+                "https://ani.pm/embed/ani/" + (ani ?: title.id) + "/" + aep + "/" + lang
             }
             base + "?color=14b8a6" + (if (st > 0) "&start=" + st else "")
         }
@@ -297,7 +303,7 @@ fun playerUrl(
         }
         "vidbolt" -> when (title.type) {
             "movie" -> "https://vidbolt.pro/movie/" + title.id + "?autoPlay=true&mobileSheets=true&theme=14b8a6" + stq
-            "anime" -> "https://vidbolt.pro/anime/mal/" + (mal ?: ani ?: title.id) + "/" + ep +
+            "anime" -> "https://vidbolt.pro/anime/mal/" + (mal ?: ani ?: title.id) + "/" + aep +
                 "?autoPlay=true&mobileSheets=true&theme=14b8a6" + stq
             else -> "https://vidbolt.pro/tv/" + title.id + "/" + season + "/" + ep +
                 "?autoPlay=true&mobileSheets=true&theme=14b8a6" + stq
@@ -1215,7 +1221,26 @@ fun PlayerScreen(
         }
     }
 
+    // Anime season routing state (0.60) - declared before load() because the
+    // loader guards on the resolved season and builds its URL from the
+    // season's own entry ids + episode base.
+    var seasonList by remember(title.id, title.type) { mutableStateOf(listOf<SeasonInfo>()) }
+    var seasonEps by remember(title.id, title.type) { mutableIntStateOf(0) }
+    var routeMal by remember(title.id, title.type) { mutableStateOf(mal) }
+    var routeAni by remember(title.id, title.type) { mutableStateOf(ani) }
+    var epBase by remember(title.id, title.type) { mutableIntStateOf(0) }
+    var resolvedSeason by remember(title.id, title.type) { mutableIntStateOf(-1) }
+    var pendingLoadAt by remember(title.id, title.type) { mutableFloatStateOf(-1f) }
+    var booted by remember(title.id, title.type, season, episode) { mutableStateOf(false) }
+
     fun load(startAt: Float = 0f) {
+        // 0.60: anime routes resolve per season - hold the load until the
+        // route matches the target season (first boot and in-player season
+        // switches land here a few ms early). The resolver fires it next.
+        if ((title.type == "anime" || title.isAnime) && resolvedSeason != epSeason) {
+            pendingLoadAt = startAt
+            return
+        }
         chromeVisible = true
         // Mirrors whose URL carries startAt (vidzen/vidbolt/anipm) keep the
         // position themselves; the rest get one seek when the player reports
@@ -1244,7 +1269,11 @@ fun PlayerScreen(
         main.post {
             try {
                 val w = web ?: return@post
-                loadMirror(w, playerUrl(title, epSeason, epNumber, mal, ani, mirror, startAt, anipmLang, cinesrcQ), mirror)
+                loadMirror(
+                    w,
+                    playerUrl(title, epSeason, epNumber, routeMal, routeAni, mirror, startAt, anipmLang, cinesrcQ, epBase),
+                    mirror,
+                )
             } catch (e: Exception) {
             }
         }
@@ -1351,15 +1380,84 @@ fun PlayerScreen(
         cmd(if (playing) "window.__sb && window.__sb.play()" else "window.__sb && window.__sb.pause()")
     }
 
+    // Anime season routing (0.60): split franchises carry one ENTRY PER
+    // SEASON (Hajime no Ippo S2 = MAL 5258 New Challenger, S3 = 19647
+    // Rising) while combined entries span the whole run (One Piece). The
+    // season's own ids resolve with its AIR YEAR and episodes number
+    // against THAT entry - the old code sent the show's first-year entry
+    // with the per-season number, so season 2 episode 1 played S1E1. The
+    // route is always ready before the first load (deferred boot).
+    LaunchedEffect(title.id, title.type, epSeason) {
+        if (title.type != "movie") {
+            val det = withContext(Dispatchers.IO) {
+                runCatching { Api.details("tv", title.id) }.getOrNull()
+            }
+            val seasons = det?.seasons ?: listOf()
+            seasonList = seasons
+            seasonEps = seasons.firstOrNull { it.n == epSeason }?.count ?: 0
+            fun cumBefore(n: Int): Int = seasons.filter { it.n in 1 until n }.sumOf { it.count }
+            val airYear = (seasons.firstOrNull { it.n == epSeason }?.air ?: "").take(4).toIntOrNull() ?: 0
+            var rMal = mal
+            var rAni = ani
+            var base = cumBefore(epSeason)
+            if (title.type == "anime" || title.isAnime) {
+                if (epSeason >= 2 && airYear > 0 && airYear != title.year) {
+                    val mapped = withContext(Dispatchers.IO) {
+                        runCatching { Api.animeMap(title.name, airYear) }.getOrNull()
+                    }
+                    val sameEntry = mapped != null && (mapped.mal ?: mapped.ani) == (mal ?: ani)
+                    if (mapped != null && !sameEntry && (mapped.mal != null || mapped.ani != null)) {
+                        // The season's own entry: its episodes start at 1.
+                        rMal = mapped.mal ?: rMal
+                        rAni = mapped.ani ?: rAni
+                        base = 0
+                    }
+                }
+            }
+            routeMal = rMal
+            routeAni = rAni
+            epBase = base
+        }
+        resolvedSeason = epSeason
+        if (pendingLoadAt >= 0f) {
+            // A load landed before the route was right (in-player season
+            // switch): fire it now that the numbering matches.
+            val at = pendingLoadAt
+            pendingLoadAt = -1f
+            load(startAt = at)
+        } else if (!booted) {
+            booted = true
+            load(startAt = resumeAt)
+        }
+    }
+
+    var epsList by remember { mutableStateOf(listOf<Ep>()) }
+    var epsBusy by remember { mutableStateOf(false) }
+
+    /** Next episode (0.60): never step past the season's real end (the
+        blind +1 built dead routes on finales) and never into an unaired
+        episode - a finale rolls into the next season's E1 when it exists. */
+    fun advanceEpisode() {
+        val count = seasonEps
+        if (count > 0 && epNumber >= count) {
+            val nxt = seasonList.firstOrNull { it.n == epSeason + 1 && it.n >= 1 }
+            if (nxt == null || nxt.count <= 0) return
+            epSeason = nxt.n
+            epNumber = 1
+        } else {
+            val next = epsList.firstOrNull { it.n == epNumber + 1 }
+            if (next != null && !next.aired) return
+            epNumber += 1
+        }
+        save(0f, dur)
+        cur = 0f
+        playing = true
+        load()
+    }
+
     fun skipNow(h: SkipHit) {
         when {
-            h.kind == "credits" -> {
-                epNumber += 1
-                save(0f, dur)
-                cur = 0f
-                playing = true
-                load()
-            }
+            h.kind == "credits" -> advanceEpisode()
             mirror == "vidbolt" && h.end != null -> {
                 // VidBolt's in-place skip seeks can leave a black surface -
                 // reopen at the marker through startAt (website boltSkipTo).
@@ -1377,8 +1475,6 @@ fun PlayerScreen(
     // Quick-select rail for the Episodes sheet (design pack): real TMDB
     // season episodes, prefetched while the video loads so the sheet opens
     // instantly (speed pass 0.32).
-    var epsList by remember { mutableStateOf(listOf<Ep>()) }
-    var epsBusy by remember { mutableStateOf(false) }
     LaunchedEffect(epSeason, title.id) {
         if (title.type != "movie") {
             epsBusy = true
@@ -1565,11 +1661,7 @@ fun PlayerScreen(
             if (autoDone != key) {
                 autoDone = key
                 if (h.kind == "credits") {
-                    epNumber += 1
-                    save(0f, dur)
-                    cur = 0f
-                    playing = true
-                    load()
+                    advanceEpisode()
                 } else {
                     h.end?.let { seekTo(it) }
                 }
@@ -1997,7 +2089,10 @@ fun PlayerScreen(
                                         if (e > 0) {
                                             save(0f, dur)
                                             if (s > 0) epSeason = s
-                                            epNumber = e
+                                            // Their episode numbers ride the
+                                            // ENTRY (0.60): convert back to
+                                            // our per-season numbering.
+                                            epNumber = (e - epBase).coerceAtLeast(1)
                                             cur = 0f
                                         }
                                     }
@@ -2152,7 +2247,13 @@ fun PlayerScreen(
                         }
                         false
                     }
-                    loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, resumeAt, anipmLang, cinesrcQ), mirror)
+                    // Anime boots only AFTER its season route resolves
+                    // (0.60) - the resolver's first pass fires load() with
+                    // the right entry ids and episode numbering.
+                    if (title.type != "anime" && !title.isAnime) {
+                        booted = true
+                        loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, resumeAt, anipmLang, cinesrcQ), mirror)
+                    }
                     web = this
                 }
             },
@@ -2436,13 +2537,12 @@ fun PlayerScreen(
                 // stays a Coming Soon schedule row, never a dead target.
                 if (title.type != "movie") {
                     val nextEp = epsList.firstOrNull { it.n == epNumber + 1 }
-                    if (epsList.isEmpty() || (nextEp != null && nextEp.aired)) {
+                    if (epsList.isEmpty() || (nextEp != null && nextEp.aired) ||
+                        (seasonEps > 0 && epNumber >= seasonEps &&
+                            seasonList.any { it.n == epSeason + 1 && it.count > 0 })
+                    ) {
                         BarPill("Next Episode", big, icon = Icons.Filled.SkipNext) {
-                            epNumber += 1
-                            save(0f, dur)
-                            cur = 0f
-                            playing = true
-                            load()
+                            advanceEpisode()
                         }
                     }
                 }

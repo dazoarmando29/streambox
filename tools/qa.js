@@ -145,7 +145,15 @@
        (focus used to yank up to the chips and back - every screen with a
        rail had it while Home never did); Up/Down stay free
     53 one All chip per genre strip (GenreBar prepends it) and a compact
-       rail so every section tab fits on screen (Browse was falling off) */
+       rail so every section tab fits on screen (Browse was falling off)
+    54 anime season routing: split franchises resolve the season's OWN
+       entry by its air year (Hajime no Ippo S2 = MAL 5258, not 263) and
+       episodes number against that entry; combined entries keep absolute
+       numbering. The old code sent the show's first-year entry with the
+       per-season number - season 2 episode 1 played S1E1
+    55 next episode never steps past a season's real end (blind +1 built
+       dead routes on finales) and never into an unaired episode - a
+       finale rolls to the next season's E1 when it exists */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -702,6 +710,35 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("one All chip per genre strip and a compact rail every section fits on");
   } else {
     bad("KDrama must not add a second All chip (GenreBar prepends one) and RailBtn must stay compact so Browse stays visible");
+  }
+}
+
+/* ---------- 54. anime season routing ---------- */
+{
+  const psA = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psA) bad("PlayerScreen.kt missing - anime season routing cannot be verified");
+  else if (/Api\.animeMap\(title\.name, airYear\)/.test(psA) &&
+           /val sameEntry/.test(psA) &&
+           /epBase: Int = 0,/.test(psA) &&
+           /val aep = \(epBase \+ episode\)\.coerceAtLeast\(1\)/.test(psA) &&
+           /resolvedSeason != epSeason/.test(psA)) {
+    ok("anime season routing: season-air-year entry resolution + entry-relative episodes (deferred boot)");
+  } else {
+    bad("anime must resolve the season's own entry by air year and number episodes against THAT entry (S2E1 played S1E1)");
+  }
+}
+
+/* ---------- 55. next episode never steps past the season ---------- */
+{
+  const psN = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psN) bad("PlayerScreen.kt missing - episode advance rules cannot be verified");
+  else if (/fun advanceEpisode\(\)/.test(psN) &&
+           /epNumber >= count/.test(psN) &&
+           /it\.n == epSeason \+ 1/.test(psN) &&
+           !/epNumber \+= 1\s*\n\s*save\(0f, dur\)/.test(psN)) {
+    ok("next episode: season-end guard + next-season roll + unaired guard (no blind +1)");
+  } else {
+    bad("episode advancing must go through advanceEpisode() - blind +1 built dead routes on season finales");
   }
 }
 
