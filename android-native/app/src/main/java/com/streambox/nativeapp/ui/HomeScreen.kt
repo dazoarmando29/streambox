@@ -1062,7 +1062,7 @@ private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
         genres = withContext(Dispatchers.IO) {
             runCatching {
                 val g = Api.genres(if (kind == "movie") "movie" else "tv")
-                if (kind == "anime") g.filter { it.first != 16 } else g
+                if (kind == "anime" || kind == "kdrama") g.filter { it.first != 16 } else g
             }.getOrDefault(listOf())
         }
     }
@@ -1109,12 +1109,18 @@ private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
             modifier = Modifier.padding(horizontal = 16.dp),
         )
         Spacer(modifier = Modifier.height(6.dp))
-        Row(
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.padding(horizontal = 16.dp),
         ) {
-            listOf("movie" to "Movies", "tv" to "TV Shows", "anime" to "Anime").forEach { (k, label) ->
-                PillButton(label, big, accent = kind == k) { kind = k }
+            val kinds = listOf(
+                "movie" to "Movies",
+                "tv" to "TV Shows",
+                "anime" to "Anime",
+                "kdrama" to "K-Dramas",
+            )
+            items(kinds.size) { i ->
+                PillButton(kinds[i].second, big, accent = kind == kinds[i].first) { kind = kinds[i].first }
             }
         }
         Spacer(modifier = Modifier.height(8.dp))

@@ -319,6 +319,15 @@ object Api {
                 q.append("&with_original_language=ja")
                 if (year != null) q.append("&first_air_date_year=").append(year)
             }
+            "kdrama" -> {
+                // Korean drama (0.56): Korean-language TV - every card
+                // keeps lang "ko" so it routes to VidBolt's multi-audio
+                // releases.
+                q.append("/api/tmdb/3/discover/tv?include_adult=false&sort_by=popularity.desc&without_genres=16")
+                q.append("&with_original_language=ko")
+                if (genre != null) q.append("&with_genres=").append(genre)
+                if (year != null) q.append("&first_air_date_year=").append(year)
+            }
             else -> {
                 q.append("/api/tmdb/3/discover/tv?include_adult=false&sort_by=popularity.desc&without_genres=16")
                 if (genre != null) q.append("&with_genres=").append(genre)

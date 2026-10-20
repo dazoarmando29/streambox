@@ -271,6 +271,9 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.56" to listOf(
+        "Browse tab grows K-Dramas - Korean dramas by genre and year, straight to VidBolt",
+    ),
     "0.55" to listOf(
         "New Browse tab: pick Movies / TV Shows / Anime, then genre and year chips over the full catalog",
         "Anime never reads as TV anywhere again - labels follow the content",

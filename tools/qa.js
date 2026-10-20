@@ -129,9 +129,9 @@
        timestamp and the Next Episode pill sat over the S1E1 intro
     46 server auto-switch leads with VidBolt on every chain and never hops
        to VidRift (no pause button there - hopping strands the viewer)
-    47 the Browse tab: pick the KIND (Movies / TV Shows / Anime), then
-       genre + year chips (years start at 2026 and go below) over the FULL
-       paginated catalog
+    47 the Browse tab: pick the KIND (Movies / TV Shows / Anime / K-Dramas),
+       then genre + year chips (years start at 2026 and go below) over the
+       FULL paginated catalog
     48 anime can never render as TV: the hero badge derives from content,
        saved titles keep their genreIds, and a restored Japanese-animation
        title re-types itself anime
@@ -736,12 +736,16 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   if (!appBr || !hsBr || !apiBr) bad("App.kt/HomeScreen.kt/Api.kt missing - Browse tab cannot be verified");
   else if (/BROWSE\("Browse", Icons\.Filled\.Explore\)/.test(appBr) &&
            /private fun BrowseAllView\(/.test(hsBr) &&
-           /"movie" to "Movies", "tv" to "TV Shows", "anime" to "Anime"/.test(hsBr) &&
+           /"movie" to "Movies"/.test(hsBr) &&
+           /"tv" to "TV Shows"/.test(hsBr) &&
+           /"anime" to "Anime"/.test(hsBr) &&
+           /"kdrama" to "K-Dramas"/.test(hsBr) &&
            /\(2026 downTo 1980\)/.test(hsBr) &&
-           /fun browsePage\(/.test(apiBr)) {
-    ok("Browse tab: kind pick + genre + year chips (2026 down) over the paginated catalog");
+           /fun browsePage\(/.test(apiBr) &&
+           /"kdrama" -> \{[\s\S]{0,320}with_original_language=ko/.test(apiBr)) {
+    ok("Browse tab: kind pick (Movies / TV Shows / Anime / K-Dramas) + genre + year chips (2026 down) over the paginated catalog");
   } else {
-    bad("Browse tab must offer the kind pick, genre chips, year chips from 2026 down, and Api.browsePage paging");
+    bad("Browse tab must offer the kind pick (incl. K-Dramas), genre chips, year chips from 2026 down, and Api.browsePage paging");
   }
 }
 
