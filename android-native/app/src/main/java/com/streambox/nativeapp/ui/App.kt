@@ -1,7 +1,7 @@
 package com.streambox.nativeapp.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -9,7 +9,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.IndicationNodeFactory
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -52,10 +54,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DrawModifierNode
@@ -149,7 +154,7 @@ fun StreamBoxApp() {
     var splashDone by remember { mutableStateOf(false) }
     var whatsNew by remember { mutableStateOf<Pair<String, List<String>>?>(null) }
     LaunchedEffect(Unit) {
-        delay(1700)
+        delay(1200)
         splashDone = true
         val v = BuildConfig.VERSION_NAME
         val prev = Store.lastSeenVersion(appCtx)
@@ -170,89 +175,90 @@ fun StreamBoxApp() {
             // default indication is switched off app-wide.
             LocalIndication provides NoIndication,
         ) {
-        Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
-            Crossfade(targetState = splashDone, label = "boot") { done ->
-                if (!done) {
-                    SplashScreen()
-                } else {
-                    when (val s = screen) {
-                        is Screen.Browse -> Column(modifier = Modifier.fillMaxSize()) {
-                            BrowseScreen(
-                                section = section,
-                                onSection = {
-                                    section = it
-                                    // A fresh tab never inherits the search bar.
-                                    clearSearch()
-                                    screen = Screen.Browse(it)
-                                },
-                                onOpen = { screen = Screen.Detail(it) },
-                                onPlay = { t ->
-                                    if (t.type == "movie") play(t, 1, 1, null, null)
-                                    else screen = Screen.Detail(t)
-                                },
-                                onResume = { p ->
-                                    play(
-                                        Title(p.id, p.type, p.name, p.poster, null, 0, "", 0.0, lang = p.lang),
-                                        p.season, p.episode, p.mal, p.ani,
-                                    )
-                                },
-                                searchMode = searchMode,
-                                searchInput = searchInput,
-                                searchSubmitted = searchSubmitted,
-                                onSearchToggle = {
-                                    searchMode = !searchMode
-                                    searchInput = ""
-                                    searchSubmitted = ""
-                                },
-                                onSearchInput = { searchInput = it },
-                                onSearchSubmit = { searchSubmitted = it },
-                                modifier = Modifier.weight(1f),
-                            )
-                            // TV uses the website-style top tab bar instead -
-                            // the bottom nav is a phone pattern (design split).
-                            if (!AppEnv.isTv) {
-                                BottomNav(current = section) {
-                                    section = it
-                                    screen = Screen.Browse(it)
-                                }
+        // The splash is an OVERLAY over the live tree (0.52 speed pass):
+        // the catalog starts fetching at t=0 behind it, so the boot fade
+        // reveals a warm home instead of an empty one.
+        Box(modifier = Modifier.fillMaxSize()) {
+            Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
+                when (val s = screen) {
+                    is Screen.Browse -> Column(modifier = Modifier.fillMaxSize()) {
+                        BrowseScreen(
+                            section = section,
+                            onSection = {
+                                section = it
+                                // A fresh tab never inherits the search bar.
+                                clearSearch()
+                                screen = Screen.Browse(it)
+                            },
+                            onOpen = { screen = Screen.Detail(it) },
+                            onPlay = { t ->
+                                if (t.type == "movie") play(t, 1, 1, null, null)
+                                else screen = Screen.Detail(t)
+                            },
+                            onResume = { p ->
+                                play(
+                                    Title(p.id, p.type, p.name, p.poster, null, 0, "", 0.0, lang = p.lang),
+                                    p.season, p.episode, p.mal, p.ani,
+                                )
+                            },
+                            searchMode = searchMode,
+                            searchInput = searchInput,
+                            searchSubmitted = searchSubmitted,
+                            onSearchToggle = {
+                                searchMode = !searchMode
+                                searchInput = ""
+                                searchSubmitted = ""
+                            },
+                            onSearchInput = { searchInput = it },
+                            onSearchSubmit = { searchSubmitted = it },
+                            modifier = Modifier.weight(1f),
+                        )
+                        // TV uses the website-style top tab bar instead -
+                        // the bottom nav is a phone pattern (design split).
+                        if (!AppEnv.isTv) {
+                            BottomNav(current = section) {
+                                section = it
+                                screen = Screen.Browse(it)
                             }
                         }
+                    }
 
-                        // key() per title / play session (0.48): un-keyed
-                        // remember kept the PREVIOUS title's state - a new
-                        // key = fresh composition.
-                        is Screen.Detail -> key(s.title.id, s.title.type) {
-                            DetailScreen(
-                                title = s.title,
-                                onBack = { screen = Screen.Browse(section) },
-                                onPlay = { season, episode, mal, ani, lang -> play(s.title, season, episode, mal, ani, lang) },
-                                onOpen = { screen = Screen.Detail(it) },
-                            )
-                        }
+                    // key() per title / play session (0.48): un-keyed
+                    // remember kept the PREVIOUS title's state - a new key
+                    // = fresh composition.
+                    is Screen.Detail -> key(s.title.id, s.title.type) {
+                        DetailScreen(
+                            title = s.title,
+                            onBack = { screen = Screen.Browse(section) },
+                            onPlay = { season, episode, mal, ani, lang -> play(s.title, season, episode, mal, ani, lang) },
+                            onOpen = { screen = Screen.Detail(it) },
+                        )
+                    }
 
-                        is Screen.Player -> key(s.title.id, s.title.type, s.season, s.episode, s.lang ?: "") {
-                            PlayerScreen(
-                                title = s.title,
-                                season = s.season,
-                                episode = s.episode,
-                                mal = s.mal,
-                                ani = s.ani,
-                                lang = s.lang,
-                                // Back from the player goes home (Netflix
-                                // rule) - never back into the launching
-                                // search.
-                                onHome = {
-                                    clearSearch()
-                                    screen = Screen.Browse(section)
-                                },
-                            )
-                        }
+                    is Screen.Player -> key(s.title.id, s.title.type, s.season, s.episode, s.lang ?: "") {
+                        PlayerScreen(
+                            title = s.title,
+                            season = s.season,
+                            episode = s.episode,
+                            mal = s.mal,
+                            ani = s.ani,
+                            lang = s.lang,
+                            // Back from the player goes home (Netflix rule)
+                            // - never back into the launching search.
+                            onHome = {
+                                clearSearch()
+                                screen = Screen.Browse(section)
+                            },
+                        )
                     }
                 }
             }
-        }
-        whatsNew?.let { (ver, bullets) ->
-            WhatsNewDialog(ver, bullets) { whatsNew = null }
+            AnimatedVisibility(visible = !splashDone, exit = fadeOut(tween(420))) {
+                SplashScreen()
+            }
+            whatsNew?.let { (ver, bullets) ->
+                WhatsNewDialog(ver, bullets) { whatsNew = null }
+            }
         }
         }
     }
@@ -261,6 +267,11 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.52" to listOf(
+        "Everything is faster: warm boot, instant browses, quicker players and server hops",
+        "Motion clarity: judder-free playback matched to your display's refresh",
+        "Hero meta chips in the design-pack style",
+    ),
     "0.51" to listOf(
         "Updates install right over older versions - no uninstall needed",
         "Roll back to any older APK whenever you want",
@@ -301,7 +312,18 @@ private fun SplashScreen() {
     )
     val fade by animateFloatAsState(targetValue = 1f, animationSpec = tween(650), label = "bootFade")
     val sweep = (pulse - 0.92f) / 0.16f
-    Box(modifier = Modifier.fillMaxSize().background(Ink)) {
+    // Boot guard: the splash OWNS the remote while it is up - presses can
+    // never land on the content warming up underneath it.
+    val splashFR = remember { FocusRequester() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Ink)
+            .focusRequester(splashFR)
+            .focusable()
+            .onKeyEvent { true },
+    ) {
+        LaunchedEffect(Unit) { runCatching { splashFR.requestFocus() } }
         Box(
             modifier = Modifier
                 .fillMaxSize()

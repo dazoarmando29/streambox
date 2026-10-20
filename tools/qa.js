@@ -102,7 +102,20 @@
        other one - forward updates AND rolling back to an older APK work
        from the package installer (the feature version lives in versionName)
     38 the app boots through a cinematic splash and opens a What's New card
-       ONCE per fresh update (Store.lastSeenVersion vs VERSION_NAME) */
+       ONCE per fresh update (Store.lastSeenVersion vs VERSION_NAME)
+    39 browse speed: rows load in parallel and paint as they land, and a
+       disk feed cache (30 min TTL) paints a cold start instantly while
+       the network pass revalidates
+    40 player speed: the injected VidBolt page is session-cached, the shell
+       preconnects every provider origin (server hops land on warm TLS),
+       and track discovery fetches resolve ONCE per episode
+    41 catalog calls ride a short-lived response cache (120s) so re-opening
+       a detail or re-browsing a section never pays the network twice
+    42 motion clarity + judder: the hook measures the REAL content frame
+       rate from decoded frames and the player matches the display mode to
+       an integer multiple of it (24fps on 120Hz runs 5:5 - no 3:2 pulldown)
+       at native resolution, highest matching refresh wins (fast motion
+       stays fluid), and the display's own mode is restored on exit */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -715,6 +728,64 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("boot splash + What's New card fire once per fresh update");
   } else {
     bad("App.kt must boot through SplashScreen and gate WhatsNewDialog on Store.lastSeenVersion vs BuildConfig.VERSION_NAME");
+  }
+}
+
+/* ---------- 39. browse speed: parallel rows + disk feed cache ---------- */
+{
+  const hsB = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  const stB = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
+  if (!hsB || !stB) bad("HomeScreen.kt/Store.kt missing - browse speed rules cannot be verified");
+  else if (/plan\.map \{ \(label, f\) ->\s*async \{/.test(hsB) &&
+           /Store\.loadFeedCache\(ctx, key\)/.test(hsB) &&
+           /Store\.saveFeedCache\(ctx, key, rows\)/.test(hsB) &&
+           /fun loadFeedCache\(ctx: Context, key: String\)/.test(stB)) {
+    ok("rows load in parallel and the disk feed cache paints cold starts instantly");
+  } else {
+    bad("browse must keep parallel row loads AND the Store feed cache (paint-then-revalidate)");
+  }
+}
+
+/* ---------- 40. player speed: doc cache + preconnects + one resolve ---------- */
+{
+  const psF = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psF) bad("PlayerScreen.kt missing - player speed rules cannot be verified");
+  else if (/VB_DOC_CACHE/.test(psF) &&
+           /rel=\\"preconnect\\"/.test(psF) &&
+           /VB_RESOLVE\[q\] = j; applyStream\(j\)/.test(psF)) {
+    ok("player fast paths: cached injected page, preconnects, resolve fetched once per episode");
+  } else {
+    bad("player must keep VB_DOC_CACHE + preconnect links + the VB_RESOLVE single fetch");
+  }
+}
+
+/* ---------- 41. catalog response cache ---------- */
+{
+  const apiC = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"), "utf8") : "";
+  if (!apiC) bad("Api.kt missing - response cache cannot be verified");
+  else if (/private val respCache/.test(apiC) && /RESP_TTL_MS/.test(apiC) &&
+           /respCache\[path\]\?\.let \{ if \(now - it\.at < RESP_TTL_MS\) return it\.json \}/.test(apiC)) {
+    ok("catalog calls ride the 120s response cache (no double network)");
+  } else {
+    bad("Api.get must serve repeat calls from respCache within the TTL");
+  }
+}
+
+/* ---------- 42. motion clarity + judder reduction ---------- */
+{
+  const psM = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psM) bad("PlayerScreen.kt missing - motion rules cannot be verified");
+  else if (/requestVideoFrameCallback/.test(psM) &&
+           /'video:fps'/.test(psM) &&
+           /preferredDisplayModeId = pick\.getModeId\(\)/.test(psM) &&
+           /refresh is an INTEGER multiple/.test(psM) &&
+           /preferredDisplayModeId = 0/.test(psM)) {
+    ok("motion clarity: content fps measured and matched to an integer-multiple display mode, restored on exit");
+  } else {
+    bad("motion clarity requires the rVFC fps sampler + preferredDisplayModeId matching + restore-on-exit");
   }
 }
 

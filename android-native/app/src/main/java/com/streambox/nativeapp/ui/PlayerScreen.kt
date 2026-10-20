@@ -191,6 +191,12 @@ private fun mirrorBase(m: String): String = when (m) {
     else -> "https://cinesrc.st/"
 }
 
+/** Provider origins warmed at player load (0.52 preconnect targets). */
+private val WRAPPED_ORIGINS = listOf(
+    "https://cinesrc.st/", "https://ani.pm/", "https://embed.vidrift.net/",
+    "https://vidzen.fun/", "https://vidbolt.pro/",
+)
+
 /** Load the provider the way the website does: embed URL in our own shell
     page's iframe (postMessage contract flows both ways via SB_HOOK). The
     hook rides the shell MARKUP so it is attached before the iframe can emit
@@ -210,8 +216,15 @@ private fun loadMirror(w: WebView, embedUrl: String, m: String) {
                 "d.head.appendChild(s);}" +
                 "}catch(e){}},2);setTimeout(function(){clearInterval(iv);},30000);})();</script>"
         } else ""
+        // Preconnect every provider origin (0.52 speed pass): DNS + TLS for
+        // the whole server lineup warms while THIS one plays, so a server
+        // hop lands on an already-handshaked connection.
+        val pre = WRAPPED_ORIGINS.joinToString("") {
+            "<link rel=\"preconnect\" href=\"" + it + "\">"
+        }
         val html = "<!DOCTYPE html><html><head>" +
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+            pre +
             "<script>" + SB_HOOK + "</script>" +
             "</head><body style=\"margin:0;background:#000;overflow:hidden\">" +
             shimBlock +
@@ -377,6 +390,11 @@ private val VB_MATCHMEDIA_SHIM =
 private const val VB_UA =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
+/** Session cache of the injected VidBolt page (0.52 speed pass): the page
+    is CDN-stable per episode, so reloads (skip reopens, quality hops,
+    server bounces) skip the extra fetch entirely. Four entries max. */
+private val VB_DOC_CACHE = java.util.Collections.synchronizedMap(HashMap<String, String>())
+
 /** Serve the VidBolt embed PAGE with the gate shim as its first inline
     script - deterministic: the shim is in the document before their module
     can evaluate, so the command listener registers on TVs too. FAIL-SAFE:
@@ -384,6 +402,11 @@ private const val VB_UA =
     page - the gate may stay shut but PLAYBACK never depends on this
     (0.45/0.46 froze the play screen by touching their module body). */
 private fun vbShimmedDoc(url: String): android.webkit.WebResourceResponse? {
+    fun serve(html: String) = android.webkit.WebResourceResponse(
+        "text/html", "utf-8",
+        java.io.ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)),
+    )
+    VB_DOC_CACHE[url]?.let { return serve(it) }
     return try {
         val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         conn.connectTimeout = 4000
@@ -409,12 +432,82 @@ private fun vbShimmedDoc(url: String): android.webkit.WebResourceResponse? {
         val out = src.substring(0, gt + 1) +
             "<script>" + VB_MATCHMEDIA_SHIM + "</script>" +
             src.substring(gt + 1)
-        android.webkit.WebResourceResponse(
-            "text/html", "utf-8",
-            java.io.ByteArrayInputStream(out.toByteArray(Charsets.UTF_8)),
-        )
+        VB_DOC_CACHE[url] = out
+        if (VB_DOC_CACHE.size > 4) {
+            val drop = VB_DOC_CACHE.keys.firstOrNull { it != url }
+            if (drop != null) VB_DOC_CACHE.remove(drop)
+        }
+        serve(out)
     } catch (e: Exception) {
         null
+    }
+}
+
+private fun findActivity(ctx: android.content.Context): android.app.Activity? {
+    var c: android.content.Context? = ctx
+    while (c is android.content.ContextWrapper) {
+        if (c is android.app.Activity) return c
+        c = c.baseContext
+    }
+    return null
+}
+
+/** Display.Mode size probe (0.52): the API-34 stub only carries
+    getPhysicalWidth/Height while every runtime still answers getWidth/
+    getHeight - ask both ways so the match works on every API level. */
+private fun modeSize(m: android.view.Display.Mode): IntArray {
+    for ((wName, hName) in listOf("getPhysicalWidth" to "getPhysicalHeight", "getWidth" to "getHeight")) {
+        try {
+            val w = m.javaClass.getMethod(wName).invoke(m) as Int
+            val h = m.javaClass.getMethod(hName).invoke(m) as Int
+            return intArrayOf(w, h)
+        } catch (e: Exception) {
+        }
+    }
+    return intArrayOf(0, 0)
+}
+
+/** Motion clarity + judder reduction (0.52): pick the display mode whose
+    refresh is an INTEGER multiple of the measured content rate - 24fps on
+    120Hz runs an even 5:5 cadence (no 3:2 pulldown judder) and the highest
+    matching refresh cuts sample-and-hold smear on fast motion. Native
+    resolution only (never trade pixels for rate); falls back to the
+    closest refresh. The player restores the default mode on exit. */
+private var matchModeActive = 0
+
+private fun matchContentRate(ctx: android.content.Context, fps: Float) {
+    try {
+        val act = findActivity(ctx) ?: return
+        val dm = act.getSystemService(android.hardware.display.DisplayManager::class.java) ?: return
+        val disp = dm.displays.firstOrNull() ?: return
+        val cur = disp.mode
+        val curSize = modeSize(cur)
+        val sameRes = disp.supportedModes.filter { modeSize(it).contentEquals(curSize) }
+        val exact = sameRes.filter {
+            val r = it.getRefreshRate() / fps
+            r >= 0.95f && kotlin.math.abs(r - kotlin.math.round(r)) < 0.06f
+        }
+        val pick = exact.maxByOrNull { it.getRefreshRate() }
+            ?: sameRes.minByOrNull { kotlin.math.abs(it.getRefreshRate() - fps) }
+            ?: return
+        if (pick.getModeId() == cur.getModeId()) return
+        val attrs = act.window.attributes
+        attrs.preferredDisplayModeId = pick.getModeId()
+        act.window.attributes = attrs
+        matchModeActive = pick.getModeId()
+    } catch (e: Exception) {
+    }
+}
+
+private fun restoreDisplayRate(ctx: android.content.Context) {
+    try {
+        if (matchModeActive == 0) return
+        val act = findActivity(ctx) ?: return
+        val attrs = act.window.attributes
+        attrs.preferredDisplayModeId = 0
+        act.window.attributes = attrs
+        matchModeActive = 0
+    } catch (e: Exception) {
     }
 }
 
@@ -597,6 +690,45 @@ private val SB_HOOK = """
   }
   hook();
   setInterval(hook, 1000);
+  // Motion clarity (0.52): measure the REAL content frame rate from the
+  // decoded frames (rVFC mediaTime deltas) and report it once. The shell
+  // then asks the display for a matching refresh mode - integer multiples
+  // kill judder (24fps on 120Hz runs an even 5:5 cadence) and the highest
+  // matching refresh cuts sample-and-hold smear in fast motion. Watches
+  // the shell video AND the same-origin player iframe.
+  function fpsWatch(){
+    var v = null;
+    try { v = document.querySelector('video'); } catch(e){}
+    if (!v) {
+      try {
+        var fw = window.frames[0];
+        v = fw && fw.document && fw.document.querySelector('video');
+      } catch(e){}
+    }
+    if (!v || v.__sbFps || typeof v.requestVideoFrameCallback !== 'function') return;
+    v.__sbFps = true;
+    var last = -1, hits = 0, acc = 0, sent = false;
+    function cb(now, meta){
+      try {
+        var mt = meta && meta.mediaTime;
+        if (typeof mt === 'number') {
+          if (last >= 0) {
+            var d = mt - last;
+            if (d > 0.004 && d < 0.25) { acc += d; hits++; }
+          }
+          last = mt;
+          if (!sent && hits >= 24 && acc > 0) {
+            sent = true;
+            var fps = Math.round(hits / acc);
+            if (fps >= 15 && fps <= 121) send('video:fps', { fps: fps });
+          }
+        }
+      } catch(e){}
+      v.requestVideoFrameCallback(cb);
+    }
+    v.requestVideoFrameCallback(cb);
+  }
+  setInterval(fpsWatch, 1000);
   window.__sb = {
     play: function(){
       var v=document.querySelector('video'); if(v) v.play();
@@ -678,6 +810,7 @@ private val SB_HOOK = """
   // mobile-panel delegation (narrow viewports) merges into the same
   // snapshot with its exact command values.
   var VBT = { audios: {}, subs: {}, audioSel: "", subSel: "", quals: {}, qualsByLang: {}, qualSel: "" };
+  var VB_RESOLVE = {};
   function vbPublish(){
     var au = Object.keys(VBT.audios), su = Object.keys(VBT.subs);
     var qr = Object.keys(VBT.quals).map(function(k){ return VBT.quals[k]; });
@@ -716,7 +849,10 @@ private val SB_HOOK = """
       var q = "type=" + encodeURIComponent(bt.type || "tv") + "&id=" + encodeURIComponent(bt.id || "");
       if (bt.type === "tv" && bt.season) q += "&season=" + encodeURIComponent(bt.season);
       if (bt.episode) q += "&episode=" + encodeURIComponent(bt.episode);
-      fetch("/api/resolve?" + q).then(function(r){ return r.ok ? r.json() : {}; }).then(function(j){
+      // One resolve fetch per episode (0.52): the 0/5/15s track polls all
+      // read the same snapshot - only the textTracks scan is redone (they
+      // surface late). The stream URL never leaves the WebView.
+      function applyStream(j){
         try {
           var s = (j && j.stream) || null;
           var anime = bt.type === "anime";
@@ -752,7 +888,9 @@ private val SB_HOOK = """
           });
           vbPublish();
         } catch(e2){}
-      }, function(){});
+      }
+      if (VB_RESOLVE[q]) applyStream(VB_RESOLVE[q]);
+      else fetch("/api/resolve?" + q).then(function(r){ return r.ok ? r.json() : {}; }).then(function(j){ VB_RESOLVE[q] = j; applyStream(j); }, function(){});
     } catch(e){}
   }
   // VidBolt's narrow-viewport gate (Bt) is opened by the matchMedia shim the
@@ -855,6 +993,12 @@ fun PlayerScreen(
 ) {
     val ctx = LocalContext.current
     val big = AppEnv.isTv
+
+    // Motion mode is per-player (0.52): leaving restores the display's own
+    // refresh so the rest of the UI runs as the panel likes it.
+    DisposableEffect(Unit) {
+        onDispose { restoreDisplayRate(ctx) }
+    }
 
     // Resume (Continue Watching / Detail Resume / My List): playback boots
     // at the SAVED spot for THIS episode (or this movie) - 0.35 fix, the
@@ -1875,6 +2019,14 @@ fun PlayerScreen(
                                         // Real playback kick - NEVER the
                                         // mute-bypass. TV hands it a play.
                                         if (big) cmd("window.__sb && window.__sb.play()")
+                                    }
+                                    "video:fps" -> {
+                                        // Motion clarity (0.52): the hook
+                                        // measured the real content rate -
+                                        // match the display to it (judder
+                                        // out, fast motion stays fluid).
+                                        val fps = o.optDouble("fps", 0.0).toFloat()
+                                        if (fps in 15f..121f) matchContentRate(ctx, fps)
                                     }
                                     "ready" -> {
                                         // VidBolt TV: its shell waits for a

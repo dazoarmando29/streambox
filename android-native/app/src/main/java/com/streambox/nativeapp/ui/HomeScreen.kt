@@ -254,10 +254,23 @@ fun BrowseScreen(
         // refreshed in the background - Back-from-player is instant now.
         val hitRows = BrowseCache.rows[key]
         val hitSearch = BrowseCache.searches[key]
+        var diskPainted = false
         when {
             hitRows != null -> { rows = hitRows; results = listOf() }
             hitSearch != null -> { results = hitSearch; rows = listOf() }
-            key != loadedKey -> { rows = listOf(); results = listOf() }
+            key != loadedKey -> {
+                // Disk cache (0.52 speed pass): a cold start paints the last
+                // feed instantly and the network pass below revalidates -
+                // the section never opens empty on a warm device.
+                val disk = withContext(Dispatchers.IO) { Store.loadFeedCache(ctx, key) }
+                if (disk != null && disk.isNotEmpty()) {
+                    rows = disk
+                    diskPainted = true
+                } else {
+                    rows = listOf()
+                }
+                results = listOf()
+            }
         }
         loading = rows.isEmpty() && results.isEmpty()
         error = null
@@ -275,9 +288,12 @@ fun BrowseScreen(
                 // Rows paint as they land - hero first, rest stream in.
                 // Over a cached paint we revalidate silently (no flicker
                 // back to partial rows) and swap once complete.
-                rows = fetchRows(section, genreSel, gName) { partial -> if (hitRows == null) rows = partial }
+                rows = fetchRows(section, genreSel, gName) { partial ->
+                    if (hitRows == null && !diskPainted) rows = partial
+                }
                 results = listOf()
                 BrowseCache.rows[key] = rows
+                withContext(Dispatchers.IO) { Store.saveFeedCache(ctx, key, rows) }
             }
             loadedKey = key
         } catch (e: CancellationException) {
@@ -565,7 +581,7 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
     // hid the rest of the synopsis and a long block pushed the title out).
     Box(modifier = Modifier.fillMaxWidth().heightIn(min = if (big) 420.dp else 260.dp)) {
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(100).build(),
+            model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(180).build(),
             contentDescription = t.name,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
@@ -624,15 +640,26 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Star, contentDescription = null, tint = Accent, modifier = Modifier.size(14.dp))
-                Text(
-                    "  " + String.format("%.1f", t.vote) + "  -  " +
-                        (if (t.year > 0) t.year.toString() + "  -  " else "") + t.type.uppercase(),
-                    color = Soft,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = if (big) 15.sp else 13.sp,
-                )
+            // Meta chips (design pack hero): rating / year / type as pills
+            // over the wash - same language as the mockup's badge array.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .background(Pill, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                ) {
+                    Icon(Icons.Filled.Star, contentDescription = null, tint = Accent, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        String.format("%.1f", t.vote),
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (big) 14.sp else 12.sp,
+                    )
+                }
+                if (t.year > 0) MetaChip(t.year.toString(), big)
+                MetaChip(t.type.uppercase(), big)
             }
             if (t.overview.isNotBlank()) {
                 Spacer(modifier = Modifier.height(6.dp))
@@ -675,6 +702,20 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
             }
         }
     }
+}
+
+/** Design-pack meta chip (hero badge pills: year, type). */
+@Composable
+private fun MetaChip(text: String, big: Boolean) {
+    Text(
+        text,
+        color = Soft,
+        fontWeight = FontWeight.Bold,
+        fontSize = if (big) 13.sp else 11.sp,
+        modifier = Modifier
+            .background(Pill, RoundedCornerShape(6.dp))
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+    )
 }
 
 @Composable
@@ -724,7 +765,7 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                                 .background(Pill),
                         ) {
                             AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current).data(p.poster).crossfade(100).build(),
+                                model = ImageRequest.Builder(LocalContext.current).data(p.poster).crossfade(180).build(),
                                 contentDescription = p.name,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize(),
@@ -928,7 +969,7 @@ fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false) {
                 .clickable { onOpen(t) },
         ) {
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(100).build(),
+                model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(180).build(),
                 contentDescription = t.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
@@ -1193,7 +1234,7 @@ private fun MyListCard(
                     .background(Pill),
             ) {
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(100).build(),
+                    model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(180).build(),
                     contentDescription = t.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -1339,7 +1380,7 @@ private fun MyListRow(
                     .background(Pill),
             ) {
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(100).build(),
+                    model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(180).build(),
                     contentDescription = t.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),

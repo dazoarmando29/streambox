@@ -43,6 +43,7 @@ object Store {
     private const val K_SUB_PICK = "sub_pick"
     private const val K_SUB_STYLE = "sub_style"
     private const val K_AUTO_SKIP = "auto_skip"
+    private const val K_FEED = "feed_cache"
 
     private fun prefs(ctx: Context) =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -160,6 +161,56 @@ object Store {
 
     fun setLastSeenVersion(ctx: Context, v: String) {
         prefs(ctx).edit().putString(K_LAST_SEEN, v).apply()
+    }
+
+    /** Disk feed cache (0.52 speed pass): a cold app start paints the last
+        rows of a section instantly and revalidates in the background. 30
+        minute TTL, last six sections - small prefs, big first paint. */
+    private const val FEED_TTL_MS = 30L * 60L * 1000L
+
+    fun loadFeedCache(ctx: Context, key: String): List<Pair<String, List<Title>>>? {
+        val root = JSONObject(prefs(ctx).getString(K_FEED, "{}") ?: "{}")
+        val o = root.optJSONObject(key) ?: return null
+        if (System.currentTimeMillis() - o.optLong("at", 0) > FEED_TTL_MS) return null
+        val arr = o.optJSONArray("rows") ?: return null
+        val out = ArrayList<Pair<String, List<Title>>>()
+        for (i in 0 until arr.length()) {
+            val r = arr.optJSONObject(i) ?: continue
+            val tArr = r.optJSONArray("titles") ?: JSONArray()
+            val titles = ArrayList<Title>()
+            for (j in 0 until tArr.length()) {
+                val t = tArr.optJSONObject(j) ?: continue
+                titles.add(titleFrom(t))
+            }
+            out.add(r.optString("label") to titles)
+        }
+        return out
+    }
+
+    fun saveFeedCache(ctx: Context, key: String, rows: List<Pair<String, List<Title>>>) {
+        val root = JSONObject(prefs(ctx).getString(K_FEED, "{}") ?: "{}")
+        val arr = JSONArray()
+        rows.forEach { (label, titles) ->
+            val tArr = JSONArray()
+            titles.forEach { tArr.put(titleToJson(it)) }
+            arr.put(JSONObject().put("label", label).put("titles", tArr))
+        }
+        root.put(key, JSONObject().put("at", System.currentTimeMillis()).put("rows", arr))
+        // Keep the prefs small: the six most recent keys only.
+        while (root.length() > 6) {
+            var oldest: String? = null
+            var oldestAt = Long.MAX_VALUE
+            for (k in root.keys()) {
+                val at = root.optJSONObject(k)?.optLong("at", 0) ?: 0
+                if (at < oldestAt) {
+                    oldestAt = at
+                    oldest = k
+                }
+            }
+            if (oldest == null) break
+            root.remove(oldest)
+        }
+        prefs(ctx).edit().putString(K_FEED, root.toString()).apply()
     }
 
     fun autoSkip(ctx: Context): Boolean = prefs(ctx).getBoolean(K_AUTO_SKIP, false)

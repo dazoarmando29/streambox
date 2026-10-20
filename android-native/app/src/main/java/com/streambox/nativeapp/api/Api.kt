@@ -80,7 +80,17 @@ object Api {
     private const val IMG_W300 = "https://image.tmdb.org/t/p/w300"
     private const val IMG_W185 = "https://image.tmdb.org/t/p/w185"
 
+    /** Short-lived response cache (0.52 speed pass): re-opening a detail or
+        re-browsing a section inside two minutes never pays the network
+        again. Catalog data is stable enough for a 120s window. */
+    private data class CachedResp(val at: Long, val json: JSONObject)
+
+    private val respCache = java.util.Collections.synchronizedMap(HashMap<String, CachedResp>())
+    private const val RESP_TTL_MS = 120_000L
+
     private fun get(path: String): JSONObject {
+        val now = System.currentTimeMillis()
+        respCache[path]?.let { if (now - it.at < RESP_TTL_MS) return it.json }
         val conn = URL(BASE + path).openConnection() as HttpURLConnection
         conn.connectTimeout = 12000
         conn.readTimeout = 12000
@@ -90,7 +100,13 @@ object Api {
             val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
                 ?.bufferedReader()?.use { it.readText() } ?: ""
             if (code !in 200..299) throw IllegalStateException("http_" + code)
-            return JSONObject(text)
+            val obj = JSONObject(text)
+            respCache[path] = CachedResp(now, obj)
+            if (respCache.size > 96) {
+                val oldest = respCache.entries.minByOrNull { it.value.at }?.key
+                if (oldest != null) respCache.remove(oldest)
+            }
+            return obj
         } finally {
             conn.disconnect()
         }
