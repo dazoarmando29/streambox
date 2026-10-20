@@ -135,9 +135,10 @@
        title re-types itself anime
     49 player routing honors isAnime - Japanese animation rides the anime
        route even when an old stored label says tv
-    50 episode status is ONE line pinned on the right of the title line -
-       runtime / NEW / remaining / COMING SOON with its PH air date +
-       countdown, never stacked, never drifting with the row content
+    50 episode status lives in ONE pinned right column: the title row is
+       full width so every runtime / NEW / COMING SOON label shares the
+       same right edge (straight down), runtime rides one line and Coming
+       Soon keeps its stacked PH air date + countdown
     51 Korean dramas live in their own KDrama tab beside Anime - the TV
        Shows strip never carries a K-Drama chip again
     52 the zigzag lock: Left/Right may never leave a card row or chip rail
@@ -848,12 +849,12 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
            /private fun phCountdown\(/.test(dsP) &&
            /Asia\/Manila/.test(dsP) &&
            /phCountdown\(ep\.air, tickMs\)/.test(dsP) &&
-           /val statusLine = when \{/.test(dsP) &&
-           !/val label = when \{/.test(dsP) &&
-           /verticalAlignment = Alignment\.Top/.test(dsP)) {
-    ok("episode status is ONE line on the right, anchored so it never moves, with the PH countdown");
+           /val primary = when \{/.test(dsP) &&
+           /Row\(verticalAlignment = Alignment\.Top, modifier = Modifier\.fillMaxWidth\(\)\)/.test(dsP) &&
+           /Column\(horizontalAlignment = Alignment\.End\)/.test(dsP)) {
+    ok("episode status sits in one pinned right column (full-width row) - runtime one line, Coming Soon stacked with the PH countdown");
   } else {
-    bad("episode rows need a single-line right-side status (statusLine) on a top-anchored row - stacked blocks drift with the row content");
+    bad("episode rows need a FULL-WIDTH title row (pinned right edge) and the status column (primary + Coming Soon detail) - wrap-content rows scrambled the 24m column");
   }
 }
 

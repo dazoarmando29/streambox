@@ -1145,9 +1145,12 @@ private fun EpisodeRow(
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            // One-liner status (0.61): both sides are single lines, so the
-            // title-line anchor is rock solid - the status never moves.
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Pinned right column (0.62): the row is FULL WIDTH so the
+            // status right edge is the SAME x on every row - the old
+            // wrap-content row drifted with each title's length (the
+            // "scrambled" 24m column). Top-anchored too: line one sits on
+            // the title line no matter how much follows it.
+            Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
                 // Design pack numbering: "1. The Awakening".
                 Text(
                     ep.n.toString() + ". ",
@@ -1165,9 +1168,10 @@ private fun EpisodeRow(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 Spacer(modifier = Modifier.weight(1f))
-                // Status zone (0.61): ONE line on the right, anchored to the
-                // title line - nothing stacks, nothing drifts. "NEW" stays
-                // reserved for the episode of THIS WEEK (0.38).
+                // Status column (0.62): one right edge for every row -
+                // runtime / NEW / remaining ride a single line, and Coming
+                // Soon keeps its stacked form (label + PH air date +
+                // countdown). "NEW" stays reserved for THIS WEEK (0.38).
                 val weekAgo = remember {
                     java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
                         .format(java.util.Date(System.currentTimeMillis() - 7L * 24 * 3600 * 1000))
@@ -1177,32 +1181,42 @@ private fun EpisodeRow(
                 val left = if (inProgress) {
                     fmtMin(((savedDur - savedCur) / 60).toInt().coerceAtLeast(1)) + " left"
                 } else ""
-                val statusLine = when {
-                    !ep.aired ->
-                        if (ep.air.isNotBlank()) {
-                            "COMING SOON  \u00b7  " + phAirLabel(ep.air) + " (PH)  \u00b7  " +
-                                phCountdown(ep.air, tickMs)
-                        } else {
-                            "COMING SOON"
-                        }
+                val primary = when {
+                    !ep.aired -> "COMING SOON"
                     isNew && left.isNotBlank() -> "NEW  \u00b7  " + left
                     isNew -> "NEW"
                     left.isNotBlank() -> left
                     ep.runtime > 0 -> fmtMin(ep.runtime)
                     else -> ""
                 }
-                if (statusLine.isNotBlank()) {
-                    Text(
-                        statusLine,
-                        color = when {
-                            !ep.aired -> Amber
-                            isNew || inProgress -> Accent
-                            else -> Dim
-                        },
-                        fontWeight = FontWeight.Bold,
-                        fontSize = if (big) 12.sp else 10.sp,
-                        letterSpacing = 0.5.sp,
-                    )
+                val detail = if (!ep.aired && ep.air.isNotBlank()) {
+                    phAirLabel(ep.air) + " (PH)  \u00b7  " + phCountdown(ep.air, tickMs)
+                } else {
+                    ""
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    if (primary.isNotBlank()) {
+                        Text(
+                            primary,
+                            color = when {
+                                !ep.aired -> Amber
+                                isNew || inProgress -> Accent
+                                else -> Dim
+                            },
+                            fontWeight = FontWeight.Black,
+                            fontSize = if (big) 11.sp else 9.sp,
+                            letterSpacing = 1.sp,
+                        )
+                    }
+                    if (detail.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            detail,
+                            color = Soft,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = if (big) 12.sp else 10.sp,
+                        )
+                    }
                 }
             }
             if (ep.overview.isNotBlank()) {

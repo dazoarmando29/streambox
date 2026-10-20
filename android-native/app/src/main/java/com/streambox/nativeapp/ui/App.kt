@@ -275,6 +275,10 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.62" to listOf(
+        "Episode labels line up in one straight column - no more scattered 24m",
+        "Coming Soon keeps its stacked date + PH countdown",
+    ),
     "0.61" to listOf(
         "Episode status is one clean line on the right - pinned, never moving",
     ),
