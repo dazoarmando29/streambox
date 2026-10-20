@@ -1045,7 +1045,7 @@ private fun EpisodeRow(
     onClick: () -> Unit,
 ) {
     Row(
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = if (big) 28.dp else 16.dp, vertical = 5.dp)
@@ -1145,10 +1145,9 @@ private fun EpisodeRow(
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            // Top-aligned (0.59): the status block must sit on the SAME
-            // line as the title in every row - centering drifted it up or
-            // down with the block's line count (the "all over the right").
-            Row(verticalAlignment = Alignment.Top) {
+            // One-liner status (0.61): both sides are single lines, so the
+            // title-line anchor is rock solid - the status never moves.
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 // Design pack numbering: "1. The Awakening".
                 Text(
                     ep.n.toString() + ". ",
@@ -1166,50 +1165,43 @@ private fun EpisodeRow(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 Spacer(modifier = Modifier.weight(1f))
-                // Status zone (0.57/0.59): ONE fixed block on every row,
-                // top-aligned to the title line - the LABEL slot (NEW /
-                // COMING SOON / runtime) and the DETAIL slot (remaining /
-                // PH air date + countdown) always land in the same place no
-                // matter how many of them are filled. "NEW" stays reserved
-                // for the episode of THIS WEEK (0.38).
+                // Status zone (0.61): ONE line on the right, anchored to the
+                // title line - nothing stacks, nothing drifts. "NEW" stays
+                // reserved for the episode of THIS WEEK (0.38).
                 val weekAgo = remember {
                     java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
                         .format(java.util.Date(System.currentTimeMillis() - 7L * 24 * 3600 * 1000))
                 }
                 val isNew = ep.aired && ep.air.isNotBlank() && ep.air >= weekAgo
                 val inProgress = ep.aired && current && savedDur > 0 && savedCur > 5
-                val label = when {
-                    !ep.aired -> "COMING SOON"
+                val left = if (inProgress) {
+                    fmtMin(((savedDur - savedCur) / 60).toInt().coerceAtLeast(1)) + " left"
+                } else ""
+                val statusLine = when {
+                    !ep.aired ->
+                        if (ep.air.isNotBlank()) {
+                            "COMING SOON  \u00b7  " + phAirLabel(ep.air) + " (PH)  \u00b7  " +
+                                phCountdown(ep.air, tickMs)
+                        } else {
+                            "COMING SOON"
+                        }
+                    isNew && left.isNotBlank() -> "NEW  \u00b7  " + left
                     isNew -> "NEW"
+                    left.isNotBlank() -> left
                     ep.runtime > 0 -> fmtMin(ep.runtime)
                     else -> ""
                 }
-                val detail = when {
-                    !ep.aired ->
-                        if (ep.air.isNotBlank()) {
-                            phAirLabel(ep.air) + " (PH)  \u00b7  " + phCountdown(ep.air, tickMs)
-                        } else ""
-                    inProgress -> fmtMin(((savedDur - savedCur) / 60).toInt().coerceAtLeast(1)) + " left"
-                    else -> ""
-                }
-                Column(horizontalAlignment = Alignment.End) {
+                if (statusLine.isNotBlank()) {
                     Text(
-                        label,
+                        statusLine,
                         color = when {
                             !ep.aired -> Amber
-                            isNew -> Accent
+                            isNew || inProgress -> Accent
                             else -> Dim
                         },
-                        fontWeight = FontWeight.Black,
-                        fontSize = if (big) 11.sp else 9.sp,
-                        letterSpacing = 1.sp,
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        detail,
-                        color = if (!ep.aired) Soft else Accent,
                         fontWeight = FontWeight.Bold,
                         fontSize = if (big) 12.sp else 10.sp,
+                        letterSpacing = 0.5.sp,
                     )
                 }
             }

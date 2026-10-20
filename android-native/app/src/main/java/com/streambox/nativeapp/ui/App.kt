@@ -275,6 +275,9 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.61" to listOf(
+        "Episode status is one clean line on the right - pinned, never moving",
+    ),
     "0.60" to listOf(
         "Anime seasons play RIGHT - season 2 starts at season 2 (season-aware entry routing)",
         "Next Episode never steps past a season's end or into an unaired episode",

@@ -135,10 +135,9 @@
        title re-types itself anime
     49 player routing honors isAnime - Japanese animation rides the anime
        route even when an old stored label says tv
-    50 episode rows carry ONE fixed right-aligned status zone on the title
-       line - the label slot (NEW / COMING SOON / runtime) and the detail
-       slot (remaining / PH air date + countdown) are always rendered so
-       nothing drifts, and Coming Soon counts down in Philippine time
+    50 episode status is ONE line pinned on the right of the title line -
+       runtime / NEW / remaining / COMING SOON with its PH air date +
+       countdown, never stacked, never drifting with the row content
     51 Korean dramas live in their own KDrama tab beside Anime - the TV
        Shows strip never carries a K-Drama chip again
     52 the zigzag lock: Left/Right may never leave a card row or chip rail
@@ -849,13 +848,12 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
            /private fun phCountdown\(/.test(dsP) &&
            /Asia\/Manila/.test(dsP) &&
            /phCountdown\(ep\.air, tickMs\)/.test(dsP) &&
-           /val label = when \{/.test(dsP) &&
-           /val detail = when \{/.test(dsP) &&
-           /Row\(verticalAlignment = Alignment\.Top\)/.test(dsP) &&
-           /Column\(horizontalAlignment = Alignment\.End\)/.test(dsP)) {
-    ok("episode rows share one fixed status zone (label + detail slots, title-line anchored) with the PH countdown");
+           /val statusLine = when \{/.test(dsP) &&
+           !/val label = when \{/.test(dsP) &&
+           /verticalAlignment = Alignment\.Top/.test(dsP)) {
+    ok("episode status is ONE line on the right, anchored so it never moves, with the PH countdown");
   } else {
-    bad("episode rows need the fixed two-slot status zone (label/detail always rendered, top-aligned) with the PH air date + countdown");
+    bad("episode rows need a single-line right-side status (statusLine) on a top-anchored row - stacked blocks drift with the row content");
   }
 }
 
