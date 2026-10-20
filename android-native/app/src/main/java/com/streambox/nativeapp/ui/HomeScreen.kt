@@ -235,9 +235,10 @@ fun BrowseScreen(
                     Section.ANIME -> Api.animeGenres()
                     Section.MOVIES -> Api.genres("movie").map { it.first.toString() to it.second }
                     Section.TV -> Api.genres("tv").map { it.first.toString() to it.second }
-                    // The KDrama tab (0.57): All plus the real TV genres.
-                    Section.KDRAMA -> listOf("kdrama" to "All") +
-                        Api.genres("tv").map { it.first.toString() to it.second }
+                    // KDrama tab (0.57/0.58): GenreBar already prepends its
+                    // own All chip (picks null = the full lineup) - never a
+                    // second All.
+                    Section.KDRAMA -> Api.genres("tv").map { it.first.toString() to it.second }
                     else -> listOf()
                 }
             }.getOrDefault(listOf())
@@ -614,13 +615,18 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                     Brush.horizontalGradient(listOf(Color(0xB30B111E), Color(0x000B111E))),
                 )
         )
-        // Reveal the WHOLE details block when any CTA takes focus (0.49):
-        // bringIntoView on a focused pill alone scrolled just the pill, so
-        // the title stayed cut above the fold - the ask is 'details in full'.
+        // Reveal the WHOLE details block when a CTA first takes focus (0.49,
+        // one-shot since 0.58): repeated requests of a block that cannot fit
+        // the viewport oscillated its edges (the zigzag). The title never
+        // stays cut above the fold.
         val heroBring = remember { BringIntoViewRequester() }
         val heroScope = rememberCoroutineScope()
+        var heroShown by remember(t.id) { mutableStateOf(false) }
         val heroReveal: (Boolean) -> Unit = { on ->
-            if (on) heroScope.launch { heroBring.bringIntoView() }
+            if (on && !heroShown) {
+                heroShown = true
+                heroScope.launch { heroBring.bringIntoView() }
+            }
         }
         Column(
             modifier = Modifier
@@ -943,51 +949,43 @@ fun SectionHeader(label: String, right: String? = null) {
 
 @Composable
 private fun PosterRow(label: String, titles: List<Title>, newIds: Set<Int>, onOpen: (Title) -> Unit) {
-    // Smooth TV navigation (0.53): the reveal is the WHOLE row (header +
-    // posters + names) and the SAME rect on every press, so it is
-    // idempotent - walking L/R never moves the screen. A bottom-edge row
-    // still scrolls fully into view on first focus, names included.
-    val rowBring = remember { BringIntoViewRequester() }
-    val rowScope = rememberCoroutineScope()
-    Column(modifier = Modifier.bringIntoViewRequester(rowBring).rowNavLock()) {
+    // 0.58: NO reveal requests - the whole-card focus target makes the
+    // default scroll carry names into view on every edge (the old row
+    // reveal's oversized rect oscillated between its edges = the zigzag).
+    Column(modifier = Modifier.rowNavLock()) {
         SectionHeader(label)
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(titles, key = { it.type + "-" + it.id }) { t ->
-                PosterCard(
-                    t, onOpen,
-                    newEp = t.type != "movie" && t.id in newIds,
-                    onFocusIn = { rowScope.launch { rowBring.bringIntoView() } },
-                )
+                PosterCard(t, onOpen, newEp = t.type != "movie" && t.id in newIds)
             }
         }
     }
 }
 
 @Composable
-fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false, onFocusIn: () -> Unit = {}) {
+fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false) {
     val plate = RoundedCornerShape(12.dp)
-    // The ARTWORK is the button: ring, pop and click all hug the poster.
-    // The caption below is decoration, never part of the target (the old
-    // whole-column box is what made picking feel like a square box).
-    // Name visibility rides a REVEAL CALLBACK (0.53): the caller decides
-    // what to bring into view. Rows use one idempotent row-level reveal -
-    // the old per-card bringIntoView re-scrolled on every L/R press and
-    // zigzagged against the row's own scroll (the shake).
+    // 0.58: the WHOLE card (artwork + name) is the focus/click target, so
+    // the default scroll always carries the name into view at screen edges,
+    // while artworkRing traces ONLY the poster - the artwork-only look
+    // survives. The per-card/row bringIntoView reveals are gone: their
+    // oversized rect aligned the opposite edge on every press (the zigzag).
     Column(
-        modifier = Modifier.width(if (AppEnv.isTv) 170.dp else 128.dp),
+        modifier = Modifier
+            .width(if (AppEnv.isTv) 170.dp else 128.dp)
+            .artworkRing(plate)
+            .clickable { onOpen(t) },
     ) {
+        // The ARTWORK keeps its own rounded plate and caption strip below.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .onFocusChanged { if (it.isFocused) onFocusIn() }
-                .focusRing(plate)
                 .clip(plate)
-                .background(Card)
-                .clickable { onOpen(t) },
+                .background(Card),
         ) {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(180).build(),
@@ -1181,16 +1179,9 @@ private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxSize().rowNavLock(),
                 ) {
-                    items(results, key = { "b-" + it.type + "-" + it.id }) { t ->
-                        val cellBring = remember { BringIntoViewRequester() }
-                        val cellScope = rememberCoroutineScope()
-                        Box(modifier = Modifier.bringIntoViewRequester(cellBring)) {
-                            PosterCard(
-                                t, onOpen,
-                                onFocusIn = { cellScope.launch { cellBring.bringIntoView() } },
-                            )
-                        }
-                    }
+        items(results, key = { "b-" + it.type + "-" + it.id }) { t ->
+                    PosterCard(t, onOpen)
+                }
                     if (hasMore) {
                         item {
                             Box(
@@ -1225,18 +1216,7 @@ private fun SearchGrid(titles: List<Title>, adultOpen: Boolean, onOpen: (Title) 
         modifier = Modifier.fillMaxSize().rowNavLock(),
     ) {
         items(shown, key = { it.type + "-" + it.id }) { t ->
-            // Grid cells keep a per-cell reveal (0.53): a VERTICAL grid
-            // never fights horizontal navigation, and cells in one grid row
-            // share their vertical rect so the reveal is idempotent there
-            // too - names stay visible at the bottom edge.
-            val cellBring = remember { BringIntoViewRequester() }
-            val cellScope = rememberCoroutineScope()
-            Box(modifier = Modifier.bringIntoViewRequester(cellBring)) {
-                PosterCard(
-                    t, onOpen,
-                    onFocusIn = { cellScope.launch { cellBring.bringIntoView() } },
-                )
-            }
+            PosterCard(t, onOpen)
         }
     }
 }
@@ -1704,17 +1684,19 @@ private fun TvRail(
             .width(railW.dp)
             .fillMaxSize()
             .background(Color(0xFF0E1524))
-            .padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 10.dp),
+            // Compact rail (0.58): seven sections must fit a 540dp TV or
+            // the last tabs (Browse / Adults-Only) fall off the column.
+            .padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 10.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(48.dp)
-                .background(Accent, RoundedCornerShape(14.dp)),
+                .size(40.dp)
+                .background(Accent, RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = "StreamBox", tint = Ink, modifier = Modifier.size(26.dp))
+            Icon(Icons.Filled.PlayArrow, contentDescription = "StreamBox", tint = Ink, modifier = Modifier.size(22.dp))
         }
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         val onRailFocus: (Boolean) -> Unit = { focused ->
             foldJob?.cancel()
             if (focused) {
@@ -1727,7 +1709,7 @@ private fun TvRail(
             }
         }
         RailBtn(Icons.Filled.Search, "Search", on = false, expanded = expanded, onFocus = onRailFocus, onClick = onSearchToggle)
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(5.dp))
         Section.values().forEach { s ->
             RailBtn(
                 s.icon,
@@ -1739,7 +1721,7 @@ private fun TvRail(
                 expanded = expanded,
                 onFocus = onRailFocus,
             ) { onSection(s) }
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(5.dp))
         }
         Spacer(modifier = Modifier.weight(1f))
         RailBtn(
@@ -1767,14 +1749,14 @@ private fun RailBtn(
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
-                .size(56.dp)
+                .size(46.dp)
                 .onFocusChanged { onFocus(it.isFocused) }
                 .focusRingCircle(pop = false)
                 .background(if (on) Accent else Color.Transparent, CircleShape)
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(24.dp))
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
         }
         if (expanded) {
             Spacer(modifier = Modifier.width(12.dp))

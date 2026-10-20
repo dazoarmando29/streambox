@@ -79,10 +79,9 @@
        grows with its content, and focusing any CTA brings the WHOLE
        details block into view (the pill-only scroll left the title cut
        above the fold - 'details in full')
-    32 poster captions are visible without changing the look: the ring and
-       click stay on the ARTWORK only (0.48's ring-around-everything was
-       reverted by request) and the name rides a reveal callback from the
-       caller, never a per-card scroll inside PosterCard
+    32 poster look = artwork only: artworkRing traces the poster while the
+       WHOLE card (artwork + name) is the focus/click target, so the default
+       scroll carries names into view - no full-card ring, no reveal calls
     33 Continue Watching is tab-scoped: the anime tab never shows movie/TV
        progress and the movie/TV tabs never show the others - Home and My
        List show everything
@@ -115,11 +114,10 @@
        an integer multiple of it (24fps on 120Hz runs 5:5 - no 3:2 pulldown)
        at native resolution, highest matching refresh wins (fast motion
        stays fluid), and the display's own mode is restored on exit
-    43 smooth row navigation: poster rows reveal ONCE per row with the same
-       rect every press (idempotent - the old per-card bringIntoView
-       re-scrolled on every L/R press and zigzagged against the row's own
-       scroll); only the vertical search grid keeps per-cell reveals, and
-       the detail More Like This row matches
+    43 smooth rows: rows/grids NEVER bringIntoView - an oversized reveal
+       rect aligned the OPPOSITE edge on every press (the up-then-down
+       zigzag + shake); names ride the whole-card target, hero reveal is
+       one-shot per hero
     44 VidBolt subtitle rows carry their command INDEX (engine tracks ++
        resolve subtitles, matching their H list) - label values made both
        command paths no-op and captions never appeared
@@ -145,7 +143,9 @@
        Shows strip never carries a K-Drama chip again
     52 the zigzag lock: Left/Right may never leave a card row or chip rail
        (focus used to yank up to the chips and back - every screen with a
-       rail had it while Home never did); Up/Down stay free */
+       rail had it while Home never did); Up/Down stay free
+    53 one All chip per genre strip (GenreBar prepends it) and a compact
+       rail so every section tab fits on screen (Browse was falling off) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -656,15 +656,17 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!hs2) bad("HomeScreen.kt missing - poster caption rules cannot be verified");
   else {
-    const good = /onFocusIn: \(\) -> Unit = \{\}/.test(hs2) &&
-      /\.onFocusChanged \{ if \(it\.isFocused\) onFocusIn\(\) \}/.test(hs2) &&
-      /\.focusRing\(plate\)\s*\.clip\(plate\)\s*\.background\(Card\)\s*\.clickable \{ onOpen\(t\) \}/.test(hs2) &&
-      !/cardBring/.test(hs2) &&
-      !/width\(if \(AppEnv\.isTv\) 170\.dp else 128\.dp\)[\s\S]{0,120}\.focusRing/.test(hs2);
+    const th2 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"))
+      ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"), "utf8") : "";
+    const good = /fun Modifier\.artworkRing\(/.test(th2) &&
+      /\.artworkRing\(plate\)/.test(hs2) &&
+      /\.clip\(plate\)\s*\.background\(Card\)/.test(hs2) &&
+      !/\.focusRing\(plate\)/.test(hs2) &&
+      !/cardBring/.test(hs2);
     if (good) {
-      ok("poster look stays artwork-only and names ride a reveal callback (per-card scrolling is gone)");
+      ok("poster look stays artwork-only (artworkRing) while the whole card is the target - names scroll in by default");
     } else {
-      bad("PosterCard must keep the ring/click on the artwork and reveal names via an onFocusIn callback (0.48's whole-card ring AND per-card bringIntoView are banned)");
+      bad("PosterCard must use artworkRing on the whole card (ring traces the poster only) - 0.48's full-card ring and per-card reveals are banned");
     }
   }
 }
@@ -676,14 +678,30 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   const dsN = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"))
     ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"), "utf8") : "";
   if (!hsN || !dsN) bad("HomeScreen.kt/DetailScreen.kt missing - row navigation rules cannot be verified");
-  else if (/val rowBring = remember \{ BringIntoViewRequester\(\) \}/.test(hsN) &&
-           /onFocusIn = \{ rowScope\.launch \{ rowBring\.bringIntoView\(\) \} \}/.test(hsN) &&
-           /val cellBring = remember \{ BringIntoViewRequester\(\) \}/.test(hsN) &&
-           /val rowBring = remember \{ BringIntoViewRequester\(\) \}/.test(dsN) &&
-           !/cardBring/.test(hsN + dsN)) {
-    ok("row reveals are idempotent (row-level in rows, per-cell only in the vertical grid) - L/R stays smooth");
+  else if (!/rowBring/.test(hsN) &&
+           !/cellBring/.test(hsN) &&
+           !/rowBring/.test(dsN) &&
+           !/cellBring/.test(dsN) &&
+           /heroShown/.test(hsN) &&
+           /rowNavLock\(\)/.test(hsN) &&
+           /rowNavLock\(\)/.test(dsN)) {
+    ok("smooth rows: zero reveal requests in rows/grids (hero reveal one-shot) and L/R stays locked");
   } else {
-    bad("poster rows must reveal at ROW level only - per-card bringIntoView zigzags against the row's own scroll (0.53)");
+    bad("rows must NEVER bringIntoView - an oversized reveal rect oscillated its edges on every press (the zigzag); names ride the whole-card target");
+  }
+}
+
+/* ---------- 53. one All chip + a rail every tab fits on ---------- */
+{
+  const hsA = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  if (!hsA) bad("HomeScreen.kt missing - rail/chip rules cannot be verified");
+  else if (!/listOf\("kdrama" to "All"\)/.test(hsA) &&
+           /\.size\(46\.dp\)/.test(hsA) &&
+           /Section\.values\(\)\.forEach/.test(hsA)) {
+    ok("one All chip per genre strip and a compact rail every section fits on");
+  } else {
+    bad("KDrama must not add a second All chip (GenreBar prepends one) and RailBtn must stay compact so Browse stays visible");
   }
 }
 
@@ -810,7 +828,6 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   if (!appK || !hsK) bad("App.kt/HomeScreen.kt missing - KDrama tab cannot be verified");
   else if (/KDRAMA\("KDrama"/.test(appK) &&
            /Section\.KDRAM[A-Z]* -> \{[\s\S]{0,220}Popular K-Dramas/.test(hsK) &&
-           /listOf\("kdrama" to "All"\)/.test(hsK) &&
            !/listOf\("kdrama" to "K-Drama"\)/.test(hsK)) {
     ok("KDrama tab beside Anime holds the K-Drama rows; the TV Shows strip is clean");
   } else {

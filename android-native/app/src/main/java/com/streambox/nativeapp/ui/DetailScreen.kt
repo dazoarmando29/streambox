@@ -920,21 +920,16 @@ fun DetailScreen(
         // ---- More Like This ----
         if (similar.isNotEmpty()) {
             item {
-                // Row-level reveal (0.53): same rect every press, so L/R
-                // navigation stays smooth (per-card reveals zigzagged).
-                val rowBring = remember { BringIntoViewRequester() }
-                val rowScope = rememberCoroutineScope()
-                Column(modifier = Modifier.bringIntoViewRequester(rowBring).rowNavLock()) {
+                // 0.58: no reveal requests - the whole-card target carries
+                // names into view by itself (row reveals zigzagged).
+                Column(modifier = Modifier.rowNavLock()) {
                     SectionHeader("More Like This")
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(similar.size) { i ->
-                            PosterCard(
-                                similar[i], onOpen,
-                                onFocusIn = { rowScope.launch { rowBring.bringIntoView() } },
-                            )
+                            PosterCard(similar[i], onOpen)
                         }
                     }
                     Spacer(modifier = Modifier.height(14.dp))

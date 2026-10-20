@@ -21,7 +21,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontWeight
@@ -165,4 +167,57 @@ fun Modifier.rowNavLock(): Modifier = focusProperties {
             FocusRequester.Default
         }
     }
+}
+
+/** Artwork ring for poster cards (0.58): the ring traces ONLY the poster -
+    the artwork is the top 2:3 block of the card - while the WHOLE card
+    (artwork + name) is the focus/click target, so the default scroll always
+    carries the name into view at screen edges. The old per-card/row
+    bringIntoView reveals are gone: their rect (header + row) often could
+    not fit the viewport and each request aligned the OPPOSITE edge - the
+    up-then-down zigzag and shake. Gentle pop around the artwork center. */
+fun Modifier.artworkRing(plate: Shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)): Modifier = composed {
+    var focused by remember { mutableStateOf(false) }
+    val ring by animateFloatAsState(
+        targetValue = if (focused) 1f else 0f,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "artRing",
+    )
+    val pop by animateFloatAsState(
+        targetValue = if (focused) 1.06f else 1f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "artPop",
+    )
+    onFocusChanged { focused = it.isFocused }
+        .graphicsLayer {
+            // The poster occupies the top 2:3 block - pop around its center
+            // so the look matches the artwork-only ring.
+            transformOrigin = TransformOrigin(0.5f, 0.45f)
+            scaleX = pop
+            scaleY = pop
+        }
+        .drawWithContent {
+            drawContent()
+            if (ring > 0f) {
+                val artH = size.width * 1.5f
+                fun trace(width: Dp, alpha: Float) {
+                    val stroke = Stroke(width = width.toPx())
+                    val c = Accent.copy(alpha = alpha * ring)
+                    when (val o = plate.createOutline(Size(size.width, artH), layoutDirection, this)) {
+                        is Outline.Rectangle -> drawRect(color = c, style = stroke)
+                        is Outline.Rounded -> drawRoundRect(
+                            color = c,
+                            topLeft = Offset(o.roundRect.left, o.roundRect.top),
+                            size = Size(o.roundRect.width, o.roundRect.height),
+                            cornerRadius = o.roundRect.topLeftCornerRadius,
+                            style = stroke,
+                        )
+                        is Outline.Generic -> drawPath(o.path, color = c, style = stroke)
+                    }
+                }
+                trace(10.dp, 0.16f)
+                trace(5.dp, 0.32f)
+                trace(2.5.dp, 0.95f)
+            }
+        }
 }
