@@ -139,13 +139,21 @@ object Api {
             }
             val lang = o.optString("original_language", "")
             val isAnime = 16 in genIds && lang == "ja"
-            // Japanese animation is ANIME everywhere it lands - search/multi
-            // and trending included (0.48: 'My Happy Marriage' searched as
-            // plain TV and rode the TV default player instead of AniPM).
-            val type = typeOverride
-                ?: if (o.has("title") && !o.has("name")) "movie"
+            // Content typing (0.48/0.49): Japanese animation is ANIME
+            // everywhere it lands - search/multi and trending included ('My
+            // Happy Marriage' used to ride the TV default player) - and a
+            // forced "anime" label only STICKS to real Japanese animation
+            // (searching the Korean drama 'Lie to Me' from the Anime tab
+            // stamped it anime and sent it to AniPM).
+            val content = if (o.has("title") && !o.has("name")) "movie"
                 else if (mediaType == "movie") "movie"
                 else if (isAnime) "anime" else "tv"
+            val type = when {
+                typeOverride == null -> content
+                typeOverride == "anime" && content == "anime" -> "anime"
+                typeOverride == "anime" -> content
+                else -> typeOverride
+            }
             out.add(
                 Title(
                     id = id,

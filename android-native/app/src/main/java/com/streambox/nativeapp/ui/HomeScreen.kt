@@ -26,6 +26,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -521,9 +523,7 @@ private fun Feed(
     }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        // TV: the bottom bar (legend/status) overlays the feed - pad past it
-        // so the last row's captions can scroll fully clear (0.48).
-        contentPadding = PaddingValues(bottom = if (big) 76.dp else 20.dp),
+        contentPadding = PaddingValues(bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         if (hero != null) {
@@ -570,9 +570,18 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                     Brush.horizontalGradient(listOf(Color(0xB30B111E), Color(0x000B111E))),
                 )
         )
+        // Reveal the WHOLE details block when any CTA takes focus (0.49):
+        // bringIntoView on a focused pill alone scrolled just the pill, so
+        // the title stayed cut above the fold - the ask is 'details in full'.
+        val heroBring = remember { BringIntoViewRequester() }
+        val heroScope = rememberCoroutineScope()
+        val heroReveal: (Boolean) -> Unit = { on ->
+            if (on) heroScope.launch { heroBring.bringIntoView() }
+        }
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
+                .bringIntoViewRequester(heroBring)
                 .padding(
                     horizontal = if (big) 28.dp else 16.dp,
                     vertical = if (big) 18.dp else 12.dp,
@@ -628,14 +637,21 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
             val heroCtx = LocalContext.current
             var heroList by remember(t.id) { mutableStateOf(Store.inList(heroCtx, t.type, t.id)) }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                PillButton("Watch", big, accent = true, icon = Icons.Filled.PlayArrow) { onPlay(t) }
-                PillButton("Details", big, icon = Icons.Filled.Info) { onOpen(t) }
+                PillButton(
+                    "Watch", big, accent = true, icon = Icons.Filled.PlayArrow,
+                    onFocusChange = heroReveal,
+                ) { onPlay(t) }
+                PillButton(
+                    "Details", big, icon = Icons.Filled.Info,
+                    onFocusChange = heroReveal,
+                ) { onOpen(t) }
                 if (big) {
                     // TV hero (design pack): Watch Now | Details | My List.
                     PillButton(
                         if (heroList) "In My List" else "My List",
                         big,
                         icon = if (heroList) Icons.Filled.Check else Icons.Filled.Add,
+                        onFocusChange = heroReveal,
                     ) {
                         Store.toggleList(heroCtx, t)
                         heroList = Store.inList(heroCtx, t.type, t.id)
@@ -869,39 +885,32 @@ private fun PosterRow(label: String, titles: List<Title>, newIds: Set<Int>, onOp
 
 @Composable
 fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false) {
-    val tv = AppEnv.isTv
     val plate = RoundedCornerShape(12.dp)
-    // TV (0.48): the ring/click wraps the WHOLE card (artwork + name) so the
-    // caption sits inside the focus bounds - bringIntoView then scrolls the
-    // name into view with the poster (bottom-edge rows used to hide every
-    // name under the legend). Phone keeps the artwork-only target: a tap
-    // should feel like the poster, not a tall box.
+    // The ARTWORK is the button: ring, pop and click all hug the poster.
+    // The caption below is decoration, never part of the target (the old
+    // whole-column box is what made picking feel like a square box).
+    // Name visibility (0.49) rides bringIntoView instead of the ring: when
+    // the poster takes focus the WHOLE card (artwork + name) scrolls into
+    // view, so bottom-edge rows show their captions and the look stays
+    // artwork-only (0.48's ring-around-everything was reverted by request).
+    val cardBring = remember { BringIntoViewRequester() }
+    val cardScope = rememberCoroutineScope()
     Column(
         modifier = Modifier
-            .width(if (tv) 170.dp else 128.dp)
-            .then(
-                if (tv) Modifier
-                    .focusRing(plate)
-                    .clip(plate)
-                    .background(Card)
-                    .clickable { onOpen(t) }
-                else Modifier
-            ),
+            .width(if (AppEnv.isTv) 170.dp else 128.dp)
+            .bringIntoViewRequester(cardBring),
     ) {
-        // The ARTWORK is the button on phone: ring, pop and click hug the
-        // poster. On TV the whole card is the target (caption visibility).
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .then(
-                    if (tv) Modifier
-                    else Modifier
-                        .focusRing(plate)
-                        .clip(plate)
-                        .background(Card)
-                        .clickable { onOpen(t) }
-                ),
+                .onFocusChanged {
+                    if (it.isFocused) cardScope.launch { cardBring.bringIntoView() }
+                }
+                .focusRing(plate)
+                .clip(plate)
+                .background(Card)
+                .clickable { onOpen(t) },
         ) {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(100).build(),

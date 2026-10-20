@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -232,7 +233,9 @@ private fun BottomNav(current: Section, onPick: (Section) -> Unit) {
     }
 }
 
-/** Pill button in the website's style. */
+/** Pill button in the website's style. onFocusChange lets a container bring
+    its WHOLE block into view when a pill takes focus (0.49: bringIntoView
+    otherwise scrolls only the focused pill and the hero title stayed cut). */
 @Composable
 fun PillButton(
     label: String,
@@ -241,6 +244,7 @@ fun PillButton(
     outline: Boolean = false,
     icon: ImageVector? = null,
     modifier: Modifier = Modifier,
+    onFocusChange: (Boolean) -> Unit = {},
     onClick: () -> Unit,
 ) {
     val h = if (big) 54.dp else 46.dp
@@ -259,6 +263,7 @@ fun PillButton(
         modifier = modifier
             .then(if (accent) Modifier.glow(RoundedCornerShape(50)) else Modifier)
             .height(h)
+            .onFocusChanged { onFocusChange(it.isFocused) }
             .focusRing(RoundedCornerShape(50))
             .background(bg, RoundedCornerShape(50))
             .clickable(onClick = onClick)

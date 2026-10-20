@@ -66,19 +66,24 @@
     28 silent-start kicks: a VidBolt/VidZen frame that reports nothing gets
        an explicit play nudge before the 30s idle watchdog hops away
        (website _playKickT parity - TV WebViews can swallow autoplay)
-    29 Japanese animation types as ANIME with no override: search/multi and
-       trending land in titlesFrom too, and a plain "tv" type there sent
-       'My Happy Marriage' to the TV default player instead of AniPM
+    29 Japanese animation types as ANIME with no override (search/multi and
+       trending land in titlesFrom too - 'My Happy Marriage' rode the TV
+       default player), and a forced "anime" label only ever STICKS to real
+       Japanese animation (searching the Korean drama 'Lie to Me' from the
+       Anime tab stamped it anime and sent it to AniPM)
     30 screens are keyed per title / play session: un-keyed remember kept
        the PREVIOUS title's season/episode/saved/ids across detail-similar
        navigation and replays ('episode 1' opened S2 E1), the episode rail
        clears before every season fetch (no stale rail), and a season that
        does not exist on the title snaps back to a real one
-    31 the TV hero tells the whole story: overview never clamps and the
-       hero box grows with its content (the 3-line cut hid the synopsis)
-    32 poster captions ride the focus bounds on TV: the ring/click wraps
-       artwork + name so bringIntoView scrolls the name clear of the
-       bottom bar (phone keeps the artwork-only tap target) */
+    31 the TV hero tells the whole story: overview never clamps, the box
+       grows with its content, and focusing any CTA brings the WHOLE
+       details block into view (the pill-only scroll left the title cut
+       above the fold - 'details in full')
+    32 poster captions are visible without changing the look: the ring and
+       click stay on the ARTWORK only (0.48's ring-around-everything was
+       reverted by request) and the name rides bringIntoView on focus, so
+       bottom-edge rows show their captions */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -531,16 +536,17 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   }
 }
 
-/* ---------- 29. Japanese animation types as ANIME without an override ---------- */
+/* ---------- 29. anime typing: content decides, overrides never lie ---------- */
 {
   const apiP = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt");
   const apiS = fs.existsSync(apiP) ? fs.readFileSync(apiP, "utf8") : "";
   if (!apiS) bad("Api.kt missing - anime typing cannot be verified");
   else if (/val isAnime = 16 in genIds && lang == "ja"/.test(apiS) &&
-           /else if \(isAnime\) "anime" else "tv"/.test(apiS)) {
-    ok("search/multi + trending type Japanese animation as anime (AniPM routing)");
+           /else if \(isAnime\) "anime" else "tv"/.test(apiS) &&
+           /typeOverride == "anime" && content == "anime" -> "anime"/.test(apiS)) {
+    ok("anime typing is content-decided: ja+16 is anime everywhere, non-anime is never stamped anime");
   } else {
-    bad("titlesFrom must map genre 16 + ja to \"anime\" even with no override - plain \"tv\" sent anime to the TV default player");
+    bad("titlesFrom must type ja+16 as anime with no override AND refuse to stamp non-anime items as anime (Lie to Me mistake)");
   }
 }
 
@@ -573,23 +579,30 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   const hs = fs.existsSync(hsP) ? fs.readFileSync(hsP, "utf8") : "";
   if (!hs) bad("HomeScreen.kt missing - hero rules cannot be verified");
   else if (/heightIn\(min = if \(big\) 420\.dp else 260\.dp\)/.test(hs) &&
-           /maxLines = if \(big\) Int\.MAX_VALUE else 3/.test(hs)) {
-    ok("TV hero grows with its content and the overview is never clamped");
+           /maxLines = if \(big\) Int\.MAX_VALUE else 3/.test(hs) &&
+           /heroBring\.bringIntoView\(\)/.test(hs) &&
+           /onFocusChange = heroReveal/.test(hs)) {
+    ok("TV hero grows with its content, overview unclamped, and a CTA focus reveals the whole block");
   } else {
-    bad("TV hero must use heightIn(min) + an unclamped overview - the 3-line cut hid the synopsis");
+    bad("TV hero must use heightIn(min) + unclamped overview + heroReveal bringIntoView on its CTAs (title stayed cut above the fold)");
   }
 }
 
-/* ---------- 32. poster captions ride the TV focus bounds ---------- */
+/* ---------- 32. poster captions visible, artwork-only ring ---------- */
 {
   const hs2 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
     ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!hs2) bad("HomeScreen.kt missing - poster caption rules cannot be verified");
-  else if (/width\(if \(tv\) 170\.dp else 128\.dp\)[\s\S]{0,420}if \(tv\) Modifier\s*\.focusRing\(plate\)/.test(hs2) &&
-           /contentPadding = PaddingValues\(bottom = if \(big\) 76\.dp else 20\.dp\)/.test(hs2)) {
-    ok("poster ring wraps artwork + name on TV and the feed clears the bottom bar");
-  } else {
-    bad("PosterCard must wrap artwork + caption in the TV focus target (names hidden under the legend otherwise) and the feed must pad past the TV bottom bar");
+  else {
+    const good = /\.bringIntoViewRequester\(cardBring\)/.test(hs2) &&
+      /if \(it\.isFocused\) cardScope\.launch \{ cardBring\.bringIntoView\(\) \}/.test(hs2) &&
+      /\.focusRing\(plate\)\s*\.clip\(plate\)\s*\.background\(Card\)\s*\.clickable \{ onOpen\(t\) \}/.test(hs2) &&
+      !/width\(if \(AppEnv\.isTv\) 170\.dp else 128\.dp\)[\s\S]{0,120}\.focusRing/.test(hs2);
+    if (good) {
+      ok("poster look stays artwork-only and the caption rides bringIntoView on focus");
+    } else {
+      bad("PosterCard must keep the ring/click on the artwork and reveal the name via bringIntoViewRequester (0.48's whole-card ring is banned)");
+    }
   }
 }
 
