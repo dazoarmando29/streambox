@@ -153,6 +153,8 @@ private fun rowPlan(
         "Top Rated Anime" to { Api.animeTop() },
     )
     Section.MYLIST -> listOf()
+    // The Browse tab loads its own paginated grid (kind + genre + year).
+    Section.BROWSE -> listOf()
 }
 
 /** Every row loads in parallel AND paints the moment it lands (speed pass
@@ -338,6 +340,7 @@ fun BrowseScreen(
                         contentAlignment = Alignment.Center,
                     ) { Text(error ?: "", color = Dim, fontFamily = BodyFont) }
                     searchMode && searchSubmitted.isNotBlank() -> SearchGrid(results, adultOpen, onOpen)
+                    section == Section.BROWSE -> BrowseAllView(big, onOpen)
                     section == Section.MYLIST -> MyListView(
                         titles = myList,
                         cont = cont,
@@ -659,7 +662,9 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
                     )
                 }
                 if (t.year > 0) MetaChip(t.year.toString(), big)
-                MetaChip(t.type.uppercase(), big)
+                // Content decides the label (0.55): Japanese animation
+                // reads ANIME wherever it appears - never TV.
+                MetaChip((if (t.isAnime) "anime" else t.type).uppercase(), big)
             }
             if (t.overview.isNotBlank()) {
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1032,6 +1037,154 @@ fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false, onFocu
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp),
         )
+    }
+}
+
+/** The Browse tab (0.55, design pack): pick the KIND first (Movies / TV
+    Shows / Anime) so you always know what you are looking at, then genre +
+    year chips over the FULL catalog - years start at 2026 and go below -
+    with the grid paging in everything as you scroll. */
+@Composable
+private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
+    var kind by remember { mutableStateOf("movie") }
+    var genreSel by remember { mutableStateOf<Int?>(null) }
+    var yearSel by remember { mutableStateOf<Int?>(null) }
+    var genres by remember { mutableStateOf(listOf<Pair<Int, String>>()) }
+    var results by remember { mutableStateOf(listOf<Title>()) }
+    var page by remember { mutableIntStateOf(1) }
+    var hasMore by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val years = remember { listOf<Int?>(null) + (2026 downTo 1980).toList() }
+
+    LaunchedEffect(kind) {
+        genreSel = null
+        genres = withContext(Dispatchers.IO) {
+            runCatching {
+                val g = Api.genres(if (kind == "movie") "movie" else "tv")
+                if (kind == "anime") g.filter { it.first != 16 } else g
+            }.getOrDefault(listOf())
+        }
+    }
+    LaunchedEffect(kind, genreSel, yearSel) {
+        busy = true
+        results = listOf()
+        hasMore = false
+        val first = withContext(Dispatchers.IO) {
+            runCatching { Api.browsePage(kind, genreSel, yearSel, 1) }
+                .getOrDefault(listOf<Title>() to false)
+        }
+        results = first.first
+        page = 1
+        hasMore = first.second
+        busy = false
+    }
+    val loadMore: () -> Unit = {
+        if (!busy && hasMore) {
+            busy = true
+            val next = page + 1
+            scope.launch {
+                val more = withContext(Dispatchers.IO) {
+                    runCatching { Api.browsePage(kind, genreSel, yearSel, next) }
+                        .getOrDefault(listOf<Title>() to false)
+                }
+                if (more.first.isNotEmpty()) {
+                    results = results + more.first
+                    page = next
+                }
+                hasMore = more.second
+                busy = false
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // KIND - the big explicit pick (design pack pill trio language).
+        Text(
+            "I WANT TO WATCH",
+            color = Dim,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (big) 12.sp else 10.sp,
+            letterSpacing = 2.sp,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 16.dp),
+        ) {
+            listOf("movie" to "Movies", "tv" to "TV Shows", "anime" to "Anime").forEach { (k, label) ->
+                PillButton(label, big, accent = kind == k) { kind = k }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        // GENRE (real TMDB lists; the anime kind keeps its 16 + ja base).
+        if (genres.isNotEmpty()) {
+            GenreBar(genres.map { it.first.toString() to it.second }, genreSel?.toString(), big) {
+                genreSel = it?.toIntOrNull()
+            }
+        }
+        // YEAR - starts at 2026 and goes below (All = everything).
+        Text(
+            "YEAR",
+            color = Dim,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (big) 12.sp else 10.sp,
+            letterSpacing = 2.sp,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(years.size) { i ->
+                val y = years[i]
+                GenreChip(if (y == null) "All" else y.toString(), yearSel == y, big) { yearSel = y }
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                results.isEmpty() && busy -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) { CircularProgressIndicator(color = Accent) }
+                results.isEmpty() -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Nothing found - try another genre or year", color = Dim, fontFamily = BodyFont) }
+                else -> LazyVerticalGrid(
+                    columns = GridCells.Adaptive(if (big) 170.dp else 128.dp),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(results, key = { "b-" + it.type + "-" + it.id }) { t ->
+                        val cellBring = remember { BringIntoViewRequester() }
+                        val cellScope = rememberCoroutineScope()
+                        Box(modifier = Modifier.bringIntoViewRequester(cellBring)) {
+                            PosterCard(
+                                t, onOpen,
+                                onFocusIn = { cellScope.launch { cellBring.bringIntoView() } },
+                            )
+                        }
+                    }
+                    if (hasMore) {
+                        item {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(18.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                LaunchedEffect(Unit) { loadMore() }
+                                CircularProgressIndicator(color = Accent, modifier = Modifier.size(26.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

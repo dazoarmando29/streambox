@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
@@ -83,6 +84,9 @@ enum class Section(val label: String, val icon: ImageVector) {
     TV("TV", Icons.Filled.LiveTv),
     ANIME("Anime", Icons.Filled.AutoAwesome),
     MYLIST("My List", Icons.Filled.Favorite),
+    // Browse everything (0.55): pick movie / TV / anime, then genre + year
+    // chips over the FULL paginated catalog.
+    BROWSE("Browse", Icons.Filled.Explore),
 }
 
 sealed class Screen {
@@ -267,6 +271,10 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.55" to listOf(
+        "New Browse tab: pick Movies / TV Shows / Anime, then genre and year chips over the full catalog",
+        "Anime never reads as TV anywhere again - labels follow the content",
+    ),
     "0.54" to listOf(
         "VidBolt subtitles actually show when you pick them",
         "Skip pills: plain Skip Intro / Next Episode names, no false Next Ep over the intro",

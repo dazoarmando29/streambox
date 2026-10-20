@@ -155,21 +155,14 @@ object Api {
             }
             val lang = o.optString("original_language", "")
             val isAnime = 16 in genIds && lang == "ja"
-            // Content typing (0.48/0.49): Japanese animation is ANIME
-            // everywhere it lands - search/multi and trending included ('My
-            // Happy Marriage' used to ride the TV default player) - and a
-            // forced "anime" label only STICKS to real Japanese animation
-            // (searching the Korean drama 'Lie to Me' from the Anime tab
-            // stamped it anime and sent it to AniPM).
+            // Content typing (0.48/0.55): Japanese animation is ANIME
+            // EVERYWHERE - the label always wins over any row override, so
+            // home's Popular Shows can no longer stamp an anime as TV ('it
+            // reads as tv') or route it to the TV default player.
             val content = if (o.has("title") && !o.has("name")) "movie"
                 else if (mediaType == "movie") "movie"
                 else if (isAnime) "anime" else "tv"
-            val type = when {
-                typeOverride == null -> content
-                typeOverride == "anime" && content == "anime" -> "anime"
-                typeOverride == "anime" -> content
-                else -> typeOverride
-            }
+            val type = if (content == "anime") "anime" else (typeOverride ?: content)
             out.add(
                 Title(
                     id = id,
@@ -307,6 +300,38 @@ object Api {
     /** Real TMDB genre names (/genre/movie|tv/list) for the BROWSE BY GENRE
         chips - cached for the session. Failures are NEVER cached (0.46: one
         cold timeout froze the strip at All only) and get one retry. */
+    /** Browse-tab page (0.55): one page of the FULL catalog for a kind
+        (movie / tv / anime) with optional genre + year filters, popularity
+        order. Returns the titles plus whether another page exists. The TV
+        kind excludes animation (anime lives in its own kind); the anime
+        kind is Japanese animation (genre 16 + ja). */
+    fun browsePage(kind: String, genre: Int?, year: Int?, page: Int): Pair<List<Title>, Boolean> {
+        val q = StringBuilder()
+        when (kind) {
+            "movie" -> {
+                q.append("/api/tmdb/3/discover/movie?include_adult=false&sort_by=popularity.desc")
+                if (genre != null) q.append("&with_genres=").append(genre)
+                if (year != null) q.append("&primary_release_year=").append(year)
+            }
+            "anime" -> {
+                q.append("/api/tmdb/3/discover/tv?include_adult=false&sort_by=popularity.desc")
+                q.append("&with_genres=").append(if (genre != null) "16," + genre else "16")
+                q.append("&with_original_language=ja")
+                if (year != null) q.append("&first_air_date_year=").append(year)
+            }
+            else -> {
+                q.append("/api/tmdb/3/discover/tv?include_adult=false&sort_by=popularity.desc&without_genres=16")
+                if (genre != null) q.append("&with_genres=").append(genre)
+                if (year != null) q.append("&first_air_date_year=").append(year)
+            }
+        }
+        q.append("&page=").append(page)
+        val o = get(q.toString())
+        val titles = titlesFrom(o.optJSONArray("results") ?: JSONArray(), if (kind == "movie") "movie" else null)
+        val total = o.optInt("total_pages", 0)
+        return titles to (titles.isNotEmpty() && (total == 0 || page < total))
+    }
+
     fun genres(kind: String): List<Pair<Int, String>> {
         val k = if (kind == "movie") "movie" else "tv"
         genreCache[k]?.let { return it }

@@ -66,11 +66,10 @@
     28 silent-start kicks: a VidBolt/VidZen frame that reports nothing gets
        an explicit play nudge before the 30s idle watchdog hops away
        (website _playKickT parity - TV WebViews can swallow autoplay)
-    29 Japanese animation types as ANIME with no override (search/multi and
-       trending land in titlesFrom too - 'My Happy Marriage' rode the TV
-       default player), and a forced "anime" label only ever STICKS to real
-       Japanese animation (searching the Korean drama 'Lie to Me' from the
-       Anime tab stamped it anime and sent it to AniPM)
+    29 Japanese animation types as ANIME everywhere and the label always
+       wins over row overrides: search/multi, trending AND home's Popular
+       Shows can never stamp an anime as TV, while a Korean drama is never
+       anime (the Anime-tab Lie to Me mistake)
     30 screens are keyed per title / play session: un-keyed remember kept
        the PREVIOUS title's season/episode/saved/ids across detail-similar
        navigation and replays ('episode 1' opened S2 E1), the episode rail
@@ -129,7 +128,15 @@
        carry a TAIL guard - one open-ended start=0 entry matched every
        timestamp and the Next Episode pill sat over the S1E1 intro
     46 server auto-switch leads with VidBolt on every chain and never hops
-       to VidRift (no pause button there - hopping strands the viewer) */
+       to VidRift (no pause button there - hopping strands the viewer)
+    47 the Browse tab: pick the KIND (Movies / TV Shows / Anime), then
+       genre + year chips (years start at 2026 and go below) over the FULL
+       paginated catalog
+    48 anime can never render as TV: the hero badge derives from content,
+       saved titles keep their genreIds, and a restored Japanese-animation
+       title re-types itself anime
+    49 player routing honors isAnime - Japanese animation rides the anime
+       route even when an old stored label says tv */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -589,10 +596,10 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   if (!apiS) bad("Api.kt missing - anime typing cannot be verified");
   else if (/val isAnime = 16 in genIds && lang == "ja"/.test(apiS) &&
            /else if \(isAnime\) "anime" else "tv"/.test(apiS) &&
-           /typeOverride == "anime" && content == "anime" -> "anime"/.test(apiS)) {
-    ok("anime typing is content-decided: ja+16 is anime everywhere, non-anime is never stamped anime");
+           /val type = if \(content == "anime"\) "anime" else \(typeOverride \?: content\)/.test(apiS)) {
+    ok("anime typing always wins: ja+16 is anime everywhere and never stamps as TV");
   } else {
-    bad("titlesFrom must type ja+16 as anime with no override AND refuse to stamp non-anime items as anime (Lie to Me mistake)");
+    bad("titlesFrom must let the anime label win over every row override (home 'reads as tv' / Lie to Me mistakes)");
   }
 }
 
@@ -715,6 +722,53 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     } else {
       bad("fallbackChain must lead with vidbolt and never auto-hop to vidrift (no pause button there)");
     }
+  }
+}
+
+/* ---------- 47. Browse tab: kind + genre + year over the full catalog ---------- */
+{
+  const appBr = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
+  const hsBr = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  const apiBr = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"), "utf8") : "";
+  if (!appBr || !hsBr || !apiBr) bad("App.kt/HomeScreen.kt/Api.kt missing - Browse tab cannot be verified");
+  else if (/BROWSE\("Browse", Icons\.Filled\.Explore\)/.test(appBr) &&
+           /private fun BrowseAllView\(/.test(hsBr) &&
+           /"movie" to "Movies", "tv" to "TV Shows", "anime" to "Anime"/.test(hsBr) &&
+           /\(2026 downTo 1980\)/.test(hsBr) &&
+           /fun browsePage\(/.test(apiBr)) {
+    ok("Browse tab: kind pick + genre + year chips (2026 down) over the paginated catalog");
+  } else {
+    bad("Browse tab must offer the kind pick, genre chips, year chips from 2026 down, and Api.browsePage paging");
+  }
+}
+
+/* ---------- 48. anime can never render as TV ---------- */
+{
+  const hsT = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  const stT = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
+  if (!hsT || !stT) bad("HomeScreen.kt/Store.kt missing - anime label rules cannot be verified");
+  else if (/\(if \(t\.isAnime\) "anime" else t\.type\)\.uppercase\(\)/.test(hsT) &&
+           /put\("genres", JSONArray\(t\.genreIds\)\)/.test(stT) &&
+           /t\.copy\(type = "anime"\)/.test(stT)) {
+    ok("anime never renders as TV: content-driven badges + genreIds survive saves + restores re-type anime");
+  } else {
+    bad("hero badge must derive from isAnime, Store must persist genreIds, and restores must re-type anime (home 'reads as tv')");
+  }
+}
+
+/* ---------- 49. routing honors isAnime ---------- */
+{
+  const psR = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psR) bad("PlayerScreen.kt missing - routing rules cannot be verified");
+  else if (/title\.type == "anime" \|\| title\.isAnime -> if \(mal != null \|\| ani != null\) "anipm"/.test(psR)) {
+    ok("player routing honors isAnime - Japanese animation rides the anime route");
+  } else {
+    bad("defaultMirror must treat isAnime titles as anime even when an old stored label says tv");
   }
 }
 

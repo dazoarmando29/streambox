@@ -53,18 +53,35 @@ object Store {
         .put("poster", t.poster).put("backdrop", t.backdrop)
         .put("year", t.year).put("overview", t.overview).put("vote", t.vote)
         .put("lang", t.lang)
+        // genreIds ride along (0.55): without them a restored title lost its
+        // isAnime signal and an anime could render as TV forever.
+        .put("genres", JSONArray(t.genreIds))
 
-    private fun titleFrom(o: JSONObject): Title = Title(
-        id = o.optInt("id"),
-        type = o.optString("type"),
-        name = o.optString("name"),
-        poster = if (o.isNull("poster")) null else o.optString("poster"),
-        backdrop = if (o.isNull("backdrop")) null else o.optString("backdrop"),
-        year = o.optInt("year"),
-        overview = o.optString("overview"),
-        vote = o.optDouble("vote"),
-        lang = o.optString("lang", ""),
-    )
+    private fun titleFrom(o: JSONObject): Title {
+        val gArr = o.optJSONArray("genres")
+        val genIds = ArrayList<Int>()
+        if (gArr != null) {
+            for (i in 0 until gArr.length()) {
+                val g = gArr.optInt(i, -1)
+                if (g >= 0) genIds.add(g)
+            }
+        }
+        val t = Title(
+            id = o.optInt("id"),
+            type = o.optString("type"),
+            name = o.optString("name"),
+            poster = if (o.isNull("poster")) null else o.optString("poster"),
+            backdrop = if (o.isNull("backdrop")) null else o.optString("backdrop"),
+            year = o.optInt("year"),
+            overview = o.optString("overview"),
+            vote = o.optDouble("vote"),
+            lang = o.optString("lang", ""),
+            genreIds = genIds,
+        )
+        // Restored Japanese animation is anime, full stop (0.55) - a stored
+        // "tv" can never render or route as TV again.
+        return if (t.isAnime && t.type != "anime") t.copy(type = "anime") else t
+    }
 
     private fun progressToJson(x: Progress): JSONObject = JSONObject()
         .put("type", x.type).put("id", x.id).put("name", x.name)

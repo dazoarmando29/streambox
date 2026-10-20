@@ -139,8 +139,8 @@ private val MIRROR_NAMES = mapOf(
     "hls" to "Direct HLS",
 )
 
-private fun mirrorsFor(title: Title, mal: Int?, ani: Int?): List<String> = when (title.type) {
-    "anime" -> buildList {
+private fun mirrorsFor(title: Title, mal: Int?, ani: Int?): List<String> = when {
+    title.type == "anime" || title.isAnime -> buildList {
         if (mal != null || ani != null) add("anipm")
         add("vidrift")
         if (!Regex("doraemon", RegexOption.IGNORE_CASE).containsMatchIn(title.name)) add("vidbolt")
@@ -155,7 +155,9 @@ private fun mirrorsFor(title: Title, mal: Int?, ani: Int?): List<String> = when 
 }
 
 private fun defaultMirror(title: Title, mal: Int?, ani: Int?): String = when {
-    title.type == "anime" -> if (mal != null || ani != null) "anipm" else "vidrift"
+    // Content decides (0.55): Japanese animation rides the anime route
+    // even when a stored label says tv.
+    title.type == "anime" || title.isAnime -> if (mal != null || ani != null) "anipm" else "vidrift"
     // Korean dramas ride VidBolt (0.41): its TV route carries the
     // multi-audio Korean releases and our sheet drives its real tracks.
     title.lang == "ko" -> "vidbolt"
