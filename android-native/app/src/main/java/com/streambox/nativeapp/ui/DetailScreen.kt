@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +71,7 @@ import com.streambox.nativeapp.data.Store
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** The Series Episodes design (the pack's third screen set) for movie,
@@ -903,13 +907,22 @@ fun DetailScreen(
         // ---- More Like This ----
         if (similar.isNotEmpty()) {
             item {
-                Column {
+                // Row-level reveal (0.53): same rect every press, so L/R
+                // navigation stays smooth (per-card reveals zigzagged).
+                val rowBring = remember { BringIntoViewRequester() }
+                val rowScope = rememberCoroutineScope()
+                Column(modifier = Modifier.bringIntoViewRequester(rowBring)) {
                     SectionHeader("More Like This")
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        items(similar.size) { i -> PosterCard(similar[i], onOpen) }
+                        items(similar.size) { i ->
+                            PosterCard(
+                                similar[i], onOpen,
+                                onFocusIn = { rowScope.launch { rowBring.bringIntoView() } },
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(14.dp))
                 }

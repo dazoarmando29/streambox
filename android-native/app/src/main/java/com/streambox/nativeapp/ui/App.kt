@@ -267,6 +267,9 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.53" to listOf(
+        "Smooth TV row navigation - the zigzag and shake are gone",
+    ),
     "0.52" to listOf(
         "Everything is faster: warm boot, instant browses, quicker players and server hops",
         "Motion clarity: judder-free playback matched to your display's refresh",

@@ -926,43 +926,47 @@ fun SectionHeader(label: String, right: String? = null) {
 
 @Composable
 private fun PosterRow(label: String, titles: List<Title>, newIds: Set<Int>, onOpen: (Title) -> Unit) {
-    Column {
+    // Smooth TV navigation (0.53): the reveal is the WHOLE row (header +
+    // posters + names) and the SAME rect on every press, so it is
+    // idempotent - walking L/R never moves the screen. A bottom-edge row
+    // still scrolls fully into view on first focus, names included.
+    val rowBring = remember { BringIntoViewRequester() }
+    val rowScope = rememberCoroutineScope()
+    Column(modifier = Modifier.bringIntoViewRequester(rowBring)) {
         SectionHeader(label)
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(titles, key = { it.type + "-" + it.id }) { t ->
-                PosterCard(t, onOpen, newEp = t.type != "movie" && t.id in newIds)
+                PosterCard(
+                    t, onOpen,
+                    newEp = t.type != "movie" && t.id in newIds,
+                    onFocusIn = { rowScope.launch { rowBring.bringIntoView() } },
+                )
             }
         }
     }
 }
 
 @Composable
-fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false) {
+fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false, onFocusIn: () -> Unit = {}) {
     val plate = RoundedCornerShape(12.dp)
     // The ARTWORK is the button: ring, pop and click all hug the poster.
     // The caption below is decoration, never part of the target (the old
     // whole-column box is what made picking feel like a square box).
-    // Name visibility (0.49) rides bringIntoView instead of the ring: when
-    // the poster takes focus the WHOLE card (artwork + name) scrolls into
-    // view, so bottom-edge rows show their captions and the look stays
-    // artwork-only (0.48's ring-around-everything was reverted by request).
-    val cardBring = remember { BringIntoViewRequester() }
-    val cardScope = rememberCoroutineScope()
+    // Name visibility rides a REVEAL CALLBACK (0.53): the caller decides
+    // what to bring into view. Rows use one idempotent row-level reveal -
+    // the old per-card bringIntoView re-scrolled on every L/R press and
+    // zigzagged against the row's own scroll (the shake).
     Column(
-        modifier = Modifier
-            .width(if (AppEnv.isTv) 170.dp else 128.dp)
-            .bringIntoViewRequester(cardBring),
+        modifier = Modifier.width(if (AppEnv.isTv) 170.dp else 128.dp),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .onFocusChanged {
-                    if (it.isFocused) cardScope.launch { cardBring.bringIntoView() }
-                }
+                .onFocusChanged { if (it.isFocused) onFocusIn() }
                 .focusRing(plate)
                 .clip(plate)
                 .background(Card)
@@ -1047,7 +1051,20 @@ private fun SearchGrid(titles: List<Title>, adultOpen: Boolean, onOpen: (Title) 
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        items(shown, key = { it.type + "-" + it.id }) { t -> PosterCard(t, onOpen) }
+        items(shown, key = { it.type + "-" + it.id }) { t ->
+            // Grid cells keep a per-cell reveal (0.53): a VERTICAL grid
+            // never fights horizontal navigation, and cells in one grid row
+            // share their vertical rect so the reveal is idempotent there
+            // too - names stay visible at the bottom edge.
+            val cellBring = remember { BringIntoViewRequester() }
+            val cellScope = rememberCoroutineScope()
+            Box(modifier = Modifier.bringIntoViewRequester(cellBring)) {
+                PosterCard(
+                    t, onOpen,
+                    onFocusIn = { cellScope.launch { cellBring.bringIntoView() } },
+                )
+            }
+        }
     }
 }
 

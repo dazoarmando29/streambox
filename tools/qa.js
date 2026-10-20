@@ -82,8 +82,8 @@
        above the fold - 'details in full')
     32 poster captions are visible without changing the look: the ring and
        click stay on the ARTWORK only (0.48's ring-around-everything was
-       reverted by request) and the name rides bringIntoView on focus, so
-       bottom-edge rows show their captions
+       reverted by request) and the name rides a reveal callback from the
+       caller, never a per-card scroll inside PosterCard
     33 Continue Watching is tab-scoped: the anime tab never shows movie/TV
        progress and the movie/TV tabs never show the others - Home and My
        List show everything
@@ -115,7 +115,12 @@
        rate from decoded frames and the player matches the display mode to
        an integer multiple of it (24fps on 120Hz runs 5:5 - no 3:2 pulldown)
        at native resolution, highest matching refresh wins (fast motion
-       stays fluid), and the display's own mode is restored on exit */
+       stays fluid), and the display's own mode is restored on exit
+    43 smooth row navigation: poster rows reveal ONCE per row with the same
+       rect every press (idempotent - the old per-card bringIntoView
+       re-scrolled on every L/R press and zigzagged against the row's own
+       scroll); only the vertical search grid keeps per-cell reveals, and
+       the detail More Like This row matches */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -626,15 +631,34 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!hs2) bad("HomeScreen.kt missing - poster caption rules cannot be verified");
   else {
-    const good = /\.bringIntoViewRequester\(cardBring\)/.test(hs2) &&
-      /if \(it\.isFocused\) cardScope\.launch \{ cardBring\.bringIntoView\(\) \}/.test(hs2) &&
+    const good = /onFocusIn: \(\) -> Unit = \{\}/.test(hs2) &&
+      /\.onFocusChanged \{ if \(it\.isFocused\) onFocusIn\(\) \}/.test(hs2) &&
       /\.focusRing\(plate\)\s*\.clip\(plate\)\s*\.background\(Card\)\s*\.clickable \{ onOpen\(t\) \}/.test(hs2) &&
+      !/cardBring/.test(hs2) &&
       !/width\(if \(AppEnv\.isTv\) 170\.dp else 128\.dp\)[\s\S]{0,120}\.focusRing/.test(hs2);
     if (good) {
-      ok("poster look stays artwork-only and the caption rides bringIntoView on focus");
+      ok("poster look stays artwork-only and names ride a reveal callback (per-card scrolling is gone)");
     } else {
-      bad("PosterCard must keep the ring/click on the artwork and reveal the name via bringIntoViewRequester (0.48's whole-card ring is banned)");
+      bad("PosterCard must keep the ring/click on the artwork and reveal names via an onFocusIn callback (0.48's whole-card ring AND per-card bringIntoView are banned)");
     }
+  }
+}
+
+/* ---------- 43. smooth row navigation: idempotent reveals only ---------- */
+{
+  const hsN = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  const dsN = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"), "utf8") : "";
+  if (!hsN || !dsN) bad("HomeScreen.kt/DetailScreen.kt missing - row navigation rules cannot be verified");
+  else if (/val rowBring = remember \{ BringIntoViewRequester\(\) \}/.test(hsN) &&
+           /onFocusIn = \{ rowScope\.launch \{ rowBring\.bringIntoView\(\) \} \}/.test(hsN) &&
+           /val cellBring = remember \{ BringIntoViewRequester\(\) \}/.test(hsN) &&
+           /val rowBring = remember \{ BringIntoViewRequester\(\) \}/.test(dsN) &&
+           !/cardBring/.test(hsN + dsN)) {
+    ok("row reveals are idempotent (row-level in rows, per-cell only in the vertical grid) - L/R stays smooth");
+  } else {
+    bad("poster rows must reveal at ROW level only - per-card bringIntoView zigzags against the row's own scroll (0.53)");
   }
 }
 
