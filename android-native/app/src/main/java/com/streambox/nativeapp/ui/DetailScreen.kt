@@ -1165,9 +1165,13 @@ private fun EpisodeRow(
                     fontSize = if (big) 16.sp else 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    // The ONLY flexible child (0.63): the title eats exactly
+                    // the space left of the status, so the status column is
+                    // pinned to the same right edge on every row. The old
+                    // weight(fill=false) + spacer split let short titles
+                    // shrink and drag the label inward (the scramble).
+                    modifier = Modifier.weight(1f),
                 )
-                Spacer(modifier = Modifier.weight(1f))
                 // Status column (0.62): one right edge for every row -
                 // runtime / NEW / remaining ride a single line, and Coming
                 // Soon keeps its stacked form (label + PH air date +

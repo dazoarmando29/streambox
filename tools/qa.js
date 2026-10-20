@@ -851,10 +851,11 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
            /phCountdown\(ep\.air, tickMs\)/.test(dsP) &&
            /val primary = when \{/.test(dsP) &&
            /Row\(verticalAlignment = Alignment\.Top, modifier = Modifier\.fillMaxWidth\(\)\)/.test(dsP) &&
-           /Column\(horizontalAlignment = Alignment\.End\)/.test(dsP)) {
-    ok("episode status sits in one pinned right column (full-width row) - runtime one line, Coming Soon stacked with the PH countdown");
+           /Column\(horizontalAlignment = Alignment\.End\)/.test(dsP) &&
+           !/weight\(1f, fill = false\)/.test(dsP)) {
+    ok("episode status sits in one pinned right column (full-width row, title the only flexible child)");
   } else {
-    bad("episode rows need a FULL-WIDTH title row (pinned right edge) and the status column (primary + Coming Soon detail) - wrap-content rows scrambled the 24m column");
+    bad("episode rows need the full-width title row with the title as the ONLY weighted child - weight(fill=false)+spacer dragged the label inward on short titles");
   }
 }
 
