@@ -120,7 +120,16 @@
        rect every press (idempotent - the old per-card bringIntoView
        re-scrolled on every L/R press and zigzagged against the row's own
        scroll); only the vertical search grid keeps per-cell reveals, and
-       the detail More Like This row matches */
+       the detail More Like This row matches
+    44 VidBolt subtitle rows carry their command INDEX (engine tracks ++
+       resolve subtitles, matching their H list) - label values made both
+       command paths no-op and captions never appeared
+    45 skip pills speak plainly and honestly: names are "Skip Intro" /
+       "Next Episode" with no countdown suffix, and credits/preview ranges
+       carry a TAIL guard - one open-ended start=0 entry matched every
+       timestamp and the Next Episode pill sat over the S1E1 intro
+    46 server auto-switch leads with VidBolt on every chain and never hops
+       to VidRift (no pause button there - hopping strands the viewer) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -659,6 +668,53 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("row reveals are idempotent (row-level in rows, per-cell only in the vertical grid) - L/R stays smooth");
   } else {
     bad("poster rows must reveal at ROW level only - per-card bringIntoView zigzags against the row's own scroll (0.53)");
+  }
+}
+
+/* ---------- 44. VidBolt subtitles carry their command index ---------- */
+{
+  const psSub = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psSub) bad("PlayerScreen.kt missing - VidBolt subtitle rules cannot be verified");
+  else if (/VBT\.subs\[String\(k\)\]/.test(psSub) &&
+           /String\(nat\.length \+ j\)/.test(psSub) &&
+           /option:'subtitles', value: String\(val\)/.test(psSub) &&
+           /var idx = parseFloat\(val\)/.test(psSub) &&
+           /idx < 0/.test(psSub)) {
+    ok("VidBolt subtitle rows mirror their H index (engine ++ resolve) - picks land and captions show");
+  } else {
+    bad("VidBolt subtitle rows must carry the numeric H index - labels no-op both command paths (0.54)");
+  }
+}
+
+/* ---------- 45. skip pills: plain names + tail-guarded credits ---------- */
+{
+  const psSkip = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psSkip) bad("PlayerScreen.kt missing - skip pill rules cannot be verified");
+  else if (/fun hitAt\(cur: Float, dur: Float/.test(psSkip) &&
+           /fun inTail\(r: IntroDb\.TRange\)/.test(psSkip) &&
+           /inRange\(it\) && inTail\(it\)/.test(psSkip) &&
+           /SkipHit\("credits", it\.end, "Next Episode"\)/.test(psSkip) &&
+           !/hit\.label \+ "  " \+ fmt/.test(psSkip)) {
+    ok("skip pills: plain Skip Intro / Next Episode names and credits only count in the episode tail");
+  } else {
+    bad("skip pills must use plain names (no countdown) and tail-guard credits/preview ranges (bogus start=0 ranges sat over the intro)");
+  }
+}
+
+/* ---------- 46. server auto-switch leads with VidBolt ---------- */
+{
+  const psHop = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psHop) bad("PlayerScreen.kt missing - auto-switch rules cannot be verified");
+  else {
+    const chain = (psHop.match(/private fun fallbackChain[\s\S]*?\n}\n/) || [""])[0];
+    if (chain.includes('"anipm" -> listOf("vidbolt"') &&
+        chain.includes('"cinesrc" -> listOf("vidbolt"') &&
+        chain.includes('"vidzen" -> listOf("vidbolt"') &&
+        !/listOf\("vidrift"/.test(chain)) {
+      ok("auto-switch leads with VidBolt on every chain and never hops to VidRift");
+    } else {
+      bad("fallbackChain must lead with vidbolt and never auto-hop to vidrift (no pause button there)");
+    }
   }
 }
 

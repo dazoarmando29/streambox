@@ -164,16 +164,18 @@ private fun defaultMirror(title: Title, mal: Int?, ani: Int?): String = when {
 
 /** One auto-hop chain when a mirror stalls or serves its own WEBSITE instead
     of the player (AniPM's "Watch now" page is undrivable on TV) - website
-    stuckFallback spirit, first entry allowed for this title wins. */
+    stuckFallback spirit, first entry allowed for this title wins. VidBolt
+    leads EVERY chain (0.54 request) and VidRift never auto-switches in -
+    it has no pause button, so hopping to it just strands the viewer. */
 private fun fallbackChain(m: String): List<String> {
     val extras = listOf("vidcore", "vidsrcsh", "vidsrctw", "vidsrcapi")
     return when (m) {
-        "anipm" -> listOf("vidrift", "vidbolt", "cinesrc") + extras
-        "cinesrc" -> listOf("vidrift", "vidzen", "vidbolt") + extras
-        "vidrift" -> listOf("vidzen", "vidbolt", "cinesrc", "anipm") + extras
-        "vidzen" -> listOf("vidbolt", "vidrift", "cinesrc") + extras
-        "vidbolt" -> listOf("vidrift", "vidzen", "cinesrc") + extras
-        else -> (listOf("vidrift", "vidzen", "cinesrc", "anipm") + extras).filter { it != m }
+        "anipm" -> listOf("vidbolt", "cinesrc", "vidzen") + extras
+        "cinesrc" -> listOf("vidbolt", "vidzen") + extras
+        "vidrift" -> listOf("vidbolt", "vidzen", "cinesrc") + extras
+        "vidzen" -> listOf("vidbolt", "cinesrc") + extras
+        "vidbolt" -> listOf("vidzen", "cinesrc") + extras
+        else -> (listOf("vidbolt", "vidzen", "cinesrc", "anipm") + extras).filter { it != m }
     }
 }
 
@@ -351,19 +353,25 @@ private fun fmt(s: Float): String {
     exists ONLY inside the range. */
 private data class SkipHit(val kind: String, val end: Float?, val label: String)
 
-private fun hitAt(cur: Float, skips: IntroDb.Skips): SkipHit? {
+private fun hitAt(cur: Float, dur: Float, skips: IntroDb.Skips): SkipHit? {
     fun inRange(r: IntroDb.TRange): Boolean =
         cur >= r.start && (r.end == null || cur < r.end!! - 1f)
+    // Tail guard (0.54): a credits/preview range that STARTS at the episode
+    // beginning is bogus data - one open-ended start=0 entry matched every
+    // timestamp and the Next Episode pill sat over the S1E1 intro. Those
+    // ranges only count in the episode's tail.
+    fun inTail(r: IntroDb.TRange): Boolean =
+        r.start > 10f && (dur <= 0f || r.start >= dur * 0.5f)
     skips.recap.firstOrNull(::inRange)?.let {
         return SkipHit("recap", it.end, "Skip Recap")
     }
     skips.intro.firstOrNull(::inRange)?.let {
         return SkipHit("intro", it.end, "Skip Intro")
     }
-    skips.credits.firstOrNull(::inRange)?.let {
-        return SkipHit("credits", it.end, "Next Ep")
+    skips.credits.firstOrNull { inRange(it) && inTail(it) }?.let {
+        return SkipHit("credits", it.end, "Next Episode")
     }
-    skips.preview.firstOrNull(::inRange)?.let {
+    skips.preview.firstOrNull { inRange(it) && inTail(it) }?.let {
         return SkipHit("preview", it.end, "Skip Preview")
     }
     return null
@@ -780,16 +788,32 @@ private val SB_HOOK = """
       try{ for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({type:'mobile-option', option:'audio', value:String(val)}, '*'); }catch(e){}
     },
     vbsub: function(val){
+      // 0.54: value is their H index (engine tracks ++ resolve subtitles) -
+      // numeric only, labels made both the command and the flip no-op (no
+      // captions ever appeared). Their pipeline loads external picks and
+      // their cue overlay draws them (hidden tracks), so only the native
+      // half gets a visibility flip (0.41 rule).
       var idx = parseFloat(val);
-      try{ for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({type:'mobile-option', option:'subtitles', value: val}, '*'); }catch(e){}
+      try{ for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({type:'mobile-option', option:'subtitles', value: String(val)}, '*'); }catch(e){}
       try{
         var fw = window.frames[0];
         var v = fw && fw.document && fw.document.querySelector('video');
-        if (v && v.textTracks && Number.isFinite(idx)) {
-          for (var j = 0; j < v.textTracks.length; j++) {
-            v.textTracks[j].mode = (idx >= 0 && j === idx) ? 'showing' : 'hidden';
-            if (idx < 0) v.textTracks[j].mode = 'disabled';
-          }
+        if (!v || !v.textTracks) return;
+        if (idx < 0) {
+          for (var j = 0; j < v.textTracks.length; j++) v.textTracks[j].mode = 'disabled';
+          return;
+        }
+        if (!Number.isFinite(idx)) return;
+        var extEls = v.querySelectorAll('track');
+        var ext = [];
+        for (var e2 = 0; e2 < extEls.length; e2++) ext.push(extEls[e2].track);
+        var nat = [];
+        for (var i2 = 0; i2 < v.textTracks.length; i2++) {
+          if (ext.indexOf(v.textTracks[i2]) < 0) nat.push(i2);
+        }
+        if (idx < nat.length) {
+          for (var j2 = 0; j2 < v.textTracks.length; j2++) v.textTracks[j2].mode = 'hidden';
+          v.textTracks[nat[idx]].mode = 'showing';
         }
       }catch(e){}
     },
@@ -873,19 +897,33 @@ private val SB_HOOK = """
               if (VBT.qualsByLang[lab].indexOf(qz) < 0) VBT.qualsByLang[lab].push(qz);
             }
           });
+          // VidBolt subtitle ROWS carry their command INDEX (0.54 fix):
+          // setSubtitle indexes H = [engine tracks] ++ [resolve subtitles]
+          // and only reacts to finite numbers - the old label values made
+          // every tap a silent no-op (no captions ever appeared). Mirror H
+          // exactly: native textTracks WITHOUT a <track> element first (the
+          // engine half, their own filter), then the resolve subtitles in
+          // order (the external half their loader serves).
           try {
             var v = fw.document && fw.document.querySelector("video");
             if (v && v.textTracks) {
+              var extEls = v.querySelectorAll("track");
+              var ext = [];
+              for (var e2 = 0; e2 < extEls.length; e2++) ext.push(extEls[e2].track);
+              var nat = [];
               for (var i = 0; i < v.textTracks.length; i++) {
-                var lb = vbLabelOf(v.textTracks[i], i);
-                VBT.subs[lb] = lb;
+                if (ext.indexOf(v.textTracks[i]) < 0) nat.push(i);
               }
+              VBT.subs = {};
+              for (var k = 0; k < nat.length; k++) {
+                VBT.subs[String(k)] = vbLabelOf(v.textTracks[nat[k]], k);
+              }
+              ((s && s.subtitles) || []).forEach(function(n, j){
+                var l = n && n.label;
+                if (l) VBT.subs[String(nat.length + j)] = l;
+              });
             }
           } catch(e2){}
-          ((s && s.subtitles) || []).forEach(function(n){
-            var l = n && n.label;
-            if (l) VBT.subs[l] = l;
-          });
           vbPublish();
         } catch(e2){}
       }
@@ -1503,7 +1541,7 @@ fun PlayerScreen(
     }
 
     val hit = remember(cur, skips, title.type) {
-        if (title.type == "movie") null else hitAt(cur, skips)
+            if (title.type == "movie") null else hitAt(cur, dur, skips)
     }
     // pill vanished under us (range ended): fall back to the video layer
     LaunchedEffect(hit == null) {
@@ -2299,13 +2337,9 @@ fun PlayerScreen(
             // Episode pill.
             if (hit != null) {
                 Row(modifier = Modifier.padding(bottom = 8.dp)) {
-                    val label = when {
-                        hit.kind == "credits" -> hit.label
-                        // Design pack: the pill counts DOWN the range
-                        // ("Skip Intro  2:04"), not the end timestamp.
-                        hit.end != null -> hit.label + "  " + fmt((hit.end - cur).coerceAtLeast(0f))
-                        else -> hit.label
-                    }
+                    // Plain names (0.54 request): "Skip Intro" / "Next
+                    // Episode" - no countdown suffix on the pill.
+                    val label = hit.label
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -2401,7 +2435,7 @@ fun PlayerScreen(
                 if (title.type != "movie") {
                     val nextEp = epsList.firstOrNull { it.n == epNumber + 1 }
                     if (epsList.isEmpty() || (nextEp != null && nextEp.aired)) {
-                        BarPill(if (big) "Next Episode" else "Next Ep", big, icon = Icons.Filled.SkipNext) {
+                        BarPill("Next Episode", big, icon = Icons.Filled.SkipNext) {
                             epNumber += 1
                             save(0f, dur)
                             cur = 0f

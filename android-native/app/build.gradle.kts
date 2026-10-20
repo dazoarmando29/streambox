@@ -19,7 +19,7 @@ android {
         // fresh debug key AND versionCode only moved up, so 'update' errored
         // and older builds could never be reinstalled.)
         versionCode = 50
-        versionName = "0.53"
+        versionName = "0.54"
         // Backend: Cloudflare Worker (catalog proxy + anime mapping).
         // Provider keys live in the Worker as Wrangler secrets - never here.
         buildConfigField("String", "API_BASE", "\"https://streambox-api.dazoarmando.workers.dev\"")
