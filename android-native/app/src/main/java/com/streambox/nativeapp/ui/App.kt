@@ -275,6 +275,9 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.66" to listOf(
+        "Auto-play Next is ours now - the next episode always opens through our own route, even on VidBolt Up Next",
+    ),
     "0.65" to listOf(
         "Next Episode always plays the NEXT episode - on every anime, TV show and K-Drama, on every server",
         "Provider Up Next events can no longer jump your episode to a different video",

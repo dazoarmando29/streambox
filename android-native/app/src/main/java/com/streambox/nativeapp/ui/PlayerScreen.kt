@@ -1255,6 +1255,11 @@ fun PlayerScreen(
     // When WE last navigated the player (0.65): provider episode events
     // inside EP_SYNC_GRACE_MS are settling noise and never adopted.
     var lastLoadAtMs by remember(title.id, title.type) { mutableStateOf(0L) }
+    // 0.66: one Auto-play Next advance per load - the dying page's echoed
+    // ended must never double-step past the episode we just opened.
+    var endedHandled by remember(title.id, title.type) { mutableStateOf(false) }
+    fun pastSyncGrace(): Boolean =
+        System.currentTimeMillis() - lastLoadAtMs >= EP_SYNC_GRACE_MS
     var booted by remember(title.id, title.type, season, episode) { mutableStateOf(false) }
 
     fun load(startAt: Float = 0f) {
@@ -1280,6 +1285,7 @@ fun PlayerScreen(
         val lang = anipmLang
         val q = cinesrcQ
         lastLoadAtMs = System.currentTimeMillis()
+        endedHandled = false
         // Mirrors whose URL carries startAt (vidzen/vidbolt/anipm) keep the
         // position themselves; the rest get one seek when the player reports
         // ready - switching providers never loses your place (task rule).
@@ -1488,7 +1494,7 @@ fun PlayerScreen(
         if (e <= 0) return false
         val s = if (sIn > 0) sIn else epSeason
         if (s == epSeason && e == epNumber) return false
-        if (System.currentTimeMillis() - lastLoadAtMs < EP_SYNC_GRACE_MS) return false
+        if (!pastSyncGrace()) return false
         val count = if (s == epSeason) maxOf(seasonEps, epsList.size)
         else seasonList.firstOrNull { it.n == s }?.count ?: 0
         if (count > 0 && e > count) return false
@@ -2109,7 +2115,26 @@ fun PlayerScreen(
                                 when (t) {
                                     "play" -> playing = true
                                     "pause" -> playing = false
-                                    "ended" -> playing = false
+                                    "ended" -> {
+                                        playing = false
+                                        // 0.66: Auto-play Next TAKES OVER the
+                                        // transition on route mirrors - our
+                                        // advanceEpisode() opens the next
+                                        // episode through the canonical
+                                        // /tv/{id}/{s}/{e} route BEFORE the
+                                        // embed's own Up Next can resolve a
+                                        // different video (the K-Drama
+                                        // auto-next bug). Grace + the one-per-
+                                        // load latch keep the dying page's
+                                        // echoed ended from double-stepping.
+                                        if (autoSkip && title.type != "movie" &&
+                                            mirror != "anipm" && mirror != "hls" &&
+                                            !endedHandled && pastSyncGrace()
+                                        ) {
+                                            endedHandled = true
+                                            advanceEpisode()
+                                        }
+                                    }
                                     "loadedmetadata" -> {
                                         dur = o.optDouble("duration", 0.0).toFloat()
                                         if (pendingSeek >= 0f) {
@@ -2293,23 +2318,31 @@ fun PlayerScreen(
                                     }
                                     "mirror:episode" -> {
                                         // Provider advanced internally (Up
-                                        // Next / picker): sync state only -
-                                        // reloading would double-switch. The
-                                        // adoption door (0.65) validates the
-                                        // pair - raw provider numbers used to
-                                        // stomp state and the next Next
-                                        // Episode opened a different video.
-                                        adoptProviderEpisode(o.optInt("season", -1), o.optInt("episode", -1))
+                                        // Next / picker): adopt through the
+                                        // shared door (0.65) - never raw
+                                        // numbers. 0.66: a REAL switch is
+                                        // re-opened through OUR canonical
+                                        // route URL - the same deterministic
+                                        // /tv/{id}/{s}/{e} our Next Episode
+                                        // uses - because the embed's own Up
+                                        // Next resolved a DIFFERENT video for
+                                        // K-Drama auto-next. An echo of the
+                                        // tracked pair adopts nothing and
+                                        // never reloads.
+                                        if (adoptProviderEpisode(o.optInt("season", -1), o.optInt("episode", -1))) {
+                                            load()
+                                        }
                                     }
                                     "mirror:nextup" -> {
                                         // Their Up Next fired under OUR
                                         // episode list - WE advance (0.65)
                                         // through advanceEpisode(): season-
                                         // end roll + unaired guard, and their
-                                        // raw numbers never steer the load
-                                        // (it used to add +1 to whatever the
-                                        // provider said).
-                                        advanceEpisode()
+                                        // raw numbers never steer the load.
+                                        // 0.66: the same grace as episodechange
+                                        // - a nextup racing our own load or
+                                        // advance must never double-step.
+                                        if (pastSyncGrace()) advanceEpisode()
                                     }
                                     else -> {}
                                 }

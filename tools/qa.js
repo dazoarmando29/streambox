@@ -185,7 +185,15 @@
        method limit (Method too large). Every big layer (topHud, caption,
        paused, bar, episodes, subs) lives in a named composable lambda VAL
        whose body compiles to its own class - never inline big UI trees
-       back into the function */
+       back into the function
+    61 auto-next is OURS (0.66): the embed's own Up Next used to resolve a
+       different video when it auto-advanced (K-Drama VidBolt case) - so
+       Auto-play Next takes the transition on ended (advanceEpisode through
+       the canonical route, one per load, grace-guarded) and any provider
+       switch that IS adopted re-opens through our own load() - the same
+       deterministic /tv/{id}/{s}/{e} as the Next Episode pill. nextup and
+       ended share the EP_SYNC_GRACE_MS guard so racing events never
+       double-step */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1171,6 +1179,22 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     } else {
       bad("every big player layer must live in a named composable lambda VAL (missing: " + missing.join(", ") + ") - trailing Box/Column/Row content lambdas compile INTO PlayerScreen's method and hit the JVM 64KB limit (Method too large)");
     }
+  }
+}
+
+/* ---------- 61. auto-next is ours (canonical route, no double-step) ---------- */
+{
+  const psA = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psA) bad("PlayerScreen.kt missing - auto-next rules cannot be verified");
+  else if (/if \(adoptProviderEpisode\(o\.optInt\("season", -1\), o\.optInt\("episode", -1\)\)\) \{\s*\n\s*load\(\)/.test(psA) &&
+           /"ended" -> \{[\s\S]{0,1600}?\!endedHandled && pastSyncGrace\(\)/.test(psA) &&
+           /endedHandled = true\s*\n\s*advanceEpisode\(\)/.test(psA) &&
+           /if \(pastSyncGrace\(\)\) advanceEpisode\(\)/.test(psA) &&
+           /fun pastSyncGrace\(\): Boolean/.test(psA) &&
+           /endedHandled = false/.test(psA)) {
+    ok("auto-next is ours: provider switches re-open through load(), ended advances once per load through advanceEpisode(), everything grace-guarded");
+  } else {
+    bad("auto-next must never ride the embed's own Up Next - adopted switches reload through load(), ended runs advanceEpisode() once per load (endedHandled + pastSyncGrace), and nextup is grace-guarded");
   }
 }
 
