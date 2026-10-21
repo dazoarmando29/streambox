@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -47,6 +48,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -376,12 +378,21 @@ fun BrowseScreen(
         if (big) {
             // TV shell (design pack): icon rail owns the left edge, the
             // status strip carries device + clock, content flows beside it.
+            // The rail registers itself as the Left-escape target (0.64):
+            // Left out of any row/grid lands on the active tab instead of
+            // dead-ending on the lock or yanking to a chip strip.
+            val railFR = remember { FocusRequester() }
+            DisposableEffect(Unit) {
+                NavEscape.left = railFR
+                onDispose { NavEscape.left = null }
+            }
             Row(modifier = Modifier.fillMaxSize()) {
                 TvRail(
                     section = section,
                     onSection = onSection,
                     onSearchToggle = onSearchToggle,
                     adultOpen = adultOpen,
+                    activeFR = railFR,
                     onAdultToggle = {
                         adultOpen = !adultOpen
                         Store.setAdultOpen(ctx, adultOpen)
@@ -861,14 +872,18 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
 }
 
 /** BROWSE BY GENRE strip (design pack chips): tracked label + pill row,
-    All plus the section's real TMDB genres. A pick drives discover rows. */
+    All plus the section's real TMDB genres. A pick drives discover rows.
+    inset=false drops the built-in 16dp gutters (the Browse grid already
+    pads its content, so the strip would double-indent). */
 @Composable
 private fun GenreBar(
     genres: List<Pair<String, String>>,
     sel: String?,
     big: Boolean,
+    inset: Boolean = true,
     onPick: (String?) -> Unit,
 ) {
+    val gut = if (inset) 16.dp else 0.dp
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             "BROWSE BY GENRE",
@@ -876,12 +891,12 @@ private fun GenreBar(
             fontWeight = FontWeight.Bold,
             fontSize = if (big) 10.sp else 9.sp,
             letterSpacing = 1.5.sp,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp),
+            modifier = Modifier.padding(start = gut, end = gut, top = 10.dp),
         )
         Spacer(modifier = Modifier.height(6.dp))
         LazyRow(
             modifier = Modifier.rowNavLock(),
-            contentPadding = PaddingValues(horizontal = 16.dp),
+            contentPadding = PaddingValues(horizontal = gut),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item { GenreChip("All", sel == null, big) { onPick(null) } }
@@ -987,8 +1002,12 @@ fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false) {
                 .clip(plate)
                 .background(Card),
         ) {
+            val imgCtx = LocalContext.current
+            val imgModel = remember(t.poster) {
+                ImageRequest.Builder(imgCtx).data(t.poster).crossfade(180).build()
+            }
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(180).build(),
+                model = imgModel,
                 contentDescription = t.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
@@ -1041,19 +1060,39 @@ fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false) {
         }
         Text(
             t.name,
-            fontSize = if (AppEnv.isTv) 13.sp else 12.sp,
-            color = Dim,
+            fontSize = if (AppEnv.isTv) 15.sp else 13.sp,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 6.dp),
+            modifier = Modifier.padding(top = 7.dp),
+        )
+        // Meta line (design pack poster captions): year + kind, tracked
+        // uppercase dim - the name above is the readable half.
+        Text(
+            (if (t.year > 0) t.year.toString() + "  \u00B7  " else "") +
+                (if (t.isAnime) "ANIME" else t.type.uppercase()),
+            fontSize = if (AppEnv.isTv) 11.sp else 10.sp,
+            color = Dim,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 2.dp),
         )
     }
 }
 
 /** The Browse tab (0.55, design pack): pick the KIND first (Movies / TV
-    Shows / Anime) so you always know what you are looking at, then genre +
-    year chips over the FULL catalog - years start at 2026 and go below -
-    with the grid paging in everything as you scroll. */
+    Shows / Anime / K-Dramas) so you always know what you are looking at,
+    then genre + year chips over the FULL catalog - years start at 2026 and
+    go below - with the grid paging in everything as you scroll.
+    0.64: ONE scroll surface. The chrome used to sit in a fixed column above
+    a small grid window, and on a 540dp TV that window was barely 200dp tall
+    - every poster row rendered CLIPPED mid-artwork with its name floating
+    over the next row (the "can't see the name and poster" report). The
+    chips now ride as spanning header items of the grid itself, so the page
+    scrolls chrome-and-cards together and each focused card shows whole. */
 @Composable
 private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
     var kind by remember { mutableStateOf("movie") }
@@ -1066,6 +1105,14 @@ private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val years = remember { listOf<Int?>(null) + (2026 downTo 1980).toList() }
+    val kinds = remember {
+        listOf(
+            "movie" to "Movies",
+            "tv" to "TV Shows",
+            "anime" to "Anime",
+            "kdrama" to "K-Dramas",
+        )
+    }
 
     LaunchedEffect(kind) {
         genreSel = null
@@ -1108,89 +1155,89 @@ private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(if (big) 170.dp else 128.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxSize().rowNavLock(),
+    ) {
         // KIND - the big explicit pick (design pack pill trio language).
-        Text(
-            "I WANT TO WATCH",
-            color = Dim,
-            fontWeight = FontWeight.Bold,
-            fontSize = if (big) 12.sp else 10.sp,
-            letterSpacing = 2.sp,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        LazyRow(
-            modifier = Modifier.rowNavLock(),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            val kinds = listOf(
-                "movie" to "Movies",
-                "tv" to "TV Shows",
-                "anime" to "Anime",
-                "kdrama" to "K-Dramas",
-            )
-            items(kinds.size) { i ->
-                PillButton(kinds[i].second, big, accent = kind == kinds[i].first) { kind = kinds[i].first }
+        item(span = { GridItemSpan(maxLineSpan) }, key = "b-kinds") {
+            Column {
+                Text(
+                    "I WANT TO WATCH",
+                    color = Dim,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (big) 12.sp else 10.sp,
+                    letterSpacing = 2.sp,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                LazyRow(
+                    modifier = Modifier.rowNavLock(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(kinds.size) { i ->
+                        PillButton(kinds[i].second, big, accent = kind == kinds[i].first) { kind = kinds[i].first }
+                    }
+                }
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
         // GENRE (real TMDB lists; the anime kind keeps its 16 + ja base).
-        if (genres.isNotEmpty()) {
-            GenreBar(genres.map { it.first.toString() to it.second }, genreSel?.toString(), big) {
-                genreSel = it?.toIntOrNull()
+        item(span = { GridItemSpan(maxLineSpan) }, key = "b-genres") {
+            if (genres.isNotEmpty()) {
+                GenreBar(genres.map { it.first.toString() to it.second }, genreSel?.toString(), big, inset = false) {
+                    genreSel = it?.toIntOrNull()
+                }
             }
         }
         // YEAR - starts at 2026 and goes below (All = everything).
-        Text(
-            "YEAR",
-            color = Dim,
-            fontWeight = FontWeight.Bold,
-            fontSize = if (big) 12.sp else 10.sp,
-            letterSpacing = 2.sp,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        LazyRow(
-            modifier = Modifier.rowNavLock(),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(years.size) { i ->
-                val y = years[i]
-                GenreChip(if (y == null) "All" else y.toString(), yearSel == y, big) { yearSel = y }
+        item(span = { GridItemSpan(maxLineSpan) }, key = "b-years") {
+            Column {
+                Text(
+                    "YEAR",
+                    color = Dim,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (big) 12.sp else 10.sp,
+                    letterSpacing = 2.sp,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                LazyRow(
+                    modifier = Modifier.rowNavLock(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(years.size) { i ->
+                        val y = years[i]
+                        GenreChip(if (y == null) "All" else y.toString(), yearSel == y, big) { yearSel = y }
+                    }
+                }
             }
         }
-        Spacer(modifier = Modifier.height(6.dp))
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                results.isEmpty() && busy -> Box(
-                    modifier = Modifier.fillMaxSize(),
+        when {
+            results.isEmpty() && busy -> item(span = { GridItemSpan(maxLineSpan) }, key = "b-busy") {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(260.dp),
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator(color = Accent) }
-                results.isEmpty() -> Box(
-                    modifier = Modifier.fillMaxSize(),
+            }
+            results.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }, key = "b-empty") {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(220.dp),
                     contentAlignment = Alignment.Center,
                 ) { Text("Nothing found - try another genre or year", color = Dim, fontFamily = BodyFont) }
-                else -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(if (big) 170.dp else 128.dp),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxSize().rowNavLock(),
-                ) {
-        items(results, key = { "b-" + it.type + "-" + it.id }) { t ->
+            }
+            else -> {
+                items(results, key = { "b-" + it.type + "-" + it.id }) { t ->
                     PosterCard(t, onOpen)
                 }
-                    if (hasMore) {
-                        item {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().padding(18.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                LaunchedEffect(Unit) { loadMore() }
-                                CircularProgressIndicator(color = Accent, modifier = Modifier.size(26.dp))
-                            }
+                if (hasMore) {
+                    item(span = { GridItemSpan(maxLineSpan) }, key = "b-more") {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(18.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            LaunchedEffect(Unit) { loadMore() }
+                            CircularProgressIndicator(color = Accent, modifier = Modifier.size(26.dp))
                         }
                     }
                 }
@@ -1668,6 +1715,7 @@ private fun TvRail(
     onSection: (Section) -> Unit,
     onSearchToggle: () -> Unit,
     adultOpen: Boolean,
+    activeFR: FocusRequester,
     onAdultToggle: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -1720,6 +1768,8 @@ private fun TvRail(
                 on = s == section,
                 expanded = expanded,
                 onFocus = onRailFocus,
+                // The active tab is the Left-escape landing pad (0.64).
+                fr = if (s == section) activeFR else null,
             ) { onSection(s) }
             Spacer(modifier = Modifier.height(5.dp))
         }
@@ -1743,6 +1793,7 @@ private fun RailBtn(
     on: Boolean,
     expanded: Boolean,
     tint: Color = if (on) Ink else Dim,
+    fr: FocusRequester? = null,
     onFocus: (Boolean) -> Unit,
     onClick: () -> Unit,
 ) {
@@ -1750,6 +1801,7 @@ private fun RailBtn(
         Box(
             modifier = Modifier
                 .size(46.dp)
+                .then(if (fr != null) Modifier.focusRequester(fr) else Modifier)
                 .onFocusChanged { onFocus(it.isFocused) }
                 .focusRingCircle(pop = false)
                 .background(if (on) Accent else Color.Transparent, CircleShape)
@@ -1835,6 +1887,15 @@ private fun TvLegend() {
             color = Color(0xFF3B4A63),
             fontWeight = FontWeight.Bold,
             fontSize = 10.sp,
+            letterSpacing = 1.5.sp,
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        // Finishing touch (0.64): the builder's nickname, bottom right.
+        Text(
+            "dazzo",
+            color = Accent,
+            fontWeight = FontWeight.Black,
+            fontSize = 12.sp,
             letterSpacing = 1.5.sp,
         )
     }

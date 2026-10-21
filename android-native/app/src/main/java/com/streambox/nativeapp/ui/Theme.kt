@@ -154,17 +154,26 @@ fun Modifier.focusRingCircle(pop: Boolean = true): Modifier = composed {
         }
 }
 
-/** Row navigation lock (0.57, the zigzag fix): Left/Right may never LEAVE
-    a card row or chip rail. The spatial search used to yank focus up to the
-    chip strip and back down while walking a row (right goes up, right again
-    goes down) - every screen with a chip rail had it, Home (no rail) never
-    did. Up/Down still walk between rails and rows freely. */
+/** Left-escape target for the TV shell (0.64): the nav rail registers its
+    active tab here while it is composed. Left leaving a row/grid then lands
+    on the rail DETERMINISTICALLY - a plain spatial search from a card edge
+    can only find chip strips above (the old yank). Null everywhere else
+    (phone, detail, player sheets) where Left stays locked. */
+object NavEscape {
+    var left: FocusRequester? = null
+}
+
+/** Row navigation lock (0.57, the zigzag fix): Right may never LEAVE a card
+    row or chip rail (the spatial search yanked focus up to the chip strip
+    and back down - every screen with a chip rail had it, Home never did).
+    Left leaves ONLY to the registered TV nav rail (0.64: "Left goes to the
+    menu") - never a free spatial search. Up/Down walk freely. */
 fun Modifier.rowNavLock(): Modifier = focusProperties {
     exit = { d ->
-        if (d == FocusDirection.Left || d == FocusDirection.Right) {
-            FocusRequester.Cancel
-        } else {
-            FocusRequester.Default
+        when (d) {
+            FocusDirection.Left -> NavEscape.left ?: FocusRequester.Cancel
+            FocusDirection.Right -> FocusRequester.Cancel
+            else -> FocusRequester.Default
         }
     }
 }

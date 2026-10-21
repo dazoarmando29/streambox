@@ -141,9 +141,11 @@
        Soon keeps its stacked PH air date + countdown
     51 Korean dramas live in their own KDrama tab beside Anime - the TV
        Shows strip never carries a K-Drama chip again
-    52 the zigzag lock: Left/Right may never leave a card row or chip rail
-       (focus used to yank up to the chips and back - every screen with a
-       rail had it while Home never did); Up/Down stay free
+    52 the zigzag lock: Right may never leave a card row or chip rail (focus
+       used to yank up to the chips and back - every screen with a rail had
+       it while Home never did); Left leaves ONLY to the registered TV nav
+       rail (NavEscape) so the menu is always one press away; Up/Down stay
+       free
     53 one All chip per genre strip (GenreBar prepends it) and a compact
        rail so every section tab fits on screen (Browse was falling off)
     54 anime season routing: split franchises resolve the season's OWN
@@ -153,7 +155,20 @@
        per-season number - season 2 episode 1 played S1E1
     55 next episode never steps past a season's real end (blind +1 built
        dead routes on finales) and never into an unaired episode - a
-       finale rolls to the next season's E1 when it exists */
+       finale rolls to the next season's E1 when it exists
+    56 K-drama VidBolt defaults: Korean dramas play the TAGALOG dub by
+       default (Korean when the release carries none) and ride VidBolt's
+       OWN English subtitles - the Wyzie/TSDB/BetaSeries chain never
+       auto-loads or restores over them, and a manual pick stands the
+       auto-behavior down
+    57 Left escapes rows/grids to the TV nav rail: rowNavLock's Left exit
+       resolves to the NavEscape target the shell registers (the active
+       tab) instead of dead-ending or yanking to a chip strip - Right stays
+       locked so the zigzag can never return
+    58 the Browse tab is ONE scroll surface (chrome rides the grid as
+       spanning headers - the fixed chrome + 200dp grid window clipped every
+       poster row mid-artwork on TV), poster names render white/bold with a
+       meta line, and the builder's "dazzo" credit sits bottom right */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -886,11 +901,12 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   const uses = ((hsZ + dsZ).match(/rowNavLock\(\)/g) || []).length;
   if (!thZ || !hsZ || !dsZ) bad("Theme/HomeScreen/DetailScreen missing - zigzag lock cannot be verified");
   else if (/fun Modifier\.rowNavLock\(\)/.test(thZ) &&
-           /FocusDirection\.Left \|\| d == FocusDirection\.Right/.test(thZ) &&
+           /FocusDirection\.Right -> FocusRequester\.Cancel/.test(thZ) &&
+           /FocusDirection\.Left -> NavEscape\.left \?: FocusRequester\.Cancel/.test(thZ) &&
            uses >= 10) {
-    ok("zigzag lock: L/R never leaves a card row or chip rail (applied at " + uses + " containers)");
+    ok("zigzag lock: Right never leaves a card row or chip rail (applied at " + uses + " containers); Left escapes to the TV rail");
   } else {
-    bad("rowNavLock must exist in Theme.kt and wrap every card row and chip rail (L/R used to yank up to the chips)");
+    bad("rowNavLock must exist in Theme.kt and wrap every card row and chip rail (Right locked, Left only via NavEscape)");
   }
 }
 
@@ -1043,6 +1059,63 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("motion clarity: content fps measured and matched to an integer-multiple display mode, restored on exit");
   } else {
     bad("motion clarity requires the rVFC fps sampler + preferredDisplayModeId matching + restore-on-exit");
+  }
+}
+
+/* ---------- 56. K-drama VidBolt defaults ---------- */
+{
+  const psK = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psK) bad("PlayerScreen.kt missing - K-drama defaults cannot be verified");
+  else if (/var koAuto by remember \{ mutableStateOf\(title\.lang == "ko"\) \}/.test(psK) &&
+           /contains\("tagalog", true\)/.test(psK) &&
+           /contains\("korean", true\)/.test(psK) &&
+           /l\.contains\("english"\) \|\| l == "eng"/.test(psK) &&
+           /if \(title\.lang == "ko"\) return@LaunchedEffect/.test(psK) &&
+           /K-Dramas use the provider's own English subtitles/.test(psK) &&
+           /window\.__sb && window\.__sb\.vbaudio\(/.test(psK) &&
+           /window\.__sb && window\.__sb\.vbsub\(-1\)/.test(psK)) {
+    ok("K-drama defaults: Tagalog audio (Korean fallback) + VidBolt's own English subs, our chain stays off");
+  } else {
+    bad("K-dramas must default to the Tagalog dub (Korean fallback) and ride VidBolt's English subs - our chain never auto-loads over them");
+  }
+}
+
+/* ---------- 57. Left escapes to the TV nav rail ---------- */
+{
+  const thL = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"), "utf8") : "";
+  const hsL = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  if (!thL || !hsL) bad("Theme/HomeScreen missing - Left-escape rules cannot be verified");
+  else if (/object NavEscape \{/.test(thL) &&
+           /FocusDirection\.Left -> NavEscape\.left \?: FocusRequester\.Cancel/.test(thL) &&
+           /FocusDirection\.Right -> FocusRequester\.Cancel/.test(thL) &&
+           /NavEscape\.left = railFR/.test(hsL) &&
+           /onDispose \{ NavEscape\.left = null \}/.test(hsL) &&
+           /fr = if \(s == section\) activeFR else null/.test(hsL)) {
+    ok("Left escapes rows/grids to the registered TV rail (never a yank to the chips); Right stays locked");
+  } else {
+    bad("rowNavLock Left must land on the TV nav rail via NavEscape (registered in BrowseScreen, targeting the active tab); Right stays Cancel");
+  }
+}
+
+/* ---------- 58. Browse one scroll surface + readable captions + dazzo ---------- */
+{
+  const hsG = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+  if (!hsG) bad("HomeScreen.kt missing - Browse layout rules cannot be verified");
+  else if (/GridItemSpan\(maxLineSpan\)/.test(hsG) &&
+           /"b-kinds"/.test(hsG) &&
+           /"b-years"/.test(hsG) &&
+           /"b-more"/.test(hsG) &&
+           /LaunchedEffect\(Unit\) \{ loadMore\(\) \}/.test(hsG) &&
+           /inset = false/.test(hsG) &&
+           /t\.name,\s*\n\s*fontSize = if \(AppEnv\.isTv\) 15\.sp else 13\.sp,\s*\n\s*color = Color\.White,/.test(hsG) &&
+           /"dazzo",/.test(hsG) &&
+           !/remember\([^)]*\) \{\s*ImageRequest\.Builder\(LocalContext\.current/.test(hsG)) {
+    ok("Browse is one scroll surface (spanning chip headers), poster names render white/bold, and dazzo sits bottom right");
+  } else {
+    bad("Browse must ride ONE LazyVerticalGrid (spanning headers, no clipped grid window), with white/bold poster names, the dazzo credit in TvLegend, and no LocalContext.current inside remember {} (K2 composable-context error)");
   }
 }
 

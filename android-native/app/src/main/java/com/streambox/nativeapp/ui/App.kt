@@ -275,6 +275,11 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.64" to listOf(
+        "K-Dramas play the Tagalog dub by default (Korean when there is none) with VidBolt's own English subtitles",
+        "Browse is redesigned - every poster and name readable on one clean scroll",
+        "Left now reaches the menu from anywhere in the rows and grids",
+    ),
     "0.63" to listOf(
         "Episode labels truly line up now - one right edge for every row",
     ),

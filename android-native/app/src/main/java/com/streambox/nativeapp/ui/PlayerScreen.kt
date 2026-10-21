@@ -1146,6 +1146,15 @@ fun PlayerScreen(
     var vbSubs by remember { mutableStateOf(listOf<Pair<String, String>>()) }
     var vbAudioSel by remember { mutableStateOf("") }
     var vbSubSel by remember { mutableStateOf("") }
+    // K-drama house rules (0.64): Korean dramas on VidBolt play the TAGALOG
+    // dub by default (Korean when the release carries no Tagalog track) and
+    // always ride VidBolt's OWN English subtitles - our Wyzie/TSDB/
+    // BetaSeries chain never loads over them. The auto-pick aims at the
+    // preferred track whenever tracks republish (Tagalog can surface late)
+    // until the viewer picks manually - then it stands down.
+    var koAuto by remember { mutableStateOf(title.lang == "ko") }
+    var koAudioCmd by remember { mutableStateOf("") }
+    var koSubCmd by remember { mutableStateOf("") }
     // VidBolt quality (0.50): provider-reported labels only. Rows either
     // come from the player's own mobile-panel delegation (option + value
     // echoed verbatim) or from its resolve files per language - never an
@@ -1161,6 +1170,10 @@ fun PlayerScreen(
         }
         subs = SubFile(name, lang, cues)
         subMsg = "Loaded " + cues.size + " lines."
+        // A manual file on a K-drama stands the VidBolt auto-pick down (the
+        // clear of the provider captions rides the subs watcher below -
+        // cmd() lives further down this body).
+        if (title.lang == "ko") koAuto = false
     }
 
     val pickSub = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1582,6 +1595,14 @@ fun PlayerScreen(
     }
     LaunchedEffect(showSubs, wyzLang, title.id, epSeason, epNumber, bsTick) {
         if (showSubs) {
+            // K-dramas ride the provider's own English subtitles (0.64):
+            // our Wyzie/TSDB/BetaSeries chain never runs over them.
+            if (title.lang == "ko") {
+                wyzItems = listOf()
+                wyzBusy = false
+                subMsg = "K-Dramas use the provider's own English subtitles - not our chain."
+                return@LaunchedEffect
+            }
             wyzBusy = true
             subMsg = ""
             val (note, items) = fetchSubChain()
@@ -1603,6 +1624,9 @@ fun PlayerScreen(
     // its embed's own captioning (a Faulconer dub has no business carrying
     // forced English text).
     LaunchedEffect(title.id, epSeason, epNumber) {
+        // K-dramas ride the provider's own English subtitles (0.64): our
+        // chain never auto-loads or restores over them.
+        if (title.lang == "ko") return@LaunchedEffect
         val pick = withContext(Dispatchers.IO) {
             runCatching { Store.subPick(ctx, title.type, title.id, epSeason, epNumber) }.getOrNull()
         }
@@ -1629,6 +1653,16 @@ fun PlayerScreen(
                 ctx, title.type, title.id, epSeason, epNumber,
                 SubPick(first.url, first.release, lang),
             )
+        }
+    }
+
+    // K-drama + a manual file: clear the provider captions so two caption
+    // layers never stack. Watches vbSubSel too - a track republish that
+    // re-selects English gets cleared again (0.64).
+    LaunchedEffect(subs, title.lang, mirror, vbSubSel) {
+        if (title.lang == "ko" && subs != null && mirror == "vidbolt" && vbSubSel != "-1") {
+            vbSubSel = "-1"
+            cmd("window.__sb && window.__sb.vbsub(-1)")
         }
     }
 
@@ -2149,6 +2183,36 @@ fun PlayerScreen(
                                         vbQualsByLang = qMap
                                         val qSel = o.optString("qualSel", "")
                                         if (qSel.isNotBlank() && qSel != "null") vbQualSel = qSel
+                                        // K-drama defaults (0.64): Tagalog
+                                        // dub first, Korean when the release
+                                        // carries none, and VidBolt's OWN
+                                        // English subtitles (never ours).
+                                        // Tracks merge in waves (mobile-panel
+                                        // + resolve), so the aim re-runs per
+                                        // publish - Tagalog surfacing late
+                                        // upgrades a Korean pick. A manual
+                                        // pick (koAuto=false) stands down.
+                                        if (koAuto && mirror == "vidbolt") {
+                                            val au = vbAudios.firstOrNull {
+                                                it.first.contains("tagalog", true) ||
+                                                    it.first.contains("filipino", true)
+                                            } ?: vbAudios.firstOrNull { it.first.contains("korean", true) }
+                                            if (au != null && koAudioCmd != au.second) {
+                                                koAudioCmd = au.second
+                                                vbAudioSel = au.second
+                                                cmd("window.__sb && window.__sb.vbaudio('" + au.second.replace("'", "") + "')")
+                                            }
+                                            val en = vbSubs.firstOrNull {
+                                                val l = it.first.lowercase()
+                                                l.contains("english") || l == "eng" || l == "en" ||
+                                                    l.startsWith("en-") || l.startsWith("en ")
+                                            }
+                                            if (en != null && koSubCmd != en.second) {
+                                                koSubCmd = en.second
+                                                vbSubSel = en.second
+                                                cmd("window.__sb && window.__sb.vbsub('" + en.second.replace("'", "") + "')")
+                                            }
+                                        }
                                     }
                                     "anipm:autoplay" -> {
                                         // Real playback kick - NEVER the
@@ -3054,6 +3118,7 @@ fun PlayerScreen(
                                             active = on,
                                             big = big,
                                         ) {
+                                            koAuto = false
                                             vbAudioSel = value
                                             cmd("window.__sb && window.__sb.vbaudio('" + value.replace("'", "") + "')")
                                         }
@@ -3075,27 +3140,31 @@ fun PlayerScreen(
                         Column(modifier = Modifier.weight(1.15f)) {
                             PanelColTitle("SUBTITLES")
                             Spacer(modifier = Modifier.height(6.dp))
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                items(SUBLANGS.size) { i ->
-                                    val (code, label) = SUBLANGS[i]
-                                    val on = code == wyzLang
-                                    Box(
-                                        modifier = Modifier
-                                            .focusRing(RoundedCornerShape(50), pop = false)
-                                            .background(if (on) Accent else Pill, RoundedCornerShape(50))
-                                            .clickable { wyzLang = code }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    ) {
-                                        Text(
-                                            label,
-                                            color = if (on) Ink else Color.White,
-                                            fontWeight = FontWeight.Black,
-                                            fontSize = 12.sp,
-                                        )
+                            // K-dramas (0.64): no chain chrome at all - the
+                            // provider's own English tracks below do the work.
+                            if (title.lang != "ko") {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    items(SUBLANGS.size) { i ->
+                                        val (code, label) = SUBLANGS[i]
+                                        val on = code == wyzLang
+                                        Box(
+                                            modifier = Modifier
+                                                .focusRing(RoundedCornerShape(50), pop = false)
+                                                .background(if (on) Accent else Pill, RoundedCornerShape(50))
+                                                .clickable { wyzLang = code }
+                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        ) {
+                                            Text(
+                                                label,
+                                                color = if (on) Ink else Color.White,
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = 12.sp,
+                                            )
+                                        }
                                     }
                                 }
+                                Spacer(modifier = Modifier.height(8.dp))
                             }
-                            Spacer(modifier = Modifier.height(8.dp))
                             if (subMsg.isNotEmpty()) {
                                 Text(subMsg, color = Amber, fontFamily = BodyFont, fontSize = 11.sp)
                                 Spacer(modifier = Modifier.height(6.dp))
@@ -3125,36 +3194,38 @@ fun PlayerScreen(
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                             }
-                            if (wyzBusy) {
-                                CircularProgressIndicator(
-                                    color = Accent,
-                                    modifier = Modifier.padding(10.dp).size(24.dp),
-                                )
-                            } else {
-                                wyzItems.take(10).forEach { item ->
-                                    OptRow(
-                                        label = item.release,
-                                        detail = listOf(
-                                            item.display,
-                                            item.origin,
-                                            if (item.downloads > 0) item.downloads.toString() else "",
-                                            if (item.cc) "CC" else "",
-                                        ).filter { it.isNotEmpty() }.joinToString("  -  "),
-                                        chip = "",
-                                        active = false,
-                                        big = big,
-                                    ) { loadFrom(item) }
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                }
-                                if (wyzItems.isEmpty()) {
-                                    OptRow(
-                                        label = "Try backups (TSDB + BetaSeries)",
-                                        detail = "Same title, different releases",
-                                        chip = "",
-                                        active = false,
-                                        big = big,
-                                    ) { bsTick += 1 }
-                                    Spacer(modifier = Modifier.height(6.dp))
+                            if (title.lang != "ko") {
+                                if (wyzBusy) {
+                                    CircularProgressIndicator(
+                                        color = Accent,
+                                        modifier = Modifier.padding(10.dp).size(24.dp),
+                                    )
+                                } else {
+                                    wyzItems.take(10).forEach { item ->
+                                        OptRow(
+                                            label = item.release,
+                                            detail = listOf(
+                                                item.display,
+                                                item.origin,
+                                                if (item.downloads > 0) item.downloads.toString() else "",
+                                                if (item.cc) "CC" else "",
+                                            ).filter { it.isNotEmpty() }.joinToString("  -  "),
+                                            chip = "",
+                                            active = false,
+                                            big = big,
+                                        ) { loadFrom(item) }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                    }
+                                    if (wyzItems.isEmpty()) {
+                                        OptRow(
+                                            label = "Try backups (TSDB + BetaSeries)",
+                                            detail = "Same title, different releases",
+                                            chip = "",
+                                            active = false,
+                                            big = big,
+                                        ) { bsTick += 1 }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                    }
                                 }
                             }
                             OptRow(
@@ -3211,6 +3282,7 @@ fun PlayerScreen(
                                     active = vbSubSel.isEmpty() || vbSubSel == "-1",
                                     big = big,
                                 ) {
+                                    koAuto = false
                                     vbSubSel = "-1"
                                     cmd("window.__sb && window.__sb.vbsub(-1)")
                                 }
@@ -3224,6 +3296,7 @@ fun PlayerScreen(
                                         active = on,
                                         big = big,
                                     ) {
+                                        koAuto = false
                                         vbSubSel = value
                                         cmd("window.__sb && window.__sb.vbsub('" + value.replace("'", "") + "')")
                                     }
