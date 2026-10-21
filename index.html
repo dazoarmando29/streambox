@@ -125,6 +125,11 @@
     background: rgba(0, 240, 181, .18); color: #00F0B5; font-weight: 700;
     border: 1px solid rgba(0, 240, 181, .35); box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
   }
+  /* remote-cursor button is TV furniture (a mouse IS the pointer elsewhere):
+     hidden outside TV so it can never sit over the footer legend. The
+     watch-on hide (below) still wins on TV while playing. */
+  #cursorBtn { display: none !important; }
+  body.tv-mode #cursorBtn, body.tv-app #cursorBtn { display: inline-flex !important; align-items: center; justify-content: center; }
   /* Top 10 rank numerals (design pack): giant outline digits behind posters */
   .rank-number {
     font-family: "Space Grotesk", sans-serif;
@@ -666,7 +671,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 199; // bump every release alongside version.txt
+  const BUILD_NUM = 200; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -822,7 +827,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <div id="listGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
   </main>
   <!-- FOOTER: brand + credits (text-only, never enters remote tab order) -->
-  <footer class="px-4 md:px-10 pr-20 pb-10 pt-2 text-[11px] text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-1">
+  <footer class="px-4 md:px-10 pb-10 pt-2 text-[11px] text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-1" style="padding-right: 88px">
     <span class="font-black text-sm text-gray-400">Stream<span class="text-teal-400">Box</span> <span id="footVer"></span></span>
     <span>•</span><span>Catalog: TMDB</span><span>•</span><span>Playback: CineSrc + mirrors</span><span>•</span><span>Subs: Wyzie</span>
     <span class="flex-1"></span>

@@ -1009,11 +1009,13 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
     bad("a floating scroll-to-top button survives -- it stacked over the remote-cursor control and covered the dazzo legend");
   else ok("no floating scroll-to-top button");
   const foot = html.match(/<footer[\s\S]*?<\/footer>/);
-  if (foot && /pr-20/.test(foot[0]) && /dazzo/.test(foot[0])) ok("footer keeps right-edge clearance for the dazzo legend");
-  else bad("the footer must carry right-edge clearance (pr-*) so fixed controls never cover the dazzo credit");
-  const cur = html.match(/id="cursorBtn"/);
-  if (cur) ok("the TV remote-cursor control stays (functional, not decorative)");
-  else bad("cursorBtn must remain -- it is the TV remote-cursor control");
+  if (foot && /padding-right:\s*\d\dpx/.test(foot[0]) && /dazzo/.test(foot[0])) ok("footer keeps inline right-edge clearance for the dazzo legend");
+  else bad("the footer must carry inline padding-right clearance (class padding loses to md:px-*) so fixed controls never cover dazzo");
+  if (/#cursorBtn \{ display: none !important; \}/.test(html) && /body\.tv-mode #cursorBtn[\s\S]{0,120}inline-flex/.test(html))
+    ok("remote-cursor button shows on TV only (a mouse is the pointer elsewhere)");
+  else bad("cursorBtn must hide outside TV -- on desktop it sat over the dazzo legend");
+  if (/body\.watch-on #cursorBtn/.test(html)) ok("the watch-on cursor hide survives");
+  else bad("the body.watch-on #cursorBtn hide must stay (no cursor button over playback)");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
