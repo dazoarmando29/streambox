@@ -575,7 +575,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 186; // bump every release alongside version.txt
+  const BUILD_NUM = 187; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1022,6 +1022,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <button onclick="subOffsetStep(0.5)" aria-label="Captions later" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">+</button>
         </div>
       </div>
+      <div id="subStyle" class="mt-3"></div>
+      <div id="subCapPreview" class="mt-2 rounded-xl bg-black/60 border border-white/10 py-2 px-4 text-center">Caption preview</div>
       <p class="text-[11px] text-gray-500 mt-2">Search Wyzie above (built-in key works instantly; your own key = guaranteed quota), load it once — it sticks to that title. Fixes missing subs, wrong language, and bad timing.</p>
       <p class="text-xs text-gray-400 font-bold mt-5 mb-2">PLAYER SUBTITLES</p>
       <p class="text-xs text-gray-400 leading-relaxed">Our player is subtitles-safe: captions show automatically. To change language or toggle tracks, briefly show the video's own buttons, use its <b>CC / &#x2699; &#x2192; Subtitles</b> menu, then hide them again — position is kept.</p>
@@ -1090,14 +1092,17 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <h2 id="avTitle" class="text-xl font-black">Audio &amp; Subtitles</h2>
       <button onclick="closePanels()" aria-label="Close audio and subtitles" class="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-lg">&#x2715;</button>
     </div>
+    <p id="avHServers" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">SERVERS</p>
+    <div id="avServers" class="flex flex-wrap gap-2 mb-5"></div>
     <p id="avHAudio" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">AUDIO</p>
-    <div id="avAudio" class="flex gap-2 mb-5"></div>
+    <div id="avAudio" class="flex flex-wrap gap-2 mb-5"></div>
     <p id="avHSubs" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">SUBTITLES</p>
     <div id="avSubs" class="flex flex-wrap gap-2 mb-5"></div>
     <p id="avHQuality" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">QUALITY</p>
     <div id="avQuality" class="flex flex-wrap gap-2 mb-5"></div>
-    <p id="avHServers" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">SERVERS</p>
-    <div id="avServers" class="flex flex-wrap gap-2"></div>
+    <p id="avHStyle" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">STYLING &amp; SYNC</p>
+    <div id="avStyle" class="mb-3"></div>
+    <div id="avCapPreview" class="rounded-xl bg-black/60 border border-white/10 py-3 px-4 text-center mb-4">Caption preview</div>
   </div>
 </div>
 
@@ -4470,7 +4475,11 @@ function setTab(name){
     const b = document.getElementById("tab" + t[0].toUpperCase() + t.slice(1));
     b.className = "flex-1 py-2 rounded-full " + (t === name ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
   });
-  if (name === "subs") { paintWyzLang(); wyzSearch(); }
+  if (name === "subs") {
+    paintWyzLang(); wyzSearch();
+    renderStyleControls(document.getElementById("subStyle"), false);
+    paintCapStyleUI();
+  }
 }
 /* speed presets */
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -5694,6 +5703,106 @@ function subStatus(msg){
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = msg;
 }
+/* Caption style (house rule: 12-26sp / white-yellow-cyan / bg None-Semi-Solid
+   with live preview): ONE state shared by the Settings Subs tab and the A/V
+   sheet STYLING & SYNC column. Size is sp (TV renders 1.35x so the 12-26
+   ladder reads right from the couch). */
+let capStyle = { size: 18, color: "white", bg: "none" };
+try {
+  const cs = JSON.parse(localStorage.getItem("streambox_cap_style") || "{}");
+  if (cs && typeof cs === "object") {
+    if (cs.size >= 12 && cs.size <= 26) capStyle.size = cs.size;
+    if (["white", "yellow", "cyan"].includes(cs.color)) capStyle.color = cs.color;
+    if (["none", "semi", "solid"].includes(cs.bg)) capStyle.bg = cs.bg;
+  }
+} catch(e){}
+const CAP_COLORS = ["white", "yellow", "cyan"];
+const CAP_BGS = ["none", "semi", "solid"];
+function persistCapStyle(){
+  try { localStorage.setItem("streambox_cap_style", JSON.stringify(capStyle)); } catch(e){}
+}
+function capColorHex(){
+  return capStyle.color === "yellow" ? "#fde047" : capStyle.color === "cyan" ? "#22d3ee" : "#ffffff";
+}
+function applyCapStyle(el, scale){
+  if (!el) return;
+  let sc = scale;
+  if (sc == null) {
+    sc = (document.body.classList.contains("tv-mode") || document.body.classList.contains("tv-app")) ? 1.35 : 1;
+  }
+  el.style.fontSize = Math.round((capStyle.size || 18) * sc) + "px";
+  el.style.color = capColorHex();
+  el.style.background = capStyle.bg === "solid" ? "rgba(0,0,0,0.92)"
+    : capStyle.bg === "semi" ? "rgba(0,0,0,0.5)" : "transparent";
+  el.style.borderRadius = "6px";
+  el.style.padding = capStyle.bg === "none" ? "0 8%" : "2px 8px";
+}
+function capSizeStep(d){
+  capStyle.size = Math.min(26, Math.max(12, (capStyle.size || 18) + d)); // 12-26sp ladder
+  persistCapStyle(); paintCaps(true); paintCapStyleUI();
+}
+function capColorStep(){
+  const i = CAP_COLORS.indexOf(capStyle.color);
+  capStyle.color = CAP_COLORS[(i + 1) % CAP_COLORS.length];
+  persistCapStyle(); paintCaps(true); paintCapStyleUI();
+}
+function capBgStep(){
+  const i = CAP_BGS.indexOf(capStyle.bg);
+  capStyle.bg = CAP_BGS[(i + 1) % CAP_BGS.length];
+  persistCapStyle(); paintCaps(true); paintCapStyleUI();
+}
+function renderStyleControls(box, withSync){
+  // shared STYLING & SYNC builder (closure-wired, no ids: safe to render in
+  // two surfaces at once). Sync rides subFile.offset like the Subs tab.
+  if (!box) return;
+  box.innerHTML = `
+    <div class="flex flex-wrap items-center gap-2 mb-2">
+      <span class="text-xs text-gray-400">Size</span>
+      <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
+        <button data-cap="size-" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none" aria-label="Smaller captions">A-</button>
+        <span data-cap="sizeLabel" class="text-xs font-bold min-w-[48px] text-center"></span>
+        <button data-cap="size+" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none" aria-label="Bigger captions">A+</button>
+      </div>
+      <span class="text-xs text-gray-400">Color</span>
+      <button data-cap="color" class="h-9 px-3 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold"></button>
+      <span class="text-xs text-gray-400">Bg</span>
+      <button data-cap="bg" class="h-9 px-3 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold"></button>
+    </div>
+    ${withSync ? `<div class="flex flex-wrap items-center gap-2">
+      <span class="text-xs text-gray-400">Sync</span>
+      <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
+        <button data-cap="off-" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none" aria-label="Captions earlier">-</button>
+        <span data-cap="offLabel" class="text-xs font-bold min-w-[52px] text-center"></span>
+        <button data-cap="off+" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none" aria-label="Captions later">+</button>
+      </div>
+    </div>` : ""}`;
+  box.querySelectorAll("[data-cap]").forEach(b => {
+    const k = b.getAttribute("data-cap");
+    if (k === "size-") b.onclick = () => capSizeStep(-2);
+    else if (k === "size+") b.onclick = () => capSizeStep(2);
+    else if (k === "color") b.onclick = () => capColorStep();
+    else if (k === "bg") b.onclick = () => capBgStep();
+    else if (k === "off-") b.onclick = () => subOffsetStep(-0.5);
+    else if (k === "off+") b.onclick = () => subOffsetStep(0.5);
+  });
+  paintCapStyleUI();
+}
+function paintCapStyleUI(){
+  document.querySelectorAll("[data-cap='sizeLabel']").forEach(el => { el.textContent = (capStyle.size || 18) + "sp"; });
+  document.querySelectorAll("[data-cap='color']").forEach(el => { el.textContent = capStyle.color[0].toUpperCase() + capStyle.color.slice(1); });
+  document.querySelectorAll("[data-cap='bg']").forEach(el => {
+    el.textContent = capStyle.bg === "semi" ? "Semi" : capStyle.bg === "solid" ? "Solid" : "None";
+  });
+  document.querySelectorAll("[data-cap='offLabel']").forEach(el => {
+    const o = (subFile && subFile.offset) || 0;
+    el.textContent = (o >= 0 ? "+" : "") + o.toFixed(1) + "s";
+  });
+  // live preview: the same ladders the overlay uses, slightly scaled down
+  ["avCapPreview", "subCapPreview"].forEach(id => {
+    const pv = document.getElementById(id);
+    if (pv) applyCapStyle(pv, 0.8);
+  });
+}
 const SUBPOS = ["top", "center", "bottom"];
 function subPosStep(d){
   if (!subFile) { subStatus("Load a subtitle file first."); return; }
@@ -5738,6 +5847,7 @@ function paintSubsUI(){
     const o = (subFile && subFile.offset) || 0;
     ol.textContent = (o >= 0 ? "+" : "") + o.toFixed(1) + "s";
   }
+  try { paintCapStyleUI(); } catch(e){}
 }
 function paintCaps(force){
   const ov = document.getElementById("capOverlay");
@@ -5760,6 +5870,7 @@ function paintCaps(force){
   ov.style.display = html ? "block" : "none";
   ov.classList.remove("cap-bottom", "cap-center", "cap-top");
   ov.classList.add("cap-" + ((subFile && subFile.pos) || "bottom"));
+  applyCapStyle(ov); // 12-26sp / white-yellow-cyan / None-Semi-Solid
 }
 /* episodes drawer — browsing seasons NEVER touches playback: the drawer
    keeps its own season cursor (drawerS); only tapping an episode plays. */
@@ -7155,10 +7266,11 @@ function paintAV(){
   if (mirror !== "anipm" && mirror !== "vidbolt") return;
   const isBolt = mirror === "vidbolt";
   document.getElementById("avTitle").textContent = isBolt ? "Player" : "Audio & Subtitles";
-  ["avHAudio", "avAudio", "avHSubs", "avSubs", "avHQuality", "avQuality"].forEach(id => {
+  ["avHAudio", "avAudio", "avHSubs", "avSubs", "avHQuality", "avQuality", "avHStyle", "avStyle", "avCapPreview"].forEach(id => {
     const el = document.getElementById(id); if (el) el.style.display = "";
   });
   paintAVServers();
+  renderStyleControls(document.getElementById("avStyle"), true);
   if (isBolt) { paintBoltAV(); return; }
   const T = window._anipmTracks || {};
   const audio = document.getElementById("avAudio"); audio.innerHTML = "";

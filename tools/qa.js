@@ -55,7 +55,13 @@
    80 "NEW" only within 7 days of the PH air date (epIsNew 7d window)
    81 episode status lives in ONE pinned right column (runtime / NEW /
       X left one line; COMING SOON stacks "Sun, Oct 25 (PH) - in 3d 17h")
-   82 the dazzo credit signs the bottom right (TV legend treatment) */
+   82 the dazzo credit signs the bottom right (TV legend treatment)
+   83 caption style ladder: 12-26sp clamp, white/yellow/cyan, bg
+      None/Semi/Solid, persisted (streambox_cap_style)
+   84 live caption preview restyles with the ladders (both surfaces)
+   85 the A/V sheet carries SERVERS | AUDIO | SUBTITLES | QUALITY |
+      STYLING & SYNC; VidBolt audio by LABEL, subtitles/quality echo the
+      provider's own values verbatim (numeric H index) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -563,6 +569,47 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("footer must credit dazzo bottom-right with the STREAMBOX 10-FOOT UI legend");
   if (foot && /flex-1/.test(foot[0])) ok("legend is right-aligned in the footer");
   else bad("the dazzo legend must push right (flex-1 spacer)");
+}
+
+/* ---------- 83. caption style ladder ---------- */
+{
+  const cs = html.match(/function capSizeStep\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (cs && /Math\.min\(26,\s*Math\.max\(12,/.test(cs[0])) ok("caption size clamps to the 12-26sp ladder");
+  else bad("capSizeStep must clamp size to 12-26sp");
+  if (/const CAP_COLORS = \["white", "yellow", "cyan"\]/.test(html)) ok("caption colors are white/yellow/cyan");
+  else bad("CAP_COLORS must be exactly white/yellow/cyan");
+  if (/const CAP_BGS = \["none", "semi", "solid"\]/.test(html)) ok("caption bg is None/Semi/Solid");
+  else bad("CAP_BGS must be exactly none/semi/solid");
+  if (/streambox_cap_style/.test(html)) ok("caption style persists (streambox_cap_style)");
+  else bad("caption style must persist via streambox_cap_style");
+}
+
+/* ---------- 84. live caption preview ---------- */
+{
+  if (/id="avCapPreview"/.test(html) && /id="subCapPreview"/.test(html)) ok("caption preview present on both surfaces");
+  else bad("live caption preview missing (avCapPreview / subCapPreview)");
+  const p = html.match(/function paintCapStyleUI\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (p && /applyCapStyle\(/.test(p[0]) && /avCapPreview/.test(p[0])) ok("preview restyles through applyCapStyle");
+  else bad("paintCapStyleUI must restyle the live previews via applyCapStyle");
+  const pc = html.match(/function paintCaps\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (pc && /applyCapStyle\(\s*ov\s*\)/.test(pc[0])) ok("the caption overlay paints with the style ladders");
+  else bad("paintCaps must apply the caption style to the overlay");
+}
+
+/* ---------- 85. A/V sheet columns + provider values verbatim ---------- */
+{
+  const sheet = html.match(/<div id="avSheet"[\s\S]*?<\/div>\s*\n\s*<div id="vrSheet"/);
+  const body = sheet ? sheet[0] : html.match(/<div id="avSheet"[\s\S]{0,2500}/)[0];
+  ["SERVERS", "AUDIO", "SUBTITLES", "QUALITY", "STYLING"].forEach((h) => {
+    if (body.includes(h)) ok("A/V sheet has the " + h + " column");
+    else bad("A/V sheet missing the " + h + " column");
+  });
+  const av = html.match(/function paintBoltAV\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (av && /o\.label/.test(av[0]) && /boltMobileOption\(o\.option, o\.value\)/.test(av[0])) ok("VidBolt rows show provider labels and echo o.value verbatim");
+  else bad("paintBoltAV must render labels verbatim and send the provider's own value (audio label / subtitle H index)");
+  const lbl = html.match(/const lbl = \(o\.label[^;]+;/);
+  if (lbl) ok("audio/track rows prefer the provider LABEL");
+  else bad("A/V rows must prefer the provider label for display");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
