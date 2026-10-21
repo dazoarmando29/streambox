@@ -31,7 +31,11 @@
    67 adopt guards: echo no-op, 8s settling window, season-range drop, and
       the sync clock restarts on every load AND adopt
    68 advanceEpisode owns the next-episode decision (season-end roll to next
-      season E1, unaired guard) and provider nextup events run through it */
+      season E1, unaired guard) and provider nextup events run through it
+   69 Auto-next runs on EVERY series on ended (one advance per load latch +
+      grace guard + movie exclusion), toggle-gated and ON by default
+   70 provider nextup events are grace-gated and never write raw episode
+      state (no countdown auto-advance path survives) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -317,6 +321,47 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("nextEpisode must delegate forward steps to advanceEpisode");
   if (/vidrift:nextup-play[\s\S]{0,400}advanceEpisode\(\)/.test(html)) ok("provider nextup events run through our own advanceEpisode");
   else bad("vidrift:nextup-play must run through advanceEpisode -- never trust raw provider numbers");
+}
+
+/* ---------- 69. Auto-next on every series (latch + grace + movie ban) ---------- */
+{
+  const m = html.match(/function maybeUpNext\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (!m) bad("maybeUpNext() missing");
+  else {
+    const t = m[0];
+    if (/watchState\.type !== "tv"/.test(t)) ok("Auto-next never runs on movies (series only)");
+    else bad("maybeUpNext must exclude movies (watchState.type !== \"tv\")");
+    if (/_endedHandled/.test(t) && /pastSyncGrace\(\)/.test(t)) ok("Auto-next is one-advance-per-load (latch) + grace-guarded");
+    else bad("maybeUpNext missing the endedHandled latch or the pastSyncGrace guard -- racing events double-step");
+    if (/advanceEpisode\(\)/.test(t)) ok("Auto-next advances through our own advanceEpisode");
+    else bad("maybeUpNext must advance through advanceEpisode (canonical route)");
+    if (/autoNextOn\(\)|optAutonext/.test(t)) ok("Auto-next honors the optAutonext toggle");
+    else bad("maybeUpNext must read the optAutonext toggle (directly or via autoNextOn())");
+  }
+  const an = html.match(/function autoNextOn\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (an && /optAutonext/.test(an[0]) && /checked/.test(an[0])) ok("autoNextOn() reads optAutonext.checked");
+  else bad("autoNextOn() must read the optAutonext checkbox");
+  const lp = html.match(/function loadPlayer\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (lp && /_endedHandled\s*=\s*false/.test(lp[0])) ok("endedHandled latch resets per load");
+  else bad("loadPlayer must reset the _endedHandled latch (one advance per load)");
+  if (/id="optAutonext"\s+checked/.test(html)) ok("Auto-next toggle defaults ON");
+  else bad("optAutonext must be checked by default (auto-next is on out of the box)");
+}
+
+/* ---------- 70. nextup events grace-gated, no raw writes, no countdown path ---------- */
+{
+  const seg = html.match(/vidrift:nextup-play[\s\S]{0,600}/);
+  if (!seg) bad("vidrift:nextup-play handler missing");
+  else {
+    const t = seg[0];
+    if (/pastSyncGrace\(\)/.test(t) && /advanceEpisode\(\)/.test(t)) ok("nextup events are grace-gated into our advanceEpisode");
+    else bad("vidrift:nextup-play must gate advanceEpisode behind pastSyncGrace");
+    if (!/watchState\.(e|s)\s*=/.test(t)) ok("nextup events never write raw episode state");
+    else bad("vidrift:nextup-play writes watchState directly -- route through advanceEpisode only");
+  }
+  const m = html.match(/function maybeUpNext\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (m && !/Date\.now\(\)\s*\+\s*10000/.test(m[0])) ok("no countdown auto-advance path survives in maybeUpNext");
+  else bad("maybeUpNext must not keep a countdown auto-advance path -- Auto-next advances on ended, the card is manual");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

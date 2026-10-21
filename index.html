@@ -564,7 +564,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 181; // bump every release alongside version.txt
+  const BUILD_NUM = 182; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2711,6 +2711,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   window._anipmRetryKey = ""; window._anipmRetryCount = 0; window._anipmStartAt = 0; window._anipmGestureBlocked = false;
   window._boltRetryKey = ""; window._boltRetryCount = 0; window._boltStartAt = 0;
   window._lastLoadAt = Date.now(); // boot settling window: provider echoes in the first 8s are noise
+  window._endedHandled = false; // one auto-advance per load
   try { gridS = s; } catch(e){}
   try {
     // house route: movies/TV always open on CineSrc, anime always on AniPM.
@@ -2879,25 +2880,34 @@ function paintUpNext(eps){
   document.getElementById("upNextMeta").textContent = "You're all caught up — no next episode";
   if (playBtn) playBtn.classList.add("hidden");
 }
-/* ---------- Up Next card (Netflix-style endgame): fires on ended wherever
-   the player cannot advance by itself. VidRift runs its own Up Next (our
-   nextup-info feeds it); CineSrc/AniPM self-advance while Auto-next is on;
-   VidZen/VidBolt (and any mirror with Auto-next off) get OUR card: a 10s
-   countdown or a plain Play Next. Sleep-timer ends never auto-advance. ---------- */
+/* ---------- Up Next / Auto-next (Netflix-style endgame): the embeds do NOT
+   reliably self-advance (episodes sat stuck at the end on Lie to Me), so on
+   ended AUTO-NEXT advances EVERY series (TV shows, anime, K-Drama) through
+   OUR own next-episode logic into the canonical route — one advance per load
+   (latch) + the shared grace guard so racing ended/nextup events never
+   double-step. Movies never auto-advance; the Auto-next toggle governs it
+   (on by default). Auto-next off keeps the Play Next card. Sleep-timer ends
+   never auto-advance (the callers skip us). ---------- */
+function autoNextOn(){
+  try { return document.getElementById("optAutonext").checked; } catch(e){ return true; }
+}
 function maybeUpNext(){
   try {
-    if (watchState.type !== "tv") return;
+    if (watchState.type !== "tv") return; // movies never auto-advance
+    if (mirror === "hls") return; // dormant HLS test slot owns its own endgame
     if (document.getElementById("watchView").classList.contains("hidden")) return;
-    if (mirror === "vidrift") return; // their Up Next owns the endgame
-    let auto = true;
-    try { auto = document.getElementById("optAutonext").checked; } catch(e){}
-    if ((mirror === "cinesrc" || mirror === "anipm") && auto) return; // they self-advance
+    if (autoNextOn()) {
+      if (window._endedHandled) return; // one advance per load
+      if (!pastSyncGrace()) return; // stale ended from a just-switched stream
+      window._endedHandled = true;
+      advanceEpisode();
+      return;
+    }
     const nxt = nextAiredEp();
     if (!nxt) return;
     document.getElementById("upNextCTitle").textContent = "S" + watchState.s + " E" + nxt.episode_number + " \u2022 " + (nxt.name || "");
     document.getElementById("upNextCMeta").textContent = nxt.runtime ? nxt.runtime + "m" : "";
-    const countdown = !!auto && (mirror === "vidzen" || mirror === "vidbolt");
-    window._upNextEnd = countdown ? Date.now() + 10000 : 0;
+    window._upNextEnd = 0; // Auto-next is OFF: no countdown, Play Next on demand
     document.getElementById("upNextCard").classList.remove("hidden");
     tickUpNext();
     if (document.body.classList.contains("tv-mode") || document.body.classList.contains("tv-app")) {
@@ -3508,6 +3518,7 @@ function loadPlayer(){
   // settling window are noise from OUR OWN load and get dropped
   window._lastLoadAt = Date.now();
   window._loadTarget = { s: watchState.s, e: watchState.e, t: watchState.type }; // captured at CALL time
+  window._endedHandled = false; // one auto-advance per load
   window._cineErrBurst = []; window._pauseBurst = []; window._lastProgAt = 0; // fresh frame, fresh strikes
   window._unexpectedPauseAt = 0; window._userPauseHold = false; window._anipmFocusAfterLoad = false; window._anipmKickHintShown = false; window._anipmGestureBlocked = false;
   preconnectCinesrc();  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
@@ -6175,9 +6186,10 @@ window.addEventListener("message", (event)=>{
   }
   if (d.type === "vidrift:nextup-play") {
     // their countdown/Next fired under OUR nextup-info — OUR advance decides
-    // the video (season-end roll + unaired guard), never raw provider numbers
+    // the video (season-end roll + unaired guard), never raw provider numbers.
+    // Grace-gated like native: a nextup inside the 8s settling window is noise.
     closeVrSheet(); // phone panel options belong to the finished episode
-    advanceEpisode();
+    if (pastSyncGrace()) advanceEpisode();
   }
   if (d.type === "vidrift:mobile-panel") {
     // phone sheet delegation (?mobileSheets=true): render their panel in
