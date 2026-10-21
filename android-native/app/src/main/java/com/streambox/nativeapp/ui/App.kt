@@ -275,6 +275,9 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.68" to listOf(
+        "Continue Watching remembers your K-Dramas - resuming Lie to Me plays the Tagalog dub again",
+    ),
     "0.67" to listOf(
         "Auto-play Next now works on EVERY TV show, anime and K-Drama - episodes chain and never sit stuck at the end",
         "Auto-play Next is ON by default (still switchable in Episodes)",

@@ -200,13 +200,28 @@
        test slot and movies are excluded), Auto-play Next defaults ON on a
        fresh pref key (a stale saved OFF predates working auto-next), and
        adoptProviderEpisode restarts the sync clock so any provider that
-       DOES self-advance can never double-step with ours */
+       DOES self-advance can never double-step with ours
+    63 the stored language heals before routing (0.68): a legacy Continue
+       Watching record predates the lang field - its Title routed a Korean
+       drama to CineSrc and BOTH symptoms appeared (Tagalog never selected
+       AND the Tagalog audio option gone). contentLang is authoritative and
+       heals from TMDB original_language before the first load picks a
+       mirror (lang-less TV boots wait for it), the mirror realigns to
+       VidBolt for ko, save() writes the healed value so the record
+       self-heals, and the K-Drama rules read contentLang - never the raw
+       title.lang */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const cp = require("child_process");
 const ROOT = path.resolve(__dirname, "..");
-const read = (f) => fs.readFileSync(path.join(ROOT, f), "utf8");
+// Normalize line endings (0.68 pitfall): git autocrlf checkouts deliver
+// CRLF and every \n-anchored regex silently fails on \r\n - the gate must
+// judge CONTENT, never the checkout's line endings. Every file read in this
+// gate goes through qaRead for exactly that reason.
+const _readFileSync = fs.readFileSync.bind(fs);
+const qaRead = (p) => _readFileSync(p, "utf8").replace(/\r\n/g, "\n");
+const read = (f) => qaRead(path.join(ROOT, f));
 
 let fails = 0, warns = 0;
 const bad = (m) => { console.log("FAIL  " + m); fails++; };
@@ -369,7 +384,7 @@ else missingFn.forEach((f) => bad("inline handler calls undefined function: " + 
 /* ---------- 13. workflow ASCII (every workflow, not just android-apk) ---------- */
 const wfDir = path.join(ROOT, ".github/workflows");
 for (const wf of fs.readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f)).sort()) {
-  const src = fs.readFileSync(path.join(wfDir, wf), "utf8");
+  const src = qaRead(path.join(wfDir, wf), "utf8");
   const nonAscii = [...new Set([...src].filter((c) => c.charCodeAt(0) > 127))];
   if (!nonAscii.length) ok("workflow YAML pure ASCII: " + wf);
   else bad("workflow " + wf + " has non-ASCII chars: " + nonAscii.map((c) => "U+" + c.charCodeAt(0).toString(16).toUpperCase()).join(" "));
@@ -387,7 +402,7 @@ const walkKt = (d) => {
     const p = path.join(d, e.name);
     if (e.isDirectory()) walkKt(p);
     else if (e.name.endsWith(".kt")) {
-      const src = fs.readFileSync(p, "utf8");
+      const src = qaRead(p, "utf8");
       for (const m of src.matchAll(/Icons\.Filled\.Volume\w*/g)) {
         natBad.push(path.relative(ROOT, p).replace(/\\/g, "/") + ": " + m[0]);
       }
@@ -401,7 +416,7 @@ else natBad.forEach((x) => bad("deprecated volume icon (use Icons.AutoMirrored.F
 /* ---------- 16. native SB_HOOK bridge JS parses ---------- */
 const psPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/PlayerScreen.kt");
 if (fs.existsSync(psPath)) {
-  const ps = fs.readFileSync(psPath, "utf8");
+  const ps = qaRead(psPath, "utf8");
   const m = ps.match(/private val SB_HOOK = """\n([\s\S]*?)\n?"""/);
   if (!m) bad("SB_HOOK raw string not found in PlayerScreen.kt");
   else {
@@ -419,7 +434,7 @@ if (fs.existsSync(psPath)) {
 const hlsPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HlsPlayer.kt");
 if (!fs.existsSync(hlsPath)) bad("HlsPlayer.kt missing - the HLS slot file is gone");
 else {
-  const hlsSrc = fs.readFileSync(hlsPath, "utf8");
+  const hlsSrc = qaRead(hlsPath, "utf8");
   if (/const val HLS_TEST_URL\s*=/.test(hlsSrc)) ok("HLS_TEST_URL defined in the slot file");
   else bad("HLS_TEST_URL definition missing from HlsPlayer.kt");
 }
@@ -432,7 +447,7 @@ const walkM3u8 = (d) => {
     const p = path.join(d, e.name);
     if (e.isDirectory()) walkM3u8(p);
     else if (e.name.endsWith(".kt")) {
-      const src = fs.readFileSync(p, "utf8");
+      const src = qaRead(p, "utf8");
       if (/\.m3u8/.test(src)) m3u8Hits.push(path.relative(ROOT, p).replace(/\\/g, "/"));
     }
   }
@@ -448,7 +463,7 @@ else ok("HLS test asset never touches the website");
 // only the hidden flag opens it (dormant pre-build rule).
 if (!fs.existsSync(psPath)) bad("PlayerScreen.kt missing - HLS slot gates cannot be verified");
 else {
-  const ps2 = fs.readFileSync(psPath, "utf8");
+  const ps2 = qaRead(psPath, "utf8");
   const mf = ps2.match(/private fun mirrorsFor[\s\S]*?\n\}/);
   if (mf && !/"hls"/.test(mf[0])) ok("mirrorsFor never lists the HLS slot");
   else bad("mirrorsFor lists \"hls\" - the slot must stay out of the normal server sheet");
@@ -474,7 +489,7 @@ const walkCorrupt = (d) => {
     const p = path.join(d, e.name);
     if (e.isDirectory()) walkCorrupt(p);
     else if (e.name.endsWith(".kt")) {
-      const src = fs.readFileSync(p, "utf8");
+      const src = qaRead(p, "utf8");
       if (/oolumn|oolor|oomposable|darkoolor|Roundedoorner|oompositionLocalProvider|Streamoolors|oenterVertically/.test(src)) {
         corruptHits.push(path.relative(ROOT, p).replace(/\\/g, "/"));
       }
@@ -487,7 +502,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 19. native quality cycle matches QLEVELS ---------- */
 {
-  const psq = fs.readFileSync(psPath, "utf8");
+  const psq = qaRead(psPath, "utf8");
   const m = psq.match(/private val CINE_Q = listOf\(([^)]*)\)/);
   const vals = m ? [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]) : null;
   if (vals && vals.join(",") === ",1080,720,480") ok("native CineSrc quality cycle is only \"\"/1080/720/480");
@@ -502,7 +517,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
       const p = path.join(d, e.name);
       if (e.isDirectory()) walkRing(p);
       else if (e.name.endsWith(".kt")) {
-        const src = fs.readFileSync(p, "utf8");
+        const src = qaRead(p, "utf8");
         if (/focusRing\(\s*CircleShape/.test(src)) {
           boxyRings.push(path.relative(ROOT, p).replace(/\\/g, "/"));
         }
@@ -527,7 +542,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 21. player resume boots at the saved position ---------- */
 {
-  const psResume = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psResume = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psResume) bad("PlayerScreen.kt missing - resume boot cannot be verified");
   else {
     if (/val resumeAt = run \{[\s\S]*?Store\.progressList\(ctx\)/.test(psResume)) ok("resumeAt derives from saved Store progress");
@@ -549,7 +564,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
       const p = path.join(d, e.name);
       if (e.isDirectory()) walkClaim(p);
       else if (e.name.endsWith(".kt")) {
-        const src = fs.readFileSync(p, "utf8");
+        const src = qaRead(p, "utf8");
         for (const m of src.matchAll(/"[^"\n]*\b(4K|Atmos|HDR10|HDR|Dolby)\b[^"\n]*"/g)) {
           claimHits.push(path.relative(ROOT, p).replace(/\\/g, "/") + ": " + m[0]);
         }
@@ -563,7 +578,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 23. watchdog hops only on real silence ---------- */
 {
-  const psW = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psW = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psW) bad("PlayerScreen.kt missing - watchdog cannot be verified");
   else {
     if (/lastMediaAt/.test(psW) && /idleFor/.test(psW)) ok("watchdog is idle-based (media traffic keeps it patient)");
@@ -592,7 +607,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 25. VidBolt unsandboxed + media never blocked ---------- */
 {
-  const psVb = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psVb = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psVb) bad("PlayerScreen.kt missing - VidBolt rules cannot be verified");
   else {
     if (/sandbox\s*=/.test(psVb)) bad("sandbox attribute in PlayerScreen - VidBolt renders Playback disabled when sandboxed");
@@ -609,7 +624,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 26. VidBolt gate shim is document-level, JS bodies untouched ---------- */
 {
-  const psG = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psG = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psG) bad("PlayerScreen.kt missing - VidBolt gate rules cannot be verified");
   else {
     if (/patchedVbJs|VB_JS_CACHE/.test(psG)) {
@@ -633,7 +648,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 27. SB_HOOK rides the wrapped shell markup ---------- */
 {
-  const psH = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psH = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psH) bad("PlayerScreen.kt missing - shell hook embed cannot be verified");
   else if (/"<script>" \+ SB_HOOK \+ "<\/script>"/.test(psH)) {
     ok("SB_HOOK rides the wrapped shell markup (attached before the iframe speaks)");
@@ -644,7 +659,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 28. silent-start kicks before the watchdog hops ---------- */
 {
-  const psK = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psK = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psK) bad("PlayerScreen.kt missing - start kicks cannot be verified");
   else if (/mirror == "vidbolt" \|\| mirror == "vidzen"\) && kicked < 2[\s\S]{0,240}window\.__sb && window\.__sb\.play\(\)/.test(psK)) {
     ok("silent-start kicks nudge VidBolt/VidZen before the 30s idle hop (website parity)");
@@ -656,7 +671,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 29. anime typing: content decides, overrides never lie ---------- */
 {
   const apiP = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt");
-  const apiS = fs.existsSync(apiP) ? fs.readFileSync(apiP, "utf8") : "";
+  const apiS = fs.existsSync(apiP) ? qaRead(apiP, "utf8") : "";
   if (!apiS) bad("Api.kt missing - anime typing cannot be verified");
   else if (/val isAnime = 16 in genIds && lang == "ja"/.test(apiS) &&
            /else if \(isAnime\) "anime" else "tv"/.test(apiS) &&
@@ -670,9 +685,9 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 30. screens keyed per title / play session ---------- */
 {
   const appP = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt");
-  const appS = fs.existsSync(appP) ? fs.readFileSync(appP, "utf8") : "";
+  const appS = fs.existsSync(appP) ? qaRead(appP, "utf8") : "";
   const detPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt");
-  const det = fs.existsSync(detPath) ? fs.readFileSync(detPath, "utf8") : "";
+  const det = fs.existsSync(detPath) ? qaRead(detPath, "utf8") : "";
   if (!appS || !det) bad("App.kt/DetailScreen.kt missing - stale-state rules cannot be verified");
   else {
     if (/is Screen\.Detail -> key\(s\.title\.id, s\.title\.type\)/.test(appS) &&
@@ -693,7 +708,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 31. TV hero tells the whole story ---------- */
 {
   const hsP = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt");
-  const hs = fs.existsSync(hsP) ? fs.readFileSync(hsP, "utf8") : "";
+  const hs = fs.existsSync(hsP) ? qaRead(hsP, "utf8") : "";
   if (!hs) bad("HomeScreen.kt missing - hero rules cannot be verified");
   else if (/heightIn\(min = if \(big\) 420\.dp else 260\.dp\)/.test(hs) &&
            /maxLines = if \(big\) Int\.MAX_VALUE else 3/.test(hs) &&
@@ -708,11 +723,11 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 32. poster captions visible, artwork-only ring ---------- */
 {
   const hs2 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!hs2) bad("HomeScreen.kt missing - poster caption rules cannot be verified");
   else {
     const th2 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"))
-      ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"), "utf8") : "";
+      ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"), "utf8") : "";
     const good = /fun Modifier\.artworkRing\(/.test(th2) &&
       /\.artworkRing\(plate\)/.test(hs2) &&
       /\.clip\(plate\)\s*\.background\(Card\)/.test(hs2) &&
@@ -729,9 +744,9 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 43. smooth row navigation: idempotent reveals only ---------- */
 {
   const hsN = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   const dsN = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"), "utf8") : "";
   if (!hsN || !dsN) bad("HomeScreen.kt/DetailScreen.kt missing - row navigation rules cannot be verified");
   else if (!/rowBring/.test(hsN) &&
            !/cellBring/.test(hsN) &&
@@ -749,7 +764,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 53. one All chip + a rail every tab fits on ---------- */
 {
   const hsA = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!hsA) bad("HomeScreen.kt missing - rail/chip rules cannot be verified");
   else if (!/listOf\("kdrama" to "All"\)/.test(hsA) &&
            /\.size\(46\.dp\)/.test(hsA) &&
@@ -762,7 +777,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 54. anime season routing ---------- */
 {
-  const psA = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psA = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psA) bad("PlayerScreen.kt missing - anime season routing cannot be verified");
   else if (/Api\.animeMap\(title\.name, airYear\)/.test(psA) &&
            /val sameEntry/.test(psA) &&
@@ -777,7 +792,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 55. next episode never steps past the season ---------- */
 {
-  const psN = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psN = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psN) bad("PlayerScreen.kt missing - episode advance rules cannot be verified");
   else if (/fun advanceEpisode\(\)/.test(psN) &&
            /epNumber >= count/.test(psN) &&
@@ -791,7 +806,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 44. VidBolt subtitles carry their command index ---------- */
 {
-  const psSub = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psSub = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psSub) bad("PlayerScreen.kt missing - VidBolt subtitle rules cannot be verified");
   else if (/VBT\.subs\[String\(k\)\]/.test(psSub) &&
            /String\(nat\.length \+ j\)/.test(psSub) &&
@@ -806,7 +821,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 45. skip pills: plain names + tail-guarded credits ---------- */
 {
-  const psSkip = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psSkip = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psSkip) bad("PlayerScreen.kt missing - skip pill rules cannot be verified");
   else if (/fun hitAt\(cur: Float, dur: Float/.test(psSkip) &&
            /fun inTail\(r: IntroDb\.TRange\)/.test(psSkip) &&
@@ -821,7 +836,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 46. server auto-switch leads with VidBolt ---------- */
 {
-  const psHop = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psHop = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psHop) bad("PlayerScreen.kt missing - auto-switch rules cannot be verified");
   else {
     const chain = (psHop.match(/private fun fallbackChain[\s\S]*?\n}\n/) || [""])[0];
@@ -839,11 +854,11 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 47. Browse tab: kind + genre + year over the full catalog ---------- */
 {
   const appBr = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
   const hsBr = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   const apiBr = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"), "utf8") : "";
   if (!appBr || !hsBr || !apiBr) bad("App.kt/HomeScreen.kt/Api.kt missing - Browse tab cannot be verified");
   else if (/BROWSE\("Browse", Icons\.Filled\.Explore\)/.test(appBr) &&
            /private fun BrowseAllView\(/.test(hsBr) &&
@@ -863,9 +878,9 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 48. anime can never render as TV ---------- */
 {
   const hsT = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   const stT = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
   if (!hsT || !stT) bad("HomeScreen.kt/Store.kt missing - anime label rules cannot be verified");
   else if (/\(if \(t\.isAnime\) "anime" else t\.type\)\.uppercase\(\)/.test(hsT) &&
            /put\("genres", JSONArray\(t\.genreIds\)\)/.test(stT) &&
@@ -878,7 +893,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 49. routing honors isAnime ---------- */
 {
-  const psR = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psR = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psR) bad("PlayerScreen.kt missing - routing rules cannot be verified");
   else if (/title\.type == "anime" \|\| title\.isAnime -> if \(mal != null \|\| ani != null\) "anipm"/.test(psR)) {
     ok("player routing honors isAnime - Japanese animation rides the anime route");
@@ -890,7 +905,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 50. episode status zone + PH Coming Soon clock ---------- */
 {
   const dsP = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"), "utf8") : "";
   if (!dsP) bad("DetailScreen.kt missing - episode status rules cannot be verified");
   else if (/private fun phAirLabel\(/.test(dsP) &&
            /private fun phCountdown\(/.test(dsP) &&
@@ -909,9 +924,9 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 51. Korean dramas live in the KDrama tab ---------- */
 {
   const appK = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
   const hsK = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!appK || !hsK) bad("App.kt/HomeScreen.kt missing - KDrama tab cannot be verified");
   else if (/KDRAMA\("KDrama"/.test(appK) &&
            /Section\.KDRAM[A-Z]* -> \{[\s\S]{0,220}Popular K-Dramas/.test(hsK) &&
@@ -925,11 +940,11 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 52. the zigzag lock ---------- */
 {
   const thZ = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"), "utf8") : "";
   const hsZ = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   const dsZ = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"), "utf8") : "";
   const uses = ((hsZ + dsZ).match(/rowNavLock\(\)/g) || []).length;
   if (!thZ || !hsZ || !dsZ) bad("Theme/HomeScreen/DetailScreen missing - zigzag lock cannot be verified");
   else if (/fun Modifier\.rowNavLock\(\)/.test(thZ) &&
@@ -945,7 +960,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 33. Continue Watching is tab-scoped ---------- */
 {
   const hs3 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!hs3) bad("HomeScreen.kt missing - Continue Watching scoping cannot be verified");
   else if (/Section\.MOVIES -> all\.filter \{ it\.type == "movie" \}/.test(hs3) &&
            /Section\.TV -> all\.filter \{ it\.type == "tv" && it\.lang != "ko" \}/.test(hs3) &&
@@ -960,9 +975,9 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 34. search state is hoisted ---------- */
 {
   const appH = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
   const hsH = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!appH || !hsH) bad("App.kt/HomeScreen.kt missing - search hoisting cannot be verified");
   else if (/var searchMode by remember \{ mutableStateOf\(false\) \}/.test(appH) &&
            /var searchSubmitted by remember \{ mutableStateOf\(""\) \}/.test(appH) &&
@@ -977,7 +992,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 35. VidBolt quality plumbing is provider-reported only ---------- */
 {
-  const psQ = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psQ = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psQ) bad("PlayerScreen.kt missing - VidBolt quality rules cannot be verified");
   else if (/vbqual: function\(opt, val\)/.test(psQ) &&
            /o\.group === "Quality"/.test(psQ) &&
@@ -994,7 +1009,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 {
   const ks = path.join(ROOT, "android-native/preview.keystore");
   const gradle = fs.existsSync(path.join(ROOT, "android-native/app/build.gradle.kts"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/build.gradle.kts"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/build.gradle.kts"), "utf8") : "";
   if (!fs.existsSync(ks)) {
     bad("android-native/preview.keystore missing - without a stable key every APK re-signs and 'update' fails to install");
   } else if (/signingConfigs/.test(gradle) &&
@@ -1009,7 +1024,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 37. versionCode frozen for cross-build installs ---------- */
 {
   const gradleV = fs.existsSync(path.join(ROOT, "android-native/app/build.gradle.kts"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/build.gradle.kts"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/build.gradle.kts"), "utf8") : "";
   if (!gradleV) bad("build.gradle.kts missing - versionCode freeze cannot be verified");
   else if (/versionCode = 50/.test(gradleV)) {
     ok("versionCode frozen at 50 (any build installs over any other; versionName carries the feature)");
@@ -1021,9 +1036,9 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 38. cinematic splash + one-time What's New ---------- */
 {
   const appB = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"), "utf8") : "";
   const storeB = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
   if (!appB || !storeB) bad("App.kt/Store.kt missing - splash and What's New cannot be verified");
   else if (/private fun SplashScreen\(\)/.test(appB) &&
            /private fun WhatsNewDialog\(/.test(appB) &&
@@ -1039,9 +1054,9 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 39. browse speed: parallel rows + disk feed cache ---------- */
 {
   const hsB = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   const stB = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
   if (!hsB || !stB) bad("HomeScreen.kt/Store.kt missing - browse speed rules cannot be verified");
   else if (/plan\.map \{ \(label, f\) ->\s*async \{/.test(hsB) &&
            /Store\.loadFeedCache\(ctx, key\)/.test(hsB) &&
@@ -1055,7 +1070,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 40. player speed: doc cache + preconnects + one resolve ---------- */
 {
-  const psF = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psF = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psF) bad("PlayerScreen.kt missing - player speed rules cannot be verified");
   else if (/VB_DOC_CACHE/.test(psF) &&
            /rel=\\"preconnect\\"/.test(psF) &&
@@ -1069,7 +1084,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 41. catalog response cache ---------- */
 {
   const apiC = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"), "utf8") : "";
   if (!apiC) bad("Api.kt missing - response cache cannot be verified");
   else if (/private val respCache/.test(apiC) && /RESP_TTL_MS/.test(apiC) &&
            /respCache\[path\]\?\.let \{ if \(now - it\.at < RESP_TTL_MS\) return it\.json \}/.test(apiC)) {
@@ -1081,7 +1096,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 42. motion clarity + judder reduction ---------- */
 {
-  const psM = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psM = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psM) bad("PlayerScreen.kt missing - motion rules cannot be verified");
   else if (/requestVideoFrameCallback/.test(psM) &&
            /'video:fps'/.test(psM) &&
@@ -1096,28 +1111,29 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 56. K-drama VidBolt defaults ---------- */
 {
-  const psK = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psK = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psK) bad("PlayerScreen.kt missing - K-drama defaults cannot be verified");
-  else if (/var koAuto by remember \{ mutableStateOf\(title\.lang == "ko"\) \}/.test(psK) &&
+  else if (/var contentLang by remember \{ mutableStateOf\(title\.lang\) \}/.test(psK) &&
+           /var koManual by remember \{ mutableStateOf\(false\) \}/.test(psK) &&
            /contains\("tagalog", true\)/.test(psK) &&
            /contains\("korean", true\)/.test(psK) &&
            /l\.contains\("english"\) \|\| l == "eng"/.test(psK) &&
-           /if \(title\.lang == "ko"\) return@LaunchedEffect/.test(psK) &&
+           /if \(contentLang == "ko"\) return@LaunchedEffect/.test(psK) &&
            /K-Dramas use the provider's own English subtitles/.test(psK) &&
            /window\.__sb && window\.__sb\.vbaudio\(/.test(psK) &&
            /window\.__sb && window\.__sb\.vbsub\(-1\)/.test(psK)) {
     ok("K-drama defaults: Tagalog audio (Korean fallback) + VidBolt's own English subs, our chain stays off");
   } else {
-    bad("K-dramas must default to the Tagalog dub (Korean fallback) and ride VidBolt's English subs - our chain never auto-loads over them");
+    bad("K-dramas must default to the Tagalog dub (Korean fallback) and ride VidBolt's English subs - our chain never auto-loads over them (rules read contentLang, never raw title.lang)");
   }
 }
 
 /* ---------- 57. Left escapes to the TV nav rail ---------- */
 {
   const thL = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/Theme.kt"), "utf8") : "";
   const hsL = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!thL || !hsL) bad("Theme/HomeScreen missing - Left-escape rules cannot be verified");
   else if (/object NavEscape \{/.test(thL) &&
            /FocusDirection\.Left -> NavEscape\.left \?: FocusRequester\.Cancel/.test(thL) &&
@@ -1134,7 +1150,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 /* ---------- 58. Browse one scroll surface + readable captions + dazzo ---------- */
 {
   const hsG = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!hsG) bad("HomeScreen.kt missing - Browse layout rules cannot be verified");
   else if (/GridItemSpan\(maxLineSpan\)/.test(hsG) &&
            /"b-kinds"/.test(hsG) &&
@@ -1153,7 +1169,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 59. provider episode events never steer the load ---------- */
 {
-  const psE = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psE = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psE) bad("PlayerScreen.kt missing - episode-sync rules cannot be verified");
   else {
     const lateRead = /playerUrl\(title, epSeason, epNumber, routeMal, routeAni, mirror, startAt, anipmLang, cinesrcQ, epBase\)/.test(psE);
@@ -1176,7 +1192,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 60. player UI lives outside PlayerScreen's method ---------- */
 {
-  const psM = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psM = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psM) bad("PlayerScreen.kt missing - JVM method-limit rules cannot be verified");
   else {
     const layers = ["topHudLayer", "captionLayer", "pausedLayer", "barLayer", "epsLayer", "subsLayer"];
@@ -1191,7 +1207,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 61. auto-next is ours (canonical route, no double-step) ---------- */
 {
-  const psA = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psA = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psA) bad("PlayerScreen.kt missing - auto-next rules cannot be verified");
   else if (/if \(adoptProviderEpisode\(o\.optInt\("season", -1\), o\.optInt\("episode", -1\)\)\) \{\s*\n\s*load\(\)/.test(psA) &&
            /"ended" -> \{[\s\S]{0,1600}?\!endedHandled && pastSyncGrace\(\)/.test(psA) &&
@@ -1207,9 +1223,9 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 62. auto-next runs on every series ---------- */
 {
-  const psN = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const psN = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   const stN = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
-    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
   if (!psN || !stN) bad("PlayerScreen.kt/Store.kt missing - auto-next coverage cannot be verified");
   else {
     const endedBlock = (psN.match(/"ended" -> \{[\s\S]{0,1600}?\n\s{20,}\}/) || [""])[0];
@@ -1225,6 +1241,27 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     } else {
       bad("auto-next must run for every series mirror (no anipm exclusion), Store.autoSkip must default ON on a fresh key, and adoptProviderEpisode must restart the sync clock - episodes sat stuck at the end");
     }
+  }
+}
+
+/* ---------- 63. the stored language heals before routing ---------- */
+{
+  const psL = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const apiL = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"), "utf8") : "";
+  if (!psL || !apiL) bad("PlayerScreen.kt/Api.kt missing - language heal cannot be verified");
+  else if (/originalLanguage/.test(apiL) &&
+           /optString\("original_language", ""\)/.test(apiL) &&
+           /if \(contentLang\.isEmpty\(\) && det != null && det\.originalLanguage\.isNotBlank\(\)\)/.test(psL) &&
+           /contentLang = det\.originalLanguage/.test(psL) &&
+           /!booted && contentLang == "ko" && mirror != "vidbolt"/.test(psL) &&
+           /\(title\.type == "movie" \|\| title\.lang\.isNotEmpty\(\)\)/.test(psL) &&
+           /mal, ani, contentLang\)/.test(psL) &&
+           /!koManual && contentLang == "ko" && mirror == "vidbolt"/.test(psL) &&
+           !/var koAuto/.test(psL)) {
+    ok("stored language heals before routing: contentLang from TMDB original_language, ko realigns to VidBolt before the first load, records self-heal on save");
+  } else {
+    bad("a blank stored lang must heal from TMDB original_language BEFORE the first load picks a mirror (K-Dramas routed to CineSrc and lost the Tagalog dub) - contentLang is authoritative, lang-less TV boots wait, save() writes the healed value");
   }
 }
 

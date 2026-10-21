@@ -69,6 +69,10 @@ data class TDetail(
     val cert: String,
     val videos: List<VideoInfo>,
     val aired: Boolean = true,
+    /** TMDB original_language (0.68): heals titles whose stored lang is
+        blank (legacy Continue Watching records) so Korean dramas still
+        route to VidBolt and the Tagalog dub. */
+    val originalLanguage: String = "",
 )
 
 /** Client for the streambox-api Worker: TMDB catalog (key stays server-side)
@@ -506,6 +510,7 @@ object Api {
                 videos = listOf(),
                 aired = dateOf(o, "release_date").ifEmpty { dateOf(o, "first_air_date") }
                     .let { it.isBlank() || it.take(10) <= today() },
+                originalLanguage = o.optString("original_language", ""),
             )
         } catch (e: Exception) {
             TDetail(listOf(), 0, listOf(), "", "", "", listOf())

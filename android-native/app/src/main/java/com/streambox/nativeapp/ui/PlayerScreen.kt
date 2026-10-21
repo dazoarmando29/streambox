@@ -1160,7 +1160,14 @@ fun PlayerScreen(
     // BetaSeries chain never loads over them. The auto-pick aims at the
     // preferred track whenever tracks republish (Tagalog can surface late)
     // until the viewer picks manually - then it stands down.
-    var koAuto by remember { mutableStateOf(title.lang == "ko") }
+    // 0.68 language heal: contentLang is the AUTHORITATIVE content language
+    // - a legacy Continue Watching record predates the lang field, its Title
+    // routed a Korean drama to CineSrc (no Tagalog dub there) and the
+    // K-Drama defaults never fired. Blank titles heal from TMDB's
+    // original_language before the first load, and the next save rewrites
+    // the record with the healed value.
+    var contentLang by remember { mutableStateOf(title.lang) }
+    var koManual by remember { mutableStateOf(false) }
     var koAudioCmd by remember { mutableStateOf("") }
     var koSubCmd by remember { mutableStateOf("") }
     // VidBolt quality (0.50): provider-reported labels only. Rows either
@@ -1181,7 +1188,7 @@ fun PlayerScreen(
         // A manual file on a K-drama stands the VidBolt auto-pick down (the
         // clear of the provider captions rides the subs watcher below -
         // cmd() lives further down this body).
-        if (title.lang == "ko") koAuto = false
+        koManual = true
     }
 
     val pickSub = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1236,7 +1243,7 @@ fun PlayerScreen(
         try {
             Store.saveProgress(
                 ctx,
-                Progress(title.type, title.id, title.name, title.poster, epSeason, epNumber, c, d, System.currentTimeMillis(), mal, ani, title.lang),
+                Progress(title.type, title.id, title.name, title.poster, epSeason, epNumber, c, d, System.currentTimeMillis(), mal, ani, contentLang),
             )
         } catch (e: Exception) {
         }
@@ -1435,6 +1442,20 @@ fun PlayerScreen(
         if (title.type != "movie") {
             val det = withContext(Dispatchers.IO) {
                 runCatching { Api.details("tv", title.id) }.getOrNull()
+            }
+            // Language heal (0.68): legacy Continue Watching records predate
+            // the lang field - their Titles routed Korean dramas to CineSrc
+            // (no Tagalog dub there) and the K-Drama defaults never fired.
+            // TMDB's original_language fills the gap BEFORE the first load
+            // picks a mirror, and the next save rewrites the record.
+            if (contentLang.isEmpty() && det != null && det.originalLanguage.isNotBlank()) {
+                contentLang = det.originalLanguage
+            }
+            // K-Drama rides VidBolt (Tagalog dub + its own English subs) -
+            // realign the primary before the first load when the language
+            // only just arrived.
+            if (!booted && contentLang == "ko" && mirror != "vidbolt") {
+                mirror = "vidbolt"
             }
             val seasons = det?.seasons ?: listOf()
             seasonList = seasons
@@ -1661,7 +1682,7 @@ fun PlayerScreen(
         if (showSubs) {
             // K-dramas ride the provider's own English subtitles (0.64):
             // our Wyzie/TSDB/BetaSeries chain never runs over them.
-            if (title.lang == "ko") {
+            if (contentLang == "ko") {
                 wyzItems = listOf()
                 wyzBusy = false
                 subMsg = "K-Dramas use the provider's own English subtitles - not our chain."
@@ -1690,7 +1711,7 @@ fun PlayerScreen(
     LaunchedEffect(title.id, epSeason, epNumber) {
         // K-dramas ride the provider's own English subtitles (0.64): our
         // chain never auto-loads or restores over them.
-        if (title.lang == "ko") return@LaunchedEffect
+        if (contentLang == "ko") return@LaunchedEffect
         val pick = withContext(Dispatchers.IO) {
             runCatching { Store.subPick(ctx, title.type, title.id, epSeason, epNumber) }.getOrNull()
         }
@@ -1723,8 +1744,8 @@ fun PlayerScreen(
     // K-drama + a manual file: clear the provider captions so two caption
     // layers never stack. Watches vbSubSel too - a track republish that
     // re-selects English gets cleared again (0.64).
-    LaunchedEffect(subs, title.lang, mirror, vbSubSel) {
-        if (title.lang == "ko" && subs != null && mirror == "vidbolt" && vbSubSel != "-1") {
+    LaunchedEffect(subs, contentLang, mirror, vbSubSel) {
+        if (contentLang == "ko" && subs != null && mirror == "vidbolt" && vbSubSel != "-1") {
             vbSubSel = "-1"
             cmd("window.__sb && window.__sb.vbsub(-1)")
         }
@@ -2277,11 +2298,14 @@ fun PlayerScreen(
                                         // + resolve), so the aim re-runs per
                                         // publish - Tagalog surfacing late
                                         // upgrades a Korean pick. A manual
-                                        // pick (koAuto=false) stands down.
-                                        if (koAuto && mirror == "vidbolt") {
+                                        // pick (koManual) stands down.
+                                        if (!koManual && contentLang == "ko" && mirror == "vidbolt") {
                                             val au = vbAudios.firstOrNull {
                                                 it.first.contains("tagalog", true) ||
-                                                    it.first.contains("filipino", true)
+                                                    it.first.contains("filipino", true) ||
+                                                    it.first.equals("fil", true) ||
+                                                    it.first.equals("tl", true) ||
+                                                    it.first.equals("tgl", true)
                                             } ?: vbAudios.firstOrNull { it.first.contains("korean", true) }
                                             if (au != null && koAudioCmd != au.second) {
                                                 koAudioCmd = au.second
@@ -2402,11 +2426,16 @@ fun PlayerScreen(
                     }
                     // Anime boots only AFTER its season route resolves
                     // (0.60) - the resolver's first pass fires load() with
-                    // the right entry ids and episode numbering. The boot
-                    // starts the sync grace clock (0.65) like every load:
-                    // the page's first episodechange echo must never stomp
-                    // the episode we just opened.
-                    if (title.type != "anime" && !title.isAnime) {
+                    // the right entry ids and episode numbering. 0.68: a TV
+                    // show with NO stored language waits too - the mirror
+                    // depends on it (K-Drama -> VidBolt) and the resolver
+                    // heals it from TMDB before the first load. Movies and
+                    // titles with a known language boot immediately. The
+                    // boot also starts the sync grace clock (0.65) like
+                    // every load.
+                    if (title.type != "anime" && !title.isAnime &&
+                        (title.type == "movie" || title.lang.isNotEmpty())
+                    ) {
                         booted = true
                         lastLoadAtMs = System.currentTimeMillis()
                         loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, resumeAt, anipmLang, cinesrcQ), mirror)
@@ -3233,7 +3262,7 @@ fun PlayerScreen(
                                             active = on,
                                             big = big,
                                         ) {
-                                            koAuto = false
+                                            koManual = true
                                             vbAudioSel = value
                                             cmd("window.__sb && window.__sb.vbaudio('" + value.replace("'", "") + "')")
                                         }
@@ -3255,9 +3284,9 @@ fun PlayerScreen(
                         Column(modifier = Modifier.weight(1.15f)) {
                             PanelColTitle("SUBTITLES")
                             Spacer(modifier = Modifier.height(6.dp))
-                            // K-dramas (0.64): no chain chrome at all - the
+                            // K-dramas (0.68): no chain chrome at all - the
                             // provider's own English tracks below do the work.
-                            if (title.lang != "ko") {
+                            if (contentLang != "ko") {
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     items(SUBLANGS.size) { i ->
                                         val (code, label) = SUBLANGS[i]
@@ -3309,7 +3338,7 @@ fun PlayerScreen(
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                             }
-                            if (title.lang != "ko") {
+                            if (contentLang != "ko") {
                                 if (wyzBusy) {
                                     CircularProgressIndicator(
                                         color = Accent,
@@ -3397,7 +3426,7 @@ fun PlayerScreen(
                                     active = vbSubSel.isEmpty() || vbSubSel == "-1",
                                     big = big,
                                 ) {
-                                    koAuto = false
+                                    koManual = true
                                     vbSubSel = "-1"
                                     cmd("window.__sb && window.__sb.vbsub(-1)")
                                 }
@@ -3411,7 +3440,7 @@ fun PlayerScreen(
                                         active = on,
                                         big = big,
                                     ) {
-                                        koAuto = false
+                                        koManual = true
                                         vbSubSel = value
                                         cmd("window.__sb && window.__sb.vbsub('" + value.replace("'", "") + "')")
                                     }
