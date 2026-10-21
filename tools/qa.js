@@ -35,7 +35,10 @@
    69 Auto-next runs on EVERY series on ended (one advance per load latch +
       grace guard + movie exclusion), toggle-gated and ON by default
    70 provider nextup events are grace-gated and never write raw episode
-      state (no countdown auto-advance path survives) */
+      state (no countdown auto-advance path survives)
+   71 skip pill names stay PLAIN (Skip Recap / Skip Intro / Next Episode /
+      Skip Credits) -- no countdown or time suffixes
+   72 credits ranges keep the TAIL guard (start > 10s AND start >= dur/2) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -362,6 +365,35 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const m = html.match(/function maybeUpNext\s*\(\)\s*\{[\s\S]*?\n\}/);
   if (m && !/Date\.now\(\)\s*\+\s*10000/.test(m[0])) ok("no countdown auto-advance path survives in maybeUpNext");
   else bad("maybeUpNext must not keep a countdown auto-advance path -- Auto-next advances on ended, the card is manual");
+}
+
+/* ---------- 71. skip pill names stay plain ---------- */
+{
+  const m = html.match(/function paintSkipPill\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (!m) bad("paintSkipPill missing");
+  else {
+    const t = m[0];
+    if (/fmtT\(/.test(t)) bad("paintSkipPill formats a time/countdown suffix -- names must stay plain");
+    else ok("skip pill has no time/countdown suffix");
+    if (/Skip Recap/.test(t) && /Skip Intro/.test(t) && /Next Episode/.test(t) && /Skip Credits/.test(t)) ok("skip pill names are Skip Recap / Skip Intro / Next Episode / Skip Credits");
+    else bad("skip pill must use the plain names (Skip Recap / Skip Intro / Next Episode / Skip Credits)");
+    if (/·/.test(t)) bad("paintSkipPill still appends a dot-suffix -- plain names only");
+    else ok("skip pill labels carry no dot suffixes");
+  }
+}
+
+/* ---------- 72. credits TAIL guard ---------- */
+{
+  const m = html.match(/function inTail\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (!m) bad("inTail() missing -- credits/preview ranges need the TAIL guard");
+  else {
+    const t = m[0];
+    if (/start > 10/.test(t) && /0\.5/.test(t)) ok("inTail: start > 10s AND start >= dur/2");
+    else bad("inTail must require start > 10s AND start >= dur * 0.5");
+  }
+  const oh = html.match(/function outroHit\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (oh && /inTail\(/.test(oh[0])) ok("outroHit enforces the TAIL guard (credits/preview)");
+  else bad("outroHit must gate on inTail -- an early credits range never shows Next Episode");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

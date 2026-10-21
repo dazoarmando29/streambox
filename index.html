@@ -564,7 +564,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 182; // bump every release alongside version.txt
+  const BUILD_NUM = 183; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -5914,7 +5914,13 @@ function outroHit(){
   if (watchState.type !== "tv") return null; // same gates as intros
   if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt") return null;
   const cur = pState.cur || 0;
-  return _outroRanges.find(r => cur >= r.start && (r.end == null || cur < r.end)) || null;
+  // TAIL guard: credits/preview ranges only count in the tail (start > 10s
+  // AND start >= dur/2) — an early "credits" range never shows Next Episode
+  return _outroRanges.find(r => cur >= r.start && (r.end == null || cur < r.end - 1) && inTail(r)) || null;
+}
+function inTail(r){
+  const dur = pState.dur || 0;
+  return r && r.start > 10 && (dur <= 0 || r.start >= dur * 0.5);
 }
 function skipOutroNow(){
   const hit = outroHit();
@@ -5966,15 +5972,16 @@ function paintSkipPill(){
   if (sk) {
     sk.classList.add("hidden"); // retired: the floating pill owns Skip on every target
     if (cHit) { const t = "\u{23ED} Skip Recap"; if (sk.textContent !== t) sk.textContent = t; }
-    else if (inHit) { const t = "\u{23ED} Skip " + fmtT(inHit.end); if (sk.textContent !== t) sk.textContent = t; }
-    else if (oHit) { const t = hasNext ? "\u{23ED} Next Ep" : "\u{23ED} Credits"; if (sk.textContent !== t) sk.textContent = t; }
+    else if (inHit) { const t = "\u{23ED} Skip Intro"; if (sk.textContent !== t) sk.textContent = t; }
+    else if (oHit) { const t = hasNext ? "\u{23ED} Next Episode" : "\u{23ED} Skip Credits"; if (sk.textContent !== t) sk.textContent = t; }
   }
   const fl = document.getElementById("skipFloat");
   if (fl) {
     fl.classList.toggle("hidden", !(cHit || inHit || oHit)); // every target gets the floating pill
-    if (cHit) { const t = "\u{23ED} Skip Recap · " + fmtT(cHit.end); if (fl.textContent !== t) fl.textContent = t; }
-    else if (inHit) { const t = "\u{23ED} Skip Intro · " + fmtT(inHit.end); if (fl.textContent !== t) fl.textContent = t; }
-    else if (oHit) { const t = hasNext ? "\u{23ED} Skip Credits · Next Ep" : "\u{23ED} Skip Credits"; if (fl.textContent !== t) fl.textContent = t; }
+    // plain names only — no countdown/time suffixes (native 0.64 parity)
+    if (cHit) { const t = "\u{23ED} Skip Recap"; if (fl.textContent !== t) fl.textContent = t; }
+    else if (inHit) { const t = "\u{23ED} Skip Intro"; if (fl.textContent !== t) fl.textContent = t; }
+    else if (oHit) { const t = hasNext ? "\u{23ED} Next Episode" : "\u{23ED} Skip Credits"; if (fl.textContent !== t) fl.textContent = t; }
     // focus rescue: the pill just left while a remote sat on it — park on \u{25B6}
     // instead of stranding focus on a hidden pill
     if (fl.classList.contains("hidden") && document.activeElement === fl && isTV) {
