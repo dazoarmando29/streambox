@@ -1502,6 +1502,10 @@ fun PlayerScreen(
         epSeason = s
         epNumber = e
         cur = 0f
+        // The switch IS a transition (0.67): restart the sync clock so the
+        // old page's echoed ended/nextup can never double-step on top of it,
+        // no matter which provider advanced by itself.
+        lastLoadAtMs = System.currentTimeMillis()
         return true
     }
 
@@ -2118,17 +2122,20 @@ fun PlayerScreen(
                                     "ended" -> {
                                         playing = false
                                         // 0.66: Auto-play Next TAKES OVER the
-                                        // transition on route mirrors - our
-                                        // advanceEpisode() opens the next
-                                        // episode through the canonical
-                                        // /tv/{id}/{s}/{e} route BEFORE the
-                                        // embed's own Up Next can resolve a
-                                        // different video (the K-Drama
-                                        // auto-next bug). Grace + the one-per-
-                                        // load latch keep the dying page's
-                                        // echoed ended from double-stepping.
+                                        // transition - our advanceEpisode()
+                                        // opens the next episode through the
+                                        // canonical /tv/{id}/{s}/{e} route
+                                        // BEFORE the embed's own Up Next can
+                                        // resolve a different video (the
+                                        // K-Drama auto-next bug). 0.67: every
+                                        // series mirror (TV, anime, K-Drama)
+                                        // - the embeds do NOT reliably self-
+                                        // advance and episodes sat stuck at
+                                        // the end. Grace + the one-per-load
+                                        // latch keep echoes from double-
+                                        // stepping.
                                         if (autoSkip && title.type != "movie" &&
-                                            mirror != "anipm" && mirror != "hls" &&
+                                            mirror != "hls" &&
                                             !endedHandled && pastSyncGrace()
                                         ) {
                                             endedHandled = true

@@ -193,7 +193,14 @@
        switch that IS adopted re-opens through our own load() - the same
        deterministic /tv/{id}/{s}/{e} as the Next Episode pill. nextup and
        ended share the EP_SYNC_GRACE_MS guard so racing events never
-       double-step */
+       double-step
+    62 auto-next runs on EVERY series (0.67): the embeds do NOT reliably
+       self-advance - episodes sat stuck at the end (Lie to Me) - so the
+       ended takeover covers all series mirrors incl. AniPM (only the HLS
+       test slot and movies are excluded), Auto-play Next defaults ON on a
+       fresh pref key (a stale saved OFF predates working auto-next), and
+       adoptProviderEpisode restarts the sync clock so any provider that
+       DOES self-advance can never double-step with ours */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1195,6 +1202,29 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("auto-next is ours: provider switches re-open through load(), ended advances once per load through advanceEpisode(), everything grace-guarded");
   } else {
     bad("auto-next must never ride the embed's own Up Next - adopted switches reload through load(), ended runs advanceEpisode() once per load (endedHandled + pastSyncGrace), and nextup is grace-guarded");
+  }
+}
+
+/* ---------- 62. auto-next runs on every series ---------- */
+{
+  const psN = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  const stN = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
+    ? fs.readFileSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
+  if (!psN || !stN) bad("PlayerScreen.kt/Store.kt missing - auto-next coverage cannot be verified");
+  else {
+    const endedBlock = (psN.match(/"ended" -> \{[\s\S]{0,1600}?\n\s{20,}\}/) || [""])[0];
+    const anipmExcluded = /mirror != "anipm"/.test(endedBlock);
+    const adoptResetsClock = /fun adoptProviderEpisode[\s\S]{0,1600}?The switch IS a transition/.test(psN) &&
+      /fun adoptProviderEpisode[\s\S]{0,1600}?lastLoadAtMs = System\.currentTimeMillis\(\)/.test(psN);
+    if (!anipmExcluded &&
+        /if \(autoSkip && title\.type != "movie" &&\s*\n\s*mirror != "hls" &&\s*\n\s*!endedHandled && pastSyncGrace\(\)/.test(endedBlock) &&
+        /getBoolean\(K_AUTO_NEXT, true\)/.test(stN) &&
+        /private const val K_AUTO_NEXT = "auto_next_v2"/.test(stN) &&
+        adoptResetsClock) {
+      ok("auto-next runs on every series: ended takeover covers all series mirrors, default ON, adopt restarts the sync clock");
+    } else {
+      bad("auto-next must run for every series mirror (no anipm exclusion), Store.autoSkip must default ON on a fresh key, and adoptProviderEpisode must restart the sync clock - episodes sat stuck at the end");
+    }
   }
 }
 

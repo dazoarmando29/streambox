@@ -42,7 +42,7 @@ object Store {
     private const val K_SUBS_PREF = "subs_pref"
     private const val K_SUB_PICK = "sub_pick"
     private const val K_SUB_STYLE = "sub_style"
-    private const val K_AUTO_SKIP = "auto_skip"
+    private const val K_AUTO_NEXT = "auto_next_v2"
     private const val K_FEED = "feed_cache"
 
     private fun prefs(ctx: Context) =
@@ -230,10 +230,15 @@ object Store {
         prefs(ctx).edit().putString(K_FEED, root.toString()).apply()
     }
 
-    fun autoSkip(ctx: Context): Boolean = prefs(ctx).getBoolean(K_AUTO_SKIP, false)
+    // 0.67: Auto-play Next defaults ON (standing ask: episodes chain into the
+    // next one on every TV show, anime and K-Drama - never sit stuck at the
+    // end). Fresh key so a stale OFF saved before auto-next actually worked
+    // cannot keep episodes stuck; the Episodes-sheet toggle still persists a
+    // real choice from now on.
+    fun autoSkip(ctx: Context): Boolean = prefs(ctx).getBoolean(K_AUTO_NEXT, true)
 
     fun setAutoSkip(ctx: Context, on: Boolean) {
-        prefs(ctx).edit().putBoolean(K_AUTO_SKIP, on).apply()
+        prefs(ctx).edit().putBoolean(K_AUTO_NEXT, on).apply()
     }
 
     fun subStyle(ctx: Context): SubStyle {
