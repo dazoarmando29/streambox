@@ -666,7 +666,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 198; // bump every release alongside version.txt
+  const BUILD_NUM = 199; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -805,9 +805,6 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     </div>
     <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-5"></div>
     <button id="loadMoreBtn" onclick="browseMore()" class="hidden mx-auto mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 font-bold text-sm">Load more &#x2193;</button>
-    <aside class="fixed bottom-6 right-6 z-40">
-      <button onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Scroll to top" class="w-12 h-12 rounded-full glass-panel hover:bg-teal-400/20 text-gray-300 hover:text-white border border-white/10 flex items-center justify-center shadow-2xl">&#x2191;</button>
-    </aside>
   </main>
 
   <!-- MY LIST -->
@@ -825,8 +822,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <div id="listGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
   </main>
   <!-- FOOTER: brand + credits (text-only, never enters remote tab order) -->
-  <footer class="px-4 md:px-10 pb-10 pt-2 text-[11px] text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-1">
-    <span class="font-black text-sm text-gray-400">Stream<span class="text-teal-500">Box</span> <span id="footVer"></span></span>
+  <footer class="px-4 md:px-10 pr-20 pb-10 pt-2 text-[11px] text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-1">
+    <span class="font-black text-sm text-gray-400">Stream<span class="text-teal-400">Box</span> <span id="footVer"></span></span>
     <span>•</span><span>Catalog: TMDB</span><span>•</span><span>Playback: CineSrc + mirrors</span><span>•</span><span>Subs: Wyzie</span>
     <span class="flex-1"></span>
     <span class="text-[10px] font-bold text-gray-500" style="letter-spacing:.15em">STREAMBOX 10-FOOT UI</span>

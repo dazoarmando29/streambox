@@ -112,7 +112,10 @@
    105 no cross-view leaks: each Continue surface shows only on its own
       screen (home row on the HOME rows, scoped row on the GRID view), and
       the Explore header never regresses to a bare section name (studio
-      picks append as a suffix via browseTitle) */
+      picks append as a suffix via browseTitle)
+   106 no floating scroll-to-top button (it stacked over the remote-cursor
+      control and covered the dazzo legend) and the footer keeps right-edge
+      clearance so fixed bottom-right controls never cover the credit */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -998,6 +1001,19 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (psc && /browseTitle\(browse\.type\)/.test(psc[0]) && !/textContent = st \? `\$\{base\}/.test(psc[0]))
     ok("studio picks append as a suffix -- the Explore header never regresses");
   else bad("paintStudioChips must build the title from browseTitle (never a bare Movies/TV Shows)");
+}
+
+/* ---------- 106. no floating scroll-top + dazzo legend clearance ---------- */
+{
+  if (/aria-label="Scroll to top"/.test(html) || /window\.scrollTo\(\{top:0/.test(html))
+    bad("a floating scroll-to-top button survives -- it stacked over the remote-cursor control and covered the dazzo legend");
+  else ok("no floating scroll-to-top button");
+  const foot = html.match(/<footer[\s\S]*?<\/footer>/);
+  if (foot && /pr-20/.test(foot[0]) && /dazzo/.test(foot[0])) ok("footer keeps right-edge clearance for the dazzo legend");
+  else bad("the footer must carry right-edge clearance (pr-*) so fixed controls never cover the dazzo credit");
+  const cur = html.match(/id="cursorBtn"/);
+  if (cur) ok("the TV remote-cursor control stays (functional, not decorative)");
+  else bad("cursorBtn must remain -- it is the TV remote-cursor control");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
