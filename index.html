@@ -605,7 +605,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 193; // bump every release alongside version.txt
+  const BUILD_NUM = 194; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -2938,6 +2938,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   watchState.ko = (type === "tv" && d.original_language === "ko");
   window._koAuto = true;
   window._koAutoDone = "";
+  window._koSweepKey = ""; window._koSweep = {}; window._koNoTlShown = false; window._koAudioNote = "";
   loadStoredSubs(); // auto-attach this title's remembered subtitle file
   wyzAutoSubs(); // none remembered? fetch the best match silently (English default)
   // late anime catch (deep links / cold continue entries): metadata now proves
@@ -4819,6 +4820,61 @@ function koAutoPick(){
       subsOn = false;
       try { paintSubsBtn(); paintCaps(true); } catch(e){}
     }
+  } catch(e){}
+}
+/* Tagalog-first K-Dramas (native 0.70-0.71 parity): VidBolt's catalog rotates
+   — Lie to Me currently ships EN/KO/LATAM-ES/BR-PT audio with Filipino only
+   as a SUBTITLE, on every server. So (1) we ASK for Tagalog at boot through
+   their documented audio option (a no-op when absent, an instant switch the
+   moment any server carries the dub), (2) we sweep their servers once per
+   episode and land on the first one carrying a Tagalog/Filipino dub, and
+   (3) when none has it the panel SAYS SO with the Filipino subtitle pointer
+   instead of leaving the viewer hunting. Korean stays the house fallback. */
+function koBootAsk(){
+  try {
+    if (!isKDrama() || mirror !== "vidbolt") return;
+    if (window._koAuto === false) return;
+    boltMobileOption("audio", "Tagalog"); // documented audio option; no-ops when absent
+  } catch(e){}
+}
+function koNoTagalogNote(opts){
+  try {
+    const hasFilSub = (opts || []).some(o => o && o.option === "subtitles" && /filipino|tagalog/i.test(String(o.label || "")));
+    const msg = hasFilSub
+      ? "No Tagalog dub available — Filipino subtitles are available in the Subs column."
+      : "No Tagalog dub available — Korean audio active (English subs on).";
+    if (!window._koNoTlShown) {
+      window._koNoTlShown = true;
+      const ws = document.getElementById("watchStatus");
+      if (ws) ws.textContent = msg;
+    }
+    window._koAudioNote = msg;
+    try { paintAV(); } catch(e){}
+  } catch(e){}
+}
+function koTagalogSweep(){
+  // one server pass per episode: hop while no Tagalog/Filipino DUB is in the
+  // panel; each hop re-arrives as a mobile-panel and re-runs the pick. The
+  // sweep aborts the moment the viewer picks anything by hand.
+  try {
+    if (!isKDrama() || mirror !== "vidbolt") return;
+    if (window._koAuto === false) return;
+    const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
+    if (window._koSweepKey === bk) return;
+    const opts = (((window._boltPanels || {})[bk]) || []).filter(o => o && typeof o === "object" && o.option != null);
+    const audios = opts.filter(o => o.option === "audio");
+    if (!audios.length) return; // no track list yet — nothing to sweep against
+    const hasTL = audios.some(a => /tagalog|filipino/i.test(String(a.label || "")));
+    if (hasTL) { window._koSweepKey = bk; window._koAudioNote = ""; return; }
+    const servers = opts.filter(o => (o.option === "server" || o.option === "servers") && o.value != null);
+    if (servers.length < 2) { window._koSweepKey = bk; koNoTagalogNote(opts); return; }
+    window._koSweep = window._koSweep || {};
+    const tried = (window._koSweep[bk] = window._koSweep[bk] || []);
+    const next = servers.find(s => !tried.includes(String(s.value)));
+    if (!next) { window._koSweepKey = bk; koNoTagalogNote(opts); return; }
+    tried.push(String(next.value));
+    window._koAutoDone = ""; // re-pick tracks on the new server
+    boltMobileOption(next.option, next.value); // hop to the next server
   } catch(e){}
 }
 function tvSafeOnly(){
@@ -6732,6 +6788,7 @@ window.addEventListener("message", (event)=>{
         window._boltPanels[bk] = d.options;
         try { paintQuality(); } catch(e){}
         try { koAutoPick(); } catch(e){} // K-drama defaults: Tagalog dub + VidBolt own English subs
+        try { koTagalogSweep(); } catch(e){} // no Tagalog here? sweep their servers for it
       }
     } catch(e){}
     if (d && typeof d.panel === "string") openVrSheet(d.panel, d.options, null, boltMobileOption);
@@ -6741,6 +6798,7 @@ window.addEventListener("message", (event)=>{
   if (d.type === "ready") {
     hideSpin(); ctlPaint();
     showTitleCard();
+    koBootAsk(); // K-dramas: ask for the Tagalog dub at boot (no-op when absent)
     if (document.body.classList.contains("tv-mode")) {
       boltSend({ type: "play" });
       boltArmStartRetry(15000);
@@ -7429,6 +7487,15 @@ function paintBoltAV(){
       const n = document.createElement("p");
       n.className = "text-xs text-teal-300 bg-teal-500/10 border border-teal-400/30 rounded-xl px-3 py-2 mb-2";
       n.textContent = KO_SUB_NOTE;
+      box.appendChild(n);
+    }
+    if (id === "avAudio" && isKDrama() && window._koAudioNote) {
+      // honest panel state (0.71 parity): no Tagalog dub on this catalog —
+      // say it and point at the Filipino subtitle instead of leaving the
+      // viewer hunting
+      const n = document.createElement("p");
+      n.className = "w-full text-xs text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-xl px-3 py-2 mb-2";
+      n.textContent = window._koAudioNote;
       box.appendChild(n);
     }
     if (!list.length) {

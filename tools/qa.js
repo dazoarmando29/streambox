@@ -90,7 +90,13 @@
    97 auto-fallbacks NEVER land on VidRift (its bridge has no play/pause —
       the remote can't pause there): no stuckFallback("vidrift"), no auto
       setMirror("vidrift"), and stuckFallback rejects it as last-good too;
-      manual Source picks may still choose it */
+      manual Source picks may still choose it
+   98 Tagalog-first K-Dramas: the Tagalog dub is ASKED at boot via the
+      documented audio option (no-op when the release carries none, Korean
+      fallback stays)
+   99 the server sweep lands on the first Tagalog/Filipino-carrying server
+      (one pass per episode, aborts on any manual pick) and the panel states
+      "No Tagalog dub available" with the Filipino subtitle pointer */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -833,6 +839,43 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("stuckFallback must skip vidrift even when it was the last-good mirror");
   if (/moved you to VidBolt/.test(html) && /moved you to YapGrid/.test(html)) ok("fallback messages name VidBolt/YapGrid");
   else bad("the match-failure hops must land on VidBolt then YapGrid (TMDB-direct), never VidRift");
+}
+
+/* ---------- 98. Tagalog asked at boot (K-dramas) ---------- */
+{
+  const ba = html.match(/function koBootAsk\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (ba && /boltMobileOption\(\s*"audio"\s*,\s*"Tagalog"\s*\)/.test(ba[0]) && /_koAuto === false/.test(ba[0]))
+    ok("koBootAsk sends the documented audio option (Tagalog) at VidBolt ready");
+  else bad("koBootAsk must ask for the Tagalog dub at boot via boltMobileOption(audio, Tagalog)");
+  const rd = html.match(/if \(d\.type === "ready"\)\s*\{[\s\S]{0,400}/);
+  if (rd && /koBootAsk\(\)/.test(rd[0])) ok("the boot ask runs on the VidBolt ready event");
+  else bad("the VidBolt ready handler must call koBootAsk");
+  const ap = html.match(/function koAutoPick\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (ap && /tagalog\|filipino/i.test(ap[0]) && /korean/i.test(ap[0])) ok("Korean remains the house fallback when no Tagalog exists");
+  else bad("koAutoPick must keep the Tagalog-first / Korean-fallback ladder");
+}
+
+/* ---------- 99. server sweep + honest no-dub panel ---------- */
+{
+  const sw = html.match(/function koTagalogSweep\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (!sw) bad("koTagalogSweep missing -- VidBolt catalogs rotate, sweep their servers for the dub");
+  else {
+    const t = sw[0];
+    if (/option === "server"/.test(t) && /boltMobileOption\(next\.option, next\.value\)/.test(t)) ok("the sweep hops provider server options (values echoed verbatim)");
+    else bad("koTagalogSweep must hop the provider's own server options via boltMobileOption");
+    if (/_koAuto === false/.test(t)) ok("the sweep aborts on any manual pick");
+    else bad("koTagalogSweep must abort when _koAuto stands down");
+    if (/window\._koSweepKey/.test(t) && /tried/.test(t)) ok("the sweep is one pass per episode (tried list + latch)");
+    else bad("koTagalogSweep must be one bounded pass per episode (tried list, _koSweepKey latch)");
+    if (/window\._koAutoDone = ""/.test(t)) ok("each server hop re-runs the track pick");
+    else bad("a server hop must clear _koAutoDone so koAutoPick re-runs on the new server");
+  }
+  const nn = html.match(/function koNoTagalogNote\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (nn && /No Tagalog dub available/.test(nn[0]) && /Filipino/.test(nn[0])) ok("the panel states No Tagalog dub available with the Filipino subtitle pointer");
+  else bad("koNoTagalogNote must render the honest no-dub message + Filipino subtitle pointer");
+  const pav = html.match(/function paintBoltAV\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (pav && /_koAudioNote/.test(pav[0])) ok("the A/V AUDIO column shows the no-dub note");
+  else bad("paintBoltAV must surface window._koAudioNote in the AUDIO column");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
