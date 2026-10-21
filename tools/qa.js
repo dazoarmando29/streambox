@@ -216,7 +216,16 @@
        Tagalog dub "disappeared" on Lie to Me ep 8). vbRoute() reads the
        EMBED URL first (known the moment the wrapper exists) and a retry
        loop keeps asking until the tracks land - the resolve fetch itself
-       stays once-per-episode */
+       stays once-per-episode
+    65 resolve hardening + weak-TV speed (0.70): the 0.69 discovery queried
+       /api/resolve BEFORE their player bootstrap and CACHED the empty
+       answer - the Tagalog dub vanished everywhere. The fetch now waits
+       for fw.__VB__ (the session that fills the sources), runs ONE in
+       flight per episode (VB_PENDING - no slow-wifi fetch storms that also
+       slowed video starts), caches ONLY answers with real sources (empties
+       retry), publishes only on real changes (no recomposition spam), the
+       splash beat is 700ms not 1200, and TV image crossfades are off (the
+       weak box decodes, it does not need to blend) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1081,10 +1090,12 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   if (!psF) bad("PlayerScreen.kt missing - player speed rules cannot be verified");
   else if (/VB_DOC_CACHE/.test(psF) &&
            /rel=\\"preconnect\\"/.test(psF) &&
-           /VB_RESOLVE\[q\] = j; applyStream\(j\)/.test(psF)) {
+           /VB_PENDING\[q\] = 1;/.test(psF) &&
+           /VB_RESOLVE\[q\] = j;/.test(psF) &&
+           /applyStream\(j\);/.test(psF)) {
     ok("player fast paths: cached injected page, preconnects, resolve fetched once per episode");
   } else {
-    bad("player must keep VB_DOC_CACHE + preconnect links + the VB_RESOLVE single fetch");
+    bad("player must keep VB_DOC_CACHE + preconnect links + the VB_RESOLVE single fetch (VB_PENDING dedupe)");
   }
 }
 
@@ -1278,13 +1289,36 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   if (!psT) bad("PlayerScreen.kt missing - track discovery rules cannot be verified");
   else if (psT.includes("function vbRoute()") &&
            psT.includes("var r = vbRoute();") &&
-           psT.includes("if (Object.keys(VBT.audios).length > 0 || vbTries > 40) clearInterval(vbTimer);") &&
+           psT.includes("if (have || vbTries > 40) clearInterval(vbTimer);") &&
            psT.includes("var anime = r.type === \"anime\";") &&
            !psT.includes("setTimeout(vbTracks, 5000)") &&
            !/var bt = fw && fw\.__VB__ && fw\.__VB__\.title;\s*\n\s*if \(!bt\) return;/.test(psT)) {
     ok("VidBolt track discovery: route reads the embed URL first and retries until the real audio tracks land (once-per-episode resolve kept)");
   } else {
     bad("track discovery must resolve its route from the EMBED URL (vbRoute - fw.__VB__ surfaces too late on slow TVs) and retry until the real tracks land - the audio list came up empty and the Tagalog dub vanished");
+  }
+}
+
+/* ---------- 65. resolve hardening + weak-TV speed ---------- */
+{
+  const psT = fs.existsSync(psPath) ? qaRead(psPath) : "";
+  const appT = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt")) : "";
+  const hsT = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt")) : "";
+  if (!psT || !appT || !hsT) bad("PlayerScreen/App/HomeScreen missing - resolve hardening cannot be verified");
+  else if (psT.includes("var VB_PENDING = {};") &&
+           psT.includes("else if (fw && fw.__VB__ && !VB_PENDING[q]) {") &&
+           /if \(st && st\.sources && st\.sources\.length > 0\) VB_RESOLVE\[q\] = j;/.test(psT) &&
+           psT.includes("if (sig === VB_PUBSIG) return;") &&
+           psT.includes("for (var vk in VB_RESOLVE)") &&
+           /delay\(700\)/.test(appT) &&
+           /crossfade\(if \(AppEnv\.isTv\) 0 else 180\)/.test(hsT) &&
+           !psT.includes("setTimeout(vbTracks, 5000)") &&
+           !/VB_RESOLVE\[q\] = j; applyStream/.test(psT)) {
+    ok("resolve hardening: bootstrap-gated single fetch, empties never cached, publish-on-change; splash 700ms and no TV crossfade");
+  } else {
+    bad("the resolve fetch must wait for fw.__VB__ (bootstrap session), run one in flight per episode (VB_PENDING), cache ONLY source-bearing answers, and publish only on change - early empty caches erased the Tagalog dub and storms slowed slow-wifi starts");
   }
 }
 

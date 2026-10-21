@@ -606,7 +606,7 @@ private fun Hero(t: Title, rowLabel: String?, big: Boolean, onPlay: (Title) -> U
     // hid the rest of the synopsis and a long block pushed the title out).
     Box(modifier = Modifier.fillMaxWidth().heightIn(min = if (big) 420.dp else 260.dp)) {
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(180).build(),
+            model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(if (AppEnv.isTv) 0 else 180).build(),
             contentDescription = t.name,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
@@ -798,7 +798,7 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                                 .background(Pill),
                         ) {
                             AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current).data(p.poster).crossfade(180).build(),
+                                model = ImageRequest.Builder(LocalContext.current).data(p.poster).crossfade(if (AppEnv.isTv) 0 else 180).build(),
                                 contentDescription = p.name,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize(),
@@ -1004,7 +1004,7 @@ fun PosterCard(t: Title, onOpen: (Title) -> Unit, newEp: Boolean = false) {
         ) {
             val imgCtx = LocalContext.current
             val imgModel = remember(t.poster) {
-                ImageRequest.Builder(imgCtx).data(t.poster).crossfade(180).build()
+                ImageRequest.Builder(imgCtx).data(t.poster).crossfade(if (AppEnv.isTv) 0 else 180).build()
             }
             AsyncImage(
                 model = imgModel,
@@ -1451,7 +1451,7 @@ private fun MyListCard(
                     .background(Pill),
             ) {
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(180).build(),
+                    model = ImageRequest.Builder(LocalContext.current).data(t.backdrop ?: t.poster).crossfade(if (AppEnv.isTv) 0 else 180).build(),
                     contentDescription = t.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -1597,7 +1597,7 @@ private fun MyListRow(
                     .background(Pill),
             ) {
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(180).build(),
+                    model = ImageRequest.Builder(LocalContext.current).data(t.poster).crossfade(if (AppEnv.isTv) 0 else 180).build(),
                     contentDescription = t.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),

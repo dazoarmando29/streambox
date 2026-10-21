@@ -162,7 +162,10 @@ fun StreamBoxApp() {
     var splashDone by remember { mutableStateOf(false) }
     var whatsNew by remember { mutableStateOf<Pair<String, List<String>>?>(null) }
     LaunchedEffect(Unit) {
-        delay(1200)
+        // 0.70 perf: the cinematic beat is 700ms now - the old 1200ms was
+        // pure waiting on a weak TV box (the splash overlay animates the
+        // whole time). The catalog still warms behind it from t=0.
+        delay(700)
         splashDone = true
         val v = BuildConfig.VERSION_NAME
         val prev = Store.lastSeenVersion(appCtx)
@@ -275,6 +278,10 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.70" to listOf(
+        "The Tagalog dub is back on every episode - audio tracks can no longer vanish",
+        "Snappier on weak TV boxes and faster video starts on slow Wi-Fi",
+    ),
     "0.69" to listOf(
         "The real audio tracks ALWAYS appear now - the Tagalog dub can no longer vanish",
     ),

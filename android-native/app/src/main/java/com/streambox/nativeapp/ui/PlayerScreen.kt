@@ -851,11 +851,19 @@ private val SB_HOOK = """
   // snapshot with its exact command values.
   var VBT = { audios: {}, subs: {}, audioSel: "", subSel: "", quals: {}, qualsByLang: {}, qualSel: "" };
   var VB_RESOLVE = {};
+  var VB_PENDING = {};
+  var VB_PUBSIG = "";
   function vbPublish(){
     var au = Object.keys(VBT.audios), su = Object.keys(VBT.subs);
     var qr = Object.keys(VBT.quals).map(function(k){ return VBT.quals[k]; });
     var qb = Object.keys(VBT.qualsByLang);
     if (!au.length && !su.length && !qr.length && !qb.length) return;
+    // Publish only REAL changes (0.70): the discovery retries used to push
+    // an identical snapshot every tick and recomposed the player for
+    // nothing on a weak TV.
+    var sig = au.join() + "#" + su.join() + "#" + qr.length + "#" + qb.join() + "#" + VBT.audioSel + "#" + VBT.subSel + "#" + VBT.qualSel;
+    if (sig === VB_PUBSIG) return;
+    VB_PUBSIG = sig;
     send("vb:tracks", {
       audios: au.map(function(v){ return { label: VBT.audios[v] || v, value: v }; }),
       subs: su.map(function(v){ return { label: VBT.subs[v] || v, value: v }; }),
@@ -972,7 +980,22 @@ private val SB_HOOK = """
         } catch(e2){}
       }
       if (VB_RESOLVE[q]) applyStream(VB_RESOLVE[q]);
-      else fetch("/api/resolve?" + q).then(function(r){ return r.ok ? r.json() : {}; }).then(function(j){ VB_RESOLVE[q] = j; applyStream(j); }, function(){});
+      // 0.70: (a) ask ONLY after their player bootstrap (fw.__VB__) - the
+      // session it registers is what fills /api/resolve with sources, and
+      // the early 0.69 query used to CACHE THE EMPTY ANSWER so the real
+      // audio tracks (the Tagalog dub) vanished everywhere; (b) one fetch
+      // in flight per episode - no storm on slow wifi (storms slowed the
+      // video start too); (c) cache ONLY answers that really carry sources,
+      // empties stay retryable.
+      else if (fw && fw.__VB__ && !VB_PENDING[q]) {
+        VB_PENDING[q] = 1;
+        fetch("/api/resolve?" + q).then(function(rr){ return rr.ok ? rr.json() : {}; }).then(function(j){
+          VB_PENDING[q] = 0;
+          var st = j && j.stream;
+          if (st && st.sources && st.sources.length > 0) VB_RESOLVE[q] = j;
+          applyStream(j);
+        }, function(){ VB_PENDING[q] = 0; });
+      }
     } catch(e){}
   }
   // VidBolt's narrow-viewport gate (Bt) is opened by the matchMedia shim the
@@ -990,7 +1013,12 @@ private val SB_HOOK = """
     var vbTimer = setInterval(function(){
       vbTries++;
       vbTracks();
-      if (Object.keys(VBT.audios).length > 0 || vbTries > 40) clearInterval(vbTimer);
+      // Stop once a REAL answer is cached (not merely when some label
+      // appeared) - a panel-only snapshot would stop the retries before
+      // the resolve ever succeeded. 40 tries = 2 min cap.
+      var have = false;
+      for (var vk in VB_RESOLVE) { if (VB_RESOLVE.hasOwnProperty(vk)) { have = true; break; } }
+      if (have || vbTries > 40) clearInterval(vbTimer);
     }, 3000);
   }
   if (ANIPM) {

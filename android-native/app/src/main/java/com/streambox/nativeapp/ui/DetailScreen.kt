@@ -205,7 +205,7 @@ fun DetailScreen(
         item {
             Box(modifier = Modifier.fillMaxWidth().height(if (big) 560.dp else 440.dp)) {
                 AsyncImage(
-                    model = ImageRequest.Builder(ctx).data(title.backdrop ?: title.poster).crossfade(180).build(),
+                    model = ImageRequest.Builder(ctx).data(title.backdrop ?: title.poster).crossfade(if (AppEnv.isTv) 0 else 180).build(),
                     contentDescription = title.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -826,7 +826,7 @@ fun DetailScreen(
                                     AsyncImage(
                                         model = ImageRequest.Builder(ctx)
                                             .data("https://img.youtube.com/vi/" + v.key + "/hqdefault.jpg")
-                                            .crossfade(180)
+                                            .crossfade(if (AppEnv.isTv) 0 else 180)
                                             .build(),
                                         contentDescription = v.name,
                                         contentScale = ContentScale.Crop,
@@ -1064,7 +1064,7 @@ private fun EpisodeRow(
         ) {
             if (ep.still != null) {
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data(ep.still).crossfade(180).build(),
+                    model = ImageRequest.Builder(LocalContext.current).data(ep.still).crossfade(if (AppEnv.isTv) 0 else 180).build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
