@@ -19,6 +19,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -388,6 +389,13 @@ private fun hitAt(cur: Float, dur: Float, skips: IntroDb.Skips): SkipHit? {
 /** Media file extensions the watchdog counts as stream liveness (suffix
     match - never spelled as dotted literals, see the Ad Shield hook). */
 private val MEDIA_EXTS = setOf("m3u8", "mpd", "ts", "m4s", "mp4", "webm", "aac", "m4a")
+
+/** Episode-sync grace (0.65): provider episode events landing this soon
+    after OUR OWN load are settling noise - the outgoing page's episodechange
+    racing the navigation, or an echo of what we just opened. They used to
+    stomp epSeason/epNumber blindly and the next Next Episode opened a
+    different video. */
+private const val EP_SYNC_GRACE_MS = 8000L
 
 /** VidBolt's mobile-option command listener (audio/subtitles/speed) only
     registers when its NARROW-VIEWPORT gate passes - the phone works natively,
@@ -1244,6 +1252,9 @@ fun PlayerScreen(
     var epBase by remember(title.id, title.type) { mutableIntStateOf(0) }
     var resolvedSeason by remember(title.id, title.type) { mutableIntStateOf(-1) }
     var pendingLoadAt by remember(title.id, title.type) { mutableFloatStateOf(-1f) }
+    // When WE last navigated the player (0.65): provider episode events
+    // inside EP_SYNC_GRACE_MS are settling noise and never adopted.
+    var lastLoadAtMs by remember(title.id, title.type) { mutableStateOf(0L) }
     var booted by remember(title.id, title.type, season, episode) { mutableStateOf(false) }
 
     fun load(startAt: Float = 0f) {
@@ -1255,6 +1266,20 @@ fun PlayerScreen(
             return
         }
         chromeVisible = true
+        // Capture the TARGET now (0.65): the posted load used to read
+        // epSeason/epNumber LATE, so a queued provider episodechange landing
+        // between advanceEpisode() and the post swapped the URL under us -
+        // K-drama Next Episode opened a different video. The URL is built
+        // from the numbers the CALLER intended, period. Same for the route
+        // fields the resolver owns.
+        val s = epSeason
+        val ep = epNumber
+        val rMal = routeMal
+        val rAni = routeAni
+        val base = epBase
+        val lang = anipmLang
+        val q = cinesrcQ
+        lastLoadAtMs = System.currentTimeMillis()
         // Mirrors whose URL carries startAt (vidzen/vidbolt/anipm) keep the
         // position themselves; the rest get one seek when the player reports
         // ready - switching providers never loses your place (task rule).
@@ -1284,7 +1309,7 @@ fun PlayerScreen(
                 val w = web ?: return@post
                 loadMirror(
                     w,
-                    playerUrl(title, epSeason, epNumber, routeMal, routeAni, mirror, startAt, anipmLang, cinesrcQ, epBase),
+                    playerUrl(title, s, ep, rMal, rAni, mirror, startAt, lang, q, base),
                     mirror,
                 )
             } catch (e: Exception) {
@@ -1447,9 +1472,38 @@ fun PlayerScreen(
     var epsList by remember { mutableStateOf(listOf<Ep>()) }
     var epsBusy by remember { mutableStateOf(false) }
 
+    /** Adopt a provider-internal episode switch (0.65) - the ONE door into
+        epSeason/epNumber for every mirror (VidBolt/VidRift episodechange,
+        AniPM episodechange) and every type (anime, TV, K-drama). Raw provider
+        numbers used to stomp state blindly: a boot echo, an event racing our
+        navigation, or a mis-shaped payload left the state pointing at ANOTHER
+        episode and the next Next Episode load opened a different video
+        (K-dramas on VidBolt hit it first - the same stomp could hit anything).
+        Only a COHERENT episode from our TMDB model is adopted: echoes of the
+        tracked pair are no-ops, settling noise inside EP_SYNC_GRACE_MS after
+        our own load is dropped, and a number outside the real season range is
+        dropped. */
+    fun adoptProviderEpisode(sIn: Int, eIn: Int): Boolean {
+        val e = eIn
+        if (e <= 0) return false
+        val s = if (sIn > 0) sIn else epSeason
+        if (s == epSeason && e == epNumber) return false
+        if (System.currentTimeMillis() - lastLoadAtMs < EP_SYNC_GRACE_MS) return false
+        val count = if (s == epSeason) maxOf(seasonEps, epsList.size)
+        else seasonList.firstOrNull { it.n == s }?.count ?: 0
+        if (count > 0 && e > count) return false
+        save(0f, dur)
+        epSeason = s
+        epNumber = e
+        cur = 0f
+        return true
+    }
+
     /** Next episode (0.60): never step past the season's real end (the
         blind +1 built dead routes on finales) and never into an unaired
-        episode - a finale rolls into the next season's E1 when it exists. */
+        episode - a finale rolls into the next season's E1 when it exists.
+        Every next-episode path runs through here: the bar pill, the skip
+        pill, auto-skip credits, AND the providers' own Up Next (0.65). */
     fun advanceEpisode() {
         val count = seasonEps
         if (count > 0 && epNumber >= count) {
@@ -2121,13 +2175,13 @@ fun PlayerScreen(
                                         val e = o.optInt("episode", -1)
                                         val s = o.optInt("season", -1)
                                         if (e > 0) {
-                                            save(0f, dur)
-                                            if (s > 0) epSeason = s
                                             // Their episode numbers ride the
                                             // ENTRY (0.60): convert back to
-                                            // our per-season numbering.
-                                            epNumber = (e - epBase).coerceAtLeast(1)
-                                            cur = 0f
+                                            // our per-season numbering, then
+                                            // the shared adoption (0.65)
+                                            // validates the pair before it
+                                            // may touch state.
+                                            adoptProviderEpisode(s, (e - epBase).coerceAtLeast(1))
                                         }
                                     }
                                     "vb:tracks" -> {
@@ -2240,27 +2294,22 @@ fun PlayerScreen(
                                     "mirror:episode" -> {
                                         // Provider advanced internally (Up
                                         // Next / picker): sync state only -
-                                        // reloading would double-switch.
-                                        val e = o.optInt("episode", -1)
-                                        val s = o.optInt("season", -1)
-                                        if (e > 0) {
-                                            save(0f, dur)
-                                            if (s > 0) epSeason = s
-                                            epNumber = e
-                                            cur = 0f
-                                        }
+                                        // reloading would double-switch. The
+                                        // adoption door (0.65) validates the
+                                        // pair - raw provider numbers used to
+                                        // stomp state and the next Next
+                                        // Episode opened a different video.
+                                        adoptProviderEpisode(o.optInt("season", -1), o.optInt("episode", -1))
                                     }
                                     "mirror:nextup" -> {
                                         // Their Up Next fired under OUR
-                                        // episode list - WE advance (website
-                                        // parity: nextup-play means e+1).
-                                        save(0f, dur)
-                                        val s = o.optInt("season", -1)
-                                        if (s > 0) epSeason = s
-                                        epNumber = o.optInt("episode", epNumber) + 1
-                                        cur = 0f
-                                        playing = true
-                                        load()
+                                        // episode list - WE advance (0.65)
+                                        // through advanceEpisode(): season-
+                                        // end roll + unaired guard, and their
+                                        // raw numbers never steer the load
+                                        // (it used to add +1 to whatever the
+                                        // provider said).
+                                        advanceEpisode()
                                     }
                                     else -> {}
                                 }
@@ -2313,9 +2362,13 @@ fun PlayerScreen(
                     }
                     // Anime boots only AFTER its season route resolves
                     // (0.60) - the resolver's first pass fires load() with
-                    // the right entry ids and episode numbering.
+                    // the right entry ids and episode numbering. The boot
+                    // starts the sync grace clock (0.65) like every load:
+                    // the page's first episodechange echo must never stomp
+                    // the episode we just opened.
                     if (title.type != "anime" && !title.isAnime) {
                         booted = true
+                        lastLoadAtMs = System.currentTimeMillis()
                         loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, resumeAt, anipmLang, cinesrcQ), mirror)
                     }
                     web = this
@@ -2328,6 +2381,13 @@ fun PlayerScreen(
         // Sx:Ex "episode name", real cert + CC chips - and the right edge
         // carries the playback state + clock. Quality chips stay OFF unless
         // a provider reports them (house rule: never claim 4K/Atmos).
+        // 0.65 JVM-64KB split: Box/Column/Row are INLINE composables, so a
+        // trailing content lambda compiles INTO this function's method - the
+        // whole player UI blew past the JVM's 64KB method limit (Method too
+        // large). Each big layer below lives in a named composable lambda
+        // VAL, whose body compiles to its own class. Never inline big UI
+        // trees back into this function.
+        val topHudLayer: @Composable BoxScope.() -> Unit = {
         if (chromeVisible) {
         Column(
             modifier = Modifier
@@ -2433,11 +2493,14 @@ fun PlayerScreen(
             }
         }
         }
+        }
+        topHudLayer(this)
 
         // Caption overlay (website-style): cue window is cur + sync offset.
         // Captions track the chrome on BOTH phone and TV - they ride up
         // while the bar is showing (TV bar is taller, so higher there) and
         // sink toward the bottom when it minimizes (Netflix feel).
+        val captionLayer: @Composable BoxScope.() -> Unit = {
         if (capCue != null && !showEps && !showSubs) {
             val bottomPad by animateDpAsState(
                 targetValue = if (chromeVisible) (if (big) 156.dp else 112.dp) else (if (big) 38.dp else 30.dp),
@@ -2465,8 +2528,11 @@ fun PlayerScreen(
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
+        }
+        captionLayer(this)
 
         // Center overlay while paused (website style).
+        val pausedLayer: @Composable BoxScope.() -> Unit = {
         if (!playing && !showEps) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -2488,9 +2554,12 @@ fun PlayerScreen(
                 CircleBtn("+30s", big) { seekRel(30f) }
             }
         }
+        }
+        pausedLayer(this)
 
         // Bottom control bar (website style): skip pill + time row + buttons.
         // Chrome fades when idle; the skip pill stays while in its range.
+        val barLayer: @Composable BoxScope.() -> Unit = {
         if (chromeVisible || hit != null) {
         Column(
             modifier = Modifier
@@ -2711,12 +2780,15 @@ fun PlayerScreen(
             }
         }
         }
+        }
+        barLayer(this)
 
         // Episodes sheet (design pack episode-picker): series line, season
         // stepper + Auto-play Next, range tabs and the real episode cards.
         // Bounded to the screen so the D-pad always lands on something
         // VISIBLE (0.38 fix: the old bottom-anchored Load pill sat below
         // the fold and focus escaped to the player behind the sheet).
+        val epsLayer: @Composable BoxScope.() -> Unit = {
         if (showEps) {
             Box(
                 modifier = Modifier
@@ -2948,10 +3020,13 @@ fun PlayerScreen(
                 }
             }
         }
+        }
+        epsLayer(this)
 
         // Audio & Subtitles panel (design pack TV overlay): SERVERS, AUDIO,
         // SUBTITLES and STYLING & SYNC under one glass header - the server
         // picker lives HERE now (0.36 request), no separate sheet.
+        val subsLayer: @Composable BoxScope.() -> Unit = {
         if (showSubs) {
             Box(
                 modifier = Modifier
@@ -3496,6 +3571,8 @@ fun PlayerScreen(
                 }
             }
         }
+        }
+        subsLayer(this)
     }
 }
 

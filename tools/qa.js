@@ -168,7 +168,24 @@
     58 the Browse tab is ONE scroll surface (chrome rides the grid as
        spanning headers - the fixed chrome + 200dp grid window clipped every
        poster row mid-artwork on TV), poster names render white/bold with a
-       meta line, and the builder's "dazzo" credit sits bottom right */
+       meta line, and the builder's "dazzo" credit sits bottom right
+    59 provider episode events never steer the load (0.65): load() captures
+       the target season/episode BEFORE the posted navigation (a queued
+       episodechange used to swap the URL under advanceEpisode - K-drama
+       Next Episode opened a different video), and every provider switch
+       (VidBolt/VidRift/AniPM episodechange, any Up Next) enters state ONLY
+       through adoptProviderEpisode: echoes of the tracked pair are no-ops,
+       settling noise inside EP_SYNC_GRACE_MS after our load/boot is
+       dropped, a number outside the real season range is dropped, and
+       nextup runs advanceEpisode() (season-end + unaired guards) instead
+       of trusting raw provider numbers
+    60 the player UI stays OUT of PlayerScreen's method (0.65): Box/Column/
+       Row are inline composables, so trailing content lambdas compile into
+       the caller's method and the whole player tree hit the JVM 64KB
+       method limit (Method too large). Every big layer (topHud, caption,
+       paused, bar, episodes, subs) lives in a named composable lambda VAL
+       whose body compiles to its own class - never inline big UI trees
+       back into the function */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1116,6 +1133,44 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("Browse is one scroll surface (spanning chip headers), poster names render white/bold, and dazzo sits bottom right");
   } else {
     bad("Browse must ride ONE LazyVerticalGrid (spanning headers, no clipped grid window), with white/bold poster names, the dazzo credit in TvLegend, and no LocalContext.current inside remember {} (K2 composable-context error)");
+  }
+}
+
+/* ---------- 59. provider episode events never steer the load ---------- */
+{
+  const psE = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psE) bad("PlayerScreen.kt missing - episode-sync rules cannot be verified");
+  else {
+    const lateRead = /playerUrl\(title, epSeason, epNumber, routeMal, routeAni, mirror, startAt, anipmLang, cinesrcQ, epBase\)/.test(psE);
+    const rawStomp = /if \(s > 0\) epSeason = s/.test(psE) || /epNumber = o\.optInt\("episode", epNumber\) \+ 1/.test(psE);
+    if (!lateRead && !rawStomp &&
+        /playerUrl\(title, s, ep, rMal, rAni, mirror, startAt, lang, q, base\)/.test(psE) &&
+        /fun adoptProviderEpisode\(sIn: Int, eIn: Int\)/.test(psE) &&
+        /EP_SYNC_GRACE_MS/.test(psE) &&
+        /if \(count > 0 && e > count\) return false/.test(psE) &&
+        /adoptProviderEpisode\(o\.optInt\("season", -1\), o\.optInt\("episode", -1\)\)/.test(psE) &&
+        /adoptProviderEpisode\(s, \(e - epBase\)\.coerceAtLeast\(1\)\)/.test(psE) &&
+        /"mirror:nextup" -> \{[\s\S]{0,400}?advanceEpisode\(\)/.test(psE) &&
+        /lastLoadAtMs = System\.currentTimeMillis\(\)/.test(psE)) {
+      ok("episode sync: loads capture their target and provider switches enter state only through adoptProviderEpisode");
+    } else {
+      bad("episode sync must (a) capture season/episode at load() call time, (b) route every provider episode event through adoptProviderEpisode (grace + range guards), and (c) run nextup through advanceEpisode() - raw provider numbers steered loads to different videos");
+    }
+  }
+}
+
+/* ---------- 60. player UI lives outside PlayerScreen's method ---------- */
+{
+  const psM = fs.existsSync(psPath) ? fs.readFileSync(psPath, "utf8") : "";
+  if (!psM) bad("PlayerScreen.kt missing - JVM method-limit rules cannot be verified");
+  else {
+    const layers = ["topHudLayer", "captionLayer", "pausedLayer", "barLayer", "epsLayer", "subsLayer"];
+    const missing = layers.filter((l) => !new RegExp("val " + l + ": @Composable BoxScope\\.\\(\\) -> Unit = \\{").test(psM));
+    if (!missing.length && /JVM-64KB split/.test(psM)) {
+      ok("player layers compile outside PlayerScreen's method (named lambda vals - JVM 64KB limit)");
+    } else {
+      bad("every big player layer must live in a named composable lambda VAL (missing: " + missing.join(", ") + ") - trailing Box/Column/Row content lambdas compile INTO PlayerScreen's method and hit the JVM 64KB limit (Method too large)");
+    }
   }
 }
 
