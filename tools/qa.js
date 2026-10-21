@@ -108,7 +108,11 @@
       dot, meta chips (star pill + year + type + genres), and the CTA trio
       (Watch pill + glass Details + My List bookmark via heroListToggle)
    104 Top 10 row with the giant rank numerals + the pack modal treatment
-      (28px card, glow shadow, teal Watch Now) */
+      (28px card, glow shadow, teal Watch Now)
+   105 no cross-view leaks: each Continue surface shows only on its own
+      screen (home row on the HOME rows, scoped row on the GRID view), and
+      the Explore header never regresses to a bare section name (studio
+      picks append as a suffix via browseTitle) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -976,6 +980,24 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const modal = html.match(/<div id="modal"[\s\S]{0,1800}/);
   if (modal && /rounded-\[28px\]/.test(modal[0]) && /Watch Now/.test(modal[0])) ok("details modal wears the pack treatment (28px card + teal Watch Now)");
   else bad("the details modal must use the design-pack card treatment");
+}
+
+/* ---------- 105. no cross-view Continue leaks + stable Explore titles ---------- */
+{
+  const rc = html.match(/function renderContinue\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (rc && /rows"\)\.classList\.contains\("hidden"\)/.test(rc[0]) && /gridView"\)\.classList\.contains\("hidden"\)/.test(rc[0]))
+    ok("renderContinue gates each surface on its own active view");
+  else bad("renderContinue must gate the home row on #rows and the scoped row on #gridView (the home-card leak)");
+  const pc = html.match(/function paintContinueRow\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (pc && /!active/.test(pc[0]) && /classList\.add\("hidden"\)/.test(pc[0])) ok("paintContinueRow hides inactive surfaces");
+  else bad("paintContinueRow must hide the row when its surface is not active");
+  const bt = html.match(/function browseTitle\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (bt && /Explore Movies/.test(bt[0]) && /Explore K-Dramas/.test(bt[0])) ok("browseTitle owns the Explore header names");
+  else bad("browseTitle missing -- Explore titles must come from one helper");
+  const psc = html.match(/function paintStudioChips\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (psc && /browseTitle\(browse\.type\)/.test(psc[0]) && !/textContent = st \? `\$\{base\}/.test(psc[0]))
+    ok("studio picks append as a suffix -- the Explore header never regresses");
+  else bad("paintStudioChips must build the title from browseTitle (never a bare Movies/TV Shows)");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
