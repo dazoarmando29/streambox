@@ -278,6 +278,10 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.71" to listOf(
+        "Tagalog is the K-Drama priority again - the app hunts every VidBolt server for the dub and switches to it automatically",
+        "When no Tagalog dub exists right now, the app says so and keeps Korean (Filipino subtitles stay available)",
+    ),
     "0.70" to listOf(
         "The Tagalog dub is back on every episode - audio tracks can no longer vanish",
         "Snappier on weak TV boxes and faster video starts on slow Wi-Fi",

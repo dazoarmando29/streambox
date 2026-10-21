@@ -225,7 +225,15 @@
        slowed video starts), caches ONLY answers with real sources (empties
        retry), publishes only on real changes (no recomposition spam), the
        splash beat is 700ms not 1200, and TV image crossfades are off (the
-       weak box decodes, it does not need to blend) */
+       weak box decodes, it does not need to blend)
+    66 Tagalog-first for K-Dramas (0.71): VidBolt's catalog rotates (the
+       Tagalog dub was there and later gone from every server - verified:
+       the servers carry English/Korean/Spanish/Portuguese and Filipino
+       SUBTITLES only). The boot now asks for Tagalog via their documented
+       audio option, the hook SWEEPS every server (only=) and switches to
+       the first one carrying a Tagalog/Filipino dub so the app snaps back
+       the moment any server has it, Korean stays the house fallback, and
+       the panel says so honestly instead of leaving the user hunting */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1193,7 +1201,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     const lateRead = /playerUrl\(title, epSeason, epNumber, routeMal, routeAni, mirror, startAt, anipmLang, cinesrcQ, epBase\)/.test(psE);
     const rawStomp = /if \(s > 0\) epSeason = s/.test(psE) || /epNumber = o\.optInt\("episode", epNumber\) \+ 1/.test(psE);
     if (!lateRead && !rawStomp &&
-        /playerUrl\(title, s, ep, rMal, rAni, mirror, startAt, lang, q, base\)/.test(psE) &&
+        /playerUrl\(title, s, ep, rMal, rAni, mirror, startAt, lang, q, base, contentLang == "ko"\)/.test(psE) &&
         /fun adoptProviderEpisode\(sIn: Int, eIn: Int\)/.test(psE) &&
         /EP_SYNC_GRACE_MS/.test(psE) &&
         /if \(count > 0 && e > count\) return false/.test(psE) &&
@@ -1319,6 +1327,24 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("resolve hardening: bootstrap-gated single fetch, empties never cached, publish-on-change; splash 700ms and no TV crossfade");
   } else {
     bad("the resolve fetch must wait for fw.__VB__ (bootstrap session), run one in flight per episode (VB_PENDING), cache ONLY source-bearing answers, and publish only on change - early empty caches erased the Tagalog dub and storms slowed slow-wifi starts");
+  }
+}
+
+/* ---------- 66. Tagalog-first for K-Dramas ---------- */
+{
+  const psG = fs.existsSync(psPath) ? qaRead(psPath) : "";
+  if (!psG) bad("PlayerScreen.kt missing - Tagalog-first rules cannot be verified");
+  else if (/tagalog: Boolean = false/.test(psG) &&
+           /if \(tagalog\) "&audio=Tagalog" else ""/.test(psG) &&
+           psG.includes("function vbSweepTagalog(q)") &&
+           psG.includes("&only=") &&
+           /option:'server', value:id/.test(psG) &&
+           psG.includes("vbSweepTagalog(q);") &&
+           psG.includes("No Tagalog dub available") &&
+           /audio=Tagalog/.test(psG)) {
+    ok("Tagalog-first: boot preference + full server sweep with auto-switch + honest fallback note (Korean)");
+  } else {
+    bad("K-Dramas must ask for Tagalog at boot (audio=Tagalog), sweep EVERY VidBolt server (only=) and switch to the first carrying a Tagalog/Filipino dub, and say so when none does - their catalog rotates and the dub must snap back on its own");
   }
 }
 

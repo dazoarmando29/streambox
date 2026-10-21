@@ -263,6 +263,7 @@ fun playerUrl(
     langOverride: String = "",
     quality: String = "",
     epBase: Int = 0,
+    tagalog: Boolean = false,
 ): String {
     val m = mirror.ifEmpty { defaultMirror(title, mal, ani) }
     val ep = episode.coerceAtLeast(1)
@@ -306,8 +307,12 @@ fun playerUrl(
             "movie" -> "https://vidbolt.pro/movie/" + title.id + "?autoPlay=true&mobileSheets=true&theme=14b8a6" + stq
             "anime" -> "https://vidbolt.pro/anime/mal/" + (mal ?: ani ?: title.id) + "/" + aep +
                 "?autoPlay=true&mobileSheets=true&theme=14b8a6" + stq
+            // 0.71: K-Dramas carry the Tagalog-first preference into their
+            // boot options (their documented options.audio) - their player
+            // pre-selects a Tagalog track whenever the release has one.
             else -> "https://vidbolt.pro/tv/" + title.id + "/" + season + "/" + ep +
-                "?autoPlay=true&mobileSheets=true&theme=14b8a6" + stq
+                "?autoPlay=true&mobileSheets=true&theme=14b8a6" +
+                (if (tagalog) "&audio=Tagalog" else "") + stq
         }
         // VidCore (docs 2026-10-17): TMDB embeds, autoplay/startAt/theme.
         "vidcore" -> {
@@ -917,6 +922,46 @@ private val SB_HOOK = """
     } catch(e){}
     return null;
   }
+  // 0.71 Tagalog-first for K-Dramas: VidBolt's catalog rotates (the dub was
+  // there and later gone from every server). When the boot asked for Tagalog
+  // (audio=Tagalog) and the playing server has none, sweep the other servers
+  // (their only= param) and switch to the first one that carries a
+  // Tagalog/Filipino dub - the moment any server has it again the app finds
+  // it by itself. Korean remains the fallback (house rule).
+  var VB_SWEEP = 0;
+  function vbSweepTagalog(q){
+    try {
+      if (VB_SWEEP) return;
+      var f0 = document.querySelector("iframe");
+      var src0 = (f0 && f0.src) || "";
+      if (src0.indexOf("audio=Tagalog") < 0) return;
+      VB_SWEEP = 1;
+      var fwS = window.frames[0];
+      var list = (fwS && fwS.__VB__ && fwS.__VB__.servers) || [];
+      var ids = [];
+      for (var si = 0; si < list.length; si++) if (list[si] && list[si].id) ids.push(list[si].id);
+      var idx = 0;
+      var step = function(){
+        if (idx >= ids.length) { VB_SWEEP = 2; return; }
+        var id = ids[idx++];
+        fetch("/api/resolve?" + q + "&only=" + encodeURIComponent(id)).then(function(x2){ return x2.ok ? x2.json() : {}; }).then(function(j2){
+          var ss = (j2 && j2.stream && j2.stream.sources) || [];
+          var hit = false;
+          for (var k2 = 0; k2 < ss.length; k2++) {
+            var lg = String((ss[k2] && ss[k2].language) || "").toLowerCase();
+            if (lg.indexOf("tagalog") >= 0 || lg.indexOf("filipino") >= 0 || lg === "fil" || lg === "tl") { hit = true; break; }
+          }
+          if (hit) {
+            VB_SWEEP = 2;
+            try{ for (var fw4 = 0; fw4 < window.frames.length; fw4++) window.frames[fw4].postMessage({type:'mobile-option', option:'server', value:id}, '*'); }catch(e){}
+            return;
+          }
+          step();
+        }, function(){ step(); });
+      };
+      step();
+    } catch(e){}
+  }
   function vbTracks(){
     try {
       var fw = window.frames[0];
@@ -977,6 +1022,7 @@ private val SB_HOOK = """
             }
           } catch(e2){}
           vbPublish();
+          vbSweepTagalog(q);
         } catch(e2){}
       }
       if (VB_RESOLVE[q]) applyStream(VB_RESOLVE[q]);
@@ -1386,7 +1432,7 @@ fun PlayerScreen(
                 val w = web ?: return@post
                 loadMirror(
                     w,
-                    playerUrl(title, s, ep, rMal, rAni, mirror, startAt, lang, q, base),
+                    playerUrl(title, s, ep, rMal, rAni, mirror, startAt, lang, q, base, contentLang == "ko"),
                     mirror,
                 )
             } catch (e: Exception) {
@@ -2502,7 +2548,7 @@ fun PlayerScreen(
                     ) {
                         booted = true
                         lastLoadAtMs = System.currentTimeMillis()
-                        loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, resumeAt, anipmLang, cinesrcQ), mirror)
+                        loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, resumeAt, anipmLang, cinesrcQ, tagalog = contentLang == "ko"), mirror)
                     }
                     web = this
                 }
@@ -3304,6 +3350,29 @@ fun PlayerScreen(
                                     Spacer(modifier = Modifier.height(6.dp))
                                 }
                             } else if (mirror == "vidbolt") {
+                                // 0.71 honesty: when a K-Drama has no
+                                // Tagalog dub on ANY server right now, say
+                                // so - the dub itself is provider-side and
+                                // their catalog rotates. Korean is the
+                                // house fallback and Filipino subtitles
+                                // stay available below.
+                                if (contentLang == "ko" && vbAudios.none {
+                                        it.first.contains("tagalog", true) ||
+                                            it.first.contains("filipino", true) ||
+                                            it.first.equals("fil", true) ||
+                                            it.first.equals("tl", true) ||
+                                            it.first.equals("tgl", true)
+                                    }
+                                ) {
+                                    OptRow(
+                                        label = "No Tagalog dub available",
+                                        detail = "Korean audio selected - Filipino subtitles are in the Subtitles column",
+                                        chip = "FALLBACK",
+                                        active = false,
+                                        big = big,
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
                                 // VidBolt's REAL audio tracks (0.41): the
                                 // labels its resolved stream reports. Until
                                 // the stream lands there is nothing to pick,
