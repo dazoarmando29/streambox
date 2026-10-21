@@ -25,7 +25,13 @@
    64 K-drama VidBolt defaults (Tagalog dub first, Korean fallback, English
       provider subtitles picked from the provider's own option values)
    65 manual subtitle pick stands the K-drama auto down and clears the
-      provider caption layer (two layers never stack) */
+      provider caption layer (two layers never stack)
+   66 provider episode events enter state ONLY through adoptProviderEpisode
+      (no raw watchState.e writes from message callbacks)
+   67 adopt guards: echo no-op, 8s settling window, season-range drop, and
+      the sync clock restarts on every load AND adopt
+   68 advanceEpisode owns the next-episode decision (season-end roll to next
+      season E1, unaired guard) and provider nextup events run through it */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -256,6 +262,61 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   });
   if (!missingStand.length) ok("manual subtitle picks call koStandDown (" + manualSites.length + " sites)");
   else bad("manual subtitle pick without koStandDown: " + missingStand.join(", "));
+}
+
+/* ---------- 66. provider episode events only via adoptProviderEpisode ---------- */
+{
+  if (/function adoptProviderEpisode\s*\(/.test(html)) ok("adoptProviderEpisode present");
+  else bad("adoptProviderEpisode missing -- provider episode events need ONE validated entry path");
+  const rawWrites = [...html.matchAll(/watchState\.e\s*=\s*(?:d|data)\.episode\b/g)];
+  if (!rawWrites.length) ok("no raw watchState.e writes from provider messages");
+  else bad("provider message writes watchState.e directly (x" + rawWrites.length + ") -- route through adoptProviderEpisode");
+  const adoptCalls = [...html.matchAll(/adoptProviderEpisode\(/g)].length - 1; // minus the definition
+  if (adoptCalls >= 3) ok("adoptProviderEpisode wired into " + adoptCalls + " provider episode handlers");
+  else bad("adoptProviderEpisode should gate every provider episode handler (vidrift:episode / anipm episodechange / cinesrc:nextepisode) -- found " + adoptCalls + " call sites");
+}
+
+/* ---------- 67. adopt guards + sync clock ---------- */
+{
+  const m = html.match(/function adoptProviderEpisode\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (!m) bad("adoptProviderEpisode body not found");
+  else {
+    const t = m[0];
+    if (/s === watchState\.s && e === watchState\.e/.test(t)) ok("adopt echoes of the tracked pair are no-ops");
+    else bad("adoptProviderEpisode missing the echo no-op guard");
+    if (/pastSyncGrace\(\)/.test(t)) ok("adopt drops settling noise via pastSyncGrace");
+    else bad("adoptProviderEpisode missing the settling-window guard");
+    if (/e > count/.test(t)) ok("adopt drops numbers outside the real season range");
+    else bad("adoptProviderEpisode missing the season-range drop");
+    if (/window\._lastLoadAt\s*=\s*Date\.now\(\)/.test(t)) ok("adopt restarts the sync clock");
+    else bad("adoptProviderEpisode must restart the sync clock (window._lastLoadAt)");
+  }
+  const grace = html.match(/function pastSyncGrace\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (grace && /8000/.test(grace[0])) ok("pastSyncGrace uses the 8s settling window");
+  else bad("pastSyncGrace must use the 8s (8000ms) settling window");
+  const lp = html.match(/function loadPlayer\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (lp && /window\._lastLoadAt\s*=\s*Date\.now\(\)/.test(lp[0])) ok("loadPlayer restarts the sync clock at CALL time");
+  else bad("loadPlayer must stamp window._lastLoadAt at entry");
+}
+
+/* ---------- 68. advanceEpisode owns the next-episode decision ---------- */
+{
+  const adv = html.match(/function advanceEpisode\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (!adv) bad("advanceEpisode missing -- Next Episode / skip credits / auto-next need ONE advance path");
+  else {
+    const t = adv[0];
+    if (/season_number === s0 \+ 1/.test(t) && /watchState\.e = 1/.test(t)) ok("advanceEpisode rolls a season finale to the next season E1");
+    else bad("advanceEpisode missing the season-end roll to next season E1");
+    if (/epUnaired\(/.test(t)) ok("advanceEpisode never steps into an unaired episode");
+    else bad("advanceEpisode missing the unaired guard");
+    if (/window\._watchEps/.test(t)) ok("advanceEpisode consults the loaded episode list (call-time data)");
+    else bad("advanceEpisode must read the loaded episode list for its target");
+  }
+  const ne = html.match(/function nextEpisode\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (ne && /advanceEpisode\(\)/.test(ne[0])) ok("nextEpisode(1) delegates to advanceEpisode");
+  else bad("nextEpisode must delegate forward steps to advanceEpisode");
+  if (/vidrift:nextup-play[\s\S]{0,400}advanceEpisode\(\)/.test(html)) ok("provider nextup events run through our own advanceEpisode");
+  else bad("vidrift:nextup-play must run through advanceEpisode -- never trust raw provider numbers");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

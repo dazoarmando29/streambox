@@ -564,7 +564,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 180; // bump every release alongside version.txt
+  const BUILD_NUM = 181; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -2710,6 +2710,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   window._autoHopped = false; // one self-heal per title, never one per app session
   window._anipmRetryKey = ""; window._anipmRetryCount = 0; window._anipmStartAt = 0; window._anipmGestureBlocked = false;
   window._boltRetryKey = ""; window._boltRetryCount = 0; window._boltStartAt = 0;
+  window._lastLoadAt = Date.now(); // boot settling window: provider echoes in the first 8s are noise
   try { gridS = s; } catch(e){}
   try {
     // house route: movies/TV always open on CineSrc, anime always on AniPM.
@@ -2978,21 +2979,90 @@ function watchSeasonStep(dir){
   gridS = nums[(i + dir + nums.length) % nums.length];
   updateSeasonLabel(); loadEpisodes();
 }
-function nextEpisode(dir){
-  // never step into an unaired episode (Next Ep on a season finale, etc):
-  // say when it airs instead of loading a dead player
-  const target = watchState.e + dir;
-  if (target >= 1 && window._watchEps && window._watchEps.s === watchState.s) {
-    const t = (window._watchEps.eps || []).find(x => x.episode_number === target);
-    const un = t && epUnaired(t);
-    if (un) {
-      const ws = document.getElementById("watchStatus");
-      if (ws) ws.textContent = `S${watchState.s} E${target} airs ${epAirPretty(un)} — not out yet \u{1F4C5}`;
-      return;
+/* ---------- Episode sync hardening: provider episode events enter state
+   ONLY through adoptProviderEpisode; our own advance decides the next
+   episode (a season finale rolls to the next season E1, never into an unaired
+   one); every load captures its target at CALL time and restarts the sync
+   clock so racing provider events can never double-step. ---------- */
+function pastSyncGrace(){
+  return Date.now() - (window._lastLoadAt || 0) >= 8000;
+}
+function seasonEpisodeCount(s){
+  try {
+    if (watchState.anime) return 0; // entry numbering (absolute) — a TMDB range would drop valid numbers
+    if (window._watchEps && window._watchEps.s === s && (window._watchEps.eps || []).length) {
+      const n = (window._watchEps.eps || []).reduce((mx, x) => Math.max(mx, x.episode_number || 0), 0);
+      const w = (watchSeasons || []).find(x => x.season_number === s);
+      return Math.max(n, (w && w.episode_count) || 0);
     }
+    const w = (watchSeasons || []).find(x => x.season_number === s);
+    return (w && w.episode_count > 0) ? w.episode_count : 0;
+  } catch(e){ return 0; }
+}
+function applyEpisodeSwitch(){
+  // shared post-switch chain (adopted provider switches AND our own advance
+  // land here): the new episode re-opens through OUR canonical load — the
+  // same deterministic route as the Next Episode button — and the sync clock
+  // restarts so racing events can never double-step
+  try { gridS = watchState.s; } catch(e){}
+  _introKey = "";
+  if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
+  window._lastLoadAt = Date.now();
+  loadPlayer(); loadEpisodes(); saveContinue();
+  const ws = document.getElementById("watchStatus");
+  if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e}`;
+  showTitleCard();
+}
+function adoptProviderEpisode(sIn, eIn){
+  // THE validated adopt path for provider episode events (episodechange /
+  // Up Next from any embed): echoes of the tracked pair are no-ops, settling
+  // noise inside ~8s of our own load/boot is dropped, numbers outside the
+  // real season range are dropped. An adopted switch restarts the sync clock
+  // and the caller re-opens through applyEpisodeSwitch (OUR route).
+  const e = Math.floor(Number(eIn) || 0);
+  if (e <= 0) return false;
+  const sI = Math.floor(Number(sIn) || 0);
+  const s = sI > 0 ? sI : watchState.s;
+  if (s === watchState.s && e === watchState.e) return false; // echo no-op
+  if (!pastSyncGrace()) return false; // settling noise within 8s of our load/boot
+  const count = seasonEpisodeCount(s);
+  if (count > 0 && e > count) return false; // outside the real season range
+  watchState.s = s; watchState.e = e;
+  window._lastLoadAt = Date.now();
+  return true;
+}
+function advanceEpisode(){
+  // OUR canonical next-episode logic — the Next Episode button, the skip
+  // pill credits and Auto-next all run through here. The target is captured
+  // at CALL time; a season finale rolls to the next season E1 and we never
+  // step into an unaired episode (say when it airs, no dead player).
+  const s0 = watchState.s, e0 = watchState.e;
+  const count = seasonEpisodeCount(s0);
+  if (count > 0 && e0 >= count) {
+    const nxt = (watchSeasons || []).find(x => x.season_number === s0 + 1 && x.season_number >= 1);
+    if (!nxt || !(nxt.episode_count > 0)) return; // never into an empty/absent season
+    watchState.s = nxt.season_number;
+    watchState.e = 1;
+  } else {
+    const target = e0 + 1;
+    if (window._watchEps && window._watchEps.s === s0) {
+      const t = (window._watchEps.eps || []).find(x => x.episode_number === target);
+      const un = t && epUnaired(t);
+      if (un) {
+        const ws = document.getElementById("watchStatus");
+        if (ws) ws.textContent = `S${s0} E${target} airs ${epAirPretty(un)} — not out yet \u{1F4C5}`;
+        return;
+      }
+    }
+    watchState.e = target;
   }
-  watchState.e += dir;
-  if(watchState.e < 1) watchState.e = 1;
+  applyEpisodeSwitch();
+}
+function nextEpisode(dir){
+  if (dir > 0) { advanceEpisode(); return; }
+  watchState.e = Math.max(1, watchState.e + dir);
+  _introKey = "";
+  window._lastLoadAt = Date.now();
   loadPlayer(); loadEpisodes(); saveContinue();
 }
 
@@ -3434,6 +3504,10 @@ function armStuckWatchdogs(){
 }
 function loadPlayer(){
   try { hideUpNext(); } catch(e){} // fresh video: no endgame card from the last one
+  // sync clock restart: provider episode events arriving inside the 8s
+  // settling window are noise from OUR OWN load and get dropped
+  window._lastLoadAt = Date.now();
+  window._loadTarget = { s: watchState.s, e: watchState.e, t: watchState.type }; // captured at CALL time
   window._cineErrBurst = []; window._pauseBurst = []; window._lastProgAt = 0; // fresh frame, fresh strikes
   window._unexpectedPauseAt = 0; window._userPauseHold = false; window._anipmFocusAfterLoad = false; window._anipmKickHintShown = false; window._anipmGestureBlocked = false;
   preconnectCinesrc();  // TV-safe lineup may have shrunk since this mirror was picked (or saved):
@@ -6093,32 +6167,17 @@ window.addEventListener("message", (event)=>{
   if (d.type === "vidrift:paused") { pState.paused = true; ctlPaint(); }
   if (d.type === "vidrift:unpaused") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
   if (d.type === "vidrift:episode") {
-    // player advanced internally (Up Next / picker) — sync, don't reload
+    // provider episode events enter state ONLY through adoptProviderEpisode
+    // (echoes / settling noise / out-of-range are dropped); an adopted switch
+    // re-opens through OUR canonical load — same route as Next Episode
     closeVrSheet(); // phone panel options may belong to the old episode
-    if (d.season) watchState.s = d.season;
-    if (d.episode) watchState.e = d.episode;
-    try { gridS = watchState.s; } catch(e){}
-    _introKey = ""; // new episode, new intro range
-    if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
-    loadEpisodes(); saveContinue();
-    const ws = document.getElementById("watchStatus");
-    if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e}`;
-    showTitleCard();
+    if (adoptProviderEpisode(d.season, d.episode)) applyEpisodeSwitch();
   }
   if (d.type === "vidrift:nextup-play") {
-    // their countdown/Next fired under OUR nextup-info — advance ourselves
-    // (unaired can't arrive here: we advertised an aired ep or null)
+    // their countdown/Next fired under OUR nextup-info — OUR advance decides
+    // the video (season-end roll + unaired guard), never raw provider numbers
     closeVrSheet(); // phone panel options belong to the finished episode
-    const ns = d.season || watchState.s;
-    const ne = (d.episode || watchState.e) + 1;
-    watchState.s = ns; watchState.e = ne;
-    try { gridS = ns; } catch(e){}
-    _introKey = ""; // new episode, new intro range
-    if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
-    loadPlayer(); loadEpisodes(); saveContinue();
-    const wsn = document.getElementById("watchStatus");
-    if (wsn) wsn.textContent = `Now playing S${ns} E${ne}`;
-    showTitleCard();
+    advanceEpisode();
   }
   if (d.type === "vidrift:mobile-panel") {
     // phone sheet delegation (?mobileSheets=true): render their panel in
@@ -6824,13 +6883,10 @@ window.addEventListener("message", (event)=>{
     }
     case "ended": anipmEnded(); break;
     case "episodechange":
-      if (d.episode) watchState.e = d.episode;
-      if (d.season) watchState.s = d.season;
-      try { gridS = watchState.s; } catch(e){}
-      _introKey = "";
-      if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
-      loadEpisodes(); saveContinue();
-      { const wse = document.getElementById("watchStatus"); if (wse) wse.textContent = `Now playing S${watchState.s} E${watchState.e}`; showTitleCard(); }
+      // provider episode events enter state ONLY through adoptProviderEpisode
+      // (echoes / settling noise / out-of-range dropped); adopted switches
+      // re-open through OUR canonical load
+      if (adoptProviderEpisode(d.season, d.episode)) applyEpisodeSwitch();
       break;
   }
 });
@@ -7128,14 +7184,10 @@ window.addEventListener("message", (event)=>{
     }
   }
   if(type === "cinesrc:nextepisode" && data.internalNavigation){
-    // player advanced internally — sync our UI, do NOT reload iframe
-    if(data.season) watchState.s = data.season;
-    if(data.episode) watchState.e = data.episode;
-    try { gridS = watchState.s; } catch(e){}
-    if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
-    loadEpisodes(); saveContinue();
-    document.getElementById("watchStatus").textContent = `Now playing S${watchState.s} E${watchState.e}`;
-    showTitleCard();
+    // provider episode events enter state ONLY through adoptProviderEpisode
+    // (echoes / settling noise / out-of-range dropped); adopted switches
+    // re-open through OUR canonical load — do NOT trust their internal nav
+    if (adoptProviderEpisode(data.season, data.episode)) applyEpisodeSwitch();
   }
   if(type === "cinesrc:skipintro" && typeof data.time === "number"){
     pState.cur = data.time; ctlPaint();
