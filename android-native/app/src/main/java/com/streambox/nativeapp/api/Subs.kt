@@ -7,6 +7,37 @@ import java.net.URL
 
 data class Cue(val s: Float, val e: Float, val text: String)
 
+/** Active cue at time t (0.72 perf): binary search over the SORTED cue
+    list - the old firstOrNull scan walked every cue on every timeupdate
+    and the caption lookup was measurable jank on weak TV boxes. */
+fun cueAt(cues: List<Cue>, t: Float): Cue? {
+    if (cues.isEmpty()) return null
+    var lo = 0
+    var hi = cues.size - 1
+    var idx = -1
+    while (lo <= hi) {
+        val mid = (lo + hi) ushr 1
+        if (cues[mid].s <= t) {
+            idx = mid
+            lo = mid + 1
+        } else {
+            hi = mid - 1
+        }
+    }
+    if (idx < 0) return null
+    // Walk back over any overlapping tails (rare) - a handful at most.
+    var i = idx
+    var steps = 0
+    while (i >= 0 && steps < 8) {
+        val c = cues[i]
+        if (t >= c.s && t <= c.e) return c
+        if (c.e < t && idx - i > 2) return null
+        i--
+        steps++
+    }
+    return null
+}
+
 data class SubFile(
     val name: String,
     val lang: String,

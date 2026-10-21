@@ -100,6 +100,7 @@ import com.streambox.nativeapp.AppEnv
 import com.streambox.nativeapp.api.Api
 import com.streambox.nativeapp.api.Backups
 import com.streambox.nativeapp.api.Cue
+import com.streambox.nativeapp.api.cueAt
 import com.streambox.nativeapp.api.Ep
 import com.streambox.nativeapp.api.IntroDb
 import com.streambox.nativeapp.api.SeasonInfo
@@ -1293,7 +1294,8 @@ fun PlayerScreen(
             subMsg = "Couldn't read that file - is it .srt or .vtt?"
             return
         }
-        subs = SubFile(name, lang, cues)
+        // Sorted once here so the caption lookup can binary-search (0.72).
+        subs = SubFile(name, lang, cues.sortedBy { it.s })
         subMsg = "Loaded " + cues.size + " lines."
         // A manual file on a K-drama stands the VidBolt auto-pick down (the
         // clear of the provider captions rides the subs watcher below -
@@ -1864,7 +1866,7 @@ fun PlayerScreen(
     val capCue = remember(cur, subs, subOffset) {
         val f = subs ?: return@remember null
         val t = cur + subOffset
-        f.cues.firstOrNull { t >= it.s && t <= it.e }
+        cueAt(f.cues, t)
     }
 
     val hit = remember(cur, skips, title.type) {
@@ -2775,52 +2777,25 @@ fun PlayerScreen(
             }
 
             if (chromeVisible) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    fmt(if (scrub >= 0) scrub else cur),
-                    color = Accent,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = if (big) 16.sp else 13.sp,
-                )
-                Text(
-                    "  /  " + fmt(dur),
-                    color = Dim,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = if (big) 15.sp else 12.sp,
-                )
-                Slider(
-                    value = if (scrub >= 0) scrub else cur,
-                    onValueChange = { scrub = it },
-                    onValueChangeFinished = {
-                        if (scrub >= 0) {
-                            seekTo(scrub)
-                            scrub = -1f
-                        }
-                    },
-                    valueRange = 0f..(if (dur > 0) dur else 1f),
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 10.dp)
-                        .focusRequester(sliderFR),
-                    colors = SliderDefaults.colors(
-                        thumbColor = Accent,
-                        activeTrackColor = Accent,
-                        inactiveTrackColor = Color(0xFF243247),
-                    ),
-                )
-                Text(
-                    "-" + fmt(if (dur > 0) (dur - (if (scrub >= 0) scrub else cur)).coerceAtLeast(0f) else 0f),
-                    color = Accent,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = if (big) 15.sp else 12.sp,
-                )
-                Text(
-                    "  (" + fmt(dur) + ")",
-                    color = Dim,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = if (big) 12.sp else 10.sp,
-                )
-            }
+            // 0.72 stutter: the timeline runs in its OWN recomposition
+            // scope - time text + slider redraw on every timeupdate while
+            // the buttons and pills stay composed and skip. The old
+            // whole-bar recomposition over the video surface was visible
+            // stutter on weak TV boxes.
+            BarTimeline(
+                cur = cur,
+                dur = dur,
+                scrub = scrub,
+                big = big,
+                sliderFR = sliderFR,
+                onScrub = { scrub = it },
+                onScrubDone = { s2 ->
+                    if (s2 >= 0) {
+                        seekTo(s2)
+                        scrub = -1f
+                    }
+                },
+            )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3775,6 +3750,63 @@ fun PlayerScreen(
         }
         }
         subsLayer(this)
+    }
+}
+
+/** Player timeline (0.72 perf): its own recomposition scope so the
+    timeupdate heartbeat only redraws the time text + slider - the rest of
+    the bar stays composed and skips. Weak TV boxes stuttered on the old
+    whole-bar recomposition over the live video surface. */
+@Composable
+private fun BarTimeline(
+    cur: Float,
+    dur: Float,
+    scrub: Float,
+    big: Boolean,
+    sliderFR: FocusRequester,
+    onScrub: (Float) -> Unit,
+    onScrubDone: (Float) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            fmt(if (scrub >= 0) scrub else cur),
+            color = Accent,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (big) 16.sp else 13.sp,
+        )
+        Text(
+            "  /  " + fmt(dur),
+            color = Dim,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (big) 15.sp else 12.sp,
+        )
+        Slider(
+            value = if (scrub >= 0) scrub else cur,
+            onValueChange = { onScrub(it) },
+            onValueChangeFinished = { onScrubDone(scrub) },
+            valueRange = 0f..(if (dur > 0) dur else 1f),
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 10.dp)
+                .focusRequester(sliderFR),
+            colors = SliderDefaults.colors(
+                thumbColor = Accent,
+                activeTrackColor = Accent,
+                inactiveTrackColor = Color(0xFF243247),
+            ),
+        )
+        Text(
+            "-" + fmt(if (dur > 0) (dur - (if (scrub >= 0) scrub else cur)).coerceAtLeast(0f) else 0f),
+            color = Accent,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (big) 15.sp else 12.sp,
+        )
+        Text(
+            "  (" + fmt(dur) + ")",
+            color = Dim,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (big) 12.sp else 10.sp,
+        )
     }
 }
 

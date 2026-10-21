@@ -233,7 +233,15 @@
        audio option, the hook SWEEPS every server (only=) and switches to
        the first one carrying a Tagalog/Filipino dub so the app snaps back
        the moment any server has it, Korean stays the house fallback, and
-       the panel says so honestly instead of leaving the user hunting */
+       the panel says so honestly instead of leaving the user hunting
+    67 playback stutter + nav-bar lag (0.72): the player timeline runs in
+       its OWN recomposition scope (the timeupdate heartbeat redraws only
+       the time text + slider - the old whole-bar recomposition over the
+       live video stuttered on weak TV boxes), the caption lookup binary-
+       searches the sorted cue list instead of scanning it every tick, and
+       the tab feeds warm in the background behind the home screen (the
+       first-visit fetch behind a spinner was the laggish nav) - pausing
+       whenever the player owns the screen so playback keeps the line */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1345,6 +1353,29 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("Tagalog-first: boot preference + full server sweep with auto-switch + honest fallback note (Korean)");
   } else {
     bad("K-Dramas must ask for Tagalog at boot (audio=Tagalog), sweep EVERY VidBolt server (only=) and switch to the first carrying a Tagalog/Filipino dub, and say so when none does - their catalog rotates and the dub must snap back on its own");
+  }
+}
+
+/* ---------- 67. playback stutter + nav-bar lag ---------- */
+{
+  const psP = fs.existsSync(psPath) ? qaRead(psPath) : "";
+  const subP = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Subs.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Subs.kt")) : "";
+  const hsP2 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt")) : "";
+  const appP2 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt")) : "";
+  if (!psP || !subP || !hsP2 || !appP2) bad("Player/Subs/Home/App missing - stutter and nav rules cannot be verified");
+  else if (/private fun BarTimeline\(/.test(psP) &&
+           /cueAt\(f\.cues, t\)/.test(psP) &&
+           /cues\.sortedBy \{ it\.s \}/.test(psP) &&
+           /fun cueAt\(cues: List<Cue>, t: Float\)/.test(subP) &&
+           /suspend fun warmFeedCaches\(/.test(hsP2) &&
+           /while \(paused\(\)\) delay\(3000\)/.test(hsP2) &&
+           /warmFeedCaches\(appCtx\) \{ screen is Screen\.Player \}/.test(appP2)) {
+    ok("stutter + nav: timeline scoped, captions binary-searched, tab feeds warm in the background (paused during playback)");
+  } else {
+    bad("playback must keep the timeline in its own recomposition scope, captions must binary-search the sorted cues, and tab feeds must warm in the background (paused while the player owns the screen)");
   }
 }
 

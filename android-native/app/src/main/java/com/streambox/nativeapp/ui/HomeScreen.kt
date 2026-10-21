@@ -193,6 +193,30 @@ private suspend fun fetchRows(
         }
     }
 
+/** Warm the tab feeds in the background (0.72 nav perf): the first visit
+    to each section used to fetch over the network behind a spinner - on
+    slow TV Wi-Fi that IS the laggish nav-bar feel. After the home screen
+    settles, every other section's rows stream in at low priority into the
+    memory + disk caches, PAUSING whenever the player is open so playback
+    never shares the line. Navigating then lands on cache-hit instant
+    content. */
+suspend fun warmFeedCaches(ctx: android.content.Context, paused: () -> Boolean) {
+    withContext(Dispatchers.IO) {
+        for (s in listOf(Section.HOME, Section.MOVIES, Section.TV, Section.ANIME, Section.KDRAMA)) {
+            while (paused()) delay(3000)
+            val key = "r:" + s + ":"
+            if (BrowseCache.rows[key] == null) {
+                val rows = fetchRows(s, null, "") { }
+                if (rows.isNotEmpty()) {
+                    BrowseCache.rows[key] = rows
+                    runCatching { Store.saveFeedCache(ctx, key, rows) }
+                }
+            }
+            delay(750)
+        }
+    }
+}
+
 @Composable
 fun BrowseScreen(
     section: Section,

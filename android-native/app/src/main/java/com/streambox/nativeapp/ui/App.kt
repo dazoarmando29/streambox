@@ -174,6 +174,14 @@ fun StreamBoxApp() {
             Store.setLastSeenVersion(appCtx, v)
         }
     }
+    // 0.72 nav perf: warm every tab's feed behind the home screen so the
+    // nav bar never opens a section cold (that first-visit fetch behind a
+    // spinner is the laggish feel on slow TV Wi-Fi). Pauses while the
+    // player owns the screen - playback keeps the whole line.
+    LaunchedEffect(Unit) {
+        delay(2500)
+        warmFeedCaches(appCtx) { screen is Screen.Player }
+    }
 
     // Space Grotesk is the house voice (titles, labels, numerics): every
     // Text inherits it; long-form copy opts into BodyFont at the call site.
@@ -278,6 +286,10 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.72" to listOf(
+        "Smoother playback - the player bar no longer repaints over the video every beat",
+        "Snappier navigation - tabs are warmed up in the background so none of them opens cold",
+    ),
     "0.71" to listOf(
         "Tagalog is the K-Drama priority again - the app hunts every VidBolt server for the dub and switches to it automatically",
         "When no Tagalog dub exists right now, the app says so and keeps Korean (Filipino subtitles stay available)",
