@@ -61,7 +61,15 @@
    84 live caption preview restyles with the ladders (both surfaces)
    85 the A/V sheet carries SERVERS | AUDIO | SUBTITLES | QUALITY |
       STYLING & SYNC; VidBolt audio by LABEL, subtitles/quality echo the
-      provider's own values verbatim (numeric H index) */
+      provider's own values verbatim (numeric H index)
+   86 season-aware anime routing: the season's OWN entry by AIR YEAR via
+      /api/anime-map (year-keyed cache), Hajime no Ippo pinned S1=263 /
+      S2=5258 / S3=19647
+   87 numbering mode: same entry keeps absolute numbering (animeAbsEp), a
+      new entry numbers per-season, and combined-entry provider events
+      convert back from entry numbering (animeFromAbs)
+   88 anime boot deferred until the season route resolves (mapping awaited
+      before the embed src is set) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -610,6 +618,63 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const lbl = html.match(/const lbl = \(o\.label[^;]+;/);
   if (lbl) ok("audio/track rows prefer the provider LABEL");
   else bad("A/V rows must prefer the provider label for display");
+}
+
+/* ---------- 86. season-aware anime routing ---------- */
+{
+  const pin = html.match(/const ANIME_SEASON_MAP\s*=\s*\[[\s\S]*?\];/);
+  if (pin && /hajime no ippo\|fighting spirit/i.test(pin[0])
+      && /1:\s*\{\s*mal:\s*263/.test(pin[0]) && /2:\s*\{\s*mal:\s*5258/.test(pin[0]) && /3:\s*\{\s*mal:\s*19647/.test(pin[0]))
+    ok("Hajime no Ippo season route pinned (S1=263 / S2=5258 / S3=19647)");
+  else bad("ANIME_SEASON_MAP must pin Hajime no Ippo S1=263 / S2=5258 / S3=19647");
+  const y = html.match(/function animeSeasonAirYear\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (y && /air_date/.test(y[0])) ok("season air year comes from the season's own air_date");
+  else bad("animeSeasonAirYear must read the season air_date (not just the show year)");
+  if (/streambox-api\.dazoarmando\.workers\.dev\/api\/anime-map/.test(html)) ok("season entries resolve through the Worker /api/anime-map");
+  else bad("anime mapping must go through the Worker /api/anime-map (year-aware)");
+  const mf = html.match(/function animeMapFor\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (mf && /year/.test(mf[0])) ok("animeMapFor passes the year to the mapper");
+  else bad("animeMapFor must send the air year to /api/anime-map");
+  if (/sb:ani3:.*:/.test(html)) ok("anime mapping cache is year-keyed (split franchises cannot poison later seasons)");
+  else bad("the sb:ani3 cache key must include the year");
+}
+
+/* ---------- 87. numbering mode (absolute vs per-season) ---------- */
+{
+  const rr = html.match(/function animeRouteResolve\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (!rr) bad("animeRouteResolve missing");
+  else {
+    const t = rr[0];
+    if (/combined/.test(t) && /abs/.test(t)) ok("animeRouteResolve computes the numbering mode (abs vs per-season)");
+    else bad("animeRouteResolve must decide absolute vs per-season numbering from entry identity");
+    if (/window\._animeRoute\s*=/.test(t)) ok("the route (ids + mode) is published on window._animeRoute");
+    else bad("animeRouteResolve must publish window._animeRoute for the event path");
+  }
+  const fa = html.match(/function animeFromAbs\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (fa && /season_number/.test(fa[0]) && /episode_count/.test(fa[0])) ok("animeFromAbs converts entry numbering back to TMDB s/e");
+  else bad("animeFromAbs missing -- combined-entry provider events must convert back from entry numbering");
+  const ec = html.match(/case "episodechange":[\s\S]{0,800}adoptProviderEpisode\(/);
+  if (ec && /animeFromAbs\(/.test(ec[0])) ok("anipm episodechange converts entry numbering then adopts");
+  else bad("the anipm episodechange handler must convert via animeFromAbs before adoptProviderEpisode");
+  const la = html.match(/function loadAnipmPlayer\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (la && /route\.abs[\s\S]{0,120}animeAbsEp|route\.abs \?/.test(la[0])) ok("AniPM episode numbers follow the numbering mode");
+  else bad("loadAnipmPlayer must pick absolute vs per-season episode numbers via route.abs");
+}
+
+/* ---------- 88. anime boot deferred ---------- */
+{
+  const la = html.match(/function loadAnipmPlayer\s*\(\)\s*\{[\s\S]*?\n\}/);
+  const lv = html.match(/function loadVidboltAnime\s*\(\)\s*\{[\s\S]*?\n\}/);
+  const inOrder = (fn, label) => {
+    if (!fn) { bad(label + " missing"); return; }
+    const t = fn[0];
+    const routeAt = t.search(/animeRouteResolve\(/);
+    const srcAt = t.search(/\.src\s*=/);
+    if (routeAt >= 0 && srcAt > routeAt) ok(label + " defers boot until the route resolves");
+    else bad(label + " must await animeRouteResolve BEFORE setting the embed src (deferred boot)");
+  };
+  inOrder(la, "loadAnipmPlayer");
+  inOrder(lv, "loadVidboltAnime");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

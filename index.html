@@ -575,7 +575,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 187; // bump every release alongside version.txt
+  const BUILD_NUM = 188; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -6747,6 +6747,82 @@ function anipmQInfo(h){
   }
   return { height: 0, label: String(h) };
 }
+/* Season-aware anime routing (native 0.60 parity): split franchises carry
+   one MAL/AniList entry PER season (Hajime no Ippo S1 = 263, S2 = 5258 New
+   Challenger, S3 = 19647 Rising) while combined entries span the whole run
+   (One Piece). Every season resolves its OWN entry by AIR YEAR through the
+   Worker's year-aware mapper; the same entry as the base mapping keeps
+   ABSOLUTE numbering, a new entry means PER-SEASON numbering. The anime boot
+   stays deferred until the route resolves. */
+const ANIME_SEASON_MAP = [
+  // pinned split-franchise routes (the Hajime no Ippo test case) — consulted
+  // before the mapper so the documented route can never wobble
+  { match: /hajime no ippo|fighting spirit/i, seasons: {
+    1: { mal: 263, year: 2000 },
+    2: { mal: 5258, year: 2009 },
+    3: { mal: 19647, year: 2013 }
+  } }
+];
+function animeSeasonAirYear(){
+  try {
+    const s = (watchSeasons || []).find(x => x.season_number === watchState.s);
+    const y = parseInt(String((s && s.air_date) || "").slice(0, 4), 10);
+    if (y) return y;
+  } catch(e){}
+  return parseInt(String((currentItem || {}).first_air_date || "").slice(0, 4), 10) || 0;
+}
+function animeSeasonPinned(){
+  try {
+    const hit = ANIME_SEASON_MAP.find(r => r.match.test(titleOf(currentItem || {})));
+    return (hit && hit.seasons[watchState.s]) || null;
+  } catch(e){ return null; }
+}
+const ANIME_MAP_API = "https://streambox-api.dazoarmando.workers.dev/api/anime-map";
+async function animeMapFor(tmdbId, title, year){
+  // year-aware TMDB->MAL/AniList through the Worker (the sanctioned carrier),
+  // then the local Jikan/Consumet/AniList chain as fallback
+  try {
+    const q = new URLSearchParams({ title: String(title || ""), tmdb: String(tmdbId || "") });
+    if (year) q.set("year", String(year));
+    const r = await fetch(`${ANIME_MAP_API}?${q}`);
+    if (r.ok) {
+      const d = await r.json();
+      if (d && (d.mal || d.ani)) return { mal: d.mal || 0, ani: d.ani || 0 };
+    }
+  } catch(e){}
+  return anipmIds(tmdbId, title, year);
+}
+async function animeRouteResolve(){
+  // the CURRENT SEASON's own entry + numbering mode (call-time season/air year)
+  const title = titleOf(currentItem || {});
+  const year = animeSeasonAirYear();
+  const pinned = animeSeasonPinned();
+  const baseYear = parseInt(String((currentItem || {}).first_air_date || "").slice(0, 4), 10) || 0;
+  const seasonIds = pinned || await animeMapFor(watchState.id, title, year);
+  const baseIds = (seasonIds && baseYear === year) ? seasonIds : await animeMapFor(watchState.id, title, baseYear);
+  const sM = (seasonIds && seasonIds.mal) || 0, sA = (seasonIds && seasonIds.ani) || 0;
+  const bM = (baseIds && baseIds.mal) || 0, bA = (baseIds && baseIds.ani) || 0;
+  const combined = !sM && !sA ? true : ((sM && bM && sM === bM) || (sA && bA && sA === bA) || (!bM && !bA));
+  const ids = (sM || sA) ? seasonIds : (baseIds || {});
+  window._animeRoute = { ids, abs: combined };
+  return window._animeRoute;
+}
+function animeFromAbs(abs){
+  // provider entry numbering (absolute on combined entries) -> TMDB s/e
+  try {
+    const n = Math.max(1, Math.floor(abs || 0));
+    if (watchSeasons && watchSeasons.length) {
+      let base = 0;
+      const list = watchSeasons.filter(x => x.season_number > 0).sort((a, b) => a.season_number - b.season_number);
+      for (const s of list) {
+        const c = s.episode_count || 0;
+        if (n <= base + c) return { s: s.season_number, e: Math.max(1, n - base) };
+        base += c;
+      }
+    }
+  } catch(e){}
+  return { s: watchState.s, e: Math.max(1, Math.floor(abs || 0)) };
+}
 async function anipmIds(tmdbId, title, tmdbYear){
   // TMDB\u{2192}player-ID mapping, three hosts: Jikan (MAL id) first, Consumet
   // (AniList id) as backup on a different network path, AniList GraphQL
@@ -6757,7 +6833,9 @@ async function anipmIds(tmdbId, title, tmdbYear){
   // and cached the poison forever). v3 scores title affinity + year + TV
   // type, rejects strangers (no-match falls to VidRift, which is TMDB-direct
   // and therefore always the RIGHT show), and re-maps every title once.
-  const ck = "sb:ani3:" + tmdbId;
+  // v4 keys per YEAR too: split franchises (Hajime no Ippo) map differently
+  // per season air year — one show-level cache poisoned every later season.
+  const ck = "sb:ani3:" + tmdbId + ":" + (tmdbYear || 0);
   try { const c = JSON.parse(localStorage.getItem(ck) || "null"); if (c && (c.mal || c.ani)) return c; } catch(e){}
   // session blacklist (see animeRematch): IDs the viewer already rejected as
   // the wrong show are excluded from every host's candidates this session
@@ -6852,10 +6930,17 @@ function animeRematch(){
   try {
     if (!watchState.anime) return;
     const id = watchState.id;
-    const cur = JSON.parse(localStorage.getItem("sb:ani3:" + id) || "null");
+    const cur = JSON.parse(localStorage.getItem("sb:ani3:" + id + ":" + (animeSeasonAirYear() || 0)) || "null");
     window._aniSkip = window._aniSkip || {};
     if (cur && (cur.mal || cur.ani)) (window._aniSkip[id] = window._aniSkip[id] || []).push(cur.mal || cur.ani);
-    try { localStorage.removeItem("sb:ani3:" + id); } catch(e){}
+    // every year-keyed mapping for this show goes (split franchises cache per year)
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf("sb:ani3:" + id + ":") === 0) localStorage.removeItem(k);
+        if (k === "sb:ani3:" + id) localStorage.removeItem(k); // pre-v4 leftovers
+      }
+    } catch(e){}
     const ws = document.getElementById("watchStatus");
     if (ws) ws.textContent = "Re-matching this anime…";
     loadPlayer();
@@ -6903,10 +6988,13 @@ async function loadVidboltAnime(){
   if (spin) spin.style.display = "grid";
   if (ws) ws.textContent = "Matching anime…";
   const tmdbYear = parseInt(String((currentItem || {}).first_air_date || "").slice(0, 4), 10) || 0;
-  let ids = {};
-  try { ids = await withTimeout(anipmIds(id, titleOf(currentItem || {}), tmdbYear), 15000, "anime-map"); } catch(e){ ids = {}; }
+  // season-aware route (same as AniPM): the CURRENT season's own entry by AIR
+  // YEAR — boot deferred until it resolves, 15s cap
+  let route = { ids: {}, abs: true };
+  try { route = await withTimeout(animeRouteResolve(), 15000, "anime-map"); } catch(e){ route = { ids: {}, abs: true }; }
+  const ids = route.ids || {};
   if (watchState.id !== id || mirror !== "vidbolt") return; // user moved on
-  const ep = Math.max(1, animeAbsEp() || 1);
+  const ep = route.abs ? Math.max(1, animeAbsEp() || 1) : Math.max(1, watchState.e || 1);
   let vu = null;
   if (ids.ani) vu = `https://vidbolt.pro/anime/${ids.ani}/${ep}`;
   else if (ids.mal) vu = `https://vidbolt.pro/anime/mal/${ids.mal}/${ep}`;
@@ -6981,12 +7069,16 @@ async function loadAnipmPlayer(){
   if (spin) spin.style.display = "grid";
   if (ws) ws.textContent = "Matching anime…";
   const tmdbYear = parseInt(String((currentItem || {}).first_air_date || "").slice(0, 4), 10) || 0;
-  // mapping must never hang the player: 15s cap, then the no-match path below
-  let ids = {};
-  try { ids = await withTimeout(anipmIds(id, titleOf(currentItem || {}), tmdbYear), 15000, "anime-map"); } catch(e){ ids = {}; }
+  // Season-aware route: the CURRENT season's own entry by AIR YEAR (split
+  // franchises carry one entry per season — Hajime no Ippo S2 = 5258). The
+  // anime boot stays deferred until the route resolves; mapping must never
+  // hang the player: 15s cap, then the no-match path below.
+  let route = { ids: {}, abs: true };
+  try { route = await withTimeout(animeRouteResolve(), 15000, "anime-map"); } catch(e){ route = { ids: {}, abs: true }; }
+  const ids = route.ids || {};
   if (watchState.id !== id || mirror !== "anipm") return; // user moved on
   if (!ids.mal && !ids.ani) {
-    // all three mapping hosts failed — don't sit black, fall to VidRift
+    // all mapping hosts failed — don't sit black, fall to VidRift
     // (manual hop mode just names it instead of moving)
     if (spin) spin.style.display = "none";
     if (!autoSwitchOn()) { stuckRecommend("Couldn't match this anime", "VidRift"); return; }
@@ -6994,7 +7086,8 @@ async function loadAnipmPlayer(){
     setMirror("vidrift", true);
     return;
   }
-  const ep = watchState.anime ? animeAbsEp() : Math.max(1, watchState.e || 1);
+  // same entry = combined run (absolute numbering); a new entry = per-season
+  const ep = (watchState.anime && route.abs) ? animeAbsEp() : Math.max(1, watchState.e || 1);
   // house-rule dub (Dragon Ball \u{2192} Faulconer English) or sub default
   const lang0 = animeLangDefault(titleOf(currentItem || {}));
   window._anipmTracks.lang = lang0;
@@ -7164,12 +7257,21 @@ window.addEventListener("message", (event)=>{
       break;
     }
     case "ended": anipmEnded(); break;
-    case "episodechange":
+    case "episodechange": {
       // provider episode events enter state ONLY through adoptProviderEpisode
       // (echoes / settling noise / out-of-range dropped); adopted switches
-      // re-open through OUR canonical load
-      if (adoptProviderEpisode(d.season, d.episode)) applyEpisodeSwitch();
+      // re-open through OUR canonical load. Combined entries report ABSOLUTE
+      // entry numbering — convert back to TMDB season/episode first.
+      let s = d.season, e = d.episode;
+      try {
+        if (window._animeRoute && window._animeRoute.abs && !(s > 0) && e > 0) {
+          const conv = animeFromAbs(e);
+          s = conv.s; e = conv.e;
+        }
+      } catch(err){}
+      if (adoptProviderEpisode(s, e)) applyEpisodeSwitch();
       break;
+    }
   }
 });
 /* A/V sheet: modern in-player picker (no more \u{2699} detour). Anime/AniPM only —
