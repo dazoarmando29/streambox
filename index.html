@@ -66,6 +66,65 @@
     font-family: "Space Grotesk", sans-serif; letter-spacing: -0.01em;
   }
   .label-tag, .tracking-widest { text-transform: uppercase; letter-spacing: .12em; }
+  /* ===== StreamBox Website Design pack (redesign): glass + poster recipes ===== */
+  .glass-panel {
+    background: rgba(13, 19, 31, 0.7);
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  .glass-pill {
+    background: rgba(255, 255, 255, 0.05);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: background .18s ease, border-color .18s ease;
+  }
+  .glass-pill:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.18); }
+  .poster-card { transition: transform .3s cubic-bezier(.16, 1, .3, 1), box-shadow .3s ease; }
+  .poster-card:hover {
+    transform: translateY(-6px) scale(1.02);
+    box-shadow: 0 20px 30px -10px rgba(0, 0, 0, .8), 0 0 20px 2px rgba(0, 240, 181, .15);
+  }
+  body.calm .poster-card:hover { transform: none; }
+  /* catalog overlay card: name + meta ride the poster's bottom scrim */
+  .card-overlay .cap-scrim {
+    position: absolute; inset: auto 0 0 0; height: 7rem;
+    background: linear-gradient(to top, #07090f, rgba(7, 9, 15, .6) 55%, transparent);
+    display: flex; flex-direction: column; justify-content: flex-end; padding: .75rem;
+  }
+  .card-badge {
+    position: absolute; top: .75rem; right: .75rem; z-index: 2;
+    padding: .15rem .45rem; border-radius: .35rem; font-size: 10px; font-weight: 700;
+    background: rgba(0, 240, 181, .18); border: 1px solid rgba(0, 240, 181, .35); color: #00F0B5;
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  /* nav: active pill + accent dot (design pack recipe) */
+  .navlink { border-radius: 999px; padding: .35rem 1rem; font-size: .875rem; font-weight: 500;
+    color: #9aa7b8; transition: color .18s ease, background .18s ease, border-color .18s ease;
+    border: 1px solid transparent; display: inline-flex; align-items: center; gap: .4rem; }
+  .navlink:hover { color: #fff; }
+  .navlink.nav-active {
+    background: rgba(255, 255, 255, .08); color: #fff; font-weight: 600;
+    border-color: rgba(255, 255, 255, .1);
+  }
+  .navlink.nav-active::after {
+    content: ""; width: 6px; height: 6px; border-radius: 99px;
+    background: #00D2FF; box-shadow: 0 0 8px #00D2FF;
+  }
+  /* segmented year rail (design pack recipe) */
+  .year-rail {
+    display: flex; align-items: center; gap: .25rem;
+    background: rgba(0, 0, 0, .35); padding: .25rem; border-radius: .85rem;
+    border: 1px solid rgba(255, 255, 255, .1); overflow-x: auto;
+    -ms-overflow-style: none; scrollbar-width: none; max-width: 100%;
+  }
+  .year-rail::-webkit-scrollbar { display: none; }
+  .year-rail button { padding: .4rem .85rem; border-radius: .55rem; font-size: 12px;
+    font-weight: 500; color: #9aa7b8; white-space: nowrap; transition: all .15s ease; }
+  .year-rail button:hover { color: #fff; background: rgba(255, 255, 255, .05); }
+  .year-rail button.yr-active {
+    background: rgba(0, 240, 181, .18); color: #00F0B5; font-weight: 700;
+    border: 1px solid rgba(0, 240, 181, .35); box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+  }
   nav { padding-top: calc(1rem + env(safe-area-inset-top, 0px));
     transition: background-color .3s ease, box-shadow .3s ease; }
   /* fixed backgrounds repaint every scroll frame (TV jank): calm + TV scroll */
@@ -544,14 +603,8 @@
   .glass { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); border-radius: 20px; }
   .card:hover .glass, .card:focus-visible .glass, .card.tv-focus .glass {
     box-shadow: 0 0 0 2px #00F0B5, 0 10px 30px rgba(0,0,0,.5); }
-  .navlink { position: relative; padding: 8px 14px; border-radius: 12px; color: #9fb0cc;
-    border: 1px solid transparent; background: transparent; white-space: nowrap; }
-  .navlink:hover { color: #fff; }
-  .nav-active { color: #fff !important; font-weight: 800;
-    border-color: rgba(45,212,191,.6) !important; background: rgba(45,212,191,.08); }
-  .nav-active::after { content: ""; position: absolute; left: 50%; transform: translateX(-50%);
-    bottom: -9px; width: 34px; height: 4px; border-radius: 99px;
-    background: linear-gradient(90deg, #00D2FF, #00E0B5); }
+  /* nav pill visuals live in the design-pack block above (.navlink / .nav-active)
+     — the old underline-bar skin is retired (the active pill wears the dot) */
   /* mobile tab bar: thumb-sized, active tab glows teal like the desktop pill */
   .mnav-btn { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 2px; min-height: 52px; font-size: 10px; font-weight: 700; color: #8b98b3; border-radius: 14px; }
@@ -605,7 +658,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 195; // bump every release alongside version.txt
+  const BUILD_NUM = 196; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -643,9 +696,10 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <button id="navBrowse" onclick="openBrowseTab(event)" class="navlink">Browse</button>
     <button onclick="openTvGuide(event)" class="navlink" title="How to install & use on TV">&#x1F4FA; TV Setup</button>
   </div>
-  <div class="ml-auto flex gap-2 w-full md:w-auto justify-end">
-    <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-4 md:min-w-[190px] md:justify-start rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm text-gray-300">&#x1F50D; Search</button>
-    <button id="adultLockNav" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" aria-label="Adults-only gate" class="shrink-0 h-10 px-4 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-bold">&#x1F512;</button>
+  <div class="ml-auto flex items-center gap-2 w-full md:w-auto justify-end">
+    <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-4 md:w-56 lg:w-64 md:justify-start rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm text-gray-400 flex items-center gap-2"><span class="text-teal-300">&#x1F50D;</span><span>Search...</span></button>
+    <button id="adultLockNav" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" aria-label="Adults-only gate" class="shrink-0 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-gray-300">&#x1F512;</button>
+    <button id="installBtn" onclick="installPWA()" class="hidden shrink-0 h-10 px-4 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2B07;</span>Install</button>
   </div>
 </nav>
 
@@ -688,22 +742,64 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 
   <!-- SEARCH / BROWSE GRID -->
   <main id="gridView" class="hidden px-4 md:px-10 pt-28 md:pt-32 pb-20">
-    <div class="flex items-center gap-3 mb-4">
-      <h2 id="gridTitle" class="row-title text-xl font-bold flex-1"></h2>
-      <button id="adultLockBtn" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" class="shrink-0 px-4 h-11 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-sm font-bold">&#x1F512; 18+ Hidden</button>
+    <div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+      <div>
+        <div class="flex items-center gap-3">
+          <span class="w-2 h-7 bg-gradient-to-b from-teal-300 to-cyan-400 rounded-full"></span>
+          <h2 id="gridTitle" class="text-3xl font-bold tracking-tight text-white"></h2>
+          <span id="gridCount" class="text-xs font-medium px-2.5 py-1 rounded-full bg-white/5 text-gray-400 border border-white/10"></span>
+        </div>
+        <p id="gridSub" class="text-sm text-gray-400 mt-1 pl-5"></p>
+      </div>
+      <div class="flex items-center gap-3">
+        <button id="adultLockBtn" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" class="flex items-center gap-2 px-3.5 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-300"><span class="text-amber-400">&#x1F6E1;</span><span id="adultLockLabel">18+ Hidden</span></button>
+        <button id="sortBtn" onclick="cycleSort()" title="Change catalog sort" class="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200"><span class="text-teal-300">&#x21C5;</span><span>Sort: <strong id="sortLabel" class="text-white">Popularity</strong></span></button>
+      </div>
     </div>
-    <div id="gridContinue" class="hidden mb-6">
+    <div id="gridContinue" class="hidden mb-8">
       <div class="sb-row">
         <div class="flex items-center gap-2 mb-2"><h2 class="row-title text-lg font-bold flex-1">Continue Watching</h2></div>
         <div id="gridContinueGrid" class="flex gap-3 overflow-x-auto row-scroll pb-2"></div>
       </div>
     </div>
-    <div id="kindRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
-    <div id="genreRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
-    <div id="yearRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
-    <div id="studioRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
-    <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
+    <section id="filterPanel" class="glass-panel rounded-2xl p-5 border border-white/10 shadow-2xl mb-8">
+      <div id="kindWrap" class="hidden">
+        <div class="flex items-center justify-between mb-3 px-1">
+          <span class="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2"><span class="text-teal-300">&#x25A6;</span> Browse by Kind</span>
+          <span class="text-[11px] text-gray-500">Pick a kind first</span>
+        </div>
+        <div id="kindRow" class="flex gap-2 overflow-x-auto row-scroll pb-1 mb-4"></div>
+        <div class="h-px w-full bg-white/5"></div>
+      </div>
+      <div id="studiosWrap">
+        <div class="flex items-center justify-between mb-3 px-1">
+          <span class="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2"><span class="text-teal-300">&#x1F3AC;</span> <span id="studiosLabel">Top Studios &amp; Franchises</span></span>
+          <span class="text-[11px] text-gray-500">Horizontal scroll or swipe</span>
+        </div>
+        <div id="studioRow" class="flex gap-2 overflow-x-auto row-scroll pb-3"></div>
+        <div class="h-px w-full bg-white/5 my-4"></div>
+      </div>
+      <div class="flex items-center justify-between mb-3 px-1">
+        <span class="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2"><span class="text-teal-300">&#x25A7;</span> Browse by Genre</span>
+        <span id="genreCount" class="text-xs text-teal-300 font-medium"></span>
+      </div>
+      <div id="genreRow" class="flex gap-2 overflow-x-auto row-scroll pb-3"></div>
+      <div class="h-px w-full bg-white/5 my-4"></div>
+      <div class="flex items-center gap-2 mb-3 px-1">
+        <span class="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2"><span class="text-cyan-300">&#x1F4C5;</span> Year:</span>
+        <button onclick="resetFilters()" class="text-xs text-gray-400 hover:text-rose-400 transition-colors flex items-center gap-1.5 ml-auto"><span>&#x21BB;</span> Reset Filters</button>
+      </div>
+      <div id="yearRow" class="year-rail"></div>
+    </section>
+    <div id="gridChrome" class="flex items-center justify-between mb-4">
+      <h3 class="text-lg font-semibold tracking-wide text-white flex items-center gap-2"><span id="gridHeading">Trending Releases</span><span class="text-xs text-gray-400 font-normal">Based on your preferences</span></h3>
+      <div class="flex items-center gap-1.5 text-xs text-gray-400"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Live Catalog Updated</div>
+    </div>
+    <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-5"></div>
     <button id="loadMoreBtn" onclick="browseMore()" class="hidden mx-auto mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 font-bold text-sm">Load more &#x2193;</button>
+    <aside class="fixed bottom-6 right-6 z-40">
+      <button onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Scroll to top" class="w-12 h-12 rounded-full glass-panel hover:bg-teal-400/20 text-gray-300 hover:text-white border border-white/10 flex items-center justify-center shadow-2xl">&#x2191;</button>
+    </aside>
   </main>
 
   <!-- MY LIST -->
@@ -1603,26 +1699,50 @@ function makeRow(title, items, forceType){
   return div;
 }
 
-function cardEl(x, type){
+function genreNames(x, type){
+  try {
+    const ids = x.genre_ids || [];
+    if (!ids.length) return "";
+    const list = (type === "movie" ? genreCache.movie : genreCache.tv) || genreCache.movie || genreCache.tv || [];
+    return ids.slice(0, 2).map(id => (list.find(g => String(g.id) === String(id)) || {}).name).filter(Boolean).join(", ");
+  } catch(e){ return ""; }
+}
+function cardEl(x, type, variant){
   const d = document.createElement("div");
-  d.className = "card min-w-[130px] md:min-w-[160px] max-w-[130px] md:max-w-[160px] focusable";
+  d.className = "card focusable group" + (variant === "overlay"
+    ? " card-overlay poster-card min-w-0"
+    : " min-w-[130px] md:min-w-[160px] max-w-[130px] md:max-w-[160px]");
   d.tabIndex = 0;
   d.setAttribute("role", "button");
   d.setAttribute("aria-label", `${titleOf(x)} (${type})`);
   d.setAttribute("data-focusable", "1");
   // rating chips carry REAL votes only — an unrated title shows no fake 0.0
   const realVote = Number(x.vote_count || 0) > 0 && Number(x.vote_average || 0) > 0;
-  // meta line: year · type with normalized labels (ANIME = JP animation)
+  // meta line: year • genres (design pack) with the normalized type fallback
   const isAnimeCard = (x.genre_ids || []).includes(16) || x.media_type === "anime";
   const typeLabel = x._label || (type === "movie" ? "MOVIE" : isAnimeCard ? "ANIME" : "TV");
   const year = yearOf(x);
-  d.innerHTML = `
-    <div class="relative poster-frame">
-      ${realVote ? `<span class="rate-badge">\u{2605} ${Number(x.vote_average).toFixed(1)}</span>` : ""}
-      ${posterTag(x.poster_path, "rounded-lg w-full aspect-[2/3] object-cover bg-white/5")}
-    </div>
-    <p class="card-title text-xs mt-1.5 font-bold truncate">${titleOf(x)}</p>
-    <p class="card-meta text-[10px] tracking-[0.18em] text-gray-400 truncate">${year} \u{00B7} ${typeLabel}</p>`;
+  const genres = genreNames(x, type);
+  const meta = `${year ? year + " \u{00B7} " : ""}${genres || typeLabel}`;
+  if (variant === "overlay") {
+    d.innerHTML = `
+      <div class="relative aspect-[2/3] w-full rounded-2xl overflow-hidden poster-frame bg-white/5">
+        ${realVote ? `<span class="rate-badge">\u{2605} ${Number(x.vote_average).toFixed(1)}</span>` : ""}
+        ${posterTag(x.poster_path, "w-full h-full object-cover transition-transform duration-500 group-hover:scale-105")}
+        <div class="cap-scrim">
+          <p class="card-title text-sm font-bold truncate">${titleOf(x)}</p>
+          <p class="card-meta text-xs text-gray-400 truncate">${meta}</p>
+        </div>
+      </div>`;
+  } else {
+    d.innerHTML = `
+      <div class="relative poster-frame">
+        ${realVote ? `<span class="rate-badge">\u{2605} ${Number(x.vote_average).toFixed(1)}</span>` : ""}
+        ${posterTag(x.poster_path, "rounded-lg w-full aspect-[2/3] object-cover bg-white/5")}
+      </div>
+      <p class="card-title text-xs mt-1.5 font-bold truncate">${titleOf(x)}</p>
+      <p class="card-meta text-[10px] text-gray-400 truncate">${year} \u{00B7} ${typeLabel}</p>`;
+  }
   d.onclick = activatable(() => openDetail(type, x.id));
   // picking speed: hovering warms the detail cache so the popup opens
   // instantly; the player host is preconnected at the same time.
@@ -1696,21 +1816,8 @@ function purgeRetiredCaches(){
   try { syncMobileNav(); } catch(e){}
   // mark static buttons focusable for D-pad
   document.querySelectorAll("button, select, input, a").forEach(el => el.setAttribute("data-focusable", "1"));
-  // install prompt (Android Chrome): show Install button when available
-  let deferred = null;
-  window.addEventListener("beforeinstallprompt", (e) => {
-    e.preventDefault(); deferred = e;
-    try {
-      if (document.getElementById("installBtn")) return;
-      const b = document.createElement("button");
-      b.id = "installBtn";
-      b.textContent = "⤓ Install";
-      b.className = "text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full";
-      b.setAttribute("data-focusable", "1");
-      b.onclick = async () => { if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; b.remove(); } };
-      document.querySelector("nav").appendChild(b);
-    } catch(err){}
-  });
+  // install prompt (Android Chrome): the nav Install pill is static markup
+  // and un-hides itself via the beforeinstallprompt handler near filterType.
   // service worker (offline shell + repeat-visit speed; skipped on file:// )
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
@@ -2293,6 +2400,17 @@ function showGrid(title, items){
   document.getElementById("yearRow").classList.add("hidden");
   document.getElementById("studioRow").classList.add("hidden");
   document.getElementById("loadMoreBtn").classList.add("hidden");
+  try {
+    document.getElementById("filterPanel").style.display = "none";
+    document.getElementById("gridChrome").style.display = "none";
+    document.getElementById("gridSub").textContent = "";
+    document.getElementById("gridCount").textContent = "";
+    document.getElementById("gridContinue").classList.add("hidden");
+    const kw = document.getElementById("kindWrap");
+    if (kw) kw.classList.add("hidden");
+    const sw = document.getElementById("studiosWrap");
+    if (sw) sw.classList.add("hidden");
+  } catch(e){}
   const gv = document.getElementById("gridView");
   gv.classList.remove("hidden");
   document.getElementById("listView").classList.add("hidden");
@@ -2300,7 +2418,7 @@ function showGrid(title, items){
   const g = document.getElementById("grid"); g.innerHTML = "";
   items.forEach(x=>{
     const type = x.media_type === "tv" ? "tv" : "movie";
-    g.appendChild(cardEl(x, type));
+    g.appendChild(cardEl(x, type, "overlay"));
   });
   if(!items.length) g.innerHTML = "<p class='text-gray-500'>No results found.</p>";
 }
@@ -2334,6 +2452,24 @@ async function filterType(type, ev){
   window._browseTab = false; // dedicated section tab (Movies/TV/Anime/KDrama)
   openBrowse(type, ev);
 }
+/* PWA install (design-pack Install pill): shows only when the browser offers */
+let _deferredInstall = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  try {
+    e.preventDefault();
+    _deferredInstall = e;
+    const b = document.getElementById("installBtn");
+    if (b) b.classList.remove("hidden");
+  } catch(err){}
+});
+function installPWA(){
+  try {
+    if (!_deferredInstall) return;
+    _deferredInstall.prompt();
+    _deferredInstall = null;
+    document.getElementById("installBtn").classList.add("hidden");
+  } catch(e){}
+}
 /* Browse tab: kind pick FIRST (Movies/TV/Anime/K-Dramas), then the genre
    chips + year rail over the full paginated catalog. The kind chips stay
    visible so the kind switches without leaving the tab. */
@@ -2348,15 +2484,18 @@ function setKind(kind){
 }
 function buildKindRow(){
   const row = document.getElementById("kindRow");
-  if (!row) return;
-  if (!window._browseTab) { row.classList.add("hidden"); return; }
-  row.classList.remove("hidden");
+  const wrap = document.getElementById("kindWrap");
+  if (!row || !wrap) return;
+  if (!window._browseTab) { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
   row.innerHTML = "";
   [["movie", "Movies"], ["tv", "TV Shows"], ["anime", "Anime"], ["ko", "K-Dramas"]].forEach(([k, label]) => {
     const b = document.createElement("button");
     b.textContent = label;
     b.dataset.kind = k;
-    b.className = "shrink-0 px-4 h-10 rounded-full text-sm font-bold " + (browse.type === k ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
+    b.className = "flex-shrink-0 px-4 py-2 rounded-lg text-xs font-semibold transition-all " + (browse.type === k
+      ? "bg-white/15 text-white border border-white/20 shadow-sm"
+      : "bg-white/[0.03] hover:bg-white/10 text-gray-300 hover:text-white font-medium border border-white/5");
     b.onclick = () => setKind(k);
     row.appendChild(b);
   });
@@ -2519,8 +2658,12 @@ function pinClose(){
   if (!topPopup()) document.body.classList.remove("modal-open");
 }
 function paintAdultLock(){
-  const b = document.getElementById("adultLockBtn");
-  if (b) b.textContent = adultLocked() ? "\u{1F512} 18+ Hidden" : "\u{1F513} 18+ Shown";
+  const lbl = document.getElementById("adultLockLabel");
+  if (lbl) lbl.textContent = adultLocked() ? "18+ Hidden" : "18+ Shown";
+  else {
+    const b = document.getElementById("adultLockBtn");
+    if (b) b.textContent = adultLocked() ? "\u{1F512} 18+ Hidden" : "\u{1F513} 18+ Shown";
+  }
   const nb = document.getElementById("adultLockNav");
   if (nb) nb.textContent = adultLocked() ? "\u{1F512}" : "\u{1F513}";
 }
@@ -2539,7 +2682,7 @@ function refreshAfterLock(){
   else { try { init(); } catch(e){} }
 }
 /* ---------- GENRE BROWSING (Movies + TV Shows categories) ---------- */
-let browse = { type: "movie", genre: 0, year: 0, studio: 0, page: 0, totalPages: 1, loading: false };
+let browse = { type: "movie", genre: 0, year: 0, studio: 0, sort: 0, page: 0, totalPages: 1, loading: false };
 /* ---------- STUDIO FILTER (Movies + TV Shows) ----------
    Production-company chips with real TMDB logos. Every id + logo path below
    was verified against the live TMDB API (company + discover probes) — never
@@ -2583,13 +2726,28 @@ async function getGenres(type){
 async function openBrowse(type, ev){
   if (ev) ev.preventDefault();
   if (!document.getElementById("watchView").classList.contains("hidden")) goHome();
-  browse = { type, genre: 0, year: 0, studio: 0, page: 0, totalPages: 1, loading: false };
+  browse = { type, genre: 0, year: 0, studio: 0, sort: 0, page: 0, totalPages: 1, loading: false };
   document.getElementById("rows").classList.add("hidden");
   document.getElementById("hero").classList.add("hidden");
   document.getElementById("continueRow").classList.add("hidden");
   document.getElementById("listView").classList.add("hidden");
   document.getElementById("gridView").classList.remove("hidden");
-  document.getElementById("gridTitle").textContent = type === "movie" ? "Movies" : type === "anime" ? "Anime" : type === "ko" ? "K-Dramas" : "TV Shows";
+  document.getElementById("gridTitle").textContent = type === "movie" ? "Explore Movies" : type === "anime" ? "Explore Anime" : type === "ko" ? "Explore K-Dramas" : "Explore TV Shows";
+  document.getElementById("gridSub").textContent = type === "movie"
+    ? "Cinema releases, blockbuster franchises, and curated independent films."
+    : type === "anime"
+      ? "Simulcasts direct from Tokyo, legendary shonen sagas, psychological mind-benders, and cinematic treasures."
+      : type === "ko"
+        ? "Korean dramas — romance, thrillers, and weekend premieres, with Tagalog-dubbed playback."
+        : "Binge acclaimed prestige dramas, viral sensations, sitcoms, and network releases.";
+  document.getElementById("gridHeading").textContent = type === "movie" ? "Trending Releases" : type === "anime" ? "Trending Anime" : type === "ko" ? "Trending K-Dramas" : "Trending TV Shows";
+  document.getElementById("studiosLabel").innerHTML = type === "tv" ? "Top Networks &amp; Studios" : type === "anime" ? "Top Anime Studios" : "Top Studios &amp; Franchises";
+  document.getElementById("filterPanel").style.display = "";
+  document.getElementById("gridChrome").style.display = "";
+  try {
+    const gc = document.getElementById("gridCount");
+    if (gc) gc.textContent = "";
+  } catch(e){}
   paintNav(type === "movie" ? "navMovies" : type === "anime" ? "navAnime" : type === "ko" ? "navKdrama" : "navTv");
   if (window._browseTab) paintNav("navBrowse"); // Browse tab owns the highlight
   document.getElementById("grid").innerHTML = "";
@@ -2600,6 +2758,8 @@ async function openBrowse(type, ev){
   window.scrollTo(0, 0);
   try {
     const genres = await getGenres(type);
+    const gcount = document.getElementById("genreCount");
+    if (gcount) gcount.textContent = "View All (" + genres.length + ")";
     row.innerHTML = "";
     const all = document.createElement("button");
     all.textContent = "All";
@@ -2617,6 +2777,7 @@ async function openBrowse(type, ev){
     paintChips();
     buildKindRow();
     buildYears();
+    paintSort();
     paintStudios();
   } catch(e){
     row.innerHTML = `<p class="text-xs text-gray-500 py-2">Categories unavailable — showing popular.</p>`;
@@ -2628,7 +2789,15 @@ async function openBrowse(type, ev){
 function paintChips(){
   document.querySelectorAll("#genreRow button").forEach(b => {
     const active = String(b.dataset.genre) === String(browse.genre || 0);
-    b.className = "shrink-0 px-4 h-10 rounded-full text-sm font-bold " + (active ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
+    b.className = "flex-shrink-0 px-3.5 py-2 rounded-lg text-xs transition-all " + (active
+      ? "bg-white/15 text-white font-semibold border border-white/20 shadow-sm flex items-center gap-2"
+      : "bg-white/[0.03] hover:bg-white/10 text-gray-300 hover:text-white font-medium border border-white/5");
+    if (active && !b.querySelector(".chip-dot")) {
+      const d = document.createElement("span");
+      d.className = "chip-dot w-1.5 h-1.5 rounded-full bg-teal-400";
+      b.insertBefore(d, b.firstChild);
+    }
+    if (!active) { const d = b.querySelector(".chip-dot"); if (d) d.remove(); }
   });
 }
 async function setGenre(id){
@@ -2662,44 +2831,79 @@ function animeFeedCard(x){
    (2026 -> 1950). Genre + year stack; the discover page walks the whole
    catalog with the filter applied server-side. */
 function buildYears(){
+  // year rail (design pack): All default, single years down to 2020, then
+  // decade chips — all over the FULL paginated catalog
   const row = document.getElementById("yearRow");
-  row.classList.remove("hidden");
+  if (!row) return;
   row.innerHTML = "";
-  const all = document.createElement("button");
-  all.textContent = "All";
-  all.dataset.year = "0";
-  all.onclick = () => setYear(0);
-  row.appendChild(all);
-  const nowY = new Date().getFullYear();
-  for (let y = nowY; y >= 1950; y--) {
+  const mk = (label, val) => {
     const b = document.createElement("button");
-    b.textContent = String(y);
-    b.dataset.year = String(y);
-    b.onclick = () => setYear(y);
+    b.textContent = label;
+    b.dataset.year = String(val);
+    b.onclick = () => setYear(val);
     row.appendChild(b);
-  }
+  };
+  mk("All Years", "0");
+  const nowY = new Date().getFullYear();
+  for (let y = nowY; y >= 2020; y--) mk(String(y), String(y));
+  mk("2010s", "2010s");
+  mk("2000s", "2000s");
+  mk("90s Retro", "1990s");
+  mk("Classics", "classics");
   paintYears();
 }
 function paintYears(){
   document.querySelectorAll("#yearRow button").forEach(b => {
-    const active = Number(b.dataset.year) === (browse.year || 0);
-    b.className = "shrink-0 px-4 h-10 rounded-full text-sm font-bold " + (active ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
+    b.classList.toggle("yr-active", String(b.dataset.year) === String(browse.year || 0));
   });
 }
 function setYear(y){
-  browse.year = Number(y) || 0;
+  browse.year = (typeof y === "string" && y !== "0") ? y : (Number(y) || 0);
   browse.page = 0;
   browse.totalPages = 1;
   document.getElementById("grid").innerHTML = "";
   paintYears();
   browseMore(true);
 }
+function feedYearHit(year){
+  // year filter for feeds without date-range params (the anime genre feed)
+  const y = browse.year;
+  if (!y || y === "0") return true;
+  const n = Number(year) || 0;
+  if (typeof y === "number") return n === y;
+  if (y === "classics") return n > 0 && n <= 1999;
+  const start = parseInt(y, 10);
+  return start >= 1900 ? (n >= start && n <= start + 9) : true;
+}
+const SORT_LABELS = ["Popularity", "Rating", "Newest"];
+function paintSort(){
+  try { document.getElementById("sortLabel").textContent = SORT_LABELS[browse.sort || 0]; } catch(e){}
+}
+function cycleSort(){
+  browse.sort = ((browse.sort || 0) + 1) % SORT_LABELS.length;
+  paintSort();
+  browse.page = 0;
+  browse.totalPages = 1;
+  document.getElementById("grid").innerHTML = "";
+  browseMore(true);
+}
+function resetFilters(){
+  browse.genre = 0; browse.year = 0; browse.studio = 0; browse.sort = 0;
+  browse.page = 0;
+  browse.totalPages = 1;
+  document.getElementById("grid").innerHTML = "";
+  paintChips(); paintYears(); paintStudios(); paintSort();
+  browseMore(true);
+}
 function paintStudios(){
   // studio chip row (Movies + TV only): logo badge on white so dark marks
   // stay visible, name text always alongside, h-11 for TV remotes
   const srow = document.getElementById("studioRow");
-  srow.classList.toggle("hidden", browse.type === "anime" || browse.type === "ko");
-  if (browse.type === "anime" || browse.type === "ko") return;
+  const wrap = document.getElementById("studiosWrap");
+  const hide = browse.type === "anime" || browse.type === "ko";
+  if (wrap) wrap.classList.toggle("hidden", hide);
+  srow.classList.toggle("hidden", hide);
+  if (hide) return;
   srow.innerHTML = "";
   const all = document.createElement("button");
   all.textContent = "All studios";
@@ -2756,18 +2960,25 @@ async function browseMore(focusFirst){
     // Locked: TMDB itself drops keyword-tagged adult titles server-side
     // (titles here are never flagged `adult`, so include_adult=false is blind).
     const g = (typeof browse.genre === "number" && browse.genre) ? `&with_genres=${browse.genre}` : "";
-    const yr = browse.year
-      ? (browse.type === "movie" ? `&primary_release_year=${browse.year}` : `&first_air_date_year=${browse.year}`)
-      : "";
+    const dateField = browse.type === "movie" ? "primary_release_date" : "first_air_date";
+    const yr = (!browse.year || browse.year === "0") ? ""
+      : (typeof browse.year === "number")
+        ? (browse.type === "movie" ? `&primary_release_year=${browse.year}` : `&first_air_date_year=${browse.year}`)
+        : (browse.year === "classics")
+          ? `&${dateField}.lte=1999-12-31`
+          : `&${dateField}.gte=${parseInt(browse.year, 10)}-01-01&${dateField}.lte=${parseInt(browse.year, 10) + 9}-12-31`;
+    const sortKey = (browse.sort === 1) ? "vote_average.desc"
+      : (browse.sort === 2) ? (browse.type === "movie" ? "primary_release_date.desc" : "first_air_date.desc")
+      : "popularity.desc";
     let d;
     if (browse.type === "anime" && typeof browse.genre === "string" && browse.genre) {
       // AniList genre feed through the Worker (Kitsu-backed, TMDB-id items).
-      // The feed API has no year filter: the year rail narrows each page
+      // The feed API has no date filter: the year rail narrows each page
       // client-side and paging walks the whole feed (full catalog).
       const rw = await feedFetchJson(`${ANIME_BROWSE_API}?genre=${encodeURIComponent(browse.genre)}&page=${next}`);
       const w = rw || {};
       let raw = (w && w.data) || [];
-      if (browse.year) raw = raw.filter(x => Number(x.year) === Number(browse.year));
+      raw = raw.filter(x => feedYearHit(x.year));
       d = {
         results: raw.map(animeFeedCard),
         total_pages: (w && Number(w.resolved) >= Number(w.requested)) ? next + 1 : next
@@ -2775,7 +2986,7 @@ async function browseMore(focusFirst){
     } else {
       let path;
       if (browse.type === "anime") {
-        path = `/discover/tv?sort_by=popularity.desc&include_adult=false&with_genres=16${(typeof browse.genre === "number" && browse.genre) ? "," + browse.genre : ""}&with_original_language=ja${yr}&page=${next}`;
+        path = `/discover/tv?sort_by=${sortKey}&include_adult=false&with_genres=16${(typeof browse.genre === "number" && browse.genre) ? "," + browse.genre : ""}&with_original_language=ja${yr}&page=${next}`;
         if (adultLocked()) {
           const kw = await getAdultKwIds();
           if (kw.length) path += `&without_keywords=${kw.join("|")}`;
@@ -2783,22 +2994,28 @@ async function browseMore(focusFirst){
       } else if (browse.type === "ko") {
         // K-Dramas: TV shows whose ORIGINAL language is Korean (never anime)
         const gk = (typeof browse.genre === "number" && browse.genre) ? `&with_genres=${browse.genre}` : "";
-        path = `/discover/tv?sort_by=popularity.desc&include_adult=false${gk}&with_original_language=ko${yr}&page=${next}`;
+        path = `/discover/tv?sort_by=${sortKey}&include_adult=false${gk}&with_original_language=ko${yr}&page=${next}`;
       } else {
         // studio stacks with genre (TMDB ANDs them); anime never carries one
         const sc = browse.studio ? `&with_companies=${browse.studio}` : "";
-        path = `/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}${sc}${yr}&page=${next}`;
+        path = `/discover/${browse.type}?sort_by=${sortKey}&include_adult=false${g}${sc}${yr}&page=${next}`;
       }
       d = await tmdb(path);
     }
     browse.page = next;
     browse.totalPages = d.total_pages || 1;
+    try {
+      const gc = document.getElementById("gridCount");
+      if (gc && d.total_results) {
+        gc.textContent = Number(d.total_results).toLocaleString() + (browse.type === "movie" ? " Titles" : " Series");
+      }
+    } catch(e){}
     const grid = document.getElementById("grid");
     const prevCount = grid.children.length;
     const bt = (browse.type === "anime" || browse.type === "ko") ? "tv" : browse.type;
     const lockedBr = adultLocked();
     (d.results || []).filter(x => x.poster_path && (!lockedBr || !isAdult(x))).forEach(x => {
-      grid.appendChild(cardEl({ ...x, media_type: bt, _label: browse.type === "ko" ? "K-DRAMA" : "" }, bt));
+      grid.appendChild(cardEl({ ...x, media_type: bt, _label: browse.type === "ko" ? "K-DRAMA" : "" }, bt, "overlay"));
     });
     if (browse.page < browse.totalPages) btn.classList.remove("hidden");
     if (focusFirst) {

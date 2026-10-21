@@ -461,7 +461,7 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("outroHit must gate on inTail -- an early credits range never shows Next Episode");
 }
 
-/* ---------- 73. poster names white/bold + tracked year-dot-type meta ---------- */
+/* ---------- 73. poster names white/bold + bullet meta line (design pack) ---------- */
 {
   const m = html.match(/function cardEl\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
   if (!m) bad("cardEl missing");
@@ -469,10 +469,12 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
     const t = m[0];
     if (/card-title[^<]*font-bold/.test(t)) ok("poster names are bold");
     else bad("cardEl title must be font-bold (white bold names)");
-    if (/card-meta/.test(t) && /tracking-/.test(t) && /\\u\{00B7\}/.test(t)) ok("tracked year-dot-type meta line present");
-    else bad("cardEl needs the tracked meta line (year \\u{00B7} TYPE)");
+    if (/card-meta/.test(t) && /\\u\{00B7\}/.test(t)) ok("meta line carries the year-dot-genre/type separator");
+    else bad("cardEl needs the meta line with the \\u{00B7} separator (year - genres/type)");
     if (/MOVIE/.test(t) && /ANIME/.test(t) && /TV/.test(t)) ok("meta type labels normalized (MOVIE / TV / ANIME)");
     else bad("cardEl meta type labels must normalize to MOVIE / TV / ANIME");
+    if (/card-overlay/.test(t) && /cap-scrim/.test(t)) ok("catalog cards use the overlay design (name/meta on the poster scrim)");
+    else bad("cardEl must render the design-pack overlay variant for grids (cap-scrim)");
   }
   const css = html.match(/\.card \.card-title\s*\{[^}]*\}/);
   if (css && /#fff|white/.test(css[0])) ok("card-title color is white in CSS");
@@ -497,15 +499,15 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (/id="yearRow"/.test(html)) ok("yearRow rail present in markup");
   else bad("yearRow rail missing from the Browse markup");
   const by = html.match(/function buildYears\s*\(\)\s*\{[\s\S]*?\n\}/);
-  if (by && /dataset\.year = "0"/.test(by[0]) && /All/.test(by[0])) ok("year rail has the All default chip");
-  else bad("buildYears must lead with the All default chip");
-  if (by && /y >= 1950/.test(by[0]) && /y--/.test(by[0])) ok("year chips descend from the current year to 1950");
-  else bad("buildYears must walk years descending (current year down)");
+  if (by && /All Years/.test(by[0]) && /mk\("All Years", "0"\)/.test(by[0])) ok("year rail has the All default chip");
+  else bad("buildYears must lead with the All Years default chip");
+  if (by && /y >= 2020/.test(by[0]) && /2010s/.test(by[0]) && /classics/.test(by[0])) ok("year rail: years descend to 2020 + decade chips (2010s/2000s/90s/Classics)");
+  else bad("buildYears must walk years descending to 2020 then the decade chips");
   const bm = html.match(/async function browseMore\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
   if (bm && /primary_release_year/.test(bm[0]) && /first_air_date_year/.test(bm[0])) ok("browseMore filters by year over the full paginated catalog");
   else bad("browseMore must send primary_release_year / first_air_date_year");
-  if (bm && /browse\.year/.test(bm[0])) ok("browseMore reads browse.year");
-  else bad("browseMore must honor browse.year");
+  if (bm && /browse\.year/.test(bm[0]) && /\.gte=/.test(bm[0]) && /\.lte=/.test(bm[0])) ok("decade chips filter by date range (gte/lte)");
+  else bad("decade/classics chips must map to date ranges in browseMore");
 }
 
 /* ---------- 76. one scroll surface, no sliced posters ---------- */
