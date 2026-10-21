@@ -671,7 +671,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 201; // bump every release alongside version.txt
+  const BUILD_NUM = 202; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -960,33 +960,49 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <div class="no-cinema glass mt-3 p-5">
         <div class="flex flex-wrap items-center gap-3">
           <p class="font-bold text-base">Playback Settings &amp; Engine Controls</p>
-          <span class="text-[10px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-full bg-teal-400/10 border border-teal-400/30 text-teal-300">Sandboxed</span>
+          <span id="engineChip" class="text-[10px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-full bg-teal-400/10 border border-teal-400/30 text-teal-300">Sandboxed</span>
           <div id="qPills" class="ml-auto flex items-center gap-1 bg-black/30 border border-white/10 rounded-full p-1"></div>
         </div>
-        <p class="text-[11px] text-gray-500 mb-3 mt-1">Fine-tune buffer preferences and ad-shield behavior for cinema fluidity. <span id="healthLine"></span></p>
-        <div class="flex flex-wrap items-center gap-x-5 gap-y-3 text-xs text-gray-300">
-        <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="switch" onchange="toggleShield()"> Ad Shield</label>
-        <label class="flex items-center gap-2" title="TV remotes can only drive CineSrc + YapGrid — hide the other servers from Source lists."><input type="checkbox" id="optTvSafe" class="switch" onchange="tvSafeToggle()"> TV-safe servers</label>
-        <label class="flex items-center gap-2"><input type="checkbox" id="optAutoplay" checked class="switch"> Autoplay</label>
-        <label class="flex items-center gap-2"><input type="checkbox" id="optAutonext" checked class="switch"> Auto-next</label>
-        <label class="flex items-center gap-2"><input type="checkbox" id="optAutoskip" class="switch"> Auto-skip intro</label>
-        <label class="flex items-center gap-2" title="Stuck player hops mirrors by itself. Off = we just name the server to try, and you hop with &#x21C4; Source."><input type="checkbox" id="optAutoswitch" class="switch" onchange="autoSwitchSave()"> Auto-switch server</label>
-        <label class="flex items-center gap-1">Accent <input type="color" id="optColor" value="#00F0B5" class="w-8 h-6 bg-transparent"></label>
-        <label class="flex items-center gap-1" title="Smoothness of StreamBox's own UI motion (your TV's Motion setting handles the film itself)">&#x1F39E; Motion
-          <input type="checkbox" id="optMotion" checked class="switch" onchange="motionOpts()"></label>
-        <label class="flex items-center gap-1" title="How fluid UI transitions feel on your box (0 = sharp, 10 = silky)">Judder
-          <input type="range" id="optJudder" min="0" max="10" value="10" step="1" class="w-24 h-6 accent-teal-400" aria-label="Judder reduction" oninput="motionOpts()"></label>
-        <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5" title="Preferred video quality — Auto serves the best rendition the source carries">
-          <button onclick="qualityStep(-1)" aria-label="Lower quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
-          <span id="qualityLabel" class="text-xs font-bold min-w-[52px] text-center">Auto</span>
-          <button onclick="qualityStep(1)" aria-label="Higher quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
+        <p class="text-[11px] text-gray-500 mb-4 mt-1">Fine-tune buffer memory, eliminate micro-stuttering, and customize ad-shield preferences for cinema fluidity. <span id="healthLine"></span></p>
+        <!-- one clean card per switch (design pack) — every switch applies instantly -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Sandbox blocks popup ads &amp; tab hijacks. Turn off only if a server won't load.">
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x1F6E1;</span> Ad Shield</b><span class="block text-[11px] text-gray-500">Sandboxed pop-up blocker</span></span>
+            <input type="checkbox" id="optShield" checked class="switch" onchange="toggleShield()">
+          </label>
+          <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="TV remotes can only drive some servers — hide the rest from Source lists.">
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x1F4FA;</span> TV-Safe Servers</b><span class="block text-[11px] text-gray-500">Remote-drivable servers only</span></span>
+            <input type="checkbox" id="optTvSafe" class="switch" onchange="tvSafeToggle()">
+          </label>
+          <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer">
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x25B6;</span> Autoplay Next</b><span class="block text-[11px] text-gray-500">Smooth episode chaining</span></span>
+            <input type="checkbox" id="optAutonext" checked class="switch">
+          </label>
+          <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer">
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x23ED;</span> Auto-Skip Intro</b><span class="block text-[11px] text-gray-500">Bypasses OP/ED intros</span></span>
+            <input type="checkbox" id="optAutoskip" class="switch">
+          </label>
+          <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Stuck player hops mirrors by itself. Off = we name the server to try and you hop with &#x21C4; Source.">
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x21C4;</span> Auto-Switch Server</b><span class="block text-[11px] text-gray-500">Stuck players heal themselves</span></span>
+            <input type="checkbox" id="optAutoswitch" class="switch" onchange="autoSwitchSave()">
+          </label>
         </div>
-        <button onclick="applyPlayerOpts()" class="ml-2 bg-teal-500 px-3 py-1.5 rounded-full font-semibold hover:bg-teal-400">Apply</button>
-        <button onclick="reloadPlayer()" class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">&#x21BB; Reload</button>
-        <button onclick="otherSource()" title="Wrong film or broken stream? Drop this server and try another source." class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">&#x21C4; Source</button>
-        <button onclick="wrongVersion()" title="Right title, wrong cut (remake plays the original or vice versa)? Jump to the next mirror." class="bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">&#x1F3AC; Wrong version?</button>
-        <span id="watchStatus" class="ml-auto text-gray-500"></span>
+        <!-- engine row: one Motion Judder control + the real actions -->
+        <div class="flex flex-wrap items-center gap-2 mt-4">
+          <div class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-full px-4 py-2">
+            <span class="text-xs font-semibold text-gray-300 flex items-center gap-1.5"><span class="text-teal-300">&#x26A1;</span> Motion Judder</span>
+            <input type="range" id="optJudder" min="0" max="10" value="10" step="1" class="w-32 sm:w-44 h-6 accent-teal-400" aria-label="Judder reduction" oninput="motionOpts(); judderPaint()">
+            <span id="judderLabel" class="text-xs font-bold text-teal-300 w-14">Smooth</span>
+          </div>
+          <button onclick="reloadPlayer()" class="bg-teal-400 text-[#0B111E] px-5 py-2 rounded-full text-xs font-bold shadow-[0_0_20px_rgba(0,240,181,0.35)]">Reload Stream</button>
+          <button onclick="otherSource()" title="Wrong film or broken stream? Drop this server and try another source." class="bg-white/10 px-4 py-2 rounded-full hover:bg-white/20 text-xs font-semibold">&#x21C4; Source Mirror</button>
+          <button onclick="wrongVersion()" title="Right title, wrong cut (remake plays the original or vice versa)? Jump to the next mirror." class="bg-white/10 px-4 py-2 rounded-full hover:bg-white/20 text-xs font-semibold">&#x1F3AC; Wrong Version?</button>
+          <span id="watchStatus" class="ml-auto text-gray-500"></span>
         </div>
+        <!-- engine-only inputs (JS reads them; no UI of their own) -->
+        <input type="checkbox" id="optAutoplay" checked class="hidden" aria-hidden="true">
+        <input type="checkbox" id="optMotion" checked class="hidden" aria-hidden="true">
+        <input type="color" id="optColor" value="#00F0B5" class="hidden" aria-hidden="true">
       </div>
       <p class="no-cinema text-[11px] text-gray-600 mt-2">Ad Shield uses a sandboxed player (no popups / no tab-hijacks). For full in-stream ad removal also use Brave or uBlock Origin — browsers block sites from stripping ads <em>inside</em> a third-party iframe.</p>
       <div id="epNav" class="no-cinema mt-4 hidden">
@@ -1208,11 +1224,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <p>Preferred: <b id="srvPin">none</b></p>
         <div class="flex items-center gap-2">
           <span>Quality:</span>
-          <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
-            <button onclick="qualityStep(-1)" aria-label="Lower quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
-            <span id="srvQLabel" class="text-xs font-bold min-w-[52px] text-center">Auto</span>
-            <button onclick="qualityStep(1)" aria-label="Higher quality" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
-          </div>
+          <b id="srvQLabel" class="text-xs font-bold text-teal-300">Auto</b>
+          <span class="text-[10px] text-gray-500">— set from the quality pills</span>
         </div>
       </div>
       <div class="flex flex-col gap-2 mt-4">
@@ -1889,13 +1902,16 @@ function purgeRetiredCaches(){
   // + playback-engine health (old WebViews are the #1 cause of TV stutter)
   try {
     const hl = document.getElementById("healthLine");
+    const ec = document.getElementById("engineChip");
+    const m = (navigator.userAgent || "").match(/Chrome\/(\d+)/);
+    const v = m ? Number(m[1]) : 0;
     if (hl) {
-      const m = (navigator.userAgent || "").match(/Chrome\/(\d+)/);
-      const v = m ? Number(m[1]) : 0;
       hl.textContent = v >= 100 ? `Playback engine: Chrome ${v} \u{2713} modern.`
         : v > 0 ? `Playback engine: Chrome ${v} — update Android System WebView (Play Store) for smoother video.`
         : "Playback engine: unknown — update Android System WebView (Play Store) if video stutters.";
     }
+    if (ec) ec.textContent = v > 0 ? `Chrome ${v} Modern` : "Sandboxed";
+    try { judderPaint(); } catch(e){}
   } catch(e){}
   try {
     const fv = document.getElementById("footVer");
@@ -3858,11 +3874,19 @@ function streamHas4k(){
 }
 function paintQuality(){
   const t = (QLEVELS[qIdx].v === "" && streamHas4k()) ? "4K" : QLEVELS[qIdx].l;
-  ["qualityLabel", "srvQLabel", "ctlQ"].forEach(id => {
+  ["srvQLabel", "ctlQ"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = t;
   });
   try { paintQPills(); } catch(e){}
+}
+function judderPaint(){
+  try {
+    const el = document.getElementById("optJudder");
+    const v = el ? (parseInt(el.value, 10) || 0) : 0;
+    const lbl = document.getElementById("judderLabel");
+    if (lbl) lbl.textContent = v >= 8 ? "Smooth" : v >= 5 ? "Balanced" : v >= 2 ? "Crisp" : "Sharp";
+  } catch(e){}
 }
 function paintQPills(){
   const box = document.getElementById("qPills");

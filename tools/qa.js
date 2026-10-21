@@ -121,7 +121,10 @@
       List + Share), the engine panel quality pills, and episode chips with
       honest status words (PLAYING / Up Next / Seen / COMING SOON)
    108 details modal design: season chips + episode cards row (Resume badge,
-      play disc) and the meta pill row (amber star pill, year, type, genres) */
+      play disc) and the meta pill row (amber star pill, year, type, genres)
+   109 the engine panel stays de-duplicated: one card per switch, ONE Motion
+      Judder control, no Apply button (switches apply instantly), no second
+      quality stepper beside the QLEVELS pills, engine-only inputs hidden */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1064,6 +1067,28 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const mm = html.match(/getElementById\("mMeta"\)\.innerHTML = `[\s\S]{0,1200}/);
   if (mm && /amber-400\/15/.test(mm[0]) && /genres/.test(mm[0])) ok("modal meta wears the pill row (amber star pill + year + type + genres)");
   else bad("mMeta must render the design pill row");
+}
+
+/* ---------- 109. engine panel de-duplicated ---------- */
+{
+  if (/applyPlayerOpts\(\)/.test(html.replace(/function applyPlayerOpts[^}]*\}/, "")))
+    bad("an Apply button survives -- switches apply instantly and Apply was a disguised Reload");
+  else ok("no Apply button in the engine panel");
+  const stepper = html.match(/onclick="qualityStep\(-1\)"/);
+  if (stepper) bad("the old quality stepper survives beside the QLEVELS pills -- pick one (the pills)");
+  else ok("no duplicate quality stepper (QLEVELS pills own it)");
+  const cards = [...html.matchAll(/id="opt(Shield|TvSafe|Autonext|Autoskip|Autoswitch)"/g)];
+  if (cards.length === 5) ok("the 5 switches live in one card each");
+  else bad("switches must render as individual cards (found " + cards.length + " of 5)");
+  const j = html.match(/id="optJudder"/g);
+  if (j && j.length === 1 && /Motion Judder/.test(html) && /id="judderLabel"/.test(html))
+    ok("ONE Motion Judder control with its readout (no split labels)");
+  else bad("Motion Judder must be a single control with a readout label");
+  if (/id="optAutoplay" checked class="hidden"/.test(html) && /id="optColor"[^>]*class="hidden"/.test(html) && /id="optMotion" checked class="hidden"/.test(html))
+    ok("engine-only inputs kept hidden (JS still reads them)");
+  else bad("optAutoplay/optColor/optMotion must stay as hidden inputs -- engine code reads them");
+  if (/id="engineChip"/.test(html)) ok("the engine chip carries the real WebView version");
+  else bad("engineChip missing (Chrome nnn Modern)");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
