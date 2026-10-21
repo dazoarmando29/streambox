@@ -605,7 +605,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 190; // bump every release alongside version.txt
+  const BUILD_NUM = 191; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1203,7 +1203,7 @@ function preconnectCinesrc(){
   // one code path, every main player: warm TLS+DNS for all origins our
   // remote can drive, so first loads skip the handshake on slow TV Wi-Fi
   try {
-    ["https://cinesrc.st", "https://ani.pm", "https://embed.vidrift.net", "https://vidzen.fun", "https://vidbolt.pro"].forEach(h => {
+    ["https://cinesrc.st", "https://ani.pm", "https://embed.vidrift.net", "https://vidzen.fun", "https://vidbolt.pro", "https://streambox-api.dazoarmando.workers.dev"].forEach(h => {
       if (!document.querySelector(`link[href="${h}"][rel="preconnect"]`)) {
         const l = document.createElement("link");
         l.rel = "preconnect"; l.href = h; l.crossOrigin = "";
@@ -1404,12 +1404,15 @@ try {
 let currentType = "all", currentItem = null, currentDetail = null;
 let watchState = { type:"movie", id:null, s:1, e:1 };
 
-/* ---------- TMDB helpers (cached: memory + sessionStorage, 10-min TTL) ---------- */
+/* ---------- TMDB helpers (cached: memory + sessionStorage, 10-min TTL) ----------
+   Catalog feeds get 30 min (native BrowseCache TTL): tab hops and back-from-
+   detail re-read the same discover pages constantly; season/detail calls keep
+   the tighter TTL so episode status never goes stale. */
 const _mem = new Map();
 function tmdb(path){
   const sep = path.includes("?") ? "&" : "?";
   const url = `${TMDB_BASE}${path}${sep}api_key=${TMDB_API_KEY}&language=en-US`;
-  const now = Date.now(), TTL = 10 * 60 * 1000;
+  const now = Date.now(), TTL = path.startsWith("/discover/") ? 30 * 60 * 1000 : 10 * 60 * 1000;
   const hit = _mem.get(url);
   if (hit && now - hit.t < TTL) return Promise.resolve(hit.d);
   try {
@@ -1422,6 +1425,20 @@ function tmdb(path){
     try { sessionStorage.setItem("sb:" + url, JSON.stringify(c)); } catch(e){}
     return d;
   });
+}
+/* Worker feed cache (same 30-min TTL + cap): the AniList genre feed re-walks
+   on every Anime tab visit. */
+const FEED_TTL_MS = 1800000;
+const _feedMem = new Map();
+function feedFetchJson(url){
+  const now = Date.now();
+  const hit = _feedMem.get(url);
+  if (hit && now - hit.t < FEED_TTL_MS) return Promise.resolve(hit.d);
+  return fetch(url).then(r => (r.ok ? r.json() : {})).then(d => {
+    if (_feedMem.size >= 48) { const k = _feedMem.keys().next().value; if (k !== undefined) _feedMem.delete(k); }
+    _feedMem.set(url, { t: now, d });
+    return d;
+  }).catch(() => ({}));
 }
 const titleOf = x => x.title || x.name || "Untitled";
 const yearOf = x => (x.release_date || x.first_air_date || "").slice(0,4);
@@ -2707,8 +2724,8 @@ async function browseMore(focusFirst){
       // AniList genre feed through the Worker (Kitsu-backed, TMDB-id items).
       // The feed API has no year filter: the year rail narrows each page
       // client-side and paging walks the whole feed (full catalog).
-      const rw = await fetch(`${ANIME_BROWSE_API}?genre=${encodeURIComponent(browse.genre)}&page=${next}`);
-      const w = rw.ok ? await rw.json() : {};
+      const rw = await feedFetchJson(`${ANIME_BROWSE_API}?genre=${encodeURIComponent(browse.genre)}&page=${next}`);
+      const w = rw || {};
       let raw = (w && w.data) || [];
       if (browse.year) raw = raw.filter(x => Number(x.year) === Number(browse.year));
       d = {

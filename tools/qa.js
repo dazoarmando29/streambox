@@ -77,7 +77,10 @@
    91 Obsidian Glow palette (native Theme.kt parity): accent #00F0B5, cyan
       #00D2FF, ink #0B111E, amber #F5A623, soft/dim text tokens -- stale
       pre-glow hexes never come back
-   92 display type is Space Grotesk, body is Plus Jakarta Sans (loaded) */
+   92 display type is Space Grotesk, body is Plus Jakarta Sans (loaded)
+   93 feed caches: TMDB dual-layer cache with a 30-min discover TTL, Worker
+      anime feed cached with the same TTL + cap
+   94 preconnects cover every player host + the Worker + TMDB + fonts */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -742,6 +745,39 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("body must wear Plus Jakarta Sans");
   if (/font-family:\s*"Space Grotesk"/.test(html)) ok("display type is Space Grotesk");
   else bad("titles/labels must wear Space Grotesk (display)");
+}
+
+/* ---------- 93. feed caches ---------- */
+{
+  const t = html.match(/function tmdb\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (t && /sessionStorage/.test(t[0]) && /_mem\.get/.test(t[0])) ok("tmdb() keeps the dual-layer cache (memory + sessionStorage)");
+  else bad("tmdb() must keep the memory + sessionStorage cache layers");
+  if (t && /discover\/[\s\S]{0,60}30 \* 60 \* 1000/.test(t[0])) ok("discover feeds cache 30 min (native BrowseCache TTL)");
+  else bad("discover feeds must use the 30-min TTL (tab hops re-read the same pages)");
+  const f = html.match(/function feedFetchJson\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (f && /FEED_TTL_MS/.test(f[0]) && /_feedMem/.test(f[0])) ok("Worker anime feed caches with the 30-min TTL + cap");
+  else bad("feedFetchJson missing -- the AniList genre feed must cache (30-min TTL, capped)");
+  const bm = html.match(/async function browseMore\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (bm && /feedFetchJson\(/.test(bm[0])) ok("anime genre pages ride the feed cache");
+  else bad("browseMore must fetch Worker pages through feedFetchJson");
+}
+
+/* ---------- 94. preconnects ---------- */
+{
+  const hosts = ["api.themoviedb.org", "image.tmdb.org", "cinesrc.st", "ani.pm",
+    "embed.vidrift.net", "vidzen.fun", "vidbolt.pro", "streambox-api.dazoarmando.workers.dev",
+    "fonts.googleapis.com", "fonts.gstatic.com"];
+  const miss = hosts.filter(hh => !html.includes(hh) || !(new RegExp("(preconnect|dns-prefetch)[^>]*" + hh.replace(/\./g, "\\."), "i").test(html) || new RegExp(hh.replace(/\./g, "\\.") + "[^>]*(preconnect|dns-prefetch)", "i").test(html)));
+  // static head links may list the href before the rel: accept either order,
+  // fall back to a combined window check
+  const miss2 = miss.filter(hh => {
+    const idx = html.indexOf(hh);
+    return !(idx >= 0 && /preconnect|dns-prefetch/i.test(html.slice(Math.max(0, idx - 120), idx + 120)));
+  });
+  if (!miss2.length) ok("preconnect/dns-prefetch covers all " + hosts.length + " hosts (players + Worker + TMDB + fonts)");
+  else bad("missing preconnect for: " + miss2.join(", "));
+  if (/https:\/\/streambox-api\.dazoarmando\.workers\.dev/.test(html)) ok("Worker host is in play");
+  else bad("the Worker host must appear (preconnect + endpoints)");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
