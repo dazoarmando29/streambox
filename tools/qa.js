@@ -38,7 +38,13 @@
       state (no countdown auto-advance path survives)
    71 skip pill names stay PLAIN (Skip Recap / Skip Intro / Next Episode /
       Skip Credits) -- no countdown or time suffixes
-   72 credits ranges keep the TAIL guard (start > 10s AND start >= dur/2) */
+   72 credits ranges keep the TAIL guard (start > 10s AND start >= dur/2)
+   73 poster names are white/bold with a tracked year-dot-type meta line
+   74 rating chips render only with real votes (vote_count > 0)
+   75 year rail over the full paginated catalog (All default, years descending)
+   76 browse grid is ONE scroll surface: chip chrome rides ABOVE the grid as
+      spanning headers (never inside it) and TV never clips cards mid-poster
+      (content-visibility intrinsic under-sizes = the 540dp slice) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -394,6 +400,68 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const oh = html.match(/function outroHit\s*\(\)\s*\{[\s\S]*?\n\}/);
   if (oh && /inTail\(/.test(oh[0])) ok("outroHit enforces the TAIL guard (credits/preview)");
   else bad("outroHit must gate on inTail -- an early credits range never shows Next Episode");
+}
+
+/* ---------- 73. poster names white/bold + tracked year-dot-type meta ---------- */
+{
+  const m = html.match(/function cardEl\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (!m) bad("cardEl missing");
+  else {
+    const t = m[0];
+    if (/card-title[^<]*font-bold/.test(t)) ok("poster names are bold");
+    else bad("cardEl title must be font-bold (white bold names)");
+    if (/card-meta/.test(t) && /tracking-/.test(t) && /\\u\{00B7\}/.test(t)) ok("tracked year-dot-type meta line present");
+    else bad("cardEl needs the tracked meta line (year \\u{00B7} TYPE)");
+    if (/MOVIE/.test(t) && /ANIME/.test(t) && /TV/.test(t)) ok("meta type labels normalized (MOVIE / TV / ANIME)");
+    else bad("cardEl meta type labels must normalize to MOVIE / TV / ANIME");
+  }
+  const css = html.match(/\.card \.card-title\s*\{[^}]*\}/);
+  if (css && /#fff|white/.test(css[0])) ok("card-title color is white in CSS");
+  else bad(".card .card-title must be white");
+}
+
+/* ---------- 74. rating chips = real votes only ---------- */
+{
+  const m = html.match(/function cardEl\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (!m) bad("cardEl missing");
+  else {
+    const t = m[0];
+    if (/vote_count/.test(t) && /realVote/.test(t)) ok("rating chip gated on real votes (vote_count)");
+    else bad("cardEl must gate the rating chip on vote_count > 0 (never a fake 0.0)");
+    if (/realVote\s*\?\s*`<span class="rate-badge">/.test(t)) ok("rate-badge only rendered on realVote");
+    else bad("rate-badge must be inside the realVote ternary");
+  }
+}
+
+/* ---------- 75. year rail over the full catalog ---------- */
+{
+  if (/id="yearRow"/.test(html)) ok("yearRow rail present in markup");
+  else bad("yearRow rail missing from the Browse markup");
+  const by = html.match(/function buildYears\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (by && /dataset\.year = "0"/.test(by[0]) && /All/.test(by[0])) ok("year rail has the All default chip");
+  else bad("buildYears must lead with the All default chip");
+  if (by && /y >= 1950/.test(by[0]) && /y--/.test(by[0])) ok("year chips descend from the current year to 1950");
+  else bad("buildYears must walk years descending (current year down)");
+  const bm = html.match(/async function browseMore\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (bm && /primary_release_year/.test(bm[0]) && /first_air_date_year/.test(bm[0])) ok("browseMore filters by year over the full paginated catalog");
+  else bad("browseMore must send primary_release_year / first_air_date_year");
+  if (bm && /browse\.year/.test(bm[0])) ok("browseMore reads browse.year");
+  else bad("browseMore must honor browse.year");
+}
+
+/* ---------- 76. one scroll surface, no sliced posters ---------- */
+{
+  // chip rails must be SIBLINGS of #grid (spanning headers above it), never children
+  const gridOpen = html.match(/<div id="grid"[^>]*>/);
+  const chipAfterGrid = /<div id="grid"[\s\S]{0,400}id="(genreRow|yearRow|studioRow)"/.test(html);
+  if (gridOpen && !chipAfterGrid) ok("chip chrome rides above the grid (never squeezes its columns)");
+  else bad("chip rows must NOT live inside #grid -- they squeeze the poster columns into a clipped window");
+  if (/body\.tv-mode #grid > .card[\s\S]{0,200}content-visibility:\s*visible/.test(html)) ok("TV grids drop content-visibility (no mid-poster clipping)");
+  else bad("TV browse grids must set content-visibility: visible on cards (containment slices posters on weak TVs)");
+  const gRule = html.match(/#grid > \.card, #listGrid > \.card \{[^}]*\}/);
+  const intr = gRule && gRule[0].match(/contain-intrinsic-size:\s*auto (\d+)px/);
+  if (intr && Number(intr[1]) >= 460) ok("grid contain-intrinsic-size fits the largest card layout (" + intr[1] + "px)");
+  else bad("grid contain-intrinsic-size under-sizes large cards -- raise it to >= 460px (rows rule does not count)");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

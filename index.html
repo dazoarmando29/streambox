@@ -85,9 +85,12 @@
   .card:focus-visible .poster-frame {
     box-shadow: 0 0 0 3px #14b8a6, 0 10px 30px rgba(0,0,0,.55), 0 0 26px rgba(20,184,166,.5); }
   /* picked card's title lights up like an active tab (pointer hover only —
-     TV remote focus must NOT recolor captions, ring stays on the poster) */
-  .card .card-title { color: #cbd5e1; transition: color .18s ease-out; }
-  .card:hover .card-title, .card:focus-visible .card-title { color: #fff; }
+     TV remote focus must NOT recolor captions, ring stays on the poster).
+     Names are white/bold everywhere (0.64 parity) — the hover rule keeps the
+     glow shadow, not a color flip. */
+  .card .card-title { color: #fff; font-weight: 700; transition: text-shadow .18s ease-out; }
+  .card:hover .card-title, .card:focus-visible .card-title { text-shadow: 0 0 14px rgba(20,184,166,.55); }
+  .card .card-meta { letter-spacing: .18em; text-transform: uppercase; }
   button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible {
     outline: 3px solid #14b8a6; outline-offset: 2px;
   }
@@ -497,8 +500,16 @@
     .card { min-width: 180px; }
   }
   /* browse grids can run 100+ cards: skip off-screen cards until needed
-     (rows already use this above) */
-  #grid > .card, #listGrid > .card { content-visibility: auto; contain-intrinsic-size: auto 380px; }
+     (rows already use this above). The intrinsic slot must fit the LARGEST
+     layout (2-col TV cells run past 380px) or the browser clips the poster
+     mid-render — the 540dp sliced-poster bug. TV drops containment entirely:
+     few columns, and the re-layout thrash on a weak SoC costs more than it
+     saves (smooth D-pad scroll wins). */
+  #grid > .card, #listGrid > .card { content-visibility: auto; contain-intrinsic-size: auto 460px; }
+  body.tv-mode #grid > .card, body.tv-mode #listGrid > .card,
+  body.tv-app #grid > .card, body.tv-app #listGrid > .card {
+    content-visibility: visible; contain-intrinsic-size: none;
+  }
   /* MODERN skin: glass cards, pill nav tabs, switch toggles */
   .glass { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); border-radius: 20px; }
   .card:hover .glass, .card:focus-visible .glass, .card.tv-focus .glass {
@@ -564,7 +575,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 183; // bump every release alongside version.txt
+  const BUILD_NUM = 184; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -650,6 +661,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <button id="adultLockBtn" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" class="shrink-0 px-4 h-11 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-sm font-bold">&#x1F512; 18+ Hidden</button>
     </div>
     <div id="genreRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
+    <div id="yearRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="studioRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4"></div>
     <button id="loadMoreBtn" onclick="browseMore()" class="hidden mx-auto mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 font-bold text-sm">Load more &#x2193;</button>
@@ -1522,13 +1534,19 @@ function cardEl(x, type){
   d.setAttribute("role", "button");
   d.setAttribute("aria-label", `${titleOf(x)} (${type})`);
   d.setAttribute("data-focusable", "1");
+  // rating chips carry REAL votes only — an unrated title shows no fake 0.0
+  const realVote = Number(x.vote_count || 0) > 0 && Number(x.vote_average || 0) > 0;
+  // meta line: year · type with normalized labels (ANIME = JP animation)
+  const isAnimeCard = (x.genre_ids || []).includes(16) || x.media_type === "anime";
+  const typeLabel = type === "movie" ? "MOVIE" : isAnimeCard ? "ANIME" : "TV";
+  const year = yearOf(x);
   d.innerHTML = `
     <div class="relative poster-frame">
-      <span class="rate-badge">\u{2605} ${Number(x.vote_average || 0).toFixed(1)}</span>
+      ${realVote ? `<span class="rate-badge">\u{2605} ${Number(x.vote_average).toFixed(1)}</span>` : ""}
       ${posterTag(x.poster_path, "rounded-lg w-full aspect-[2/3] object-cover bg-white/5")}
     </div>
-    <p class="card-title text-xs mt-1.5 font-semibold truncate">${titleOf(x)}</p>
-    <p class="text-[11px] text-gray-500">${yearOf(x)} • ${type.toUpperCase()}</p>`;
+    <p class="card-title text-xs mt-1.5 font-bold truncate">${titleOf(x)}</p>
+    <p class="card-meta text-[10px] tracking-[0.18em] text-gray-400 truncate">${year} \u{00B7} ${typeLabel}</p>`;
   d.onclick = activatable(() => openDetail(type, x.id));
   // picking speed: hovering warms the detail cache so the popup opens
   // instantly; the player host is preconnected at the same time.
@@ -2186,6 +2204,7 @@ function showGrid(title, items){
   document.getElementById("hero").classList.add("hidden");
   document.getElementById("continueRow").classList.add("hidden");
   document.getElementById("genreRow").classList.add("hidden");
+  document.getElementById("yearRow").classList.add("hidden");
   document.getElementById("studioRow").classList.add("hidden");
   document.getElementById("loadMoreBtn").classList.add("hidden");
   const gv = document.getElementById("gridView");
@@ -2406,7 +2425,7 @@ function refreshAfterLock(){
   else { try { init(); } catch(e){} }
 }
 /* ---------- GENRE BROWSING (Movies + TV Shows categories) ---------- */
-let browse = { type: "movie", genre: 0, studio: 0, page: 0, totalPages: 1, loading: false };
+let browse = { type: "movie", genre: 0, year: 0, studio: 0, page: 0, totalPages: 1, loading: false };
 /* ---------- STUDIO FILTER (Movies + TV Shows) ----------
    Production-company chips with real TMDB logos. Every id + logo path below
    was verified against the live TMDB API (company + discover probes) — never
@@ -2435,7 +2454,7 @@ async function getGenres(type){
 async function openBrowse(type, ev){
   if (ev) ev.preventDefault();
   if (!document.getElementById("watchView").classList.contains("hidden")) goHome();
-  browse = { type, genre: 0, studio: 0, page: 0, totalPages: 1, loading: false };
+  browse = { type, genre: 0, year: 0, studio: 0, page: 0, totalPages: 1, loading: false };
   document.getElementById("rows").classList.add("hidden");
   document.getElementById("hero").classList.add("hidden");
   document.getElementById("continueRow").classList.add("hidden");
@@ -2465,6 +2484,7 @@ async function openBrowse(type, ev){
       row.appendChild(b);
     });
     paintChips();
+    buildYears();
     paintStudios();
   } catch(e){
     row.innerHTML = `<p class="text-xs text-gray-500 py-2">Categories unavailable — showing popular.</p>`;
@@ -2484,6 +2504,42 @@ async function setGenre(id){
   browse.totalPages = 1;
   document.getElementById("grid").innerHTML = "";
   paintChips();
+  browseMore(true);
+}
+/* year rail over the FULL paginated catalog: All default, current year down
+   (2026 -> 1950). Genre + year stack; the discover page walks the whole
+   catalog with the filter applied server-side. */
+function buildYears(){
+  const row = document.getElementById("yearRow");
+  row.classList.remove("hidden");
+  row.innerHTML = "";
+  const all = document.createElement("button");
+  all.textContent = "All";
+  all.dataset.year = "0";
+  all.onclick = () => setYear(0);
+  row.appendChild(all);
+  const nowY = new Date().getFullYear();
+  for (let y = nowY; y >= 1950; y--) {
+    const b = document.createElement("button");
+    b.textContent = String(y);
+    b.dataset.year = String(y);
+    b.onclick = () => setYear(y);
+    row.appendChild(b);
+  }
+  paintYears();
+}
+function paintYears(){
+  document.querySelectorAll("#yearRow button").forEach(b => {
+    const active = Number(b.dataset.year) === (browse.year || 0);
+    b.className = "shrink-0 px-4 h-10 rounded-full text-sm font-bold " + (active ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
+  });
+}
+function setYear(y){
+  browse.year = Number(y) || 0;
+  browse.page = 0;
+  browse.totalPages = 1;
+  document.getElementById("grid").innerHTML = "";
+  paintYears();
   browseMore(true);
 }
 function paintStudios(){
@@ -2548,9 +2604,12 @@ async function browseMore(focusFirst){
     // Locked: TMDB itself drops keyword-tagged adult titles server-side
     // (titles here are never flagged `adult`, so include_adult=false is blind).
     const g = browse.genre ? `&with_genres=${browse.genre}` : "";
+    const yr = browse.year
+      ? (browse.type === "movie" ? `&primary_release_year=${browse.year}` : `&first_air_date_year=${browse.year}`)
+      : "";
     let path;
     if (browse.type === "anime") {
-      path = `/discover/tv?sort_by=popularity.desc&include_adult=false&with_genres=16${browse.genre ? "," + browse.genre : ""}&with_original_language=ja&page=${next}`;
+      path = `/discover/tv?sort_by=popularity.desc&include_adult=false&with_genres=16${browse.genre ? "," + browse.genre : ""}&with_original_language=ja${yr}&page=${next}`;
       if (adultLocked()) {
         const kw = await getAdultKwIds();
         if (kw.length) path += `&without_keywords=${kw.join("|")}`;
@@ -2558,7 +2617,7 @@ async function browseMore(focusFirst){
     } else {
       // studio stacks with genre (TMDB ANDs them); anime never carries one
       const sc = browse.studio ? `&with_companies=${browse.studio}` : "";
-      path = `/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}${sc}&page=${next}`;
+      path = `/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}${sc}${yr}&page=${next}`;
     }
     const d = await tmdb(path);
     browse.page = next;
