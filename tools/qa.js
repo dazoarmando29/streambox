@@ -80,7 +80,13 @@
    92 display type is Space Grotesk, body is Plus Jakarta Sans (loaded)
    93 feed caches: TMDB dual-layer cache with a 30-min discover TTL, Worker
       anime feed cached with the same TTL + cap
-   94 preconnects cover every player host + the Worker + TMDB + fonts */
+   94 preconnects cover every player host + the Worker + TMDB + fonts
+   95 the site is connected to our Cloudflare: TMDB rides the Worker
+      /api/tmdb/3 proxy and NO API keys live in the client (no api_key=, no
+      key shards, no api.themoviedb.org calls)
+   96 Wyzie search rides /api/wyz/search and BetaSeries listings ride
+      /api/bs-subs (server-side chains); the allorigins relay is for FILE
+      downloads only and api.betaseries.com never appears */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -764,7 +770,7 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
 
 /* ---------- 94. preconnects ---------- */
 {
-  const hosts = ["api.themoviedb.org", "image.tmdb.org", "cinesrc.st", "ani.pm",
+  const hosts = ["image.tmdb.org", "cinesrc.st", "ani.pm",
     "embed.vidrift.net", "vidzen.fun", "vidbolt.pro", "streambox-api.dazoarmando.workers.dev",
     "fonts.googleapis.com", "fonts.gstatic.com"];
   const miss = hosts.filter(hh => !html.includes(hh) || !(new RegExp("(preconnect|dns-prefetch)[^>]*" + hh.replace(/\./g, "\\."), "i").test(html) || new RegExp(hh.replace(/\./g, "\\.") + "[^>]*(preconnect|dns-prefetch)", "i").test(html)));
@@ -778,6 +784,38 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("missing preconnect for: " + miss2.join(", "));
   if (/https:\/\/streambox-api\.dazoarmando\.workers\.dev/.test(html)) ok("Worker host is in play");
   else bad("the Worker host must appear (preconnect + endpoints)");
+}
+
+/* ---------- 95. site connected to our Cloudflare (TMDB via Worker, no keys) ---------- */
+{
+  const tb = html.match(/const TMDB_BASE\s*=\s*"([^"]+)"/);
+  if (tb && /streambox-api\.dazoarmando\.workers\.dev\/api\/tmdb\/3/.test(tb[1])) ok("TMDB_BASE points at the Worker /api/tmdb/3 proxy");
+  else bad("TMDB_BASE must point at https://streambox-api.dazoarmando.workers.dev/api/tmdb/3");
+  if (/api_key=/.test(html)) bad("an api_key= parameter survives in the client -- the Worker holds keys");
+  else ok("no api_key= anywhere in the client");
+  if (/TMDB_API_KEY|WYZ_BUILTIN|BS_KEY|_sbk|_wzk|_bsk/.test(html)) bad("a key or key-shard blob survives in the client");
+  else ok("no API keys or key shards in page source");
+  if (/api\.themoviedb\.org/.test(html)) bad("a direct api.themoviedb.org call/preconnect survives -- TMDB goes through the Worker");
+  else ok("no direct TMDB hosts in the client");
+}
+
+/* ---------- 96. subtitle listings ride the Worker ---------- */
+{
+  const wa = html.match(/async function wyzSearchApi\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (wa && /WYZ_WORKER/.test(wa[0]) && /wyzSearchApi/.test(wa[0])) ok("Wyzie search rides the Worker (/api/wyz/search) with an own-key escape hatch");
+  else bad("wyzSearchApi must default to the Worker and only go direct for a user-supplied key");
+  const sites = [...html.matchAll(/wyzSearchApi\(/g)].length - 1;
+  if (sites >= 2) ok("both Wyzie search paths (manual + auto) ride wyzSearchApi (" + sites + " sites)");
+  else bad("wyzSearch and wyzAutoSubs must both call wyzSearchApi");
+  const bf = html.match(/async function bsFindSubs\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (bf && /BS_WORKER/.test(bf[0]) && /api\/bs-subs/.test(html)) ok("BetaSeries listings ride the Worker (/api/bs-subs)");
+  else bad("bsFindSubs must call the Worker /api/bs-subs (chain + key server-side)");
+  if (/api\.betaseries\.com/.test(html)) bad("a direct api.betaseries.com call survives");
+  else ok("no direct BetaSeries API calls in the client");
+  const proxyUses = [...html.matchAll(/BS_PROXY\s*\+/g)];
+  if (proxyUses.length && /BS_PROXY = "https:\/\/api\.allorigins\.win\/raw\?url="; \/\/ FILE downloads only/.test(html))
+    ok("the allorigins relay is scoped to FILE downloads only (" + proxyUses.length + " download sites)");
+  else bad("BS_PROXY must be the file-download relay only (comment-scoped), never a listing path");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
