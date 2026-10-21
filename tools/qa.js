@@ -86,7 +86,11 @@
       key shards, no api.themoviedb.org calls)
    96 Wyzie search rides /api/wyz/search and BetaSeries listings ride
       /api/bs-subs (server-side chains); the allorigins relay is for FILE
-      downloads only and api.betaseries.com never appears */
+      downloads only and api.betaseries.com never appears
+   97 auto-fallbacks NEVER land on VidRift (its bridge has no play/pause —
+      the remote can't pause there): no stuckFallback("vidrift"), no auto
+      setMirror("vidrift"), and stuckFallback rejects it as last-good too;
+      manual Source picks may still choose it */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -816,6 +820,19 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (proxyUses.length && /BS_PROXY = "https:\/\/api\.allorigins\.win\/raw\?url="; \/\/ FILE downloads only/.test(html))
     ok("the allorigins relay is scoped to FILE downloads only (" + proxyUses.length + " download sites)");
   else bad("BS_PROXY must be the file-download relay only (comment-scoped), never a listing path");
+}
+
+/* ---------- 97. VidRift is never an auto-fallback ---------- */
+{
+  if (/stuckFallback\(\s*"vidrift"\s*\)/.test(html)) bad('stuckFallback("vidrift") survives -- VidRift has no play/pause command');
+  else ok("no stuckFallback targets vidrift");
+  if (/setMirror\(\s*"vidrift"\s*,\s*true\s*\)/.test(html)) bad('an auto setMirror("vidrift", true) survives -- never auto-switch to VidRift');
+  else ok("no auto setMirror(\"vidrift\") hop survives");
+  const sf = html.match(/function stuckFallback\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (sf && /g !== "vidrift"/.test(sf[0])) ok("stuckFallback rejects vidrift as last-known-good too");
+  else bad("stuckFallback must skip vidrift even when it was the last-good mirror");
+  if (/moved you to VidBolt/.test(html) && /moved you to YapGrid/.test(html)) ok("fallback messages name VidBolt/YapGrid");
+  else bad("the match-failure hops must land on VidBolt then YapGrid (TMDB-direct), never VidRift");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

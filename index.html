@@ -605,7 +605,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 192; // bump every release alongside version.txt
+  const BUILD_NUM = 193; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -3598,7 +3598,9 @@ function clearStuckTip(){
 function stuckFallback(staticFb){
   try {
     const g = window._lastGood;
-    if (g && g !== mirror && g !== "trailer" && typeof mirrorAllowed === "function" && mirrorAllowed(g)) {
+    // VidRift is NEVER an auto-fallback (its bridge has no play/pause — a
+    // remote lands there unable to pause); manual Source picks still allowed.
+    if (g && g !== mirror && g !== "trailer" && g !== "vidrift" && typeof mirrorAllowed === "function" && mirrorAllowed(g)) {
       if (g === "anipm" && !watchState.anime) return staticFb; // anime-only player
       return g;
     }
@@ -3693,11 +3695,11 @@ function armStuckWatchdogs(){
       // stage 2: still dark (blocked hosts / dead title / robot-check a
       // remote can't complete) — auto mode heals (last-known-good first);
       // manual mode just names the fallback and waits for you
-      const fbA = stuckFallback("vidrift");
+      const fbA = stuckFallback("vidbolt");
       const nmA = stuckFallbackName(fbA);
       if (!autoSwitchOn()) { stuckRecommend("AniPM isn't starting here", nmA); return; }
       const wsa = document.getElementById("watchStatus");
-      if (wsa) wsa.textContent = `AniPM isn't starting here — moved you to ${nmA}.` + (fbA === "vidrift" ? " Robot-check on the new player? \u{21C4} Source hops mirrors" : " \u{21C4} Source anytime to hop again");
+      if (wsa) wsa.textContent = `AniPM isn't starting here — moved you to ${nmA}. \u{21C4} Source anytime to hop again`;
       setMirror(fbA, true);
     }, _aTV ? 60000 : 20000);
     return;
@@ -3723,7 +3725,7 @@ function armStuckWatchdogs(){
   // the fallback and waits for \u{21C4} Source — never ping-pongs).
   if (mirror === "vidbolt" || mirror === "vidzen") {
     const nm = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
-    const fb = stuckFallback(watchState.anime ? "anipm" : (_aTV ? "yapgrid" : "vidrift"));
+    const fb = stuckFallback(watchState.anime ? "anipm" : "yapgrid");
     const fbn = stuckFallbackName(fb);
     window._watchdog = setTimeout(() => {
       if ((mirror === "vidbolt" ? window._boltProgress : window._zenStarted)
@@ -4728,7 +4730,7 @@ const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm", "vidrift",
    automatically; anyone can flip it by hand in Playback Settings. */
 /* Anime routing: titles default to AniPM (two-way API, sub/dub). If it never
    starts (blocked hosts, dead title, or a robot-check a remote can't tap),
-   TV auto-heals AniPM -> VidRift -> YapGrid on zero-progress timers, never
+   TV auto-heals AniPM -> VidBolt -> YapGrid on zero-progress timers, never
    stranding on one check. CineSrc's own sources don't cover anime. Detection:
    the anime browse rail, JP-animation metadata, or the remembered continue entry. */
 function isAnimeData(d){
@@ -6921,8 +6923,9 @@ async function anipmIds(tmdbId, title, tmdbYear){
   // the series — exact-title match fails on year-suffixed names like
   // "Doraemon (2005)", so it fell back to blind list[0], movies included,
   // and cached the poison forever). v3 scores title affinity + year + TV
-  // type, rejects strangers (no-match falls to VidRift, which is TMDB-direct
-  // and therefore always the RIGHT show), and re-maps every title once.
+  // type, rejects strangers (no-match falls to VidBolt's matcher, then
+  // YapGrid which is TMDB-direct and therefore always the RIGHT show), and
+  // re-maps every title once.
   // v4 keys per YEAR too: split franchises (Hajime no Ippo) map differently
   // per season air year — one show-level cache poisoned every later season.
   const ck = "sb:ani3:" + tmdbId + ":" + (tmdbYear || 0);
@@ -6941,7 +6944,7 @@ async function anipmIds(tmdbId, title, tmdbYear){
   // 0 (skipped); year ±1 +1 / mismatch −2 / unknown 0; TV +1 / known-other
   // −3 (movies/specials must not beat the series) / unknown 0. Score must
   // clear 0 — a stranger with no title affinity is rejected, and the caller
-  // falls back to VidRift (right show, TMDB-direct).
+  // falls back to VidBolt/YapGrid (right show, TMDB-direct).
   const scorePick = (list, names) => {
     let best = null, bestScore = -1;
     (list || []).forEach(x => {
@@ -7014,7 +7017,7 @@ async function anipmIds(tmdbId, title, tmdbYear){
 /* wrong show playing (mapped to a stranger): blacklist the current pick for
    this session, drop the cached mapping, reload the SAME mirror so it
    re-maps around the reject. No alternative clears the matcher \u{2192} the normal
-   no-match path escalates by itself (VidRift hop, or a named fallback in
+   no-match path escalates by itself (VidBolt/YapGrid hop, or a named fallback in
    manual mode). One tap, TV-reachable from the A/V sheet. */
 function animeRematch(){
   try {
@@ -7090,9 +7093,9 @@ async function loadVidboltAnime(){
   else if (ids.mal) vu = `https://vidbolt.pro/anime/mal/${ids.mal}/${ep}`;
   if (!vu) {
     if (spin) spin.style.display = "none";
-    if (!autoSwitchOn()) { stuckRecommend("Couldn't match this anime", "VidRift"); return; }
-    if (ws) ws.textContent = "Couldn't match this anime — moved you to VidRift";
-    setMirror("vidrift", true);
+    if (!autoSwitchOn()) { stuckRecommend("Couldn't match this anime", "YapGrid"); return; }
+    if (ws) ws.textContent = "Couldn't match this anime — moved you to YapGrid";
+    setMirror("yapgrid", true);
     return;
   }
   // mapped-id transparency: the id on screen names exactly what the player
@@ -7144,7 +7147,7 @@ function anipmArmStartRetry(delay){
       loadPlayer();
       return;
     }
-    const fb = stuckFallback("vidrift");
+    const fb = stuckFallback("vidbolt");
     const nm = stuckFallbackName(fb);
     if (!autoSwitchOn()) { stuckRecommend("AniPM stayed black after two retries", nm); return; }
     const retryStatus = document.getElementById("watchStatus");
@@ -7168,12 +7171,13 @@ async function loadAnipmPlayer(){
   const ids = route.ids || {};
   if (watchState.id !== id || mirror !== "anipm") return; // user moved on
   if (!ids.mal && !ids.ani) {
-    // all mapping hosts failed — don't sit black, fall to VidRift
-    // (manual hop mode just names it instead of moving)
+    // all mapping hosts failed — don't sit black, try VidBolt's matcher next
+    // (its no-match then lands on YapGrid, TMDB-direct); manual hop mode
+    // just names the fallback instead of moving
     if (spin) spin.style.display = "none";
-    if (!autoSwitchOn()) { stuckRecommend("Couldn't match this anime", "VidRift"); return; }
-    if (ws) ws.textContent = "Couldn't match this anime — moved you to VidRift";
-    setMirror("vidrift", true);
+    if (!autoSwitchOn()) { stuckRecommend("Couldn't match this anime", "VidBolt"); return; }
+    if (ws) ws.textContent = "Couldn't match this anime — moved you to VidBolt";
+    setMirror("vidbolt", true);
     return;
   }
   // same entry = combined run (absolute numbering); a new entry = per-season
