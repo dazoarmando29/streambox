@@ -49,7 +49,13 @@
       (strip-scope L/R, chevrons never intercept, Right stays locked in-row)
    78 per-card reveal ban: no bringIntoView anywhere, and row/grid focus
       scrolls only with block:"nearest" (the oversized reveal rect was the
-      zigzag) */
+      zigzag)
+   79 Coming Soon flips at 00:00 PH (epUnaired anchors to phMidnightMs,
+      never the device timezone) and PH labels/countdowns are the display
+   80 "NEW" only within 7 days of the PH air date (epIsNew 7d window)
+   81 episode status lives in ONE pinned right column (runtime / NEW /
+      X left one line; COMING SOON stacks "Sun, Oct 25 (PH) - in 3d 17h")
+   82 the dazzo credit signs the bottom right (TV legend treatment) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -501,6 +507,62 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   }
   if (!badReveals.length) ok("row/grid focus scrolls use block:\"nearest\" only (player landings excepted)");
   else badReveals.forEach((b) => bad("oversized reveal scroll (use block:\"nearest\"): " + b));
+}
+
+/* ---------- 79. Coming Soon flips at 00:00 PH ---------- */
+{
+  const pm = html.match(/function phMidnightMs\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (pm && /8 \* 3600 \* 1000/.test(pm[0])) ok("phMidnightMs anchors to Asia/Manila (UTC+8 midnight)");
+  else bad("phMidnightMs missing/incorrect -- 00:00 PH must gate availability");
+  const eu = html.match(/function epUnaired\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (eu && /phMidnightMs\(/.test(eu[0]) && !/getFullYear/.test(eu[0])) ok("epUnaired flips at 00:00 PH (never device-local dates)");
+  else bad("epUnaired must compare against phMidnightMs -- device timezones must not gate playability");
+  const al = html.match(/function phAirLabel\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (al && /Asia\/Manila/.test(al[0])) ok("phAirLabel formats in Asia/Manila");
+  else bad("phAirLabel must format dates in Asia/Manila");
+  const cd = html.match(/function phCountdown\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (cd && /in \$\{d\}d \$\{h\}h/.test(cd[0]) && /available now/.test(cd[0])) ok("phCountdown renders the in Xd Yh / available now forms");
+  else bad("phCountdown missing the 'in 3d 17h' countdown forms");
+}
+
+/* ---------- 80. NEW only within 7 days ---------- */
+{
+  const m = html.match(/function epIsNew\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (!m) bad("epIsNew missing -- NEW badges need the 7-day rule");
+  else {
+    const t = m[0];
+    if (/7 \* 86400000/.test(t) && /phMidnightMs\(/.test(t)) ok("epIsNew uses the 7-day window from the PH air date");
+    else bad("epIsNew must be a 7-day (7 * 86400000) window anchored to phMidnightMs");
+  }
+  const dr = html.match(/async function renderEpDrawer\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (dr && /epIsNew\(/.test(dr[0])) ok("drawer status column uses epIsNew");
+  else bad("renderEpDrawer must show NEW only via epIsNew");
+}
+
+/* ---------- 81. episode status in ONE pinned right column ---------- */
+{
+  const dr = html.match(/async function renderEpDrawer\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (!dr) bad("renderEpDrawer missing");
+  else {
+    const t = dr[0];
+    if (/flex items-start gap-3/.test(t) && /flex-1 min-w-0/.test(t) && /shrink-0 text-right/.test(t)) ok("episode row: flexible title + pinned right status column");
+    else bad("renderEpDrawer rows must pin the status column right (title flex-1, status shrink-0 text-right)");
+    if (/COMING SOON/.test(t)) ok("Coming Soon label present in the status column");
+    else bad("the status column must label unaired episodes COMING SOON");
+    if (/\(PH\)/.test(t) && /phCountdown\(/.test(t) && /phAirLabel\(/.test(t)) ok("COMING SOON stacks the PH air date + countdown");
+    else bad("COMING SOON must stack 'Sun, Oct 25 (PH) - in 3d 17h' (phAirLabel + phCountdown)");
+    if (/left/.test(t) && /epWatchInfo/.test(t)) ok("in-progress episodes show the X left status from our saved progress");
+    else bad("the status column must show X left from epWatchInfo (saved progress)");
+  }
+}
+
+/* ---------- 82. dazzo credit bottom right ---------- */
+{
+  const foot = html.match(/<footer[\s\S]*?<\/footer>/);
+  if (foot && /dazzo/.test(foot[0]) && /10-FOOT UI/.test(foot[0])) ok("footer carries the dazzo TV-legend credit (bottom right)");
+  else bad("footer must credit dazzo bottom-right with the STREAMBOX 10-FOOT UI legend");
+  if (foot && /flex-1/.test(foot[0])) ok("legend is right-aligned in the footer");
+  else bad("the dazzo legend must push right (flex-1 spacer)");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

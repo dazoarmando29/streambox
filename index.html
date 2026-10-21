@@ -575,7 +575,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 185; // bump every release alongside version.txt
+  const BUILD_NUM = 186; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -684,7 +684,10 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   <!-- FOOTER: brand + credits (text-only, never enters remote tab order) -->
   <footer class="px-4 md:px-10 pb-10 pt-2 text-[11px] text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-1">
     <span class="font-black text-sm text-gray-400">Stream<span class="text-teal-500">Box</span> <span id="footVer"></span></span>
-    <span>•</span><span>Catalog: TMDB</span><span>•</span><span>Playback: CineSrc + mirrors</span><span>•</span><span>Subs: Wyzie</span><span>•</span><span>Made by dazzo</span>
+    <span>•</span><span>Catalog: TMDB</span><span>•</span><span>Playback: CineSrc + mirrors</span><span>•</span><span>Subs: Wyzie</span>
+    <span class="flex-1"></span>
+    <span class="text-[10px] font-bold text-gray-500" style="letter-spacing:.15em">STREAMBOX 10-FOOT UI</span>
+    <span class="text-teal-400 font-black text-xs" style="letter-spacing:.15em">dazzo</span>
   </footer>
 </div>
 
@@ -2872,20 +2875,54 @@ async function openWatch(type, id, s=1, e=1, t=0){
   clearTimeout(window._tipT);
   window._tipT = setTimeout(() => { if (!document.body.classList.contains("video-fs")) showSubTip(false); }, 2500);
 }
-/* Unaired-episode guard (TMDB air_date vs local today, day granularity):
-   returns the future air-date string when the episode isn't out yet, else
-   null. Missing/blank dates stay clickable — old catalog rows often lack
-   dates, and we'd rather never lock a real episode. */
+/* Unaired-episode guard (TMDB air_date vs 00:00 PH): availability flips at
+   midnight Asia/Manila regardless of device timezone — returns the future
+   air-date string when the episode isn't out yet, else null. Missing/blank
+   dates stay clickable — old catalog rows often lack dates, and we'd rather
+   never lock a real episode. */
+function phMidnightMs(iso){
+  const m = String(iso || "").match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return 0;
+  // Asia/Manila = UTC+8, no DST: midnight PH expressed in UTC ms
+  return Date.UTC(+m[1], +m[2] - 1, +m[3]) - 8 * 3600 * 1000;
+}
 function epUnaired(ep){
   const a = ep && ep.air_date;
   if (!a) return null;
-  const d = new Date();
-  const today = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-  return a > today ? a : null;
+  return Date.now() < phMidnightMs(a) ? a : null;
+}
+function epIsNew(ep){
+  // "NEW" = aired within the last 7 days (anchored to the PH air date)
+  const a = ep && ep.air_date;
+  if (!a) return false;
+  const t = phMidnightMs(a);
+  const now = Date.now();
+  return now >= t && now - t < 7 * 86400000;
+}
+function phAirLabel(iso){
+  const m = String(iso || "").match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return String(iso || "");
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12));
+  try {
+    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "Asia/Manila" });
+  } catch(e){ return iso; }
+}
+function phCountdown(iso){
+  const at = phMidnightMs(iso);
+  if (!at) return "";
+  const delta = at - Date.now();
+  if (delta <= 0) return "available now";
+  const d = Math.floor(delta / 86400000), h = Math.floor((delta % 86400000) / 3600000), mm = Math.floor((delta % 3600000) / 60000);
+  if (d > 0) return `in ${d}d ${h}h`;
+  if (h > 0) return `in ${h}h ${mm}m`;
+  return `in ${Math.max(1, mm)}m`;
 }
 function epAirPretty(iso){
-  try { return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); }
-  catch(e){ return iso; }
+  return phAirLabel(iso); // PH-anchored labels everywhere (Coming Soon parity)
+}
+function fmtMins(mins){
+  const m = Math.max(0, Math.round(Number(mins) || 0));
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
 }
 async function loadEpisodes(s){
   const sv = s || gridS;
@@ -3024,6 +3061,18 @@ function savedPosFor(type, id, s, e){
     if (dur > 60 && pos > dur - 20) return 0; // finished: start fresh
     return pos;
   } catch(e){ return 0; }
+}
+function epWatchInfo(s, e){
+  // our saved Continue progress for THIS episode — feeds the pinned status
+  // column (Xm left / NEW Xm left). null = not started or finished.
+  try {
+    const arr = JSON.parse(localStorage.getItem("streambox_continue") || "[]");
+    const it = arr.find(x => x.type === "tv" && x.id === watchState.id && (x.s || 1) === (s || 1) && (x.e || 1) === (e || 1));
+    if (!it) return null;
+    const pos = Math.floor(it.pos || 0), dur = Math.floor(it.dur || 0);
+    if (pos < 30 || dur <= 60 || pos > dur - 20) return null;
+    return { pos, dur };
+  } catch(err){ return null; }
 }
 function maybeResumePrompt(){
   try {
@@ -5840,20 +5889,43 @@ async function renderEpDrawer(){
     const isFin = !unaired && ep.episode_number === _dMax;
     const finBadge = isFin ? (_dLast ? "\u{1F451} SERIES FINALE" : "\u{1F3C1} SEASON FINALE") : "";
     const isCur = drawerS === watchState.s && ep.episode_number === watchState.e;
+    // ONE pinned right column (native 0.59-0.63 parity): every row's status
+    // lands on the same right edge — runtime / NEW / x left one line, and
+    // COMING SOON stacks its PH air date + countdown on the line under it.
+    const wi = epWatchInfo(drawerS, ep.episode_number);
+    let st1 = "", st1c = "text-gray-400", st2 = "";
+    if (unaired) {
+      st1 = "COMING SOON"; st1c = "text-amber-400";
+      st2 = `${phAirLabel(unaired)} (PH) \u{00B7} ${phCountdown(unaired)}`;
+    } else if (epIsNew(ep) && wi) {
+      st1 = `NEW \u{00B7} ${Math.max(1, Math.ceil((wi.dur - wi.pos) / 60))} left`; st1c = "text-teal-300";
+    } else if (epIsNew(ep)) {
+      st1 = "NEW"; st1c = "text-teal-300";
+    } else if (wi) {
+      st1 = `${Math.max(1, Math.ceil((wi.dur - wi.pos) / 60))} left`; st1c = "text-gray-300";
+    } else {
+      st1 = ep.runtime ? fmtMins(ep.runtime) : ""; st1c = "text-gray-400";
+    }
+    const statusHtml = `<div class="shrink-0 text-right leading-tight">
+        <p class="text-[11px] font-bold ${st1c}">${st1}</p>
+        ${st2 ? `<p class="text-[10px] text-gray-400 mt-0.5">${st2}</p>` : ""}
+      </div>`;
     if (unaired) {
       // greyed + dead: out of tab/D-pad order, no handlers — visible so
       // nobody wonders where the episode went, but unmistakably unavailable
       const card = document.createElement("div");
       card.className = "relative bg-white/5 border border-dashed rounded-xl overflow-hidden border-white/10 opacity-60";
       card.setAttribute("aria-disabled", "true");
-      card.setAttribute("aria-label", `Episode ${ep.episode_number} airs ${epAirPretty(unaired)} — not out yet`);
+      card.setAttribute("aria-label", `Episode ${ep.episode_number} airs ${epAirPretty(unaired)} (PH) — coming soon`);
       const still = ep.still_path ? IMG(ep.still_path, "w300") : "";
       card.innerHTML = `
         ${still ? `<img loading="lazy" decoding="async" src="${still}" class="w-full aspect-video object-cover" onerror="this.style.display='none'">` : ""}
-        <span class="absolute top-2 right-2 text-[11px] font-bold bg-white/10 text-gray-300 px-2 py-0.5 rounded-full">\u{1F4C5} NOT OUT YET</span>
         <div class="p-3">
-          <p class="font-bold text-sm text-gray-400">E${ep.episode_number} — ${ep.name || ""}</p>
-          <p class="text-[11px] text-gray-500 mt-1">Airs ${epAirPretty(unaired)} — check back then</p>
+          <div class="flex items-start gap-3">
+            <p class="font-bold text-sm text-gray-400 flex-1 min-w-0">E${ep.episode_number} — ${ep.name || ""}</p>
+            ${statusHtml}
+          </div>
+          <p class="text-[11px] text-gray-500 mt-1">Available at 00:00 PH on air day</p>
         </div>`;
       list.appendChild(card);
       return;
@@ -5870,8 +5942,10 @@ async function renderEpDrawer(){
       ${isCur ? `<span class="absolute top-2 right-2 text-[11px] font-bold bg-teal-500 px-2 py-0.5 rounded-full">WATCHING</span>`
         : isFin ? `<span class="absolute top-2 right-2 text-[11px] font-bold bg-white/10 text-gray-200 px-2 py-0.5 rounded-full">${finBadge}</span>` : ""}
       <div class="p-3">
-        <p class="font-bold text-sm">E${ep.episode_number} — ${ep.name || ""}${isFin && !isCur ? " \u{1F3C1}" : ""}</p>
-        <p class="text-[11px] text-gray-500">${ep.runtime ? ep.runtime + "m" : ""}</p>
+        <div class="flex items-start gap-3">
+          <p class="font-bold text-sm flex-1 min-w-0">E${ep.episode_number} — ${ep.name || ""}${isFin && !isCur ? " \u{1F3C1}" : ""}</p>
+          ${statusHtml}
+        </div>
         <p class="text-xs text-gray-400 mt-1 ${hidden ? "blur-sm select-none" : ""}">${ep.overview || "No synopsis."}</p>
         ${hidden ? `<button class="mt-2 text-xs font-bold bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full">Click to reveal</button>` : ""}
       </div>`;
