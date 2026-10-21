@@ -73,7 +73,11 @@
    89 the Anime section rides AniList genres through the Worker
       (/api/anime/genres chips, /api/anime/browse feed by genre name)
    90 Worker anime items map to the card/detail route as tv (TMDB ids, real
-      votes) and the All default keeps the ja+16 discover */
+      votes) and the All default keeps the ja+16 discover
+   91 Obsidian Glow palette (native Theme.kt parity): accent #00F0B5, cyan
+      #00D2FF, ink #0B111E, amber #F5A623, soft/dim text tokens -- stale
+      pre-glow hexes never come back
+   92 display type is Space Grotesk, body is Plus Jakarta Sans (loaded) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -713,6 +717,31 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const bm = html.match(/async function browseMore\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
   if (bm && /with_original_language=ja/.test(bm[0])) ok("All-default anime browse keeps the ja+16 discover");
   else bad("the Anime All default must keep the TMDB ja + genre-16 discover");
+}
+
+/* ---------- 91. Obsidian Glow palette ---------- */
+{
+  if (/tailwind\.config/.test(html) && /"#00F0B5"/.test(html) && /"#00D2FF"/.test(html)) ok("tailwind palette maps to the Obsidian Glow tokens");
+  else bad("tailwind.config must map teal/cyan to #00F0B5 / #00D2FF");
+  if (/#0B111E/.test(html) && /#F5A623/.test(html)) ok("ink #0B111E + amber #F5A623 present");
+  else bad("the ink (#0B111E) and amber (#F5A623) tokens must be in play");
+  if (/"#8E9CAE"/.test(html) && /"#C7D5E8"/.test(html)) ok("dim/soft text tokens mapped (#8E9CAE / #C7D5E8)");
+  else bad("gray text must wear the Dim #8E9CAE / Soft #C7D5E8 tokens");
+  const stale = [...html.matchAll(/#14b8a6|#2dd4bf|#7dd3fc|#0b1426|#16294d/gi)];
+  if (!stale.length) ok("no stale pre-glow palette hexes");
+  else bad("stale pre-glow hex still present (x" + stale.length + ") -- the palette is Obsidian Glow only");
+  if (/radial-gradient\([^)]*rgba\(0,240,181/.test(html)) ok("underlay glow washes use the accent rgba(0,240,181)");
+  else bad("the body glow wash must use rgba(0,240,181,..) (native underlay glows)");
+}
+
+/* ---------- 92. Obsidian Glow type ---------- */
+{
+  if (/fonts\.googleapis\.com[^\n]*Space\+Grotesk/.test(html) && /Plus\+Jakarta\+Sans/.test(html)) ok("Space Grotesk + Plus Jakarta Sans loaded");
+  else bad("the Google Fonts stylesheet must load Space Grotesk and Plus Jakarta Sans");
+  if (/font-family:\s*"Plus Jakarta Sans"/.test(html)) ok("body type is Plus Jakarta Sans");
+  else bad("body must wear Plus Jakarta Sans");
+  if (/font-family:\s*"Space Grotesk"/.test(html)) ok("display type is Space Grotesk");
+  else bad("titles/labels must wear Space Grotesk (display)");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
