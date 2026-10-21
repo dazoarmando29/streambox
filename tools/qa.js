@@ -69,7 +69,11 @@
       new entry numbers per-season, and combined-entry provider events
       convert back from entry numbering (animeFromAbs)
    88 anime boot deferred until the season route resolves (mapping awaited
-      before the embed src is set) */
+      before the embed src is set)
+   89 the Anime section rides AniList genres through the Worker
+      (/api/anime/genres chips, /api/anime/browse feed by genre name)
+   90 Worker anime items map to the card/detail route as tv (TMDB ids, real
+      votes) and the All default keeps the ja+16 discover */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -675,6 +679,40 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   };
   inOrder(la, "loadAnipmPlayer");
   inOrder(lv, "loadVidboltAnime");
+}
+
+/* ---------- 89. AniList anime genres via the Worker ---------- */
+{
+  if (/api\/anime\/genres/.test(html) && /api\/anime\/browse/.test(html)) ok("Anime section calls the Worker /api/anime/genres + /api/anime/browse");
+  else bad("the Anime section must use the Worker AniList genre endpoints");
+  const gg = html.match(/async function getGenres\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (gg && /ANIME_GENRE_API/.test(gg[0]) && /anilist/.test(gg[0])) ok("getGenres serves AniList genres for anime (fallback TMDB)");
+  else bad("getGenres must prefer the Worker AniList genre list for anime");
+  const bm = html.match(/async function browseMore\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (bm && /ANIME_BROWSE_API/.test(bm[0]) && /typeof browse\.genre === "string"/.test(bm[0])) ok("AniList genre names browse the Worker feed");
+  else bad("browseMore must route AniList genre names through /api/anime/browse");
+  const sg = html.match(/async function setGenre\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (sg && /typeof id === "string"/.test(sg[0])) ok("setGenre keeps AniList names (not coerced to numbers)");
+  else bad("setGenre must keep AniList genre names as strings");
+}
+
+/* ---------- 90. Worker anime items -> cards ---------- */
+{
+  const fc = html.match(/function animeFeedCard\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (!fc) bad("animeFeedCard missing -- Worker feed items need the card/detail adapter");
+  else {
+    const t = fc[0];
+    if (/media_type: "tv"/.test(t) && /id: x\.id/.test(t)) ok("anime feed items route as tv with TMDB ids");
+    else bad("animeFeedCard must map id + media_type \"tv\" (TMDB ids) for openDetail/openWatch");
+    if (/vote_count/.test(t) && /vote_average/.test(t)) ok("anime feed items carry real-vote rating fields");
+    else bad("animeFeedCard must map vote/vote_count for the real-votes rating chip");
+  }
+  const pt = html.match(/function posterTag\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (pt && /https?:\/\//.test(pt[0])) ok("posterTag renders absolute (Kitsu) poster URLs as-is");
+  else bad("posterTag must accept absolute poster URLs from the anime feed");
+  const bm = html.match(/async function browseMore\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (bm && /with_original_language=ja/.test(bm[0])) ok("All-default anime browse keeps the ja+16 discover");
+  else bad("the Anime All default must keep the TMDB ja + genre-16 discover");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

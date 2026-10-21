@@ -575,7 +575,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 188; // bump every release alongside version.txt
+  const BUILD_NUM = 189; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1526,6 +1526,9 @@ function posterTag(path, cls){
   const on = `onerror="this.onerror=null;this.style.display='none'"`;
   const fallback = `https://via.placeholder.com/500x750?text=No+Image`;
   if (!path) return `<img loading="lazy" decoding="async" src="${fallback}" ${on} class="${cls}">`;
+  // absolute URLs (Kitsu/Worker anime feed posters) render as-is
+  if (/^https?:\/\//i.test(path))
+    return `<img loading="lazy" decoding="async" src="${path}" ${on} class="${cls}">`;
   if (document.body.classList.contains("calm"))
     return `<img loading="lazy" decoding="async" src="${IMG(path,"w342")}" ${on} class="${cls}">`;
   return `<img loading="lazy" decoding="async" src="${IMG(path,"w342")}" srcset="${IMG(path,"w185")} 185w, ${IMG(path,"w342")} 342w, ${IMG(path,"w500")} 500w" sizes="(max-width: 640px) 42vw, (max-width: 1024px) 22vw, (min-width: 1700px) 300px, 185px" ${on} class="${cls}">`;
@@ -2472,8 +2475,23 @@ const STUDIOS = [
   { id: 10342, name: "Ghibli", logo: "/uFuxPEZRUcBTEiYIxjHJq62Vr77.png" },
 ];
 let genreCache = {};
+/* AniList anime genres via the Worker (Kitsu taxonomy: Mecha, Slice of Life,
+   Mahou Shoujo... names TMDB has no ids for). The Anime section rides these;
+   Movies/TV keep TMDB genres. */
+const ANIME_GENRE_API = "https://streambox-api.dazoarmando.workers.dev/api/anime/genres";
+const ANIME_BROWSE_API = "https://streambox-api.dazoarmando.workers.dev/api/anime/browse";
 async function getGenres(type){
   if (genreCache[type]) return genreCache[type];
+  if (type === "anime") {
+    try {
+      const r = await fetch(ANIME_GENRE_API);
+      if (r.ok) {
+        const d = await r.json();
+        const list = ((d && d.data) || []).map(g => ({ id: String(g.id), name: String(g.name), anilist: true }));
+        if (list.length) { genreCache[type] = list; return list; }
+      }
+    } catch(e){}
+  }
   const d = await tmdb(`/genre/${type === "anime" ? "tv" : type}/list`);
   genreCache[type] = (d && d.genres) || [];
   return genreCache[type];
@@ -2507,6 +2525,7 @@ async function openBrowse(type, ev){
       const b = document.createElement("button");
       b.textContent = g.name;
       b.dataset.genre = String(g.id);
+      if (g.anilist) b.dataset.anilist = "1"; // name-keyed AniList genre (Worker feed)
       b.onclick = () => setGenre(g.id);
       row.appendChild(b);
     });
@@ -2521,17 +2540,36 @@ async function openBrowse(type, ev){
 }
 function paintChips(){
   document.querySelectorAll("#genreRow button").forEach(b => {
-    const active = Number(b.dataset.genre) === browse.genre;
+    const active = String(b.dataset.genre) === String(browse.genre || 0);
     b.className = "shrink-0 px-4 h-10 rounded-full text-sm font-bold " + (active ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
   });
 }
 async function setGenre(id){
-  browse.genre = Number(id) || 0;
+  // TMDB genres carry numeric ids, AniList anime genres carry their NAME
+  browse.genre = (typeof id === "string" && id !== "0" && id !== "") ? id : (Number(id) || 0);
   browse.page = 0;
   browse.totalPages = 1;
   document.getElementById("grid").innerHTML = "";
   paintChips();
   browseMore(true);
+}
+function animeFeedCard(x){
+  // Worker /api/anime/browse item (Kitsu-backed, TMDB-id) -> card/detail shape.
+  // The Kitsu `adult` flag is an AGE RATING (AoT carries it) and is never fed
+  // to the 18+ gate — the Worker feed is already the curated sfw catalog.
+  return {
+    id: x.id,
+    name: x.name,
+    title: x.name,
+    poster_path: x.poster || "",
+    overview: x.overview || "",
+    vote_average: Number(x.vote || 0),
+    vote_count: Number(x.vote || 0) > 0 ? 1 : 0,
+    first_air_date: x.year ? `${x.year}-01-01` : "",
+    media_type: "tv",
+    genre_ids: [16],
+    original_language: "ja"
+  };
 }
 /* year rail over the FULL paginated catalog: All default, current year down
    (2026 -> 1950). Genre + year stack; the discover page walks the whole
@@ -2630,23 +2668,38 @@ async function browseMore(focusFirst){
     // anime = TV animation from Japan; genre chips stack as sub-filters.
     // Locked: TMDB itself drops keyword-tagged adult titles server-side
     // (titles here are never flagged `adult`, so include_adult=false is blind).
-    const g = browse.genre ? `&with_genres=${browse.genre}` : "";
+    const g = (typeof browse.genre === "number" && browse.genre) ? `&with_genres=${browse.genre}` : "";
     const yr = browse.year
       ? (browse.type === "movie" ? `&primary_release_year=${browse.year}` : `&first_air_date_year=${browse.year}`)
       : "";
-    let path;
-    if (browse.type === "anime") {
-      path = `/discover/tv?sort_by=popularity.desc&include_adult=false&with_genres=16${browse.genre ? "," + browse.genre : ""}&with_original_language=ja${yr}&page=${next}`;
-      if (adultLocked()) {
-        const kw = await getAdultKwIds();
-        if (kw.length) path += `&without_keywords=${kw.join("|")}`;
-      }
+    let d;
+    if (browse.type === "anime" && typeof browse.genre === "string" && browse.genre) {
+      // AniList genre feed through the Worker (Kitsu-backed, TMDB-id items).
+      // The feed API has no year filter: the year rail narrows each page
+      // client-side and paging walks the whole feed (full catalog).
+      const rw = await fetch(`${ANIME_BROWSE_API}?genre=${encodeURIComponent(browse.genre)}&page=${next}`);
+      const w = rw.ok ? await rw.json() : {};
+      let raw = (w && w.data) || [];
+      if (browse.year) raw = raw.filter(x => Number(x.year) === Number(browse.year));
+      d = {
+        results: raw.map(animeFeedCard),
+        total_pages: (w && Number(w.resolved) >= Number(w.requested)) ? next + 1 : next
+      };
     } else {
-      // studio stacks with genre (TMDB ANDs them); anime never carries one
-      const sc = browse.studio ? `&with_companies=${browse.studio}` : "";
-      path = `/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}${sc}${yr}&page=${next}`;
+      let path;
+      if (browse.type === "anime") {
+        path = `/discover/tv?sort_by=popularity.desc&include_adult=false&with_genres=16${(typeof browse.genre === "number" && browse.genre) ? "," + browse.genre : ""}&with_original_language=ja${yr}&page=${next}`;
+        if (adultLocked()) {
+          const kw = await getAdultKwIds();
+          if (kw.length) path += `&without_keywords=${kw.join("|")}`;
+        }
+      } else {
+        // studio stacks with genre (TMDB ANDs them); anime never carries one
+        const sc = browse.studio ? `&with_companies=${browse.studio}` : "";
+        path = `/discover/${browse.type}?sort_by=popularity.desc&include_adult=false${g}${sc}${yr}&page=${next}`;
+      }
+      d = await tmdb(path);
     }
-    const d = await tmdb(path);
     browse.page = next;
     browse.totalPages = d.total_pages || 1;
     const grid = document.getElementById("grid");
