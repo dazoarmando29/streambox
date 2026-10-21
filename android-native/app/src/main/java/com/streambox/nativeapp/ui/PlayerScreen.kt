@@ -881,21 +881,49 @@ private val SB_HOOK = """
     } catch(e){}
     return "Track " + (i + 1);
   }
+  // Route from the EMBED URL first (0.69): fw.__VB__ can surface late on a
+  // slow TV and the old 0/5/15s track polls all missed it - the audio list
+  // came up empty and the Tagalog dub "disappeared". The iframe src is
+  // known the moment the wrapper page exists, so the REAL audio tracks
+  // always appear.
+  function vbRoute(){
+    try {
+      var src = "";
+      var f = document.querySelector("iframe");
+      if (f && f.src) src = f.src;
+      if (!src) {
+        var col = document.getElementsByTagName("iframe");
+        if (col && col.length) src = col[0].src || "";
+      }
+      var m = src.match(/\/tv\/(\d+)\/(\d+)\/(\d+)/);
+      if (m) return { type: "tv", id: m[1], season: m[2], episode: m[3] };
+      m = src.match(/\/anime\/mal\/(\d+)\/(\d+)/);
+      if (m) return { type: "anime", id: m[1], season: 0, episode: m[2] };
+      m = src.match(/\/movie\/(\d+)/);
+      if (m) return { type: "movie", id: m[1], season: 0, episode: 0 };
+    } catch(e){}
+    try {
+      var fw2 = window.frames[0];
+      var bt2 = fw2 && fw2.__VB__ && fw2.__VB__.title;
+      if (bt2) return { type: bt2.type || "tv", id: bt2.id, season: bt2.season || 0, episode: bt2.episode || 0 };
+    } catch(e){}
+    return null;
+  }
   function vbTracks(){
     try {
       var fw = window.frames[0];
-      var bt = fw && fw.__VB__ && fw.__VB__.title;
-      if (!bt) return;
-      var q = "type=" + encodeURIComponent(bt.type || "tv") + "&id=" + encodeURIComponent(bt.id || "");
-      if (bt.type === "tv" && bt.season) q += "&season=" + encodeURIComponent(bt.season);
-      if (bt.episode) q += "&episode=" + encodeURIComponent(bt.episode);
+      var r = vbRoute();
+      if (!r || r.id == null) return;
+      var q = "type=" + encodeURIComponent(r.type) + "&id=" + encodeURIComponent(r.id);
+      if (r.type === "tv" && r.season) q += "&season=" + encodeURIComponent(r.season);
+      if (r.episode) q += "&episode=" + encodeURIComponent(r.episode);
       // One resolve fetch per episode (0.52): the 0/5/15s track polls all
       // read the same snapshot - only the textTracks scan is redone (they
       // surface late). The stream URL never leaves the WebView.
       function applyStream(j){
         try {
           var s = (j && j.stream) || null;
-          var anime = bt.type === "anime";
+          var anime = r.type === "anime";
           ((s && s.sources) || []).forEach(function(n){
             var l = n && n.language;
             if (!l) return;
@@ -954,8 +982,16 @@ private val SB_HOOK = """
   // and the shim never reached the real player, so TV taps stayed dead.
   if (VB) {
     vbTracks();
-    setTimeout(vbTracks, 5000);
-    setTimeout(vbTracks, 15000);
+    // Keep asking until the REAL tracks land (0.69): slow TVs outlived the
+    // old 0/5/15s polls and the audio list came up empty ("the Tagalog dub
+    // disappeared"). The resolve fetch itself stays once-per-episode (the
+    // VB_RESOLVE snapshot) - only the textTracks scan is redone.
+    var vbTries = 0;
+    var vbTimer = setInterval(function(){
+      vbTries++;
+      vbTracks();
+      if (Object.keys(VBT.audios).length > 0 || vbTries > 40) clearInterval(vbTimer);
+    }, 3000);
   }
   if (ANIPM) {
     hello();

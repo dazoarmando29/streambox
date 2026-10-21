@@ -209,7 +209,14 @@
        mirror (lang-less TV boots wait for it), the mirror realigns to
        VidBolt for ko, save() writes the healed value so the record
        self-heals, and the K-Drama rules read contentLang - never the raw
-       title.lang */
+       title.lang
+    64 VidBolt track discovery always finds the REAL tracks (0.69): the old
+       0/5/15s polls all depended on fw.__VB__ surfacing inside the iframe -
+       on a slow TV every poll missed and the audio list came up empty (the
+       Tagalog dub "disappeared" on Lie to Me ep 8). vbRoute() reads the
+       EMBED URL first (known the moment the wrapper exists) and a retry
+       loop keeps asking until the tracks land - the resolve fetch itself
+       stays once-per-episode */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1262,6 +1269,22 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("stored language heals before routing: contentLang from TMDB original_language, ko realigns to VidBolt before the first load, records self-heal on save");
   } else {
     bad("a blank stored lang must heal from TMDB original_language BEFORE the first load picks a mirror (K-Dramas routed to CineSrc and lost the Tagalog dub) - contentLang is authoritative, lang-less TV boots wait, save() writes the healed value");
+  }
+}
+
+/* ---------- 64. VidBolt track discovery always finds the real tracks ---------- */
+{
+  const psT = fs.existsSync(psPath) ? qaRead(psPath) : "";
+  if (!psT) bad("PlayerScreen.kt missing - track discovery rules cannot be verified");
+  else if (psT.includes("function vbRoute()") &&
+           psT.includes("var r = vbRoute();") &&
+           psT.includes("if (Object.keys(VBT.audios).length > 0 || vbTries > 40) clearInterval(vbTimer);") &&
+           psT.includes("var anime = r.type === \"anime\";") &&
+           !psT.includes("setTimeout(vbTracks, 5000)") &&
+           !/var bt = fw && fw\.__VB__ && fw\.__VB__\.title;\s*\n\s*if \(!bt\) return;/.test(psT)) {
+    ok("VidBolt track discovery: route reads the embed URL first and retries until the real audio tracks land (once-per-episode resolve kept)");
+  } else {
+    bad("track discovery must resolve its route from the EMBED URL (vbRoute - fw.__VB__ surfaces too late on slow TVs) and retry until the real tracks land - the audio list came up empty and the Tagalog dub vanished");
   }
 }
 
