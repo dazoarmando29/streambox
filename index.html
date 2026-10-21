@@ -671,7 +671,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 200; // bump every release alongside version.txt
+  const BUILD_NUM = 201; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -838,7 +838,14 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 
 <!-- WATCH VIEW -->
 <div id="watchView" class="hidden min-h-screen pt-20 px-4 md:px-10 pb-16">
-  <button id="backBtn" onclick="goHome(event)" class="no-cinema mb-4 text-sm bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full">&#x2190; Back to Browse</button>
+  <div class="no-cinema flex flex-wrap items-center gap-3 mb-4">
+    <button id="backBtn" onclick="goHome(event)" class="glass-pill text-sm px-4 py-2 rounded-full flex items-center gap-2"><span>&#x2190;</span> Back to Browse</button>
+    <p id="watchCrumb" class="text-sm text-gray-400 truncate"></p>
+    <div class="ml-auto flex items-center gap-2">
+      <span class="flex items-center gap-2 px-3.5 py-2 rounded-full bg-teal-400/10 border border-teal-400/30 text-xs font-semibold text-teal-300"><span class="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span><span id="serverPillName">Server</span></span>
+      <button onclick="openSettings(); setTab('servers')" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">Switch Server</button>
+    </div>
+  </div>
   <div class="grid lg:grid-cols-3 gap-6">
     <div class="lg:col-span-2">
       <!-- twin-cut warning: shown only for known remake/original pairs -->
@@ -929,26 +936,34 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">&#x2699;</button>
         <button onclick="cursorToggle()" title="Remote cursor: arrows glide a pointer, OK clicks" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">&#x1F5B1;</button>
       </div>
-      <!-- One-time subtitles coach tip (arrow points at the CC button) -->
+      <!-- subtitles coach strip (design pack): points at Subs & Sync -->
       <div id="subTip" class="no-cinema hidden relative mt-3 bg-[#1a2745] border border-teal-500/40 rounded-xl p-4 pr-12 text-sm">
         <button onclick="hideSubTip(false)" aria-label="Dismiss tip" class="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/80">&#x2715;</button>
-        <p class="font-bold">&#x1F4AC; Want subtitles?</p>
-        <ol class="text-gray-300 mt-1 space-y-1 list-decimal ml-5 text-[13px]">
-          <li>Press <b>CC</b> on the player bar — captions turn on instantly.</li>
-          <li>Nothing loaded yet? The <b>Subs settings</b> open so you can search &amp; download.</li>
-          <li>Wrong timing? Fix it in <b>&#x2699; &#x2192; Subs</b> with Position + Sync.</li>
-        </ol>
+        <p class="font-bold">&#x1F4AC; Need English or Japanese Subtitles?</p>
+        <p class="text-gray-300 mt-1 text-[13px]">Captions auto-loaded: <b class="text-teal-300">English [Full CC]</b>. Press <b>C</b> on desktop or use <b>Subs &amp; Sync</b> to calibrate audio delays.</p>
         <div class="flex flex-wrap gap-2 mt-3">
-          <button onclick="hideSubTip(true)" class="bg-teal-500 hover:bg-teal-400 font-bold px-4 py-2 rounded-full text-[13px]">Got it — don't show again</button>
-          <button onclick="hideSubTip(false)" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full text-[13px]">Later</button>
+          <button onclick="openSettings(); setTab('subs')" class="bg-teal-500 hover:bg-teal-400 font-bold px-4 py-2 rounded-full text-[13px]">Adjust Sync</button>
+          <button onclick="hideSubTip(true)" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full text-[13px]">Got it — don't show again</button>
         </div>
         <div class="tip-arrow"></div>
       </div>
-      <p class="no-cinema text-[11px] text-gray-600 mt-2">Cinema remote (TV): <b>&#x25C0;</b> = −10s • <b>&#x25B6;</b> = +30s • <b>&#x25B2;</b> = banner/Got-it • <b>&#x25BC;</b> = next button • <b>OK</b> = press / play-pause. Volume: your TV remote's own keys. Desktop: same. <b>CC</b> toggles our subtitles on/off (opens Subs settings when empty). <button onclick="showSubTip(true)" class="underline hover:text-gray-400">Show subs help again?</button></p>
+      <!-- cinema hotkeys strip (design pack keycaps) -->
+      <div class="no-cinema glass mt-3 px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-400">
+        <span class="font-bold text-gray-300 flex items-center gap-2"><span class="text-teal-300">&#x1F3AE;</span> Cinema Remote Hotkeys:</span>
+        <span class="flex items-center gap-1.5"><kbd class="px-2 py-1 rounded bg-white/10 border border-white/15 font-bold text-gray-200">&#x25C0;</kbd> = -10s</span>
+        <span class="flex items-center gap-1.5"><kbd class="px-2 py-1 rounded bg-white/10 border border-white/15 font-bold text-gray-200">&#x25B6;</kbd> = +30s</span>
+        <span class="flex items-center gap-1.5"><kbd class="px-2 py-1 rounded bg-white/10 border border-white/15 font-bold text-gray-200">OK</kbd>/<kbd class="px-2 py-1 rounded bg-white/10 border border-white/15 font-bold text-gray-200">Space</kbd> = Play / Pause</span>
+        <span class="flex items-center gap-1.5"><kbd class="px-2 py-1 rounded bg-white/10 border border-white/15 font-bold text-gray-200">C</kbd> = Subtitles</span>
+        <button onclick="openTvGuide(event)" class="ml-auto text-teal-300 font-semibold underline">Need Remote Pairing Help?</button>
+      </div>
       <!-- player options -->
-      <div class="no-cinema glass mt-3 p-4">
-        <p class="font-bold text-sm">Playback Settings</p>
-        <p class="text-[11px] text-gray-500 mb-3">Fine-tune playback without cluttering the player. TV boxes start at 720p for smoothness — step up anytime. <span id="healthLine"></span></p>
+      <div class="no-cinema glass mt-3 p-5">
+        <div class="flex flex-wrap items-center gap-3">
+          <p class="font-bold text-base">Playback Settings &amp; Engine Controls</p>
+          <span class="text-[10px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-full bg-teal-400/10 border border-teal-400/30 text-teal-300">Sandboxed</span>
+          <div id="qPills" class="ml-auto flex items-center gap-1 bg-black/30 border border-white/10 rounded-full p-1"></div>
+        </div>
+        <p class="text-[11px] text-gray-500 mb-3 mt-1">Fine-tune buffer preferences and ad-shield behavior for cinema fluidity. <span id="healthLine"></span></p>
         <div class="flex flex-wrap items-center gap-x-5 gap-y-3 text-xs text-gray-300">
         <label class="flex items-center gap-1" title="Sandbox blocks popup ads & tab hijacks. Turn off only if a server won't load."><input type="checkbox" id="optShield" checked class="switch" onchange="toggleShield()"> Ad Shield</label>
         <label class="flex items-center gap-2" title="TV remotes can only drive CineSrc + YapGrid — hide the other servers from Source lists."><input type="checkbox" id="optTvSafe" class="switch" onchange="tvSafeToggle()"> TV-safe servers</label>
@@ -987,24 +1002,41 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <div id="epGrid" class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 max-h-56 overflow-y-auto p-4"></div>
       </div>
     </div>
-    <div class="no-cinema bg-white/5 border border-white/10 rounded-xl p-5 h-fit">
-      <div class="flex gap-4">
-        <img id="wPoster" class="w-24 rounded-lg" src="" onerror="this.style.display='none'">
-        <div>
-          <h1 id="wTitle" class="text-xl font-bold"></h1>
-          <p id="wMeta" class="text-sm text-gray-400 mt-1"></p>
-          <p id="wRating" class="text-sm text-yellow-400 mt-1"></p>
+    <aside class="no-cinema h-fit">
+      <div class="glass-panel rounded-2xl border border-white/10 p-5">
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="wKind" class="px-2.5 py-1 rounded-full bg-teal-400/15 border border-teal-400/40 text-teal-300 text-xs font-bold"></span>
+          <span id="wYear" class="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-gray-300 text-xs font-semibold"></span>
+          <span id="wRating" class="px-2.5 py-1 rounded-full bg-amber-400/15 border border-amber-400/30 text-amber-300 text-xs font-bold"></span>
+        </div>
+        <div class="flex gap-3 mt-3">
+          <img id="wPoster" class="w-20 rounded-lg shrink-0" src="" onerror="this.style.display='none'">
+          <div class="min-w-0">
+            <h1 id="wTitle" class="text-2xl font-bold leading-tight"></h1>
+            <p id="wMeta" class="text-sm text-teal-300 font-semibold mt-1"></p>
+          </div>
+        </div>
+        <p class="text-[11px] font-bold tracking-widest text-gray-500 uppercase mt-4">Synopsis</p>
+        <p id="wOverview" class="text-sm text-gray-300 leading-relaxed mt-1"></p>
+        <p id="wCastLabel" class="text-[11px] font-bold tracking-widest text-gray-500 uppercase mt-4">Voice Cast</p>
+        <div id="wCast" class="grid grid-cols-2 gap-2 mt-2"></div>
+        <div class="mt-4 bg-white/[0.03] border border-white/10 rounded-xl p-3 space-y-1.5 text-xs">
+          <p class="flex justify-between gap-3"><span class="text-gray-500">Audio Track</span><b id="wAudio" class="text-right">Default</b></p>
+          <p class="flex justify-between gap-3"><span class="text-gray-500">Quality</span><b id="wQual" class="text-teal-300 text-right">Auto</b></p>
+          <p class="flex justify-between gap-3"><span class="text-gray-500">Source Engine</span><b id="wEngine" class="text-right"></b></p>
+        </div>
+        <div class="flex flex-wrap gap-2 mt-4">
+          <button onclick="watchListToggle()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">+ My List</button>
+          <button onclick="shareTitle()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">Share</button>
         </div>
       </div>
-      <p id="wOverview" class="text-sm text-gray-300 mt-4 leading-relaxed"></p>
-      <div id="wCast" class="text-xs text-gray-500 mt-3"></div>
-    </div>
-    <div id="upNext" class="no-cinema hidden bg-white/5 border border-white/10 rounded-xl p-5 mt-4">
-      <p id="upNextKick" class="text-[11px] font-black tracking-[.2em] text-teal-300">UP NEXT</p>
-      <p id="upNextTitle" class="font-bold mt-1"></p>
-      <p id="upNextMeta" class="text-[11px] text-gray-500 mt-0.5"></p>
-      <button id="upNextPlay" onclick="nextEpisode(1)" class="mt-3 bg-teal-500 hover:bg-teal-400 font-bold px-5 py-2 rounded-full text-sm">Play Now</button>
-    </div>
+      <div id="upNext" class="no-cinema hidden bg-white/5 border border-white/10 rounded-xl p-5 mt-4">
+        <p id="upNextKick" class="text-[11px] font-black tracking-[.2em] text-teal-300">UP NEXT</p>
+        <p id="upNextTitle" class="font-bold mt-1"></p>
+        <p id="upNextMeta" class="text-[11px] text-gray-500 mt-0.5"></p>
+        <button id="upNextPlay" onclick="nextEpisode(1)" class="mt-3 bg-teal-500 hover:bg-teal-400 font-bold px-5 py-2 rounded-full text-sm">Play Now</button>
+      </div>
+    </aside>
   </div>
 </div>
 
@@ -1030,28 +1062,18 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     </div>
     <div class="p-6 md:p-8 -mt-12 relative">
       <h2 id="mTitle" class="text-2xl md:text-4xl font-bold tracking-tight drop-shadow-md"></h2>
-      <p id="mMeta" class="text-sm text-gray-400 mt-2"></p>
+      <p id="mMeta" class="flex flex-wrap items-center gap-2 mt-2 text-sm text-gray-400"></p>
       <p id="mOverview" class="text-sm text-gray-300 mt-3 leading-relaxed"></p>
       <div class="flex flex-wrap gap-3 mt-5 items-center">
         <button id="mWatch" class="h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold shadow-[0_0_35px_-5px_rgba(0,240,181,0.35)] hover:scale-[1.02] active:scale-[0.98] transition-all">&#x25B6; Watch Now</button>
         <button id="mListBtn" onclick="addToList()" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">+ My List</button>
       </div>
-      <div id="mSeasons" class="mt-5 hidden">
-        <div class="flex flex-wrap items-center gap-3">
-          <span class="text-sm text-gray-400">Season</span>
-          <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-1">
-            <button onclick="modalSeasonStep(-1)" aria-label="Previous season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
-            <span id="mSeasonLabel" class="text-sm font-semibold min-w-[76px] text-center">S1</span>
-            <button onclick="modalSeasonStep(1)" aria-label="Next season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
-          </div>
-          <span class="text-sm text-gray-400">Episode</span>
-          <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-1">
-            <button onclick="modalEpStep(-1)" aria-label="Previous episode" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
-            <span id="mEpisodeLabel" class="text-sm font-semibold min-w-[130px] text-center">E1</span>
-            <button onclick="modalEpStep(1)" aria-label="Next episode" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
-          </div>
+      <div id="mSeasons" class="mt-6 hidden">
+        <div class="flex flex-wrap items-center gap-2">
+          <div id="mSeasonChips" class="flex flex-wrap gap-2"></div>
+          <span id="mSeasonSub" class="text-xs text-gray-400 ml-auto"></span>
         </div>
-        <p id="mSeasonSub" class="text-xs text-gray-400 mt-2 leading-relaxed"></p>
+        <div id="mEpCards" class="flex gap-3 overflow-x-auto pb-2 mt-3"></div>
       </div>
     </div>
   </div>
@@ -2334,6 +2356,30 @@ function heroListToggle(){
     setHero(heroIdx); // repaint the bookmark state
   } catch(e){}
 }
+function watchListToggle(){
+  try {
+    const d = currentItem || {};
+    const type = watchState.type, id = watchState.id;
+    if (inList(type, id)) {
+      saveList(getList().filter(it => !(it.type === type && it.id === id)));
+      toast("Removed from My List");
+    } else {
+      saveList([{ type, id, title: titleOf(d), poster: d.poster_path, rating: d.vote_average,
+        year: (d.release_date || d.first_air_date || "").slice(0, 4), at: Date.now() }, ...getList()]);
+      toast("\u{2713} Saved to My List", toastSaveActions());
+    }
+  } catch(e){}
+}
+function shareTitle(){
+  try {
+    const url = location.origin + location.pathname + `?type=${watchState.type}&id=${watchState.id}`
+      + (watchState.type === "tv" ? `&s=${watchState.s}&e=${watchState.e}` : "");
+    const title = titleOf(currentItem || {});
+    if (navigator.share) { navigator.share({ title, url }).catch(() => {}); return; }
+    if (navigator.clipboard) { navigator.clipboard.writeText(url).then(() => toast("Link copied \u{2713}")).catch(() => {}); return; }
+    toast(url);
+  } catch(e){}
+}
 function setHero(i){
   heroIdx = i;
   const x = heroItems[i]; if(!x) return;
@@ -3131,7 +3177,12 @@ async function openDetail(type, id){
   if (!mb.src) mb.style.display = "none";
   document.getElementById("mBackdrop").loading = "eager";
   document.getElementById("mTitle").textContent = titleOf(d);
-  document.getElementById("mMeta").textContent = `\u{2605} ${Number(d.vote_average||0).toFixed(1)} • ${(d.release_date||d.first_air_date||"").slice(0,4)} • ${(d.genres||[]).map(g=>g.name).join(", ")}`;
+  document.getElementById("mMeta").innerHTML = `
+    ${Number(d.vote_count || 0) > 0 ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-400/15 border border-amber-400/30 text-amber-300 font-bold">\u{2605} ${Number(d.vote_average || 0).toFixed(1)}</span>` : ""}
+    <span class="text-gray-400 font-medium">${(d.release_date || d.first_air_date || "").slice(0, 4)}</span>
+    <span class="px-2 py-0.5 rounded border border-white/15 bg-white/5 text-[11px] font-semibold text-gray-300">${type === "tv" ? "TV" : "Movie"}</span>
+    <span class="text-gray-500">\u{00B7}</span>
+    <span class="text-teal-300">${(d.genres || []).map(g => g.name).filter(Boolean).join(" \u{00B7} ") || "\u{2014}"}</span>`;
   document.getElementById("mOverview").textContent = d.overview || "No overview.";
   try {
     document.getElementById("mListBtn").textContent = inList(type, id) ? "\u{2713} In My List" : "+ My List";
@@ -3160,16 +3211,58 @@ async function openDetail(type, id){
   setTimeout(()=>{ const w = document.getElementById("mWatch"); if (w) w.focus(); }, 60);
 }
 function updateModalSeasonLabel(){
-  const s = modalSeasons[modalSeasonIdx] || { season_number: 1, episode_count: "?" };
-  document.getElementById("mSeasonLabel").textContent = `S${s.season_number} (${s.episode_count} eps)`;
+  // design-pack season chips (Season 1 / Season 2 (2025) / ...)
+  const wrap = document.getElementById("mSeasonChips");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  modalSeasons.forEach((s, i) => {
+    const b = document.createElement("button");
+    const yr = (s.air_date || "").slice(0, 4);
+    b.textContent = `Season ${s.season_number}${s.season_number > 1 && yr ? " (" + yr + ")" : ""}`;
+    b.className = "px-3.5 py-1.5 rounded-full text-xs font-bold transition-all " + (i === modalSeasonIdx
+      ? "bg-teal-400 text-[#0B111E] shadow-[0_0_12px_rgba(0,240,181,0.35)]"
+      : "bg-white/[0.06] hover:bg-white/12 text-gray-300 border border-white/10");
+    b.onclick = () => modalSeasonPick(i);
+    wrap.appendChild(b);
+  });
+}
+function modalSeasonPick(i){
+  modalSeasonIdx = i;
+  updateModalSeasonLabel();
+  loadModalEpisodes();
 }
 function updateModalEpLabel(){
-  const e = modalEpisodes[modalEpIdx];
-  if (!e) { document.getElementById("mEpisodeLabel").textContent = "E1"; return; }
-  const un = epUnaired(e);
-  document.getElementById("mEpisodeLabel").textContent = un
-    ? `E${e.episode_number} \u{1F4C5} airs ${epAirPretty(un)}`
-    : `E${e.episode_number} — ${(e.name||"").slice(0,18)}`;
+  // design-pack episode cards: still + play disc + Resume badge + status line
+  const wrap = document.getElementById("mEpCards");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  modalEpisodes.slice(0, 24).forEach((e, i) => {
+    const un = epUnaired(e);
+    const cur = i === modalEpIdx;
+    let pos = 0;
+    try { pos = savedPosFor("tv", currentDetail.id, (modalSeasons[modalSeasonIdx] || {}).season_number, e.episode_number); } catch(err){}
+    const card = document.createElement("button");
+    card.className = "relative shrink-0 w-44 rounded-xl overflow-hidden border text-left transition-all " + (cur
+      ? "border-teal-400 shadow-[0_0_18px_rgba(0,240,181,0.35)]"
+      : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]") + (un ? " opacity-60" : "");
+    card.innerHTML = `
+      <div class="relative">
+        ${e.still_path ? `<img loading="lazy" decoding="async" src="${IMG(e.still_path, "w300")}" class="w-full aspect-video object-cover" onerror="this.style.display='none'">` : `<div class="w-full aspect-video bg-white/5"></div>`}
+        ${!un ? `<span class="absolute inset-0 grid place-items-center"><span class="w-9 h-9 rounded-full bg-teal-400 text-[#0B111E] grid place-items-center shadow-[0_0_18px_rgba(0,240,181,0.5)]">&#x25B6;</span></span>` : ""}
+        ${pos > 0 ? `<span class="absolute top-2 left-2 text-[10px] font-bold bg-teal-400 text-[#0B111E] px-2 py-0.5 rounded-full">Resume</span>` : ""}
+      </div>
+      <div class="p-2.5">
+        <p class="text-xs font-bold truncate">${e.episode_number}. ${escapeHtml(e.name || "")}</p>
+        <p class="text-[10px] text-gray-400 mt-0.5">${un ? "COMING SOON \u{00B7} " + epAirPretty(un) : (e.runtime ? e.runtime + "m" : "")}</p>
+        <p class="text-[10px] text-gray-500 line-clamp-2 mt-1">${escapeHtml(String(e.overview || "").slice(0, 100))}</p>
+      </div>`;
+    if (!un) card.onclick = () => { modalEpIdx = i; updateModalEpLabel(); playModalEp(); };
+    wrap.appendChild(card);
+  });
+}
+function playModalEp(){
+  const btn = document.getElementById("mWatch");
+  if (btn && typeof btn.onclick === "function") btn.onclick();
 }
 async function loadModalEpisodes(){
   const s = (modalSeasons[modalSeasonIdx]||{}).season_number || 1;
@@ -3291,10 +3384,35 @@ async function openWatch(type, id, s=1, e=1, t=0){
   document.getElementById("wPoster").src = IMG(d.poster_path, "w342");
   document.getElementById("wPoster").loading = "eager";
   document.getElementById("wTitle").textContent = titleOf(d);
-  document.getElementById("wMeta").textContent = `${type.toUpperCase()} • ${(d.release_date||d.first_air_date||"").slice(0,4)} • ${(d.genres||[]).map(g=>g.name).join(", ")}`;
-  document.getElementById("wRating").textContent = `\u{2605} ${Number(d.vote_average||0).toFixed(1)} (${d.vote_count||0} votes)`;
+  // design-pack sidebar: kind/year/votes chips, genre links, cast chips
+  const kindLbl = watchState.anime ? "ANIME" : watchState.ko ? "K-DRAMA" : type === "movie" ? "MOVIE" : "TV";
+  try { document.getElementById("wKind").textContent = kindLbl; } catch(e){}
+  try { document.getElementById("wYear").textContent = (d.release_date || d.first_air_date || "").slice(0, 4) || "\u{2014}"; } catch(e){}
+  document.getElementById("wMeta").textContent = (d.genres || []).map(g => g.name).filter(Boolean).join(" \u{00B7} ") || "\u{2014}";
+  document.getElementById("wRating").textContent = Number(d.vote_count || 0) > 0
+    ? `\u{2605} ${Number(d.vote_average || 0).toFixed(1)} (${d.vote_count} votes)` : "";
   document.getElementById("wOverview").textContent = d.overview || "";
-  document.getElementById("wCast").textContent = "Cast: " + ((d.credits&&d.credits.cast||[]).slice(0,6).map(c=>c.name).join(", ") || "");
+  try {
+    document.getElementById("wCastLabel").textContent = watchState.anime ? "Voice Cast" : "Top Cast";
+    const cast = ((d.credits && d.credits.cast) || []).slice(0, 4);
+    document.getElementById("wCast").innerHTML = cast.map(c =>
+      `<div class="bg-white/5 border border-white/10 rounded-xl px-3 py-2"><p class="text-sm font-bold truncate">${escapeHtml(c.name || "")}</p><p class="text-[11px] text-teal-300 truncate">${escapeHtml(c.character || "")}</p></div>`
+    ).join("");
+  } catch(e){}
+  try {
+    document.getElementById("wAudio").textContent = (window._anipmTracks && window._anipmTracks.lang)
+      ? (String(window._anipmTracks.lang).toUpperCase() + " track") : "Default";
+    document.getElementById("wQual").textContent = (QLEVELS[qIdx] || {}).l || "Auto";
+    document.getElementById("wEngine").textContent = ((MIRRORS.find(x => x.id === mirror) || {}).name || mirror) + " \u{00B7} "
+      + (document.getElementById("player").hasAttribute("sandbox") ? "Sandboxed" : "Raw");
+  } catch(e){}
+  try {
+    document.getElementById("watchCrumb").textContent =
+      (type === "movie" ? "Movies" : watchState.anime ? "Anime" : watchState.ko ? "KDrama" : "TV Shows")
+      + " \u{2F} " + titleOf(d) + (type === "tv" ? " \u{2F} Season " + watchState.s : "");
+    const spn = document.getElementById("serverPillName");
+    if (spn) spn.textContent = ((MIRRORS.find(x => x.id === mirror) || {}).name || "Server") + " \u{00B7} Ready";
+  } catch(e){}
   // TV episode UI
   if(type==="tv"){
     document.getElementById("epNav").classList.remove("hidden");
@@ -3386,18 +3504,26 @@ async function loadEpisodes(s){
     const isFin = !unaired && ep.episode_number === _maxEp;
     const finTag = isFin ? (_lastSeason ? "Series finale" : "Season finale") : "";
     const b = document.createElement("button");
-    b.textContent = unaired ? "E" + ep.episode_number + " \u{1F4C5}" : "E" + ep.episode_number + (isFin ? " \u{1F3C1}" : "");
-    b.title = unaired ? `Airs ${epAirPretty(unaired)} — not out yet` : (finTag || ep.name || "");
     const isCur = sv === watchState.s && ep.episode_number == e;
+    const isNext = sv === watchState.s && ep.episode_number === e + 1 && !unaired;
+    const isSeen = sv === watchState.s && ep.episode_number < e;
+    // design-pack chips: E number + one honest status word (never a quality claim)
+    const sub = unaired ? "COMING SOON" : isCur ? "PLAYING" : isNext ? "Up Next"
+      : isSeen ? "Seen" : (ep.runtime ? ep.runtime + "m" : "\u{2014}");
+    b.innerHTML = `<span class="block font-bold">E${ep.episode_number}</span><span class="block text-[10px] opacity-80 mt-0.5">${sub}</span>`;
+    b.title = unaired ? `Airs ${epAirPretty(unaired)} — not out yet` : (finTag || ep.name || "");
     if (unaired) {
       // greyed + dead: no data-focusable (stays out of D-pad/Tab order),
       // no handler — a real disabled button can't be mistaken for content
       b.disabled = true;
       b.setAttribute("aria-disabled", "true");
-      b.className = "text-xs px-2 py-2 rounded-lg bg-white/5 text-gray-500";
+      b.className = "text-xs px-2 py-2.5 rounded-xl bg-white/5 text-gray-500";
     } else {
       b.setAttribute("data-focusable", "1");
-      b.className = "text-xs px-2 py-2 rounded-lg " + (isCur ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
+      b.className = "text-xs px-2 py-2.5 rounded-xl " + (isCur
+        ? "bg-teal-400 text-[#0B111E] font-bold ring-2 ring-teal-300 shadow-[0_0_18px_rgba(0,240,181,0.45)]"
+        : isNext ? "bg-white/10 hover:bg-white/20 text-teal-300 border border-teal-400/40"
+        : "bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10");
       b.onclick = ()=>{ watchState.s = sv; gridS = sv; watchState.e = ep.episode_number; loadPlayer(); loadEpisodes(); updateSeasonLabel(); saveContinue(); };
     }
     grid.appendChild(b);
@@ -3736,6 +3862,29 @@ function paintQuality(){
     const el = document.getElementById(id);
     if (el) el.textContent = t;
   });
+  try { paintQPills(); } catch(e){}
+}
+function paintQPills(){
+  const box = document.getElementById("qPills");
+  if (!box) return;
+  box.innerHTML = "";
+  QLEVELS.forEach((q, i) => {
+    const b = document.createElement("button");
+    b.textContent = q.l;
+    b.className = "px-3.5 py-1.5 rounded-full text-xs font-bold transition-all " + (qIdx === i
+      ? "bg-teal-400 text-[#0B111E] shadow-[0_0_14px_rgba(0,240,181,0.4)]"
+      : "text-gray-300 hover:bg-white/10");
+    b.onclick = () => qualityPick(i);
+    box.appendChild(b);
+  });
+}
+function qualityPick(i){
+  try {
+    if (mirror === "anipm" || mirror === "vidbolt") { openAV(); return; } // provider levels live in A/V
+    qIdx = ((i % QLEVELS.length) + QLEVELS.length) % QLEVELS.length;
+    qualityStep(0); // bar path: paint + persist + debounced keep-pos reload
+    paintQPills();
+  } catch(e){}
 }
 function qualityStep(dir){
   // AniPM has no server to re-pick — cycle renditions live instead of reloading

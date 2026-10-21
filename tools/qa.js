@@ -115,7 +115,13 @@
       picks append as a suffix via browseTitle)
    106 no floating scroll-to-top button (it stacked over the remote-cursor
       control and covered the dazzo legend) and the footer keeps right-edge
-      clearance so fixed bottom-right controls never cover the credit */
+      clearance so fixed bottom-right controls never cover the credit
+   107 player page design: breadcrumb + server pill + Switch Server, the
+      details sidebar (kind/year/votes chips, cast chips, tech specs, My
+      List + Share), the engine panel quality pills, and episode chips with
+      honest status words (PLAYING / Up Next / Seen / COMING SOON)
+   108 details modal design: season chips + episode cards row (Resume badge,
+      play disc) and the meta pill row (amber star pill, year, type, genres) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1016,6 +1022,48 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("cursorBtn must hide outside TV -- on desktop it sat over the dazzo legend");
   if (/body\.watch-on #cursorBtn/.test(html)) ok("the watch-on cursor hide survives");
   else bad("the body.watch-on #cursorBtn hide must stay (no cursor button over playback)");
+}
+
+/* ---------- 107. player page design pack ---------- */
+{
+  if (html.includes('id="watchCrumb"') && html.includes('id="serverPillName"') && /Switch Server/.test(html))
+    ok("player breadcrumb + server pill + Switch Server present");
+  else bad("the player page needs the breadcrumb bar (watchCrumb + serverPillName + Switch Server)");
+  ["wKind", "wYear", "wRating", "wAudio", "wQual", "wEngine", "wCastLabel"].forEach((id) => {
+    if (!html.includes('id="' + id + '"')) bad("sidebar element missing: #" + id);
+  });
+  if (/id="wKind"/.test(html) && /wAudio/.test(html) && /Source Engine/.test(html)) ok("details sidebar carries the chips + tech-specs box");
+  else bad("the watch sidebar needs kind/year/votes chips and the tech-specs box");
+  const wl = html.match(/function watchListToggle\s*\(\)\s*\{[\s\S]*?\n\}/);
+  const sh = html.match(/function shareTitle\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (wl && sh && /watchListToggle\(\)/.test(html) && /shareTitle\(\)/.test(html)) ok("sidebar actions: My List toggle + Share");
+  else bad("watchListToggle / shareTitle must exist and be wired");
+  const qp = html.match(/function paintQPills\s*\(\)\s*\{[\s\S]*?\n\}/);
+  const qpk = html.match(/function qualityPick\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (qp && qpk && /QLEVELS/.test(qp[0])) ok("engine panel quality pills ride QLEVELS (no invented 4K)");
+  else bad("paintQPills/qualityPick missing -- the engine panel needs the QLEVELS pills");
+  const le = html.match(/async function loadEpisodes\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (le && /PLAYING/.test(le[0]) && /Up Next/.test(le[0]) && /COMING SOON/.test(le[0]) && /Seen/.test(le[0]))
+    ok("episode chips show the honest status words");
+  else bad("loadEpisodes chips must show PLAYING / Up Next / Seen / COMING SOON");
+  if (le && !/4[Kk]|HD\b/.test(le[0].replace(/watchState/g, ""))) ok("episode chips carry no invented quality labels");
+  else bad("episode chips must not invent HD/4K labels");
+}
+
+/* ---------- 108. details modal design pack ---------- */
+{
+  if (html.includes('id="mSeasonChips"') && html.includes('id="mEpCards"')) ok("modal season chips + episode cards row present");
+  else bad("the details modal needs mSeasonChips + mEpCards");
+  const us = html.match(/function updateModalSeasonLabel\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (us && /modalSeasonPick/.test(us[0]) && /Season /.test(us[0])) ok("season chips are built per season (year-tagged)");
+  else bad("updateModalSeasonLabel must build the season chips");
+  const ue = html.match(/function updateModalEpLabel\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (ue && /Resume/.test(ue[0]) && /mEpCards/.test(ue[0]) && /COMING SOON/.test(ue[0]))
+    ok("episode cards carry Resume badges + Coming Soon lines");
+  else bad("updateModalEpLabel must build the episode cards (Resume + status)");
+  const mm = html.match(/getElementById\("mMeta"\)\.innerHTML = `[\s\S]{0,1200}/);
+  if (mm && /amber-400\/15/.test(mm[0]) && /genres/.test(mm[0])) ok("modal meta wears the pill row (amber star pill + year + type + genres)");
+  else bad("mMeta must render the design pill row");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
