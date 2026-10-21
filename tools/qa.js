@@ -96,7 +96,14 @@
       fallback stays)
    99 the server sweep lands on the first Tagalog/Filipino-carrying server
       (one pass per episode, aborts on any manual pick) and the panel states
-      "No Tagalog dub available" with the Filipino subtitle pointer */
+      "No Tagalog dub available" with the Filipino subtitle pointer
+   100 the 7-tab house rail: Home / Movies / TV Shows / Anime / KDrama /
+      My List / Browse (desktop + phone bars)
+   101 the KDrama tab browses original_language=ko TV (never anime), cards
+      label K-DRAMA, and Continue entries carry the ko flag
+   102 tab-scoped Continue Watching: Home = everything, Movies = movies,
+      TV = non-ko non-anime TV, Anime = anime, KDrama = ko; the grid surface
+      shows the scoped row; the Browse tab leads with the kind pick */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -876,6 +883,58 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const pav = html.match(/function paintBoltAV\s*\(\)\s*\{[\s\S]*?\n\}/);
   if (pav && /_koAudioNote/.test(pav[0])) ok("the A/V AUDIO column shows the no-dub note");
   else bad("paintBoltAV must surface window._koAudioNote in the AUDIO column");
+}
+
+/* ---------- 100. the 7-tab house rail ---------- */
+{
+  const tabs = ["navHome", "navMovies", "navTv", "navAnime", "navKdrama", "navList", "navBrowse"];
+  const miss = tabs.filter((t) => !html.includes('id="' + t + '"'));
+  if (!miss.length) ok("all 7 desktop tabs present (Home/Movies/TV/Anime/KDrama/My List/Browse)");
+  else bad("missing desktop tabs: " + miss.join(", "));
+  const mtabs = ["mnavHome", "mnavMovies", "mnavTv", "mnavAnime", "mnavKdrama", "mnavList", "mnavBrowse"];
+  const mmiss = mtabs.filter((t) => !html.includes('id="' + t + '"'));
+  if (!mmiss.length) ok("all 7 phone tabs present");
+  else bad("missing phone tabs: " + mmiss.join(", "));
+  const pn = html.match(/function paintNav\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (pn && /navKdrama/.test(pn[0]) && /navBrowse/.test(pn[0])) ok("paintNav marks all 7 tabs");
+  else bad("paintNav must know the KDrama + Browse tabs");
+}
+
+/* ---------- 101. KDrama tab (original_language=ko, never anime) ---------- */
+{
+  const bm = html.match(/async function browseMore\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (bm && /with_original_language=ko/.test(bm[0])) ok("the KDrama tab browses original_language=ko TV");
+  else bad("browseMore must serve the ko discover (with_original_language=ko)");
+  if (bm && /_label: browse\.type === "ko" \? "K-DRAMA"/.test(bm[0])) ok("KDrama cards label K-DRAMA");
+  else bad("ko browse cards must carry the K-DRAMA label");
+  const gg = html.match(/async function getGenres\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (gg && /type === "ko"/.test(gg[0])) ok("getGenres maps ko to the TV genre list");
+  else bad("getGenres must resolve genres for the ko tab");
+  const sc = html.match(/function saveContinue\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (sc && /ko: !!watchState\.ko/.test(sc[0])) ok("Continue entries carry the ko flag");
+  else bad("saveContinue must store the ko flag for tab scoping");
+}
+
+/* ---------- 102. tab-scoped Continue Watching + Browse kind pick ---------- */
+{
+  const cs = html.match(/function continueScopeItems\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (!cs) bad("continueScopeItems missing -- Continue Watching must be tab-scoped");
+  else {
+    const t = cs[0];
+    if (/scope === "movie"/.test(t) && /scope === "tv"/.test(t) && /scope === "anime"/.test(t) && /scope === "ko"/.test(t))
+      ok("continueScopeItems scopes movie/tv/anime/ko (home = everything)");
+    else bad("continueScopeItems must scope movie, non-ko tv, anime and ko");
+    if (/!x\.anime && !x\.ko/.test(t)) ok("the TV scope excludes anime and K-dramas");
+    else bad("the TV Continue scope must be non-ko non-anime TV");
+  }
+  const rc = html.match(/function renderContinue\s*\(\)\s*\{[\s\S]*?\n\}/);
+  const pc = html.match(/function paintContinueRow\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (rc && /gridContinue/.test(rc[0]) && /paintContinueRow\(/.test(rc[0]) && pc && /continueScopeItems\(/.test(pc[0]))
+    ok("the grid surface shows the scoped Continue row");
+  else bad("renderContinue must paint the scoped row into the grid surface too (paintContinueRow + continueScopeItems)");
+  if (html.includes('id="kindRow"') && /function buildKindRow/.test(html) && /openBrowseTab/.test(html))
+    ok("the Browse tab leads with the kind pick (kindRow)");
+  else bad("the Browse tab needs the kind pick first (kindRow + openBrowseTab + setKind)");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

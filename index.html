@@ -605,7 +605,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 194; // bump every release alongside version.txt
+  const BUILD_NUM = 195; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -638,7 +638,9 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <button id="navMovies" onclick="filterType('movie',event)" class="navlink">Movies</button>
     <button id="navTv" onclick="filterType('tv',event)" class="navlink">TV Shows</button>
     <button id="navAnime" onclick="filterType('anime',event)" class="navlink">Anime</button>
+    <button id="navKdrama" onclick="filterType('ko',event)" class="navlink">KDrama</button>
     <button id="navList" onclick="showList(event)" class="navlink">My List</button>
+    <button id="navBrowse" onclick="openBrowseTab(event)" class="navlink">Browse</button>
     <button onclick="openTvGuide(event)" class="navlink" title="How to install & use on TV">&#x1F4FA; TV Setup</button>
   </div>
   <div class="ml-auto flex gap-2 w-full md:w-auto justify-end">
@@ -654,7 +656,9 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <button id="mnavMovies" onclick="filterType('movie',event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F3AC;</span><span>Movies</span></button>
     <button id="mnavTv" onclick="filterType('tv',event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F4FA;</span><span>TV</span></button>
     <button id="mnavAnime" onclick="filterType('anime',event)" class="mnav-btn"><span class="text-xl leading-none">&#x2728;</span><span>Anime</span></button>
+    <button id="mnavKdrama" onclick="filterType('ko',event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F338;</span><span>KDrama</span></button>
     <button id="mnavList" onclick="showList(event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F4CC;</span><span>My List</span></button>
+    <button id="mnavBrowse" onclick="openBrowseTab(event)" class="mnav-btn"><span class="text-xl leading-none">&#x2630;</span><span>Browse</span></button>
   </div>
 </nav>
 
@@ -688,6 +692,13 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <h2 id="gridTitle" class="row-title text-xl font-bold flex-1"></h2>
       <button id="adultLockBtn" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" class="shrink-0 px-4 h-11 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-sm font-bold">&#x1F512; 18+ Hidden</button>
     </div>
+    <div id="gridContinue" class="hidden mb-6">
+      <div class="sb-row">
+        <div class="flex items-center gap-2 mb-2"><h2 class="row-title text-lg font-bold flex-1">Continue Watching</h2></div>
+        <div id="gridContinueGrid" class="flex gap-3 overflow-x-auto row-scroll pb-2"></div>
+      </div>
+    </div>
+    <div id="kindRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="genreRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="yearRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
     <div id="studioRow" class="hidden flex gap-2 overflow-x-auto row-scroll pb-3 mb-2"></div>
@@ -1603,7 +1614,7 @@ function cardEl(x, type){
   const realVote = Number(x.vote_count || 0) > 0 && Number(x.vote_average || 0) > 0;
   // meta line: year · type with normalized labels (ANIME = JP animation)
   const isAnimeCard = (x.genre_ids || []).includes(16) || x.media_type === "anime";
-  const typeLabel = type === "movie" ? "MOVIE" : isAnimeCard ? "ANIME" : "TV";
+  const typeLabel = x._label || (type === "movie" ? "MOVIE" : isAnimeCard ? "ANIME" : "TV");
   const year = yearOf(x);
   d.innerHTML = `
     <div class="relative poster-frame">
@@ -2301,12 +2312,12 @@ function showRows(){
   renderContinue();
 }
 function paintNav(which){
-  ["navHome", "navMovies", "navTv", "navAnime", "navList"].forEach(id => {
+  ["navHome", "navMovies", "navTv", "navAnime", "navKdrama", "navList", "navBrowse"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.toggle("nav-active", id === which);
   });
   // phone tab bar mirrors the desktop pill
-  const mMap = { navHome: "mnavHome", navMovies: "mnavMovies", navTv: "mnavTv", navAnime: "mnavAnime", navList: "mnavList" };
+  const mMap = { navHome: "mnavHome", navMovies: "mnavMovies", navTv: "mnavTv", navAnime: "mnavAnime", navKdrama: "mnavKdrama", navList: "mnavList", navBrowse: "mnavBrowse" };
   Object.entries(mMap).forEach(([d, m]) => {
     const el = document.getElementById(m);
     if (el) el.classList.toggle("mnav-active", d === which);
@@ -2320,7 +2331,35 @@ function syncMobileNav(){
   bar.classList.toggle("hidden", onWatch);
 }
 async function filterType(type, ev){
+  window._browseTab = false; // dedicated section tab (Movies/TV/Anime/KDrama)
   openBrowse(type, ev);
+}
+/* Browse tab: kind pick FIRST (Movies/TV/Anime/K-Dramas), then the genre
+   chips + year rail over the full paginated catalog. The kind chips stay
+   visible so the kind switches without leaving the tab. */
+function openBrowseTab(ev){
+  if (ev) ev.preventDefault();
+  window._browseTab = true;
+  openBrowse(window._browseKind || "movie", null);
+}
+function setKind(kind){
+  window._browseKind = kind;
+  openBrowse(kind, null);
+}
+function buildKindRow(){
+  const row = document.getElementById("kindRow");
+  if (!row) return;
+  if (!window._browseTab) { row.classList.add("hidden"); return; }
+  row.classList.remove("hidden");
+  row.innerHTML = "";
+  [["movie", "Movies"], ["tv", "TV Shows"], ["anime", "Anime"], ["ko", "K-Dramas"]].forEach(([k, label]) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.dataset.kind = k;
+    b.className = "shrink-0 px-4 h-10 rounded-full text-sm font-bold " + (browse.type === k ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
+    b.onclick = () => setKind(k);
+    row.appendChild(b);
+  });
 }
 /* ---------- ADULT GATE (PIN-locked 18+ filter) ----------
    Locked by default: adult titles are REMOVED from rails, search, hero
@@ -2537,7 +2576,7 @@ async function getGenres(type){
       }
     } catch(e){}
   }
-  const d = await tmdb(`/genre/${type === "anime" ? "tv" : type}/list`);
+  const d = await tmdb(`/genre/${(type === "anime" || type === "ko") ? "tv" : type}/list`);
   genreCache[type] = (d && d.genres) || [];
   return genreCache[type];
 }
@@ -2550,8 +2589,9 @@ async function openBrowse(type, ev){
   document.getElementById("continueRow").classList.add("hidden");
   document.getElementById("listView").classList.add("hidden");
   document.getElementById("gridView").classList.remove("hidden");
-  document.getElementById("gridTitle").textContent = type === "movie" ? "Movies" : type === "anime" ? "Anime" : "TV Shows";
-  paintNav(type === "movie" ? "navMovies" : type === "anime" ? "navAnime" : "navTv");
+  document.getElementById("gridTitle").textContent = type === "movie" ? "Movies" : type === "anime" ? "Anime" : type === "ko" ? "K-Dramas" : "TV Shows";
+  paintNav(type === "movie" ? "navMovies" : type === "anime" ? "navAnime" : type === "ko" ? "navKdrama" : "navTv");
+  if (window._browseTab) paintNav("navBrowse"); // Browse tab owns the highlight
   document.getElementById("grid").innerHTML = "";
   const row = document.getElementById("genreRow");
   row.classList.remove("hidden");
@@ -2575,12 +2615,14 @@ async function openBrowse(type, ev){
       row.appendChild(b);
     });
     paintChips();
+    buildKindRow();
     buildYears();
     paintStudios();
   } catch(e){
     row.innerHTML = `<p class="text-xs text-gray-500 py-2">Categories unavailable — showing popular.</p>`;
   }
   paintAdultLock();
+  renderContinue(); // tab-scoped Continue Watching over the grid
   browseMore(true);
 }
 function paintChips(){
@@ -2656,8 +2698,8 @@ function paintStudios(){
   // studio chip row (Movies + TV only): logo badge on white so dark marks
   // stay visible, name text always alongside, h-11 for TV remotes
   const srow = document.getElementById("studioRow");
-  srow.classList.toggle("hidden", browse.type === "anime");
-  if (browse.type === "anime") return;
+  srow.classList.toggle("hidden", browse.type === "anime" || browse.type === "ko");
+  if (browse.type === "anime" || browse.type === "ko") return;
   srow.innerHTML = "";
   const all = document.createElement("button");
   all.textContent = "All studios";
@@ -2691,7 +2733,7 @@ function paintStudioChips(){
     const active = Number(b.dataset.studio) === browse.studio;
     b.className = "shrink-0 pl-1.5 pr-4 h-11 rounded-full text-sm font-bold flex items-center gap-2 " + (active ? "bg-teal-500" : "bg-white/10 hover:bg-white/20");
   });
-  const base = browse.type === "movie" ? "Movies" : "TV Shows";
+  const base = browse.type === "movie" ? "Movies" : browse.type === "ko" ? "K-Dramas" : "TV Shows";
   const st = STUDIOS.find(x => x.id === browse.studio);
   document.getElementById("gridTitle").textContent = st ? `${base} • ${st.name}` : base;
 }
@@ -2738,6 +2780,10 @@ async function browseMore(focusFirst){
           const kw = await getAdultKwIds();
           if (kw.length) path += `&without_keywords=${kw.join("|")}`;
         }
+      } else if (browse.type === "ko") {
+        // K-Dramas: TV shows whose ORIGINAL language is Korean (never anime)
+        const gk = (typeof browse.genre === "number" && browse.genre) ? `&with_genres=${browse.genre}` : "";
+        path = `/discover/tv?sort_by=popularity.desc&include_adult=false${gk}&with_original_language=ko${yr}&page=${next}`;
       } else {
         // studio stacks with genre (TMDB ANDs them); anime never carries one
         const sc = browse.studio ? `&with_companies=${browse.studio}` : "";
@@ -2749,10 +2795,10 @@ async function browseMore(focusFirst){
     browse.totalPages = d.total_pages || 1;
     const grid = document.getElementById("grid");
     const prevCount = grid.children.length;
-    const bt = browse.type === "anime" ? "tv" : browse.type;
+    const bt = (browse.type === "anime" || browse.type === "ko") ? "tv" : browse.type;
     const lockedBr = adultLocked();
     (d.results || []).filter(x => x.poster_path && (!lockedBr || !isAdult(x))).forEach(x => {
-      grid.appendChild(cardEl({ ...x, media_type: bt }, bt));
+      grid.appendChild(cardEl({ ...x, media_type: bt, _label: browse.type === "ko" ? "K-DRAMA" : "" }, bt));
     });
     if (browse.page < browse.totalPages) btn.classList.remove("hidden");
     if (focusFirst) {
@@ -4042,6 +4088,7 @@ function saveContinue(){
     const item = { type: watchState.type, id: watchState.id, s: watchState.s, e: watchState.e,
       title: titleOf(currentItem||{}), poster: (currentItem||{}).poster_path,
       anime: !!watchState.anime,
+      ko: !!watchState.ko,
       pos: prev ? (prev.pos || 0) : 0, dur: prev ? (prev.dur || 0) : 0, at: Date.now() };
     arr = [item, ...arr.filter(x=>!(x.type===item.type&&x.id===item.id))].slice(0,20);
     localStorage.setItem(k, JSON.stringify(arr));
@@ -4080,11 +4127,28 @@ function markWatched(){
     if (it) { it.pos = 0; localStorage.setItem(k, JSON.stringify(arr)); renderContinue(); }
   }catch(e){}
 }
+function continueScopeItems(scope){
+  // tab-scoped Continue Watching (house rule): Home = everything,
+  // Movies = movies, TV = non-ko TV, Anime = anime, KDrama = lang ko
+  let arr = [];
+  try { arr = JSON.parse(localStorage.getItem("streambox_continue") || "[]"); } catch(e){ return []; }
+  if (adultLocked()) arr = arr.filter(x => !isAdult({ title: x.title }));
+  if (scope === "movie") return arr.filter(x => x.type === "movie");
+  if (scope === "tv") return arr.filter(x => x.type === "tv" && !x.anime && !x.ko);
+  if (scope === "anime") return arr.filter(x => !!x.anime);
+  if (scope === "ko") return arr.filter(x => !!x.ko);
+  return arr;
+}
 function renderContinue(){
+  // home surface = everything; the browse/tab surface = scoped to the tab
+  paintContinueRow(document.getElementById("continueRow"), document.getElementById("continueGrid"), "home");
+  const scope = { movie: "movie", tv: "tv", anime: "anime", ko: "ko" }[(typeof browse !== "undefined" && browse) ? browse.type : ""] || "home";
+  paintContinueRow(document.getElementById("gridContinue"), document.getElementById("gridContinueGrid"), scope);
+}
+function paintContinueRow(row, grid, scope){
   try{
-    let arr = JSON.parse(localStorage.getItem("streambox_continue")||"[]");
-    if (adultLocked()) arr = arr.filter(x => !isAdult({ title: x.title }));
-    const row = document.getElementById("continueRow"), grid = document.getElementById("continueGrid");
+    const arr = continueScopeItems(scope);
+    if(!row || !grid){ return; }
     if(!arr.length){ row.classList.add("hidden"); return; }
     row.classList.remove("hidden"); grid.innerHTML = "";
     arr.forEach(x=>{
