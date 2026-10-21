@@ -17,7 +17,15 @@
    11 DOM: no duplicate ids; every literal id reference resolves
    12 inline handlers call functions that exist
    13 workflow YAML stays pure ASCII (console/log safety)
-   14 manifest.webmanifest parses */
+   14 manifest.webmanifest parses
+   Numbers 15-62 belong to the native track's qa (shared numbering space so
+   cross-track references never collide) -- website-side invariants start at 63:
+   63 K-drama chain suppression (our Wyzie/TSDB/BetaSeries chain never
+      auto-loads or restores over K-dramas; VidBolt own English subs note)
+   64 K-drama VidBolt defaults (Tagalog dub first, Korean fallback, English
+      provider subtitles picked from the provider's own option values)
+   65 manual subtitle pick stands the K-drama auto down and clears the
+      provider caption layer (two layers never stack) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -192,6 +200,63 @@ else bad("workflow YAML has non-ASCII chars: " + nonAscii.map((c) => "U+" + c.ch
 /* ---------- 14. manifest parses ---------- */
 try { JSON.parse(read("manifest.webmanifest")); ok("manifest.webmanifest parses"); }
 catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
+
+/* ---------- 63. K-drama chain suppression ---------- */
+{
+  const fnBody = (name) => {
+    const m = html.match(new RegExp("function " + name + "\\s*\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}"));
+    return m ? m[0] : null;
+  };
+  if (fnBody("isKDrama")) ok("isKDrama() present");
+  else bad("isKDrama() missing");
+  const wyzAuto = fnBody("wyzAutoSubs");
+  if (wyzAuto && /isKDrama\(\)/.test(wyzAuto)) ok("wyzAutoSubs never auto-loads over K-dramas");
+  else bad("wyzAutoSubs missing the isKDrama() guard -- chain must never auto-load over K-dramas");
+  const bsAutoB = fnBody("bsAuto");
+  if (bsAutoB && /isKDrama\(\)/.test(bsAutoB)) ok("bsAuto never auto-loads over K-dramas");
+  else bad("bsAuto missing the isKDrama() guard -- backups must never auto-load over K-dramas");
+  const loadStored = fnBody("loadStoredSubs");
+  if (loadStored && /isKDrama\(\)\s*&&\s*chain/.test(loadStored)) ok("loadStoredSubs skips chain restores over K-dramas");
+  else bad("loadStoredSubs missing the K-drama chain-restore ban (manual files may still restore)");
+  if (/K-Dramas use the provider's own English subtitles/.test(html)) ok("K-drama Subs note string present");
+  else bad("K-drama Subs note string missing (provider tracks + note in the Subs column)");
+}
+
+/* ---------- 64. K-drama VidBolt defaults ---------- */
+{
+  const m = html.match(/function koAutoPick\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (!m) bad("koAutoPick() missing -- K-dramas need the Tagalog/English track defaults");
+  else {
+    const t = m[0];
+    if (/tagalog\|filipino/i.test(t) && /korean/i.test(t)) ok("koAutoPick defaults Tagalog (Korean when none)");
+    else bad("koAutoPick missing Tagalog-first / Korean-fallback audio pick");
+    if (/option === "subtitles"/.test(t) && /english/i.test(t)) ok("koAutoPick forces VidBolt own English subtitles");
+    else bad("koAutoPick missing the English provider-subtitle pick");
+    if (/boltMobileOption\(\s*(au|su)\.option,\s*(au|su)\.value\s*\)/.test(t)) ok("koAutoPick echoes provider option values verbatim");
+    else bad("koAutoPick must send the provider option's own value (audio label / subtitle H index) -- never a label as a command value");
+  }
+}
+
+/* ---------- 65. manual pick stands the auto down, clears provider captions ---------- */
+{
+  const fnBody = (name) => {
+    const m = html.match(new RegExp("function " + name + "\\s*\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}"));
+    return m ? m[0] : null;
+  };
+  const stand = fnBody("koStandDown");
+  if (stand && /_koAuto\s*=\s*false/.test(stand) && /clearProviderCaptions\(\)/.test(stand)) ok("koStandDown stands the K-drama auto down and clears provider captions");
+  else bad("koStandDown incomplete (must set _koAuto=false AND call clearProviderCaptions)");
+  const clear = fnBody("clearProviderCaptions");
+  if (clear && /"subtitles"\s*,\s*"-1"/.test(clear)) ok("clearProviderCaptions sends VidBolt subtitles -1");
+  else bad("clearProviderCaptions missing the VidBolt {subtitles:-1} command -- two caption layers must never stack");
+  const manualSites = ["loadSubFile", "savePastedSubs", "wyzDownload", "bsDownload"];
+  const missingStand = manualSites.filter((fn) => {
+    const b = fnBody(fn);
+    return !b || !/koStandDown\(\)/.test(b);
+  });
+  if (!missingStand.length) ok("manual subtitle picks call koStandDown (" + manualSites.length + " sites)");
+  else bad("manual subtitle pick without koStandDown: " + missingStand.join(", "));
+}
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

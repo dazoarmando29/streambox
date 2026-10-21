@@ -564,7 +564,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 179; // bump every release alongside version.txt
+  const BUILD_NUM = 180; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -977,6 +977,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     </div>
 
     <div id="paneSubs" class="hidden">
+      <p id="koSubNote" class="hidden text-xs text-teal-300 bg-teal-500/10 border border-teal-400/30 rounded-xl px-3 py-2 mb-3">K-Dramas use the provider&#39;s own English subtitles - not our chain. Load a .srt/.vtt below to override.</p>
       <p class="text-xs text-gray-400 font-bold mb-2">SEARCH WYZIE SUBTITLES</p>
       <div id="wyzLangRow" class="flex flex-wrap gap-2 mb-2"></div>
       <div id="wyzResults" class="space-y-2 max-h-64 overflow-y-auto pr-1"></div>
@@ -2737,8 +2738,6 @@ async function openWatch(type, id, s=1, e=1, t=0){
   paintNav(null); // watching: no browse tab is active
   paintQuality();
   fetchTrailer(type, id); // non-blocking: trailer button appears when found
-  loadStoredSubs(); // auto-attach this title's remembered subtitle file
-  wyzAutoSubs(); // none remembered? fetch the best match silently (English default)
   let d;
   try {
     d = await tmdb(`/${type}/${id}?append_to_response=credits`);
@@ -2748,6 +2747,13 @@ async function openWatch(type, id, s=1, e=1, t=0){
     return;
   }
   currentItem = d;
+  // K-drama flag BEFORE any subtitle chain runs: Korean dramas ride VidBolt's
+  // own English subs (Tagalog dub default), so the Wyzie chain must know first.
+  watchState.ko = (type === "tv" && d.original_language === "ko");
+  window._koAuto = true;
+  window._koAutoDone = "";
+  loadStoredSubs(); // auto-attach this title's remembered subtitle file
+  wyzAutoSubs(); // none remembered? fetch the best match silently (English default)
   // late anime catch (deep links / cold continue entries): metadata now proves
   // it's JP animation but we opened on CineSrc — reroute once (house route).
   if (type === "tv" && !watchState.anime && isAnimeData(d)) {
@@ -4428,6 +4434,72 @@ function detectAnime(type, id){
   } catch(e){}
   return false;
 }
+/* K-dramas (TV shows whose original language is Korean — never "anime"):
+   VidBolt defaults to the TAGALOG dub (Korean when the release carries none)
+   and always uses VIDBOLT'S OWN English subtitles. Our Wyzie/TSDB/BetaSeries
+   chain never auto-loads or restores over them — manual .srt/.vtt stays the
+   escape hatch and stands the auto down. */
+function isKDrama(){
+  try { if (watchState && watchState.ko) return true; } catch(e){}
+  try { if (currentItem && currentItem.original_language === "ko" && watchState && watchState.type === "tv") return true; } catch(e){}
+  return false;
+}
+const KO_SUB_NOTE = "K-Dramas use the provider's own English subtitles - not our chain.";
+function koSubNote(){
+  try {
+    const ws = document.getElementById("watchStatus");
+    if (ws && !window._koNoteShown) { window._koNoteShown = true; ws.textContent = KO_SUB_NOTE; }
+  } catch(e){}
+}
+function clearProviderCaptions(){
+  // two caption layers never stack: loading OUR file clears the provider's
+  try {
+    if (mirror === "vidbolt") boltMobileOption("subtitles", "-1");
+    else if (mirror === "anipm") {
+      window._anipmSubs = false;
+      anipmSend("setSubtitles", { enabled: false });
+      paintSubsBtn();
+    }
+  } catch(e){}
+}
+function koStandDown(){
+  // a manual pick owns captions: stand the K-drama auto down and clear the
+  // provider layer under our file
+  window._koAuto = false;
+  clearProviderCaptions();
+}
+function koAutoPick(){
+  // K-drama VidBolt track defaults, applied once per episode load from the
+  // provider's own option entries (mobile-panel cache): audio by LABEL
+  // (Tagalog/Filipino first, Korean when the release carries none), subtitles
+  // by the numeric H index (engine tracks ++ resolve subtitles) — command
+  // values are echoed verbatim, never invented. A manual pick stands this down.
+  try {
+    if (!isKDrama() || mirror !== "vidbolt") return;
+    if (window._koAuto === false) return;
+    const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
+    if (window._koAutoDone === bk) return;
+    const opts = (((window._boltPanels || {})[bk]) || []).filter(o => o && typeof o === "object" && o.option != null);
+    if (!opts.length) return;
+    const au = opts.find(o => o.option === "audio" && /tagalog|filipino/i.test(String(o.label || "")))
+      || opts.find(o => o.option === "audio" && /korean/i.test(String(o.label || "")));
+    const su = opts.find(o => o.option === "subtitles" && String(o.value) !== "-1"
+      && (/english/i.test(String(o.label || "")) || /^(en|eng|en-\w+)$/i.test(String(o.label || "").trim())));
+    if (!au && !su) return;
+    window._koAutoDone = bk;
+    if (au && !au.selected) {
+      boltMobileOption(au.option, au.value);
+      opts.forEach(x => { if (x.option === "audio") x.selected = (x === au); });
+    }
+    if (su && !su.selected) {
+      boltMobileOption(su.option, su.value);
+      opts.forEach(x => { if (x.option === "subtitles") x.selected = (x === su); });
+      // their captions on: our overlay would double them — stand it down
+      subsOn = false;
+      try { paintSubsBtn(); paintCaps(true); } catch(e){}
+    }
+  } catch(e){}
+}
 function tvSafeOnly(){
   try { const v = localStorage.getItem("streambox_tv_safe"); if (v !== null) return v === "1"; } catch(e){}
   return IS_TV_DEVICE;
@@ -4990,6 +5062,7 @@ async function wyzDownload(url, it){
     const lang = (it && (it.display || it.language)) || wyzLang.toUpperCase();
     setSubs({ name: ((it && it.fileName) || "wyzie.srt"), lang, cues, url: url, corsUrl: url, src: "wyzie", code: wyzLang,
       pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+    koStandDown(); // searched-and-picked = manual: K-drama auto stands down, provider layer clears
     wyzQuotaClear();
     subStatus(`Loaded ${cues.length} lines (${lang}).`);
   } catch(err) {
@@ -5003,6 +5076,7 @@ async function wyzDownload(url, it){
 async function wyzAutoSubs(){
   try {
     if (subFile && subFile.cues && subFile.cues.length) return;
+    if (isKDrama()) { koSubNote(); return; } // K-dramas ride VidBolt's own English subs
     if (mirror !== "cinesrc" && mirror !== "vidbolt") return;
     if (wyzQuota && Date.now() - wyzQuota.at < 3600000) {
       wyzCapNote(); // capped: one calm switch-note per session, then silence
@@ -5206,6 +5280,7 @@ async function bsDownload(sub){
     const gl = guessLang(sub.file);
     setSubs({ name: (sub.file || "backup.srt"), lang: gl !== "Custom" ? gl : (sub.language || wyzLang.toUpperCase()), cues, src: sub.tsdbUrl ? "tsdb" : "betaseries", corsUrl: (sub.tsdbUrl || ""),
       pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+    koStandDown(); // searched-and-picked = manual: K-drama auto stands down, provider layer clears
     subStatus(`Loaded ${cues.length} lines (backup \u{2713}).`);
   } catch(err) {
     // last resort: TSDB files open as plain text; BetaSeries ones too — copy into \u{270F} Paste text
@@ -5219,6 +5294,7 @@ async function bsAuto(){
     if (bsTriedKey === k) return;
     bsTriedKey = k;
     if (subFile && subFile.cues && subFile.cues.length) return;
+    if (isKDrama()) return; // K-dramas ride VidBolt's own English subs — chain never auto-loads
     if (mirror !== "cinesrc" && mirror !== "vidbolt") return;
     let list = await tsdbFindSubs().catch(() => []);
     if (!list.length && watchState.type === "tv") { try { list = await bsFindSubs(); } catch(e){ list = []; } }
@@ -5356,8 +5432,11 @@ function loadStoredSubs(){
       if (o && o.cues && o.cues.length) {
         // scrub remembered promo banners (saved before the filter existed)
         o.cues = o.cues.filter(c => c && c.text && !WYZ_PROMO_RE.test(c.text));
-        if (o.cues.length) subFile = o;
-        else { try { localStorage.removeItem(subStorageKey()); } catch(e){} }
+        // K-dramas never restore a CHAIN file over VidBolt's own English subs
+        // (manual files still restore — the escape hatch)
+        const chain = o.src === "wyzie" || o.src === "tsdb" || o.src === "betaseries";
+        if (o.cues.length && !(isKDrama() && chain)) subFile = o;
+        else if (!o.cues.length) { try { localStorage.removeItem(subStorageKey()); } catch(e){} }
       }
     }
   } catch(e){}
@@ -5373,6 +5452,7 @@ function loadSubFile(input){
     if (!cues.length) { subStatus("Couldn't read that file — is it .srt or .vtt?"); return; }
     setSubs({ name: f.name, lang: guessLang(f.name), cues,
       pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+    koStandDown(); // manual pick owns captions — K-drama auto stands down, provider layer clears
     subStatus(`Loaded ${cues.length} lines.`);
   };
   rd.readAsText(f);
@@ -5387,6 +5467,7 @@ function savePastedSubs(){
   if (!cues.length) { subStatus("Nothing readable pasted — need SRT/VTT text."); return; }
   setSubs({ name: "pasted.txt", lang: "Custom", cues,
     pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+  koStandDown(); // manual pick owns captions — K-drama auto stands down, provider layer clears
   document.getElementById("subPasteWrap").classList.add("hidden");
   document.getElementById("subPaste").value = "";
   subStatus(`Loaded ${cues.length} lines.`);
@@ -5433,6 +5514,10 @@ function paintSubsUI(){
       ? `${subFile.name} • ${subFile.lang} • ${subFile.cues.length} lines`
       : "None loaded";
   }
+  try {
+    const kn = document.getElementById("koSubNote");
+    if (kn) kn.classList.toggle("hidden", !isKDrama());
+  } catch(e){}
   const pl = document.getElementById("subPosLabel");
   if (pl) pl.textContent = subFile
     ? subFile.pos[0].toUpperCase() + subFile.pos.slice(1) : "Bottom";
@@ -6213,6 +6298,7 @@ window.addEventListener("message", (event)=>{
         const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
         window._boltPanels[bk] = d.options;
         try { paintQuality(); } catch(e){}
+        try { koAutoPick(); } catch(e){} // K-drama defaults: Tagalog dub + VidBolt own English subs
       }
     } catch(e){}
     if (d && typeof d.panel === "string") openVrSheet(d.panel, d.options, null, boltMobileOption);
@@ -6804,6 +6890,13 @@ function paintBoltAV(){
     const box = document.getElementById(id); if (!box) return;
     box.innerHTML = "";
     const list = opts.filter(o => kinds.includes(o.option));
+    if (id === "avSubs" && isKDrama()) {
+      // K-drama Subs column: provider tracks + the note (our chain stays out)
+      const n = document.createElement("p");
+      n.className = "text-xs text-teal-300 bg-teal-500/10 border border-teal-400/30 rounded-xl px-3 py-2 mb-2";
+      n.textContent = KO_SUB_NOTE;
+      box.appendChild(n);
+    }
     if (!list.length) {
       const p = document.createElement("p");
       p.className = "text-xs text-gray-500";
@@ -6819,6 +6912,7 @@ function paintBoltAV(){
         try { boltMobileOption(o.option, o.value); } catch(e){}
         // optimistic selected mark (their bundle answers picks with no event)
         try { opts.forEach(x => { if (x.option === o.option) x.selected = (x === o); }); } catch(e){}
+        window._koAuto = false; // a manual pick stands the K-drama auto down
         if (o.option === "subtitles" && String(o.value) !== "-1") {
           // native track on: our overlay would double it — stand it down
           try { subsOn = false; localStorage.setItem("streambox_subs_on", "0"); } catch(e){}
