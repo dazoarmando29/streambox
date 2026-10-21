@@ -575,7 +575,7 @@
 
 <!-- ============ CONFIG: your TMDB key is already filled in ============ -->
 <script>
-  const BUILD_NUM = 184; // bump every release alongside version.txt
+  const BUILD_NUM = 185; // bump every release alongside version.txt
 /* key shards: base64 pieces stored reversed so the plaintext key never
    appears in page source (inspect \u{2192} Sources shows only these blobs) */
 const _sbk = ["IzN1U2YhR2M2EjZ", "GNhJGO5kzNhRjNw", "=YWO3MGZkBDNzI"];
@@ -1202,6 +1202,15 @@ function topPopup(){
   // topmost visible popup wins (search sits above drawers, guide above all)
   const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal,#pinPad,#avSheet,#vrSheet,#resumeDlg")].filter(p => !p.classList.contains("hidden"));
   return ps.length ? ps[ps.length - 1] : null;
+}
+function navEscapeFocus(){
+  // Left-escape (0.64 parity): Left out of any row/grid lands on the nav
+  // rail ACTIVE tab deterministically — never a spatial-search yank to a
+  // chip strip or a chevron.
+  try {
+    const active = document.querySelector("nav .nav-active") || document.getElementById("navHome");
+    return safeFocus(active);
+  } catch(e){ return false; }
 }
 function dirOf(e){
   // TV remotes/WebViews often send keyCodes (or legacy names) instead of "ArrowX"
@@ -1924,16 +1933,18 @@ function purgeRetiredCaches(){
       // arrows from rows or the player never overshoot into logo/search/links
       const ae0 = document.activeElement;
       const navZone = !!(ae0 && ae0.closest && (ae0.closest("nav") || ae0.closest("#hero") || ae0.id === "backBtn"));
-      // weak-CPU fast path: L/R inside a row only walks that row (title +
-      // chevrons + cards) instead of scanning the whole document — same
-      // destinations in practice (rows are full-width; nothing sits
-      // left/right of a card), ~10x fewer rect reads per press. U/D keeps
-      // the full scan so focus can always leave the row.
+      // weak-CPU fast path: L/R inside a row/grid only walks that strip
+      // (cards/chips ONLY — chevrons and row titles stay out so the left edge
+      // escapes to the menu instead of parking on a chevron) instead of
+      // scanning the whole document. Right stays LOCKED to the strip (the
+      // zigzag fix); Up/Down keep the full scan so focus can always leave.
       let scope = top || bar || document;
+      let inContent = false;
       if (!top && !bar && (dir === "left" || dir === "right") && ae0 && ae0.closest) {
         try {
-          const wrap = ae0.closest(".sb-row") || ae0.closest(".row-scroll");
-          if (wrap) scope = wrap;
+          const wrap = ae0.closest(".row-scroll") || ae0.closest("#grid")
+            || ae0.closest("#listGrid") || ae0.closest("#searchResults");
+          if (wrap) { scope = wrap; inContent = true; }
         } catch(e){}
       }
       // results-list lock: U/D with focus inside the Subs results walks the
@@ -1958,7 +1969,10 @@ function purgeRetiredCaches(){
           && !(el.tagName === "INPUT" && (el.type === "range" || el.type === "color"))
           && !(el.closest && el.closest("#ctlBar.bar-hidden"))
           && (navZone || !el.closest("nav")));
-      if (!items.length) return;
+      if (!items.length) {
+        if (dir === "left" && inContent) { e.preventDefault(); navEscapeFocus(); }
+        return;
+      }
       const cur = document.activeElement;
       let cx, cy;
       if (cur && cur !== document.body && cur !== document.documentElement && cur.getBoundingClientRect) {
@@ -1996,6 +2010,11 @@ function purgeRetiredCaches(){
         }
         document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
         best.classList.add("tv-focus");
+      } else if (dir === "left" && inContent) {
+        // Left-escape: nothing left inside the row/grid — the nav rail active
+        // tab is the deterministic destination (0.64 parity)
+        e.preventDefault();
+        navEscapeFocus();
       } else if (top && (dir === "down" || dir === "up")) {
         // bottom/top of popup reached: scroll its content instead of doing nothing
         e.preventDefault();

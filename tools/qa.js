@@ -44,7 +44,12 @@
    75 year rail over the full paginated catalog (All default, years descending)
    76 browse grid is ONE scroll surface: chip chrome rides ABOVE the grid as
       spanning headers (never inside it) and TV never clips cards mid-poster
-      (content-visibility intrinsic under-sizes = the 540dp slice) */
+      (content-visibility intrinsic under-sizes = the 540dp slice)
+   77 Left out of any row/grid reaches the nav rail active tab deterministically
+      (strip-scope L/R, chevrons never intercept, Right stays locked in-row)
+   78 per-card reveal ban: no bringIntoView anywhere, and row/grid focus
+      scrolls only with block:"nearest" (the oversized reveal rect was the
+      zigzag) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -462,6 +467,40 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const intr = gRule && gRule[0].match(/contain-intrinsic-size:\s*auto (\d+)px/);
   if (intr && Number(intr[1]) >= 460) ok("grid contain-intrinsic-size fits the largest card layout (" + intr[1] + "px)");
   else bad("grid contain-intrinsic-size under-sizes large cards -- raise it to >= 460px (rows rule does not count)");
+}
+
+/* ---------- 77. Left-escape to the nav rail ---------- */
+{
+  const nf = html.match(/function navEscapeFocus\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (nf && /nav-active/.test(nf[0]) && /navHome/.test(nf[0])) ok("navEscapeFocus lands on the nav rail active tab");
+  else bad("navEscapeFocus missing -- Left out of any row/grid must reach the nav menu deterministically");
+  const escapes = [...html.matchAll(/navEscapeFocus\(\)/g)].length - 1;
+  if (escapes >= 2) ok("Left-escape wired at the row/grid edge (" + escapes + " call sites)");
+  else bad("the Left-escape must fire when no left target exists in the strip (found " + escapes + " call sites)");
+  if (/dir === "left" && inContent/.test(html)) ok("Left-escape is scoped to rows/grids (inContent)");
+  else bad("the Left-escape must key off inContent -- rows/grids only");
+  // strip scope must be the scrolling strip/grid, never .sb-row (chevrons intercept)
+  const scope = html.match(/const wrap = ae0\.closest\([^;]+\)/);
+  if (scope && /\.row-scroll/.test(scope[0]) && /#grid/.test(scope[0]) && !/\.sb-row/.test(scope[0])) ok("L/R strip scope is cards/chips only (chevrons never intercept)");
+  else bad("L/R scope must be the strip/grid only (.row-scroll / #grid / #listGrid) -- .sb-row lets chevrons park Left");
+}
+
+/* ---------- 78. per-card reveal ban (no zigzag) ---------- */
+{
+  if (/bringIntoView/.test(html)) bad("bringIntoView present -- the oversized reveal rect was the zigzag");
+  else ok("no bringIntoView anywhere (per-card reveal ban)");
+  const badReveals = [];
+  for (const m of html.matchAll(/\.scrollIntoView\(\{([^}]*)\}/g)) {
+    const args = m[1];
+    if (/block:\s*["']nearest["']/.test(args)) continue;
+    const fnIdx = html.lastIndexOf("function ", m.index);
+    const fnName = fnIdx >= 0 ? (html.slice(fnIdx, fnIdx + 80).match(/function\s+([A-Za-z_$][\w$]*)/) || [])[1] : "";
+    const ctx = html.slice(Math.max(0, m.index - 320), m.index + m[0].length);
+    if (/playerBox/.test(ctx) || fnName === "focusPlayer" || fnName === "openWatch") continue; // player landings only
+    badReveals.push(ctx.trim().slice(-90));
+  }
+  if (!badReveals.length) ok("row/grid focus scrolls use block:\"nearest\" only (player landings excepted)");
+  else badReveals.forEach((b) => bad("oversized reveal scroll (use block:\"nearest\"): " + b));
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
