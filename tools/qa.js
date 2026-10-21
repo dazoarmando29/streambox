@@ -103,7 +103,12 @@
       label K-DRAMA, and Continue entries carry the ko flag
    102 tab-scoped Continue Watching: Home = everything, Movies = movies,
       TV = non-ko non-anime TV, Anime = anime, KDrama = ko; the grid surface
-      shows the scoped row; the Browse tab leads with the kind pick */
+      shows the       scoped row; the Browse tab leads with the kind pick
+   103 home hero wears the design pack: trending badge pill with the pulse
+      dot, meta chips (star pill + year + type + genres), and the CTA trio
+      (Watch pill + glass Details + My List bookmark via heroListToggle)
+   104 Top 10 row with the giant rank numerals + the pack modal treatment
+      (28px card, glow shadow, teal Watch Now) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -937,6 +942,40 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (html.includes('id="kindRow"') && /function buildKindRow/.test(html) && /openBrowseTab/.test(html))
     ok("the Browse tab leads with the kind pick (kindRow)");
   else bad("the Browse tab needs the kind pick first (kindRow + openBrowseTab + setKind)");
+}
+
+/* ---------- 103. home hero design pack ---------- */
+{
+  const sh = html.match(/function setHero\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (!sh) bad("setHero missing");
+  else {
+    const t = sh[0];
+    if (/Trending/.test(t) && /animate-pulse/.test(t) && /rounded-full/.test(t)) ok("hero badge pill with the pulse dot");
+    else bad("the hero needs the trending badge pill (pulse dot + #N Trending label)");
+    if (/heroListToggle/.test(t) && /glass-pill/.test(t) && /Watch/.test(t) && /Details/.test(t)) ok("hero CTA trio: Watch + glass Details + My List bookmark");
+    else bad("the hero CTA trio must be Watch + Details + heroListToggle bookmark");
+    if (/genreNames\(/.test(t) && /\\u\{2605\}/.test(t)) ok("hero meta chips: star pill + year + type + genres");
+    else bad("the hero meta chips need the star pill and genre names");
+  }
+  const hl = html.match(/function heroListToggle\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (hl && /saveList\(/.test(hl[0]) && /inList\(/.test(hl[0])) ok("heroListToggle saves/removes My List entries");
+  else bad("heroListToggle must toggle the My List store");
+}
+
+/* ---------- 104. Top 10 + modal design pack ---------- */
+{
+  const t10 = html.match(/function makeTop10\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (t10 && /rank-number/.test(t10[0]) && /Top 10/.test(t10[0])) ok("Top 10 row renders the giant rank numerals");
+  else bad("makeTop10 must render rank-number numerals behind the posters");
+  if (/\.rank-number\s*\{/.test(html) && /-webkit-text-stroke/.test(html)) ok("rank numerals use the outline treatment");
+  else bad(".rank-number CSS (giant outline digits) missing");
+  const init = html.match(/async function init\s*\(\)\s*\{[\s\S]*?\n  try \{[\s\S]*?\n  \}/);
+  if (html.includes("makeTop10(trend.results)") && html.includes("Trending Now across StreamBox"))
+    ok("home rows: Trending Now across StreamBox + Top 10 wired into init");
+  else bad("init must append makeRow(Trending Now across StreamBox) + makeTop10");
+  const modal = html.match(/<div id="modal"[\s\S]{0,1800}/);
+  if (modal && /rounded-\[28px\]/.test(modal[0]) && /Watch Now/.test(modal[0])) ok("details modal wears the pack treatment (28px card + teal Watch Now)");
+  else bad("the details modal must use the design-pack card treatment");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

@@ -125,6 +125,14 @@
     background: rgba(0, 240, 181, .18); color: #00F0B5; font-weight: 700;
     border: 1px solid rgba(0, 240, 181, .35); box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
   }
+  /* Top 10 rank numerals (design pack): giant outline digits behind posters */
+  .rank-number {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 7rem; line-height: 1; font-weight: 900; color: #0B111E;
+    -webkit-text-stroke: 2px #263852;
+    text-shadow: 0 4px 18px rgba(0, 240, 181, .15);
+  }
+  .tv-mode .rank-number { font-size: 5.5rem; }
   nav { padding-top: calc(1rem + env(safe-area-inset-top, 0px));
     transition: background-color .3s ease, box-shadow .3s ease; }
   /* fixed backgrounds repaint every scroll frame (TV jank): calm + TV scroll */
@@ -658,7 +666,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 196; // bump every release alongside version.txt
+  const BUILD_NUM = 197; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1012,19 +1020,19 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 
 <!-- DETAIL MODAL -->
 <div id="modal" class="hidden fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
-  <div class="bg-[#131B2C] max-w-2xl w-full rounded-2xl overflow-hidden border border-white/10 max-h-[90vh] overflow-y-auto">
+  <div class="bg-[#131B2C] max-w-2xl w-full rounded-[28px] overflow-hidden border border-white/10 max-h-[90vh] overflow-y-auto shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8),0_0_30px_rgba(0,240,181,0.06)]">
     <div class="relative h-64 md:h-80">
       <img id="mBackdrop" class="w-full h-full object-cover" src="" onerror="this.style.display='none'">
-      <div class="absolute inset-0 bg-gradient-to-t from-[#131B2C] to-transparent"></div>
-      <button onclick="closeModal()" class="absolute top-3 right-3 bg-black/60 w-9 h-9 rounded-full">&#x2715;</button>
+      <div class="absolute inset-0 bg-gradient-to-t from-[#131B2C] via-[#131B2C]/50 to-transparent"></div>
+      <button onclick="closeModal()" class="absolute top-3 right-3 bg-black/60 hover:bg-black/80 w-10 h-10 rounded-full border border-white/10 backdrop-blur-md">&#x2715;</button>
     </div>
-    <div class="p-6 -mt-10 relative">
-      <h2 id="mTitle" class="text-2xl font-bold"></h2>
-      <p id="mMeta" class="text-sm text-gray-400 mt-1"></p>
+    <div class="p-6 md:p-8 -mt-12 relative">
+      <h2 id="mTitle" class="text-2xl md:text-4xl font-bold tracking-tight drop-shadow-md"></h2>
+      <p id="mMeta" class="text-sm text-gray-400 mt-2"></p>
       <p id="mOverview" class="text-sm text-gray-300 mt-3 leading-relaxed"></p>
       <div class="flex flex-wrap gap-3 mt-5 items-center">
-        <button id="mWatch" class="bg-teal-500 hover:bg-teal-400 font-bold px-6 py-2.5 rounded-full">&#x25B6; Watch Now</button>
-        <button id="mListBtn" onclick="addToList()" class="bg-white/10 hover:bg-white/20 px-5 py-2.5 rounded-full text-sm">+ My List</button>
+        <button id="mWatch" class="h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold shadow-[0_0_35px_-5px_rgba(0,240,181,0.35)] hover:scale-[1.02] active:scale-[0.98] transition-all">&#x25B6; Watch Now</button>
+        <button id="mListBtn" onclick="addToList()" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">+ My List</button>
       </div>
       <div id="mSeasons" class="mt-5 hidden">
         <div class="flex flex-wrap items-center gap-3">
@@ -1604,7 +1612,8 @@ async function init(){
     if (!trend || !trend.results) throw new Error("empty catalog");
     buildHero(trend.results.slice(0,5));
     rows.innerHTML = "";
-    rows.appendChild(makeRow("Trending Now", trend.results));
+    rows.appendChild(makeRow("Trending Now across StreamBox", trend.results));
+    rows.appendChild(makeTop10(trend.results));
     hideSplash();
     markReady();
     // TV: focus content immediately instead of waiting for the rest —
@@ -1694,6 +1703,36 @@ function makeRow(title, items, forceType){
   items.filter(x=>x.poster_path && (!adultLocked() || !isAdult(x))).forEach(x=>{
     const type = forceType || (x.media_type === "tv" ? "tv" : "movie");
     sc.appendChild(cardEl(x, type));
+  });
+  div.appendChild(sc);
+  return div;
+}
+function makeTop10(items){
+  // design pack: big translucent rank numerals behind the posters
+  const div = document.createElement("div");
+  div.className = "sb-row";
+  div.innerHTML = `<div class="flex items-center gap-2 mb-2"><h2 class="row-title text-lg font-bold flex-1">Top 10 in StreamBox This Week</h2>${rowArrows()}</div>`;
+  const sc = document.createElement("div");
+  sc.className = "flex items-end gap-6 overflow-x-auto row-scroll pb-2";
+  items.filter(x=>x.poster_path && (!adultLocked() || !isAdult(x))).slice(0, 10).forEach((x, idx)=>{
+    const type = x.media_type === "tv" ? "tv" : "movie";
+    const item = document.createElement("div");
+    item.className = "card card-wide flex-shrink-0 flex items-end relative group cursor-pointer focusable";
+    item.tabIndex = 0;
+    item.setAttribute("role", "button");
+    item.setAttribute("data-focusable", "1");
+    item.setAttribute("aria-label", `#${idx + 1} ${titleOf(x)}`);
+    item.innerHTML = `
+      <span class="rank-number -mr-8 z-10 select-none">${idx + 1}</span>
+      <div class="w-40 h-56 rounded-xl overflow-hidden relative poster-frame shadow-lg">
+        ${posterTag(x.poster_path, "w-full h-full object-cover transition-transform duration-500 group-hover:scale-105")}
+        <div class="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/90 to-transparent">
+          <p class="text-xs font-bold truncate">${titleOf(x)}</p>
+        </div>
+      </div>`;
+    item.onclick = activatable(() => openDetail(type, x.id));
+    item.onkeydown = (ev) => { if (okPressed(ev)) { ev.preventDefault(); activatable(() => openDetail(type, x.id))(); } };
+    sc.appendChild(item);
   });
   div.appendChild(sc);
   return div;
@@ -2277,6 +2316,22 @@ function buildHero(items){
       setHero((heroIdx+1)%heroItems.length);
   }, document.body.classList.contains("tv-mode") ? 15000 : 8000);
 }
+function heroListToggle(){
+  try {
+    const x = heroItems[heroIdx];
+    if (!x) return;
+    const type = x.media_type === "tv" ? "tv" : "movie";
+    if (inList(type, x.id)) {
+      saveList(getList().filter(it => !(it.type === type && it.id === x.id)));
+      toast("Removed from My List");
+    } else {
+      saveList([{ type, id: x.id, title: titleOf(x), poster: x.poster_path, rating: x.vote_average,
+        year: (x.release_date || x.first_air_date || "").slice(0, 4), at: Date.now() }, ...getList()]);
+      toast("\u{2713} Saved to My List", toastSaveActions());
+    }
+    setHero(heroIdx); // repaint the bookmark state
+  } catch(e){}
+}
 function setHero(i){
   heroIdx = i;
   const x = heroItems[i]; if(!x) return;
@@ -2285,17 +2340,26 @@ function setHero(i){
   // TV decodes w1280 slowly: w780 there (gradient + text cover the difference)
   const tvPic = document.body.classList.contains("tv-mode");
   const bg = x.backdrop_path ? IMG(x.backdrop_path, tvPic ? "w780" : "w1280") : (x.poster_path ? IMG(x.poster_path,"w780") : "");
+  const year = (x.release_date || x.first_air_date || "").slice(0, 4);
+  const genres = genreNames(x, type);
+  const saved = inList(type, x.id);
   document.getElementById("hero").innerHTML = `
     ${bg ? `<img src="${bg}" fetchpriority="high" decoding="async" onerror="this.style.display='none'" class="absolute inset-0 w-full h-full object-cover">` : ""}
     <div class="absolute inset-0 hero-gradient"></div>
     <div class="relative px-4 md:px-10 pb-16 max-w-2xl">
-      <span class="text-xs bg-teal-500 px-3 py-1 rounded-full font-bold">#${i+1} TRENDING • ${type.toUpperCase()}</span>
-      <h1 class="text-3xl md:text-5xl font-black mt-3">${titleOf(x)}</h1>
-      <p class="text-xs text-teal-300/90 font-bold mt-2 tracking-wide">\u{2605} ${Number(x.vote_average || 0).toFixed(1)} • ${(x.release_date || x.first_air_date || "").slice(0, 4)} • ${type.toUpperCase()}</p>
-      <p class="text-sm text-gray-300 mt-2 line-clamp-3">${x.overview||""}</p>
-      <div class="flex gap-3 mt-5">
-        <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="bg-teal-500 hover:bg-teal-400 font-bold px-7 h-12 text-base rounded-full">\u{25B6} Watch</button>
-        <button onclick='openDetail("${type}",${x.id})' class="bg-white/20 hover:bg-white/30 font-bold px-7 h-12 text-base rounded-full">ⓘ Details</button>
+      <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-teal-400/20 border border-teal-400/60 text-teal-300 text-xs font-bold tracking-wider mb-4 uppercase shadow-lg backdrop-blur-md"><span class="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>#${i+1} Trending \u{00B7} ${type === "tv" ? "TV" : "Movie"}</span>
+      <h1 class="text-3xl md:text-6xl font-black mt-2 tracking-tight leading-tight drop-shadow-md">${titleOf(x)}</h1>
+      <div class="flex flex-wrap items-center gap-3 text-sm font-semibold text-gray-200 mt-4">
+        <span class="flex items-center gap-1.5 text-teal-300 bg-teal-400/10 px-2 py-0.5 rounded border border-teal-400/30">\u{2605} ${Number(x.vote_average || 0).toFixed(1)}</span>
+        <span class="text-gray-500">\u{00B7}</span><span>${year}</span>
+        <span class="text-gray-500">\u{00B7}</span><span class="bg-white/10 px-2 py-0.5 rounded text-xs text-white">${type === "tv" ? "TV" : "Movie"}</span>
+        ${genres ? `<span class="text-gray-500">\u{00B7}</span><span>${genres}</span>` : ""}
+      </div>
+      <p class="text-sm text-gray-300 mt-4 line-clamp-3 leading-relaxed drop-shadow">${x.overview||""}</p>
+      <div class="flex gap-3 mt-6 items-center">
+        <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold text-base flex items-center gap-2.5 shadow-lg shadow-teal-400/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200">\u{25B6} Watch</button>
+        <button onclick='openDetail("${type}",${x.id})' class="h-12 px-7 rounded-full glass-pill text-white hover:bg-white/15 font-semibold text-base flex items-center gap-2 border border-white/20 hover:border-white/40 transition-all">\u{24D8} Details</button>
+        <button onclick="heroListToggle()" title="${saved ? "Remove from My List" : "Add to My List"}" aria-label="${saved ? "Remove from My List" : "Add to My List"}" class="w-12 h-12 rounded-full glass-pill ${saved ? "text-teal-300 border-teal-400/50" : "text-gray-300 hover:text-teal-300 hover:border-teal-400/40"} flex items-center justify-center transition-all text-lg">${saved ? "\u{2665}" : "\u{2661}"}</button>
       </div>
     </div>`;
   // preload next hero backdrop so rotation is instant (calm never rotates:
