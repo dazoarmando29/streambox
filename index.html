@@ -250,6 +250,15 @@
   #capOverlay.cap-bottom { bottom: 12%; }
   #capOverlay.cap-center { top: 44%; }
   #capOverlay.cap-top { top: 10%; }
+  /* the caption background hugs the TEXT (a pill), never the full-width
+     overlay — a full-bleed band read as a broken player bar */
+  #capOverlay .cap-pill { display: inline-block; border-radius: 8px; max-width: 100%; }
+  /* the caption floats up while the control bar is up (the player is alive)
+     and settles back to its own spot when the bar minimizes again */
+  #capOverlay { transition: bottom .25s ease, top .25s ease; }
+  #capOverlay.bar-lift.cap-bottom { bottom: 26%; }
+  #capOverlay.bar-lift.cap-center { top: 36%; }
+  #capOverlay.bar-lift.cap-top { top: 6%; }
   /* the bar floats over the video (all modes): glass panel in Netflix
      anatomy - full-width seek row on top (times flank the glowing track),
      controls in one scrollable row below. Two fixed rows, never soup. */
@@ -676,7 +685,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 207; // bump every release alongside version.txt
+  const BUILD_NUM = 208; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1650,6 +1659,7 @@ setTimeout(checkCinesrc, 2500);
 /* ---------- HOME ---------- */
 async function init(){
   try { autoSwitchRestore(); } catch(e){} // manual hop mode persists across visits
+  try { restoreWatchSession(); } catch(e){} // tab switch / reload returns to the player
   renderContinue();
   const rows = document.getElementById("rows");
   // beauty: shimmer placeholders so the page never looks broken while loading
@@ -3364,6 +3374,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   document.body.classList.add("watch-on");
   const anime = detectAnime(type, id);
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
+  try { saveWatchSession(); } catch(e){} // tab-switch survival: the player comes back
   window._autoHopped = false; // one self-heal per title, never one per app session
   window._anipmRetryKey = ""; window._anipmRetryCount = 0; window._anipmStartAt = 0; window._anipmGestureBlocked = false;
   window._boltRetryKey = ""; window._boltRetryCount = 0; window._boltStartAt = 0;
@@ -4583,6 +4594,7 @@ function applyPlayerOpts(){ reloadKeepPos(); }
 function goHome(ev){
   if(ev) ev.preventDefault();
   try { hideUpNext(); } catch(e){}
+  try { clearWatchSession(); } catch(e){} // leaving the player clears the session
   document.body.classList.remove("watch-on");
   paintNav("navHome");
   ctlPollStop();
@@ -4658,6 +4670,7 @@ function saveContinue(){
       pos: prev ? (prev.pos || 0) : 0, dur: prev ? (prev.dur || 0) : 0, at: Date.now() };
     arr = [item, ...arr.filter(x=>!(x.type===item.type&&x.id===item.id))].slice(0,20);
     localStorage.setItem(k, JSON.stringify(arr));
+    try { saveWatchSession(); } catch(e){}
     renderContinue();
   }catch(e){}
 }
@@ -4849,6 +4862,7 @@ function renderList(){
     } catch(e){}
     const bar = document.getElementById("ctlBar");
     bar.classList.add("bar-hidden");
+    try { capFloat(false); } catch(e){} // bar minimized: captions settle back
     try { document.getElementById("titleCard").classList.add("hidden"); } catch(e){}
   }
   function pokeHud(){
@@ -4857,6 +4871,7 @@ function renderList(){
     const bar = document.getElementById("ctlBar");
     const wasHidden = bar.classList.contains("bar-hidden");
     bar.classList.remove("bar-hidden");
+    try { capFloat(true); } catch(e){} // bar up: captions float above it
     clearTimeout(window._idleT);
     window._idleT = setTimeout(hideHud, 4000);
     // the title card rides with the bar: one render per reveal (mousemove
@@ -4864,7 +4879,37 @@ function renderList(){
     if (wasHidden) { try { showTitleCard(true); } catch(e){} }
   }
 
-/* ---------- CineSrc remote controls (per https://cinesrc.st/docs player methods) ---------- */
+/* ---------- Watch session (tab-switch survival) ----------
+   The site is a single-page app: a reload (browser tab switch on a phone
+   WebView, an app restart, a crash-reload) used to land on HOME with the
+   player lost. The session is written on every play/continue and restored on
+   boot, so coming back to the tab returns to the same title + episode. Back
+   out of the player clears it (that IS leaving the player). */
+function saveWatchSession(){
+  try {
+    if (!watchState || watchState.id == null) return;
+    localStorage.setItem("streambox_watch", JSON.stringify({
+      type: watchState.type, id: watchState.id, s: watchState.s || 1, e: watchState.e || 1,
+      t: Math.max(0, Math.floor(pState.cur || watchState.t || 0)),
+      at: Date.now()
+    }));
+  } catch(e){}
+}
+function clearWatchSession(){
+  try { localStorage.removeItem("streambox_watch"); } catch(e){}
+}
+function restoreWatchSession(){
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.get("type") && q.get("id")) return; // an explicit deep link wins
+    const raw = localStorage.getItem("streambox_watch");
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (!s || s.type == null || s.id == null) return;
+    if (Date.now() - (s.at || 0) > 6 * 3600 * 1000) { clearWatchSession(); return; }
+    openWatch(s.type, s.id, s.s || 1, s.e || 1, s.t || 0);
+  } catch(e){}
+}
 const pState = { paused: true, muted: false, rate: 1, cur: 0, dur: 0, seeking: false };
 window._cmdQ = []; window._cineReady = false; window._qSeekD = 0;
 function sendCmd(command, args = []) {
@@ -6532,8 +6577,16 @@ function applyCapStyle(el, scale){
   el.style.color = capColorHex();
   el.style.background = capStyle.bg === "solid" ? "rgba(0,0,0,0.92)"
     : capStyle.bg === "semi" ? "rgba(0,0,0,0.5)" : "transparent";
-  el.style.borderRadius = "6px";
-  el.style.padding = capStyle.bg === "none" ? "0 8%" : "2px 8px";
+  el.style.borderRadius = "8px";
+  el.style.padding = capStyle.bg === "none" ? "0" : "3px 10px";
+}
+function capFloat(barUp){
+  // the caption rides up while the control bar is up, and comes back down to
+  // its own position when the bar minimizes again
+  try {
+    const ov = document.getElementById("capOverlay");
+    if (ov) ov.classList.toggle("bar-lift", !!barUp);
+  } catch(e){}
 }
 function capSizeStep(d){
   capStyle.size = Math.min(26, Math.max(12, (capStyle.size || 18) + d)); // 12-26sp ladder
@@ -6663,12 +6716,15 @@ function paintCaps(force){
   }
   if (force || ov.dataset.h !== html) {
     ov.dataset.h = html;
-    ov.innerHTML = html;
+    // the caption BACKGROUND hugs the TEXT (a pill), never the full-width
+    // overlay — the old full-bleed band read as a broken player bar
+    ov.innerHTML = html ? `<span class="cap-pill">${html}</span>` : "";
   }
   ov.style.display = html ? "block" : "none";
   ov.classList.remove("cap-bottom", "cap-center", "cap-top");
   ov.classList.add("cap-" + ((subFile && subFile.pos) || "bottom"));
-  applyCapStyle(ov); // 12-26sp / white-yellow-cyan / None-Semi-Solid
+  const pill = ov.querySelector(".cap-pill");
+  if (pill) applyCapStyle(pill); // 12-26sp / white-yellow-cyan / None-Semi-Solid
 }
 /* episodes drawer — browsing seasons NEVER touches playback: the drawer
    keeps its own season cursor (drawerS); only tapping an episode plays. */

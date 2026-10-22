@@ -147,7 +147,13 @@
        loadPlayer, and the upscaler never touches an iframe
    117 WebSR upscaler wiring: lazy WebGPU load (esm.sh websr + weights), the
        navigator.gpu gate, plain-playback fallback on every failure, and an
-       honest "AI Upscale 2x" label (never 4K) */
+       honest "AI Upscale 2x" label (never 4K)
+   118 the caption background hugs the TEXT (a .cap-pill inside the overlay)
+       — never a full-bleed band across the player
+   119 captions float up while the control bar is up and settle back to their
+       own position when the bar minimizes again
+   120 the player page survives a tab switch/reload: the watch session is
+       saved on play, restored on boot, and cleared when leaving the player */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -680,8 +686,8 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (p && /applyCapStyle\(/.test(p[0]) && /avCapPreview/.test(p[0])) ok("preview restyles through applyCapStyle");
   else bad("paintCapStyleUI must restyle the live previews via applyCapStyle");
   const pc = html.match(/function paintCaps\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
-  if (pc && /applyCapStyle\(\s*ov\s*\)/.test(pc[0])) ok("the caption overlay paints with the style ladders");
-  else bad("paintCaps must apply the caption style to the overlay");
+  if (pc && /applyCapStyle\(\s*pill\s*\)/.test(pc[0])) ok("the caption overlay paints the styled pill (12-26sp / colors / plate)");
+  else bad("paintCaps must apply the caption style to the .cap-pill it renders");
 }
 
 /* ---------- 85. A/V sheet columns + provider values verbatim ---------- */
@@ -1246,6 +1252,54 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
     if (/AI Upscale 2x/.test(t) && !/\b4[Kk]\b/.test(t)) ok("the label is honest AI Upscale 2x (never 4K)");
     else bad("the upscaler status must say AI Upscale 2x -- never a 4K claim");
   }
+}
+
+/* ---------- 118. caption background hugs the text ---------- */
+{
+  const pc = html.match(/function paintCaps\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (pc && /cap-pill/.test(pc[0]) && /applyCapStyle\(pill\)/.test(pc[0])) ok("the caption styles the inner pill, not the full-width overlay");
+  else bad("paintCaps must render a .cap-pill and style THAT -- the overlay background painted a full-bleed band");
+  if (/applyCapStyle\(ov\)/.test(html)) bad("applyCapStyle is still applied to the overlay itself (full-bleed background)");
+  else ok("the overlay itself never gets a background");
+  const ac = html.match(/function applyCapStyle\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (ac && !/8%/.test(ac[0]) && /padding/.test(ac[0])) ok("caption padding hugs the text (no percentage bleed)");
+  else bad("applyCapStyle must use tight pixel padding -- percentage padding bleeds across the player");
+}
+
+/* ---------- 119. captions float with the bar ---------- */
+{
+  if (/#capOverlay\.bar-lift\.cap-bottom/.test(html) && /#capOverlay\.bar-lift\.cap-center/.test(html))
+    ok("caption lift positions exist for bottom/center (the float)");
+  else bad("#capOverlay.bar-lift positions missing -- captions must float while the bar is up");
+  const cf = html.match(/function capFloat\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (cf && /bar-lift/.test(cf[0])) ok("capFloat toggles the lift class");
+  else bad("capFloat must toggle the bar-lift class");
+  const hh = html.match(/function hideHud\s*\(\)\s*\{[\s\S]*?\n\}/);
+  const ph = html.match(/function pokeHud\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (hh && /capFloat\(false\)/.test(hh[0])) ok("bar minimized: the caption settles back down");
+  else bad("hideHud must call capFloat(false) -- captions settle when the bar hides");
+  if (ph && /capFloat\(true\)/.test(ph[0])) ok("bar up: the caption floats above it");
+  else bad("pokeHud must call capFloat(true) -- captions float while the bar is up");
+}
+
+/* ---------- 120. watch session survives tab switches ---------- */
+{
+  const sw = html.match(/function saveWatchSession\s*\(\)\s*\{[\s\S]*?\n\}/);
+  const cl = html.match(/function clearWatchSession\s*\(\)\s*\{[\s\S]*?\n\}/);
+  const rs = html.match(/function restoreWatchSession\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (sw && cl && rs && /streambox_watch/.test(sw[0] + rs[0])) ok("the watch session is saved and restored (streambox_watch)");
+  else bad("saveWatchSession / clearWatchSession / restoreWatchSession must exist around streambox_watch");
+  const ow = html.match(/async function openWatch\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (ow && /saveWatchSession\(\)/.test(ow[0])) ok("opening a title records the session");
+  else bad("openWatch must record the watch session");
+  const gh = html.match(/function goHome\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (gh && /clearWatchSession\(\)/.test(gh[0])) ok("leaving the player clears the session");
+  else bad("goHome must clear the watch session");
+  const ini = html.match(/async function init\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (ini && /restoreWatchSession\(\)/.test(ini[0])) ok("boot restores the session (tab switch returns to the player)");
+  else bad("init must call restoreWatchSession() -- a reload used to land on Home");
+  if (rs && /search/.test(rs[0]) && /openWatch\(/.test(rs[0])) ok("restore reopens the title; deep links win");
+  else bad("restoreWatchSession must reopen the title and let deep links win");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
