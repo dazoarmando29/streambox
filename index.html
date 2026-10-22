@@ -130,10 +130,11 @@
      watch-on hide (below) still wins on TV while playing. */
   #cursorBtn { display: none !important; }
   body.tv-mode #cursorBtn, body.tv-app #cursorBtn { display: inline-flex !important; align-items: center; justify-content: center; }
-  /* Crisp Video: perceptual sharpening on OUR player frame — works on every
-     server. It is an honest upscaler-feel (contrast/saturation lift, GPU
-     cheap); real resolution stays whatever the source carries. */
-  #playerBox.crisp #player { filter: contrast(1.06) saturate(1.06) brightness(0.995); }
+  /* Crisp Video: always-on perceptual sharpening on OUR player frame —
+     works on every server, no toggle, good-looking every time. This is the
+     honest upscaler-feel (contrast/saturation lift, GPU cheap); real
+     resolution stays whatever the source carries. */
+  #playerBox #player { filter: contrast(1.08) saturate(1.08) brightness(0.99); }
   /* Top 10 rank numerals (design pack): giant outline digits behind posters */
   .rank-number {
     font-family: "Space Grotesk", sans-serif;
@@ -675,7 +676,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 205; // bump every release alongside version.txt
+  const BUILD_NUM = 206; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -970,8 +971,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <p class="text-[11px] text-gray-500 mb-4 mt-1">Fine-tune buffer memory, eliminate micro-stuttering, and customize ad-shield preferences for cinema fluidity. <span id="healthLine"></span></p>
         <!-- one clean card per switch (design pack) — every switch applies instantly -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Ad requests are filtered on every player (the APK blocks ad hosts app-wide). Our players never get sandboxed.">
-            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x1F6E1;</span> Ad Shield</b><span class="block text-[11px] text-gray-500">Blocks ad hosts on every player (ours stay raw)</span></span>
+          <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Ad requests are filtered on every player (the APK blocks ad hosts app-wide) and sandboxed mirrors lose their pop-up ads.">
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x1F6E1;</span> Ad Shield</b><span class="block text-[11px] text-gray-500">Pop-up blocker + app-wide ad filter</span></span>
             <input type="checkbox" id="optShield" checked class="switch" onchange="toggleShield()">
           </label>
           <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="TV remotes can only drive some servers — hide the rest from Source lists.">
@@ -989,10 +990,6 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Stuck player hops mirrors by itself. Off = we name the server to try and you hop with &#x21C4; Source.">
             <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x21C4;</span> Auto-Switch Server</b><span class="block text-[11px] text-gray-500">Stuck players heal themselves</span></span>
             <input type="checkbox" id="optAutoswitch" class="switch" onchange="autoSwitchSave()">
-          </label>
-          <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Perceptual sharpening on the player frame — works on every server (real resolution stays what the source carries).">
-            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x2726;</span> Crisp Video</b><span class="block text-[11px] text-gray-500">Perceptual sharpening on any server</span></span>
-            <input type="checkbox" id="optCrisp" class="switch" onchange="crispToggle()">
           </label>
         </div>
         <!-- engine row: one Motion Judder control + the real actions -->
@@ -4493,39 +4490,17 @@ function hideTwinTip(){
 function toggleShield(){
   const on = document.getElementById("optShield").checked;
   if (NO_SANDBOX.has(mirror)) {
-    // no sandbox on our players by design — the app-level ad filter covers
-    // them regardless of this toggle
-    document.getElementById("watchStatus").textContent = "Ad Shield is active — ad hosts are filtered app-wide and our players stay unsandboxed.";
+    document.getElementById("watchStatus").textContent = "Ad Shield is active — ad hosts are filtered app-wide (this page refuses sandboxed frames).";
     return;
   }
   const f = document.getElementById("player");
-  // Shield ON = sandbox without popups/top-navigation. OFF = allow popups (only if a server breaks).
+  // Shield ON = sandbox without popups/top-navigation (this is what kills the
+  // resume-click ad popups on CineSrc and every tolerant mirror). OFF = allow
+  // popups (only if a server breaks).
   f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-modals");
   reloadKeepPos();
 }
 function applyPlayerOpts(){ reloadKeepPos(); }
-/* Crisp Video: perceptual sharpening on the player frame (any server). It is
-   NOT a real super-resolution upscaler — cross-origin players own their
-   <video> so frames can't be re-processed — but the contrast/saturation lift
-   is the honest GPU-cheap crispness boost. Calm/Lite keeps it off. */
-function applyCrisp(){
-  try {
-    let on = true;
-    try { on = localStorage.getItem("streambox_crisp") !== "0"; } catch(e){}
-    if (document.body.classList.contains("calm")) on = localStorage.getItem("streambox_crisp") === "1";
-    const box = document.getElementById("playerBox");
-    if (box) box.classList.toggle("crisp", on);
-    const cb = document.getElementById("optCrisp");
-    if (cb) cb.checked = on;
-  } catch(e){}
-}
-function crispToggle(){
-  try {
-    const on = document.getElementById("optCrisp").checked;
-    try { localStorage.setItem("streambox_crisp", on ? "1" : "0"); } catch(e){}
-    applyCrisp();
-  } catch(e){}
-}
 
 function goHome(ev){
   if(ev) ev.preventDefault();
@@ -5316,12 +5291,12 @@ const MIRRORS = [
   { id: "vidbolt", name: "VidBolt" },
   { id: "anipm", name: "AniPM" }
 ];
-/* mirrors that must NEVER carry the sandbox attribute: our own bar-driven
-   players (sandbox breaks their bridges — VidBolt goes dark, VidRift demands
-   removal) and the pages that refuse sandboxed frames. Ad Shield still covers
-   them via the app-level request filter (the APK blocks ad hosts on every
-   frame — see MainActivity.shouldInterceptRequest). */
-const NO_SANDBOX = new Set(["cinesrc", "vidzen", "vidlink", "vidfast", "yapgrid", "anipm", "vidrift", "vidbolt"]);
+/* mirrors that BREAK inside a sandboxed iframe (their pages refuse it): load
+   raw and lean on the app-level ad filter (the APK blocks ad hosts on every
+   frame). Everything else — INCLUDING our own CineSrc/VidZen, which sail
+   through sandbox — carries the sandbox popup-block whenever Ad Shield is
+   on: that is the website-side ad shield that killed the resume popups. */
+const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm", "vidrift", "vidbolt"]);
 /* TV-safe lineup helpers (TV_REMOTE_OK / IS_TV_DEVICE live in CONFIG above):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
@@ -5831,7 +5806,7 @@ function applyMirrorSandbox(){
   const sh = document.getElementById("optShield");
   if (sh) {
     sh.disabled = false;
-    sh.title = "Ad Shield is active on EVERY player — ad requests are filtered app-wide (the APK blocks ad hosts on all frames). Sandbox pop-up blocking adds itself only on third-party mirrors; our players never sandbox.";
+    sh.title = "Ad Shield is active on EVERY player — the APK filters ad hosts app-wide and sandboxed mirrors (CineSrc included) lose their pop-up ads. Sandbox-refusing pages stay raw.";
   }
   // AniPM earned an unsandboxed retry (stage-1 probe): keep it off on reloads
   if (mirror === "anipm" && window._anipmRaw) {

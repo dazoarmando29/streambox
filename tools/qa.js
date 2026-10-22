@@ -133,12 +133,15 @@
        tag survives every publish
    112 quality has no hidden floor: defaults never pin 720/480 or persist a
        default, and the stall auto-drop is session-only (soft-picture fix)
-   113 Ad Shield covers EVERY player without sandboxing our servers:
-       NO_SANDBOX owns all MAIN_PLAYERS, no "unavailable" disable path, and
-       the APK filter checks media extensions BEFORE any ad host
+   113 Ad Shield covers EVERY player: sandbox pop-up blocking on the
+       sandbox-tolerant mirrors (CineSrc included — the website-side shield
+       that kills resume-click ad popups), NO_SANDBOX = only the pages that
+       BREAK in sandbox, no "unavailable" dead-end, and the APK filter blocks
+       ad hosts BEFORE media (pre-roll dies; stream media from real hosts
+       always rides)
    114 K-Dramas boot on VidBolt (CineSrc is their fallback, never the default)
-   115 Crisp Video: perceptual sharpening on any server via the player frame
-       filter (honest copy — no invented 4K) */
+   115 Crisp Video is ALWAYS on (no toggle): the perceptual sharpening filter
+       paints on the player frame for every server — honest copy, no 4K claim */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1154,22 +1157,27 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("streambox_quality written from " + manual + " sites -- only manual quality picks may persist");
 }
 
-/* ---------- 113. Ad Shield everywhere, never sandboxing our servers ---------- */
+/* ---------- 113. Ad Shield everywhere (website sandbox + APK filter) ---------- */
 {
   const ns = html.match(/const NO_SANDBOX = new Set\(\[([^\]]*)\]\)/);
-  if (ns && /"cinesrc"/.test(ns[1]) && /"vidzen"/.test(ns[1]) && /"vidbolt"/.test(ns[1]) && /"anipm"/.test(ns[1]))
-    ok("NO_SANDBOX owns every MAIN player (cinesrc/vidzen/vidbolt/anipm/vidrift)");
-  else bad("NO_SANDBOX must cover all MAIN_PLAYERS -- Ad Shield never sandboxes our servers");
+  if (ns && /"vidbolt"/.test(ns[1]) && /"vidrift"/.test(ns[1]) && /"anipm"/.test(ns[1])
+      && !/"cinesrc"/.test(ns[1]) && !/"vidzen"/.test(ns[1]))
+    ok("NO_SANDBOX is only the sandbox-breaking set (CineSrc/VidZen keep the pop-up block)");
+  else bad("NO_SANDBOX must be the BREAK set only -- CineSrc/VidZen need sandbox popup-blocking on the website");
   if (/Ad Shield unavailable/.test(html)) bad("the Ad Shield unavailable path survives -- the shield covers every player");
   else ok("no Ad Shield unavailable dead-end");
   const am = html.match(/function applyMirrorSandbox\s*\(\)\s*\{[\s\S]*?\n\}/);
-  if (am && /sh\.disabled = false/.test(am[0]) && !/disabled = true/.test(am[0])) ok("the shield toggle stays live on every mirror");
-  else bad("applyMirrorSandbox must never disable the Ad Shield toggle");
+  if (am && /sh\.disabled = false/.test(am[0]) && !/disabled = true/.test(am[0]) && /setAttribute\("sandbox"/.test(am[0]))
+    ok("sandboxed mirrors get the pop-up block with the shield toggle live");
+  else bad("applyMirrorSandbox must apply sandbox on tolerant mirrors and never disable the toggle");
+  const ts = html.match(/function toggleShield\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (ts && /setAttribute\("sandbox"/.test(ts[0])) ok("toggleShield drives the sandbox pop-up block");
+  else bad("toggleShield must drive the sandbox pop-up block (the website-side ad shield)");
   let ma = "";
   try { ma = read("android/app/src/main/java/com/streambox/app/MainActivity.java"); } catch (e) {}
-  if (ma && /shouldInterceptRequest/.test(ma) && /\.m3u8/.test(ma) && /isAdHost/.test(ma))
-    ok("the APK filter checks media extensions BEFORE any ad host (all players)");
-  else bad("MainActivity.shouldInterceptRequest must keep the media-extension guard ahead of the ad-host block");
+  const blockFirst = ma && /ad hosts die FIRST[\s\S]{0,300}isAdHost/.test(ma) && /media second/.test(ma);
+  if (ma && blockFirst) ok("the APK filter blocks ad hosts BEFORE media (pre-roll dies, streams ride)");
+  else bad("MainActivity must block ad hosts first and only then honor media extensions");
 }
 
 /* ---------- 114. K-Dramas boot on VidBolt ---------- */
@@ -1183,16 +1191,16 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("fallback must name cinesrc for K-dramas: " + wrong[0].slice(0, 90));
 }
 
-/* ---------- 115. Crisp Video (honest sharpening) ---------- */
+/* ---------- 115. Crisp Video always on (no toggle) ---------- */
 {
-  if (/id="optCrisp"/.test(html) && /function crispToggle/.test(html) && /function applyCrisp/.test(html))
-    ok("Crisp Video engine control present");
-  else bad("optCrisp / crispToggle / applyCrisp missing -- the perceptual sharpening control");
-  if (/#playerBox\.crisp #player \{[^}]*filter:/.test(html)) ok("the crisp filter paints on the player frame (any server)");
-  else bad("#playerBox.crisp #player must carry the sharpening filter");
-  const cc = html.match(/function applyCrisp\s*\(\)\s*\{[\s\S]*?\n\}/);
-  if (cc && !/4[Kk]/.test(cc[0])) ok("crisp copy makes no 4K claims");
-  else bad("Crisp Video must not claim 4K -- it is perceptual sharpening only");
+  if (/id="optCrisp"|function crispToggle|function applyCrisp/.test(html))
+    bad("a Crisp Video toggle survives -- it is always on, no toggle");
+  else ok("Crisp sharpening has no toggle (always on)");
+  if (/#playerBox #player \{[^}]*filter:\s*contrast\(/.test(html)) ok("the sharpening filter paints on the player frame for every server");
+  else bad("#playerBox #player must carry the always-on sharpening filter");
+  const crispCss = html.match(/#playerBox #player \{[^}]*\}/);
+  if (crispCss && !/4[Kk]/.test(crispCss[0])) ok("crisp styling makes no 4K claims");
+  else bad("the crisp filter must not claim 4K -- it is perceptual sharpening only");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

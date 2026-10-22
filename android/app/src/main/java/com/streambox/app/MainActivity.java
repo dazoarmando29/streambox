@@ -166,10 +166,18 @@ public class MainActivity extends Activity {
             @Override
             public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 try {
+                    String host = request.getUrl().getHost();
+                    String h = host == null ? "" : host.toLowerCase(java.util.Locale.US);
+                    // ad hosts die FIRST - even their pre-roll media (an ad
+                    // video is still an ad). Real streams never ride ad hosts.
+                    if (isAdHost(h)) {
+                        return new android.webkit.WebResourceResponse("text/plain", "utf-8",
+                                new java.io.ByteArrayInputStream(new byte[0]));
+                    }
+                    // media second: a stream-shaped request (.m3u8/.mp4/.ts...)
+                    // from a non-ad host ALWAYS rides - Ad Shield checks media
+                    // extensions before any broader heuristic can misfire.
                     String path = request.getUrl().getPath();
-                    // media first: a real stream request is NEVER blocked, even
-                    // when some ad-ish host serves it (Ad Shield checks media
-                    // extensions BEFORE any ad host).
                     if (path != null) {
                         String p = path.toLowerCase(java.util.Locale.US);
                         if (p.endsWith(".m3u8") || p.endsWith(".mp4") || p.endsWith(".ts")
@@ -177,11 +185,6 @@ public class MainActivity extends Activity {
                                 || p.endsWith(".aac") || p.endsWith(".mpd")) {
                             return super.shouldInterceptRequest(view, request);
                         }
-                    }
-                    String host = request.getUrl().getHost();
-                    if (isAdHost(host == null ? "" : host.toLowerCase(java.util.Locale.US))) {
-                        return new android.webkit.WebResourceResponse("text/plain", "utf-8",
-                                new java.io.ByteArrayInputStream(new byte[0]));
                     }
                 } catch (Exception ignored) {}
                 return super.shouldInterceptRequest(view, request);
