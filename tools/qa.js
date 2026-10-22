@@ -123,8 +123,11 @@
    108 details modal design: season chips + episode cards row (Resume badge,
       play disc) and the meta pill row (amber star pill, year, type, genres)
    109 the engine panel stays de-duplicated: one card per switch, ONE Motion
-      Judder control, no Apply button (switches apply instantly), no second
-      quality stepper beside the QLEVELS pills, engine-only inputs hidden */
+       Judder control, no Apply button (switches apply instantly), no second
+       quality stepper beside the QLEVELS pills, engine-only inputs hidden
+   110 My List correctness: the player-page button reflects the saved state
+       (In My List vs + My List), and list cards open REAL details (the card
+       object must carry id — the missing id opened the empty Untitled modal) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1089,6 +1092,27 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("optAutoplay/optColor/optMotion must stay as hidden inputs -- engine code reads them");
   if (/id="engineChip"/.test(html)) ok("the engine chip carries the real WebView version");
   else bad("engineChip missing (Chrome nnn Modern)");
+}
+
+/* ---------- 110. My List correctness ---------- */
+{
+  const pw = html.match(/function paintWatchListBtn\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (pw && /inList\(/.test(pw[0]) && /In My List/.test(pw[0])) ok("paintWatchListBtn reflects the saved state");
+  else bad("paintWatchListBtn missing -- the player-page button must show In My List vs + My List");
+  const wt = html.match(/function watchListToggle\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (wt && /paintWatchListBtn\(\)/.test(wt[0])) ok("watchListToggle repaints the button after toggling");
+  else bad("watchListToggle must repaint the My List button");
+  const ow = html.match(/async function openWatch\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (ow && /paintWatchListBtn\(\)/.test(ow[0])) ok("openWatch paints the My List button state");
+  else bad("openWatch must paint the My List button state on load");
+  const rl = html.match(/function renderList\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (rl && /id: x\.id/.test(rl[0]) && /vote_count: x\.votes/.test(rl[0]) && /first_air_date/.test(rl[0]))
+    ok("list cards carry id + votes + year (real details, not the Untitled shell)");
+  else bad("renderList must pass id/votes/year into cardEl -- without id openDetail opened an empty modal");
+  const clicks = [...html.matchAll(/cardEl\(\{[^}]*\},/g)].map((m) => m[0]);
+  const noId = clicks.filter((c) => !/id:/.test(c) && !/\.\.\.x/.test(c));
+  if (!noId.length) ok("every synthetic cardEl object carries an id");
+  else bad("cardEl called with a synthetic object missing id: " + noId[0].slice(0, 80));
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

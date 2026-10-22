@@ -671,7 +671,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 202; // bump every release alongside version.txt
+  const BUILD_NUM = 203; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1042,7 +1042,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <p class="flex justify-between gap-3"><span class="text-gray-500">Source Engine</span><b id="wEngine" class="text-right"></b></p>
         </div>
         <div class="flex flex-wrap gap-2 mt-4">
-          <button onclick="watchListToggle()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">+ My List</button>
+          <button id="wListBtn" onclick="watchListToggle()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">+ My List</button>
           <button onclick="shareTitle()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">Share</button>
         </div>
       </div>
@@ -2366,10 +2366,25 @@ function heroListToggle(){
       toast("Removed from My List");
     } else {
       saveList([{ type, id: x.id, title: titleOf(x), poster: x.poster_path, rating: x.vote_average,
-        year: (x.release_date || x.first_air_date || "").slice(0, 4), at: Date.now() }, ...getList()]);
+        votes: x.vote_count || 0, year: (x.release_date || x.first_air_date || "").slice(0, 4), at: Date.now() }, ...getList()]);
       toast("\u{2713} Saved to My List", toastSaveActions());
     }
     setHero(heroIdx); // repaint the bookmark state
+  } catch(e){}
+}
+function paintWatchListBtn(){
+  // the player-page My List button must REFLECT the saved state — a bare
+  // "+ My List" on an already-listed title reads as "not added"
+  try {
+    const b = document.getElementById("wListBtn");
+    if (!b) return;
+    const saved = inList(watchState.type, watchState.id);
+    const label = saved ? "\u{2713} In My List" : "+ My List";
+    if (b.textContent !== label) b.textContent = label;
+    b.classList.toggle("border-teal-400/50", saved);
+    b.classList.toggle("text-teal-300", saved);
+    b.title = saved ? "Remove from My List" : "Add to My List";
+    b.setAttribute("aria-label", b.title);
   } catch(e){}
 }
 function watchListToggle(){
@@ -2381,9 +2396,10 @@ function watchListToggle(){
       toast("Removed from My List");
     } else {
       saveList([{ type, id, title: titleOf(d), poster: d.poster_path, rating: d.vote_average,
-        year: (d.release_date || d.first_air_date || "").slice(0, 4), at: Date.now() }, ...getList()]);
+        votes: d.vote_count || 0, year: (d.release_date || d.first_air_date || "").slice(0, 4), at: Date.now() }, ...getList()]);
       toast("\u{2713} Saved to My List", toastSaveActions());
     }
+    paintWatchListBtn();
   } catch(e){}
 }
 function shareTitle(){
@@ -3422,6 +3438,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
     document.getElementById("wEngine").textContent = ((MIRRORS.find(x => x.id === mirror) || {}).name || mirror) + " \u{00B7} "
       + (document.getElementById("player").hasAttribute("sandbox") ? "Sandboxed" : "Raw");
   } catch(e){}
+  try { paintWatchListBtn(); } catch(e){}
   try {
     document.getElementById("watchCrumb").textContent =
       (type === "movie" ? "Movies" : watchState.anime ? "Anime" : watchState.ko ? "KDrama" : "TV Shows")
@@ -4669,7 +4686,7 @@ function addToList(){
     toast("Removed from My List");
   } else {
     const item = { type: currentDetail.type, id: currentDetail.id, title: titleOf(d),
-      poster: d.poster_path, rating: d.vote_average,
+      poster: d.poster_path, rating: d.vote_average, votes: d.vote_count || 0,
       year: (d.release_date || d.first_air_date || "").slice(0, 4), at: Date.now() };
     saveList([item, ...getList()]);
     if (btn) btn.textContent = "\u{2713} In My List";
@@ -4713,7 +4730,15 @@ function renderList(){
   grid.innerHTML = "";
   empty.classList.toggle("hidden", arr.length > 0);
   arr.forEach(x => {
-    const c = cardEl({ title: x.title, name: x.title, poster_path: x.poster, vote_average: x.rating, media_type: x.type }, x.type);
+    // the card object MUST carry id/dates/votes — without an id openDetail
+    // fetched /tv/undefined and opened the empty "Untitled" modal
+    const c = cardEl({
+      id: x.id, title: x.title, name: x.title, poster_path: x.poster,
+      vote_average: x.rating, vote_count: x.votes || 0,
+      release_date: x.type === "movie" && x.year ? `${x.year}-01-01` : "",
+      first_air_date: x.type === "tv" && x.year ? `${x.year}-01-01` : "",
+      media_type: x.type
+    }, x.type);
     const rm = document.createElement("button");
     rm.className = "absolute top-1 right-1 z-[2] w-9 h-9 rounded-full bg-black/60 hover:bg-black/90 text-sm";
     rm.setAttribute("aria-label", `Remove ${x.title} from My List`);
