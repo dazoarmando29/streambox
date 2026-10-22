@@ -43,16 +43,20 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/full/debug/app-full-debug.apk streambox.apk
           cp android/app/build/outputs/apk/lite/debug/app-lite-debug.apk streambox-lite.apk
-          # retry loop: the releases API occasionally flakes (delete-then-create
-          # must both succeed, otherwise the old tag blocks the create)
+          # create-or-update: NEVER delete first (a flake between delete and
+          # create used to leave the rolling release missing entirely). Assets
+          # replace in place with --clobber; the tag survives every publish.
           for i in 1 2 3 4 5; do
-            gh release delete latest --cleanup-tag -y >/dev/null 2>&1 || true
-            sleep 3
-            if gh release create latest --prerelease \
-              --title "StreamBox latest APKs" \
-              --notes "Auto-built from main (${{ github.sha }}). Two flavors, install one or both side-by-side: streambox.apk = full motion, streambox-lite.apk = calm (max smoothness + battery). Uninstall the old app on your TV first, then install." \
-              streambox.apk streambox-lite.apk; then
-              break
+            if gh release view latest >/dev/null 2>&1; then
+              gh release edit latest \
+                --title "StreamBox latest APKs" \
+                --notes "Auto-built from main (${{ github.sha }}). Two flavors, install one or both side-by-side: streambox.apk = full motion, streambox-lite.apk = calm (max smoothness + battery). Uninstall the old app on your TV first, then install." && \
+              gh release upload latest streambox.apk streambox-lite.apk --clobber && break
+            else
+              gh release create latest --prerelease \
+                --title "StreamBox latest APKs" \
+                --notes "Auto-built from main (${{ github.sha }}). Two flavors, install one or both side-by-side: streambox.apk = full motion, streambox-lite.apk = calm (max smoothness + battery). Uninstall the old app on your TV first, then install." \
+                streambox.apk streambox-lite.apk && break
             fi
             echo "release publish attempt $i failed, retrying..."
             sleep 10

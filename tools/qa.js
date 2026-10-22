@@ -127,7 +127,10 @@
        quality stepper beside the QLEVELS pills, engine-only inputs hidden
    110 My List correctness: the player-page button reflects the saved state
        (In My List vs + My List), and list cards open REAL details (the card
-       object must carry id — the missing id opened the empty Untitled modal) */
+       object must carry id — the missing id opened the empty Untitled modal)
+   111 the rolling release publish never deletes first (the delete-then-create
+       flake lost the whole release once) — create-or-update with --clobber,
+       tag survives every publish */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1113,6 +1116,18 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const noId = clicks.filter((c) => !/id:/.test(c) && !/\.\.\.x/.test(c));
   if (!noId.length) ok("every synthetic cardEl object carries an id");
   else bad("cardEl called with a synthetic object missing id: " + noId[0].slice(0, 80));
+}
+
+/* ---------- 111. rolling release publish never deletes first ---------- */
+{
+  const wfy = read(".github/workflows/android-apk.yml");
+  if (/gh release delete/.test(wfy)) bad("the workflow deletes the rolling release before recreating it -- the delete-create flake lost the release once");
+  else ok("no gh release delete in the publish step");
+  if (/gh release view latest[\s\S]{0,200}gh release edit latest/.test(wfy) && /--clobber/.test(wfy))
+    ok("publish is create-or-update (view -> edit + upload --clobber)");
+  else bad("the publish step must create-or-update: gh release view + edit + upload --clobber (or create when missing)");
+  if (/gh release create latest/.test(wfy) && /gh release upload latest/.test(wfy)) ok("both paths publish both APKs");
+  else bad("the publish step must cover create (missing) and upload (existing) paths");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
