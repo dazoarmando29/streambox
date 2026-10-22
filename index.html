@@ -130,6 +130,10 @@
      watch-on hide (below) still wins on TV while playing. */
   #cursorBtn { display: none !important; }
   body.tv-mode #cursorBtn, body.tv-app #cursorBtn { display: inline-flex !important; align-items: center; justify-content: center; }
+  /* Crisp Video: perceptual sharpening on OUR player frame — works on every
+     server. It is an honest upscaler-feel (contrast/saturation lift, GPU
+     cheap); real resolution stays whatever the source carries. */
+  #playerBox.crisp #player { filter: contrast(1.06) saturate(1.06) brightness(0.995); }
   /* Top 10 rank numerals (design pack): giant outline digits behind posters */
   .rank-number {
     font-family: "Space Grotesk", sans-serif;
@@ -671,7 +675,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 204; // bump every release alongside version.txt
+  const BUILD_NUM = 205; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -966,8 +970,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <p class="text-[11px] text-gray-500 mb-4 mt-1">Fine-tune buffer memory, eliminate micro-stuttering, and customize ad-shield preferences for cinema fluidity. <span id="healthLine"></span></p>
         <!-- one clean card per switch (design pack) — every switch applies instantly -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Sandbox blocks popup ads &amp; tab hijacks. Turn off only if a server won't load.">
-            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x1F6E1;</span> Ad Shield</b><span class="block text-[11px] text-gray-500">Sandboxed pop-up blocker</span></span>
+          <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Ad requests are filtered on every player (the APK blocks ad hosts app-wide). Our players never get sandboxed.">
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x1F6E1;</span> Ad Shield</b><span class="block text-[11px] text-gray-500">Blocks ad hosts on every player (ours stay raw)</span></span>
             <input type="checkbox" id="optShield" checked class="switch" onchange="toggleShield()">
           </label>
           <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="TV remotes can only drive some servers — hide the rest from Source lists.">
@@ -985,6 +989,10 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Stuck player hops mirrors by itself. Off = we name the server to try and you hop with &#x21C4; Source.">
             <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x21C4;</span> Auto-Switch Server</b><span class="block text-[11px] text-gray-500">Stuck players heal themselves</span></span>
             <input type="checkbox" id="optAutoswitch" class="switch" onchange="autoSwitchSave()">
+          </label>
+          <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Perceptual sharpening on the player frame — works on every server (real resolution stays what the source carries).">
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x2726;</span> Crisp Video</b><span class="block text-[11px] text-gray-500">Perceptual sharpening on any server</span></span>
+            <input type="checkbox" id="optCrisp" class="switch" onchange="crispToggle()">
           </label>
         </div>
         <!-- engine row: one Motion Judder control + the real actions -->
@@ -3359,12 +3367,10 @@ async function openWatch(type, id, s=1, e=1, t=0){
   window._endedHandled = false; // one auto-advance per load
   try { gridS = s; } catch(e){}
   try {
-    // house route: movies/TV always open on CineSrc, anime always on AniPM.
-    // A saved pref from a previous title must never leak into the next one —
+    // provisional route until the TMDB detail lands (K-dramas pick below);
+    // a saved pref from a previous title must never leak into the next one —
     // mid-viewing \u{21C4} hops still work, they just don't stick past Back.
-    let def = anime ? "anipm" : "cinesrc";
-    if (!MIRRORS.some(x => x.id === def) || !mirrorAllowed(def)) def = "cinesrc";
-    mirror = def;
+    mirror = "cinesrc";
   } catch(e){ mirror = "cinesrc"; }
   trailerKey = null; // trailer is a per-viewing fallback, never default
   // no stale frames: blank the player NOW (modal-direct switches skip Back,
@@ -3400,6 +3406,16 @@ async function openWatch(type, id, s=1, e=1, t=0){
   window._koAuto = true;
   window._koAutoDone = "";
   window._koSweepKey = ""; window._koSweep = {}; window._koNoTlShown = false; window._koAudioNote = "";
+  try {
+    // house route (needs the metadata): anime always on AniPM, K-Dramas
+    // ALWAYS on VidBolt (Tagalog-dub defaults + its own English subs) with
+    // CineSrc as their fallback — never the other way around. Movies/TV open
+    // on CineSrc.
+    let def = anime ? "anipm" : watchState.ko ? "vidbolt" : "cinesrc";
+    if (!MIRRORS.some(x => x.id === def) || !mirrorAllowed(def)) def = watchState.ko ? "cinesrc" : "cinesrc";
+    mirror = def;
+    updateMirrorUI(); paintMirrors();
+  } catch(e){ mirror = watchState.ko ? "cinesrc" : mirror; }
   loadStoredSubs(); // auto-attach this title's remembered subtitle file
   wyzAutoSubs(); // none remembered? fetch the best match silently (English default)
   // late anime catch (deep links / cold continue entries): metadata now proves
@@ -3812,17 +3828,11 @@ try {
   const savedQ = localStorage.getItem("streambox_quality") || "";
   const qi = QLEVELS.findIndex(x => x.v === savedQ);
   if (qi >= 0) qIdx = qi;
-  // weak boxes decode 1080p+ slowly, so fresh installs start low (smooth
-  // beats sharp). Calm/Lite boxes go 480p, other TVs 720p. Saved choice
-  // always wins; step up anytime in Playback Settings.
-  else if (document.body.classList.contains("calm")) {
-    qIdx = QLEVELS.findIndex(x => x.v === "480");
-    try { localStorage.setItem("streambox_quality", "480"); } catch(e){}
-  }
-  else if ((typeof IS_TV_DEVICE !== "undefined" && IS_TV_DEVICE)) {
-    qIdx = QLEVELS.findIndex(x => x.v === "720");
-    try { localStorage.setItem("streambox_quality", "720"); } catch(e){}
-  }
+  // no hidden floor: Auto (best the source carries) everywhere. The old TV
+  // 720p / calm 480p pins made 1080p sources look soft and were persisted —
+  // resolution is the viewer's choice now. Calm keeps 720p as its polite
+  // default (battery), still one tap to Auto.
+  else if (document.body.classList.contains("calm")) qIdx = QLEVELS.findIndex(x => x.v === "720");
 } catch(e){}
 /* single-player mode: hide the video's own button bar, ours is the player.
    (Its \u{2699}/CC menus go with it — re-show below any time for subtitles.) */
@@ -4040,9 +4050,10 @@ function qDropAuto(){
     const i = order.indexOf(cur);
     const nxt = order[Math.min(order.length - 1, i < 0 ? 1 : i + 1)];
     if (nxt === cur) return false; // already at the floor
+    // the drop is a STALL MITIGATION for this session only — never persisted,
+    // so the viewer's chosen quality returns on the next load
     qIdx = Math.max(0, QLEVELS.findIndex(x => x.v === nxt));
     paintQuality();
-    try { localStorage.setItem("streambox_quality", nxt); } catch(e){}
     return true;
   } catch(e){ return false; }
 }
@@ -4177,7 +4188,7 @@ function midPlayRescue(reason){
     if (document.getElementById("watchView").classList.contains("hidden")) return;
     try { srvMarkBad(pState.server); } catch(e){} // whatever carried us here is booked
     const at = Math.max(0, Math.floor(pState.cur || 0));
-    const fb = stuckFallback(watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
+    const fb = stuckFallback(watchState.anime ? "anipm" : isKDrama() ? "cinesrc" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
     const nm = stuckFallbackName(fb);
     if (autoSwitchOn() && !window._autoHopped) {
       window._autoHopped = true;
@@ -4208,11 +4219,9 @@ function armStuckWatchdogs(){
         if (f2 && f2.hasAttribute("sandbox")) {
           window._anipmRaw = true;
           f2.removeAttribute("sandbox");
-          const sh = document.getElementById("optShield");
-          if (sh) { sh.checked = false; sh.disabled = true; sh.title = "Ad Shield unavailable on this mirror"; }
           f2.src = f2.src.split("&_=")[0] + "&_=" + Date.now();
           const ws1 = document.getElementById("watchStatus");
-          if (ws1) ws1.textContent = "Retrying without Ad Shield…";
+          if (ws1) ws1.textContent = "Retrying unsandboxed — ad hosts stay filtered app-wide.";
           return;
         }
       } catch(e){}
@@ -4252,7 +4261,7 @@ function armStuckWatchdogs(){
   // the fallback and waits for \u{21C4} Source — never ping-pongs).
   if (mirror === "vidbolt" || mirror === "vidzen") {
     const nm = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
-    const fb = stuckFallback(watchState.anime ? "anipm" : "yapgrid");
+    const fb = stuckFallback(watchState.anime ? "anipm" : isKDrama() ? "cinesrc" : "yapgrid");
     const fbn = stuckFallbackName(fb);
     window._watchdog = setTimeout(() => {
       if ((mirror === "vidbolt" ? window._boltProgress : window._zenStarted)
@@ -4365,7 +4374,7 @@ function loadPlayer(){
     window._watchdog2 = setTimeout(() => {
       if (window._cinePlaying || mirror !== "cinesrc") return;
       // anime never belongs on the generic fallback — it lives on AniPM
-      const fb = stuckFallback(watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
+      const fb = stuckFallback(watchState.anime ? "anipm" : isKDrama() ? "cinesrc" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
       const nm = stuckFallbackName(fb);
       if (!autoSwitchOn()) { stuckRecommend("CineSrc stayed stuck", nm); return; }
       setMirror(fb, true);
@@ -4482,17 +4491,41 @@ function hideTwinTip(){
   try { sessionStorage.setItem(twinKey(), "1"); } catch(e){}
 }
 function toggleShield(){
+  const on = document.getElementById("optShield").checked;
   if (NO_SANDBOX.has(mirror)) {
-    document.getElementById("watchStatus").textContent = "Ad Shield unavailable on this mirror — it refuses sandboxed players.";
+    // no sandbox on our players by design — the app-level ad filter covers
+    // them regardless of this toggle
+    document.getElementById("watchStatus").textContent = "Ad Shield is active — ad hosts are filtered app-wide and our players stay unsandboxed.";
     return;
   }
-  const on = document.getElementById("optShield").checked;
   const f = document.getElementById("player");
   // Shield ON = sandbox without popups/top-navigation. OFF = allow popups (only if a server breaks).
   f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-modals");
   reloadKeepPos();
 }
 function applyPlayerOpts(){ reloadKeepPos(); }
+/* Crisp Video: perceptual sharpening on the player frame (any server). It is
+   NOT a real super-resolution upscaler — cross-origin players own their
+   <video> so frames can't be re-processed — but the contrast/saturation lift
+   is the honest GPU-cheap crispness boost. Calm/Lite keeps it off. */
+function applyCrisp(){
+  try {
+    let on = true;
+    try { on = localStorage.getItem("streambox_crisp") !== "0"; } catch(e){}
+    if (document.body.classList.contains("calm")) on = localStorage.getItem("streambox_crisp") === "1";
+    const box = document.getElementById("playerBox");
+    if (box) box.classList.toggle("crisp", on);
+    const cb = document.getElementById("optCrisp");
+    if (cb) cb.checked = on;
+  } catch(e){}
+}
+function crispToggle(){
+  try {
+    const on = document.getElementById("optCrisp").checked;
+    try { localStorage.setItem("streambox_crisp", on ? "1" : "0"); } catch(e){}
+    applyCrisp();
+  } catch(e){}
+}
 
 function goHome(ev){
   if(ev) ev.preventDefault();
@@ -4880,7 +4913,7 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
     // play pressed on a frame that never said hello (blocked embed, dead
     // source): parking the command would answer with silence — name the hop
     // instead. Same patience as the watchdog warn stage, never earlier.
-    const fb = stuckFallback(watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
+    const fb = stuckFallback(watchState.anime ? "anipm" : isKDrama() ? "cinesrc" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
     const nm = stuckFallbackName(fb);
     stuckRecommend("CineSrc isn't answering", nm);
     return;
@@ -5283,10 +5316,12 @@ const MIRRORS = [
   { id: "vidbolt", name: "VidBolt" },
   { id: "anipm", name: "AniPM" }
 ];
-/* mirrors that break inside ANY sandboxed iframe: load without sandbox
-   (VidRift shows "remove sandboxing" otherwise — their demand, not ours;
-   VidBolt's player likewise stays dark when sandboxed) */
-const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm", "vidrift", "vidbolt"]);
+/* mirrors that must NEVER carry the sandbox attribute: our own bar-driven
+   players (sandbox breaks their bridges — VidBolt goes dark, VidRift demands
+   removal) and the pages that refuse sandboxed frames. Ad Shield still covers
+   them via the app-level request filter (the APK blocks ad hosts on every
+   frame — see MainActivity.shouldInterceptRequest). */
+const NO_SANDBOX = new Set(["cinesrc", "vidzen", "vidlink", "vidfast", "yapgrid", "anipm", "vidrift", "vidbolt"]);
 /* TV-safe lineup helpers (TV_REMOTE_OK / IS_TV_DEVICE live in CONFIG above):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
@@ -5793,22 +5828,23 @@ function updateMirrorUI(){
 function applyMirrorSandbox(){
   const f = document.getElementById("player");
   if (!f) return;
+  const sh = document.getElementById("optShield");
+  if (sh) {
+    sh.disabled = false;
+    sh.title = "Ad Shield is active on EVERY player — ad requests are filtered app-wide (the APK blocks ad hosts on all frames). Sandbox pop-up blocking adds itself only on third-party mirrors; our players never sandbox.";
+  }
   // AniPM earned an unsandboxed retry (stage-1 probe): keep it off on reloads
   if (mirror === "anipm" && window._anipmRaw) {
     f.removeAttribute("sandbox");
-    const sh0 = document.getElementById("optShield");
-    if (sh0) { sh0.checked = false; sh0.disabled = true; sh0.title = "Ad Shield unavailable on this mirror"; }
     return;
   }
   if (NO_SANDBOX.has(mirror)) {
+    // our players + sandbox-refusing pages stay raw — the request filter is
+    // the shield here, never the sandbox attribute
     f.removeAttribute("sandbox");
-    const sh = document.getElementById("optShield");
-    if (sh) { sh.checked = false; sh.disabled = true; sh.title = "Ad Shield unavailable on this mirror"; }
     return;
   }
-  const sh = document.getElementById("optShield");
   const on = sh ? sh.checked : true;
-  if (sh) { sh.disabled = false; sh.title = ""; }
   f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-modals");
 }
 function paintMirrors(){
@@ -7281,7 +7317,7 @@ function boltArmStartRetry(delay){
       loadPlayer();
       return;
     }
-    const fb = stuckFallback(watchState.anime ? "anipm" : "yapgrid");
+    const fb = stuckFallback(watchState.anime ? "anipm" : isKDrama() ? "cinesrc" : "yapgrid");
     const nm = stuckFallbackName(fb);
     if (!autoSwitchOn()) { stuckRecommend("VidBolt stayed loading after two retries", nm); return; }
     const ws = document.getElementById("watchStatus");
@@ -8328,7 +8364,7 @@ window.addEventListener("message", (event)=>{
       } catch(e){}
       return;
     }
-    const fb = stuckFallback(watchState.anime ? "anipm" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
+    const fb = stuckFallback(watchState.anime ? "anipm" : isKDrama() ? "cinesrc" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
     const nm = stuckFallbackName(fb);
     const age = window._loadT ? Date.now() - window._loadT : 0;
     const patient = document.body.classList.contains("tv-mode") ? 45000 : 18000;

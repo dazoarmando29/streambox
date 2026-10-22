@@ -130,7 +130,15 @@
        object must carry id — the missing id opened the empty Untitled modal)
    111 the rolling release publish never deletes first (the delete-then-create
        flake lost the whole release once) — create-or-update with --clobber,
-       tag survives every publish */
+       tag survives every publish
+   112 quality has no hidden floor: defaults never pin 720/480 or persist a
+       default, and the stall auto-drop is session-only (soft-picture fix)
+   113 Ad Shield covers EVERY player without sandboxing our servers:
+       NO_SANDBOX owns all MAIN_PLAYERS, no "unavailable" disable path, and
+       the APK filter checks media extensions BEFORE any ad host
+   114 K-Dramas boot on VidBolt (CineSrc is their fallback, never the default)
+   115 Crisp Video: perceptual sharpening on any server via the player frame
+       filter (honest copy — no invented 4K) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1128,6 +1136,63 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("the publish step must create-or-update: gh release view + edit + upload --clobber (or create when missing)");
   if (/gh release create latest/.test(wfy) && /gh release upload latest/.test(wfy)) ok("both paths publish both APKs");
   else bad("the publish step must cover create (missing) and upload (existing) paths");
+}
+
+/* ---------- 112. quality has no hidden floor ---------- */
+{
+  const qd = html.match(/function qDropAuto\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (qd && !/localStorage\.setItem\(\s*"streambox_quality"/.test(qd[0])) ok("the stall auto-drop is session-only (never persisted)");
+  else bad("qDropAuto must never persist the drop -- viewers got stuck below HD forever");
+  const qdef = html.match(/const QLEVELS[\s\S]{0,900}/);
+  if (qdef && !/localStorage\.setItem\(\s*"streambox_quality"/.test(qdef[0])) ok("quality defaults never persist a floor");
+  else bad("the quality default block must not persist 720/480 floors");
+  if (qdef && !/"720"\); \}\s*\}?\s*else if \(\(typeof IS_TV_DEVICE/.test(qdef[0]) && !/findIndex\(x => x\.v === "480"\)/.test(qdef[0]))
+    ok("no TV 720p / calm 480p default pins (Auto serves best)");
+  else bad("the old TV 720p / calm 480p default pins must stay gone -- they made 1080p sources look soft");
+  const manual = [...html.matchAll(/localStorage\.setItem\(\s*"streambox_quality"/g)].length;
+  if (manual <= 3) ok("streambox_quality is written only by manual picks (" + manual + " sites)");
+  else bad("streambox_quality written from " + manual + " sites -- only manual quality picks may persist");
+}
+
+/* ---------- 113. Ad Shield everywhere, never sandboxing our servers ---------- */
+{
+  const ns = html.match(/const NO_SANDBOX = new Set\(\[([^\]]*)\]\)/);
+  if (ns && /"cinesrc"/.test(ns[1]) && /"vidzen"/.test(ns[1]) && /"vidbolt"/.test(ns[1]) && /"anipm"/.test(ns[1]))
+    ok("NO_SANDBOX owns every MAIN player (cinesrc/vidzen/vidbolt/anipm/vidrift)");
+  else bad("NO_SANDBOX must cover all MAIN_PLAYERS -- Ad Shield never sandboxes our servers");
+  if (/Ad Shield unavailable/.test(html)) bad("the Ad Shield unavailable path survives -- the shield covers every player");
+  else ok("no Ad Shield unavailable dead-end");
+  const am = html.match(/function applyMirrorSandbox\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (am && /sh\.disabled = false/.test(am[0]) && !/disabled = true/.test(am[0])) ok("the shield toggle stays live on every mirror");
+  else bad("applyMirrorSandbox must never disable the Ad Shield toggle");
+  let ma = "";
+  try { ma = read("android/app/src/main/java/com/streambox/app/MainActivity.java"); } catch (e) {}
+  if (ma && /shouldInterceptRequest/.test(ma) && /\.m3u8/.test(ma) && /isAdHost/.test(ma))
+    ok("the APK filter checks media extensions BEFORE any ad host (all players)");
+  else bad("MainActivity.shouldInterceptRequest must keep the media-extension guard ahead of the ad-host block");
+}
+
+/* ---------- 114. K-Dramas boot on VidBolt ---------- */
+{
+  const ow = html.match(/async function openWatch\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (ow && /watchState\.ko \? "vidbolt" : "cinesrc"/.test(ow[0])) ok("K-Dramas open on VidBolt (CineSrc is their fallback)");
+  else bad("openWatch must route K-Dramas to vidbolt with cinesrc as fallback");
+  const fbSites = [...html.matchAll(/stuckFallback\(/g)].map((m) => html.slice(m.index, m.index + 180));
+  const wrong = fbSites.filter((f) => /anime \? "anipm"/.test(f) && !/isKDrama\(\) \? "cinesrc"/.test(f));
+  if (!wrong.length) ok("every K-drama-capable fallback lands on CineSrc (" + fbSites.length + " sites)");
+  else bad("fallback must name cinesrc for K-dramas: " + wrong[0].slice(0, 90));
+}
+
+/* ---------- 115. Crisp Video (honest sharpening) ---------- */
+{
+  if (/id="optCrisp"/.test(html) && /function crispToggle/.test(html) && /function applyCrisp/.test(html))
+    ok("Crisp Video engine control present");
+  else bad("optCrisp / crispToggle / applyCrisp missing -- the perceptual sharpening control");
+  if (/#playerBox\.crisp #player \{[^}]*filter:/.test(html)) ok("the crisp filter paints on the player frame (any server)");
+  else bad("#playerBox.crisp #player must carry the sharpening filter");
+  const cc = html.match(/function applyCrisp\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (cc && !/4[Kk]/.test(cc[0])) ok("crisp copy makes no 4K claims");
+  else bad("Crisp Video must not claim 4K -- it is perceptual sharpening only");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

@@ -166,6 +166,18 @@ public class MainActivity extends Activity {
             @Override
             public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 try {
+                    String path = request.getUrl().getPath();
+                    // media first: a real stream request is NEVER blocked, even
+                    // when some ad-ish host serves it (Ad Shield checks media
+                    // extensions BEFORE any ad host).
+                    if (path != null) {
+                        String p = path.toLowerCase(java.util.Locale.US);
+                        if (p.endsWith(".m3u8") || p.endsWith(".mp4") || p.endsWith(".ts")
+                                || p.endsWith(".m4s") || p.endsWith(".webm") || p.endsWith(".mkv")
+                                || p.endsWith(".aac") || p.endsWith(".mpd")) {
+                            return super.shouldInterceptRequest(view, request);
+                        }
+                    }
                     String host = request.getUrl().getHost();
                     if (isAdHost(host == null ? "" : host.toLowerCase(java.util.Locale.US))) {
                         return new android.webkit.WebResourceResponse("text/plain", "utf-8",
