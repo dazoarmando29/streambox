@@ -250,6 +250,14 @@
   #capOverlay.cap-bottom { bottom: 12%; }
   #capOverlay.cap-center { top: 44%; }
   #capOverlay.cap-top { top: 10%; }
+  /* caption floats while playing, settles when paused/minimized */
+  #capOverlay.floating {
+    animation: captionFloat 3s ease-in-out infinite;
+  }
+  @keyframes captionFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+  }
   /* the caption background hugs the TEXT (a pill), never the full-width
      overlay — a full-bleed band read as a broken player bar */
   #capOverlay .cap-pill { display: inline-block; border-radius: 8px; max-width: 100%; }
@@ -4885,31 +4893,33 @@ function renderList(){
    player lost. The session is written on every play/continue and restored on
    boot, so coming back to the tab returns to the same title + episode. Back
    out of the player clears it (that IS leaving the player). */
-function saveWatchSession(){
-  try {
-    if (!watchState || watchState.id == null) return;
-    localStorage.setItem("streambox_watch", JSON.stringify({
-      type: watchState.type, id: watchState.id, s: watchState.s || 1, e: watchState.e || 1,
-      t: Math.max(0, Math.floor(pState.cur || watchState.t || 0)),
-      at: Date.now()
-    }));
-  } catch(e){}
-}
-function clearWatchSession(){
-  try { localStorage.removeItem("streambox_watch"); } catch(e){}
-}
-function restoreWatchSession(){
-  try {
-    const q = new URLSearchParams(location.search);
-    if (q.get("type") && q.get("id")) return; // an explicit deep link wins
-    const raw = localStorage.getItem("streambox_watch");
-    if (!raw) return;
-    const s = JSON.parse(raw);
-    if (!s || s.type == null || s.id == null) return;
-    if (Date.now() - (s.at || 0) > 6 * 3600 * 1000) { clearWatchSession(); return; }
-    openWatch(s.type, s.id, s.s || 1, s.e || 1, s.t || 0);
-  } catch(e){}
-}
+  /* ---------- Episode sync hardening ---------- */
+  /* robust watch-session persistence: survives tab switches and page reloads */
+  function saveWatchSession(){
+    try {
+      if (!watchState || watchState.id == null) return;
+      localStorage.setItem("streambox_watch", JSON.stringify({
+        type: watchState.type, id: watchState.id, s: watchState.s || 1, e: watchState.e || 1,
+        t: Math.max(0, Math.floor(pState.cur || watchState.t || 0)),
+        at: Date.now()
+      }));
+    } catch(e){}
+  }
+  function clearWatchSession(){
+    try { localStorage.removeItem("streambox_watch"); } catch(e){}
+  }
+  function restoreWatchSession(){
+    try {
+      const q = new URLSearchParams(location.search);
+      if (q.get("type") && q.get("id")) return; // an explicit deep link wins
+      const raw = localStorage.getItem("streambox_watch");
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (!s || s.type == null || s.id == null) return;
+      if (Date.now() - (s.at || 0) > 6 * 3600 * 1000) { clearWatchSession(); return; }
+      openWatch(s.type, s.id, s.s || 1, s.e || 1, s.t || 0);
+    } catch(e){}
+  }
 const pState = { paused: true, muted: false, rate: 1, cur: 0, dur: 0, seeking: false };
 window._cmdQ = []; window._cineReady = false; window._qSeekD = 0;
 function sendCmd(command, args = []) {
@@ -6724,7 +6734,13 @@ function paintCaps(force){
   ov.classList.remove("cap-bottom", "cap-center", "cap-top");
   ov.classList.add("cap-" + ((subFile && subFile.pos) || "bottom"));
   const pill = ov.querySelector(".cap-pill");
-  if (pill) applyCapStyle(pill); // 12-26sp / white-yellow-cyan / None-Semi-Solid
+  if (pill) applyCapStyle(pill);
+  // float when playing, settle when paused/minimized
+  if (subsOn && subFile && subFile.cues && subFile.cues.length && !pState.paused) {
+    ov.classList.add("floating");
+  } else {
+    ov.classList.remove("floating");
+  }
 }
 /* episodes drawer — browsing seasons NEVER touches playback: the drawer
    keeps its own season cursor (drawerS); only tapping an episode plays. */
