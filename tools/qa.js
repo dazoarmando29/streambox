@@ -141,7 +141,13 @@
        always rides)
    114 K-Dramas boot on VidBolt (CineSrc is their fallback, never the default)
    115 Crisp Video is ALWAYS on (no toggle): the perceptual sharpening filter
-       paints on the player frame for every server — honest copy, no 4K claim */
+       paints on the player frame for every server — honest copy, no 4K claim
+   116 dormant HLS shell: OUR OWN <video> only (the one legal upscaler attach
+       point), dormant until window._hlsSource is wired, dispatched from
+       loadPlayer, and the upscaler never touches an iframe
+   117 WebSR upscaler wiring: lazy WebGPU load (esm.sh websr + weights), the
+       navigator.gpu gate, plain-playback fallback on every failure, and an
+       honest "AI Upscale 2x" label (never 4K) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1201,6 +1207,45 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const crispCss = html.match(/#playerBox #player \{[^}]*\}/);
   if (crispCss && !/4[Kk]/.test(crispCss[0])) ok("crisp styling makes no 4K claims");
   else bad("the crisp filter must not claim 4K -- it is perceptual sharpening only");
+}
+
+/* ---------- 116. dormant HLS shell (own video only) ---------- */
+{
+  if (html.includes('id="hlsVideo"') && html.includes('id="hlsShell"') && html.includes('id="hlsCanvas"'))
+    ok("the HLS shell carries its own video + upscale canvas");
+  else bad("the HLS shell slot needs hlsShell/hlsVideo/hlsCanvas");
+  const lp = html.match(/function loadPlayer\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (lp && /mirror === "hls"/.test(lp[0]) && /loadHlsPlayer\(\)/.test(lp[0]))
+    ok("loadPlayer dispatches the hls mirror to the shell");
+  else bad("loadPlayer must dispatch mirror === \"hls\" to loadHlsPlayer");
+  const lh = html.match(/function loadHlsPlayer\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (lh && /window\._hlsSource/.test(lh[0]) && /dormant/.test(lh[0])) ok("the shell stays dormant until _hlsSource is wired");
+  else bad("loadHlsPlayer must gate on window._hlsSource and say so while dormant");
+  const au = html.match(/async function attachHlsUpscaler\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (au && /hlsVideo/.test(au[0]) && !/contentWindow|getElementById\("player"\)/.test(au[0]))
+    ok("the upscaler attaches ONLY to our own video element (never an iframe)");
+  else bad("attachHlsUpscaler must target #hlsVideo only -- embed iframes can never be upscaled");
+  const tv = html.match(/const TV_REMOTE_OK = new Set\(\[([^\]]*)\]\)/);
+  if (tv && /"hls"/.test(tv[1])) ok("the shell is TV-remote drivable (first-party player)");
+  else bad("TV_REMOTE_OK must include the hls shell (it is our own bar-driven player)");
+}
+
+/* ---------- 117. WebSR wiring (lazy, graceful, honest) ---------- */
+{
+  const au = html.match(/async function attachHlsUpscaler\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (!au) bad("attachHlsUpscaler missing");
+  else {
+    const t = au[0];
+    if (/import\("https:\/\/esm\.sh\/@websr\/websr/.test(t) && /fetch\("https:\/\/katana\.video\/files\/cnn-2x/.test(t))
+      ok("WebSR + Anime4K weights load lazily (only when the shell plays)");
+    else bad("attachHlsUpscaler must lazy-load WebSR and its weights on first use");
+    if (/navigator\.gpu/.test(t)) ok("the WebGPU gate runs before init");
+    else bad("attachHlsUpscaler must gate on navigator.gpu");
+    if (/catch/.test(t) && /catch\(\(\) =>/.test(t)) ok("every failure path falls back to plain playback");
+    else bad("the upscaler needs plain-playback fallbacks (init catch + render catch)");
+    if (/AI Upscale 2x/.test(t) && !/\b4[Kk]\b/.test(t)) ok("the label is honest AI Upscale 2x (never 4K)");
+    else bad("the upscaler status must say AI Upscale 2x -- never a 4K claim");
+  }
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

@@ -676,7 +676,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 206; // bump every release alongside version.txt
+  const BUILD_NUM = 207; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -692,7 +692,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 /* TV-safe lineup (early: boot code below reads these at parse time):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
-const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift", "vidzen", "vidbolt", "anipm"]);
+const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift", "vidzen", "vidbolt", "anipm", "hls"]);
 const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVIA|Fire TV|AFT/i.test(navigator.userAgent || "");
 </script>
 
@@ -870,6 +870,13 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           allowfullscreen allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
           referrerpolicy="strict-origin-when-cross-origin" loading="eager"
           sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"></iframe>
+        <!-- dormant HLS shell: OUR OWN <video> — the one place an AI upscaler
+             can legally and technically attach. Dormant until a lawful source
+             feeds window._hlsSource (nothing does today). -->
+        <div id="hlsShell" class="hidden absolute inset-0 bg-black">
+          <video id="hlsVideo" playsinline class="w-full h-full object-contain"></video>
+          <canvas id="hlsCanvas" class="hidden absolute inset-0 w-full h-full object-contain"></canvas>
+        </div>
         <!-- our own caption overlay (external subtitle files) -->
         <div id="capOverlay" class="cap-bottom"></div>
         <!-- trailer mode chip (control bar hides; trailers need no controls) -->
@@ -4277,6 +4284,70 @@ function armStuckWatchdogs(){
     return;
   }
 }
+/* ---------- HLS shell slot (dormant) + WebSR AI upscaler ----------
+   The shell plays a DIRECT media URL through OUR OWN <video> — the only
+   place an upscaler can attach (cross-origin embed iframes can't be touched,
+   and feeding third-party streams through cloud upscalers would re-serve
+   streams we don't own). DORMANT: window._hlsSource stays null until a
+   lawful source is wired: window._hlsSource = { url } + setMirror("hls").
+   Upscaler = WebSR (WebGPU, Anime4K CNN 2x, on-device, real-time). Every
+   failure path falls back to plain playback — the slot must never black. */
+let _hlsUpscaled = false;
+function loadHlsPlayer(){
+  const f = document.getElementById("player");
+  const shell = document.getElementById("hlsShell");
+  const v = document.getElementById("hlsVideo");
+  const src = window._hlsSource;
+  try { const sp = document.getElementById("playerSpin"); if (sp) sp.style.display = "none"; } catch(e){}
+  if (!src || !src.url) {
+    // dormant: nothing wired — say so, never a mystery black frame
+    if (shell) shell.classList.add("hidden");
+    const ws = document.getElementById("watchStatus");
+    if (ws) ws.textContent = "HLS shell slot is dormant — no source wired yet.";
+    return;
+  }
+  try { if (f) f.src = "about:blank"; } catch(e){}
+  if (shell) shell.classList.remove("hidden");
+  if (v) {
+    v.src = src.url;
+    const p = v.play();
+    if (p && p.catch) p.catch(() => {});
+  }
+  attachHlsUpscaler();
+}
+async function attachHlsUpscaler(){
+  // WebSR renders OUR video's frames through an Anime4K 2x network into the
+  // canvas, on-device via WebGPU — lazy-loaded, and any failure (no WebGPU,
+  // CDN down, tainted frames) silently keeps plain playback.
+  const v = document.getElementById("hlsVideo");
+  const c = document.getElementById("hlsCanvas");
+  if (!v || !c || _hlsUpscaled) return;
+  try {
+    if (!navigator.gpu) return;
+    const mod = await import("https://esm.sh/@websr/websr@0.0.15");
+    const WebSR = mod && (mod.default || mod.WebSR);
+    if (!WebSR) return;
+    const weights = await (await fetch("https://katana.video/files/cnn-2x-lg-2d-animation.json")).json();
+    const gpu = await WebSR.initWebGPU();
+    if (!gpu) return;
+    const websr = new WebSR({ network_name: "anime4k/cnn-2x-l", weights: weights, gpu: gpu, canvas: c });
+    const loop = () => {
+      websr.render(v).then(() => {
+        if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(loop);
+        else requestAnimationFrame(loop);
+      }).catch(() => {
+        // tainted/unsupported frames: plain playback, never a stuck canvas
+        try { c.classList.add("hidden"); } catch(e){}
+      });
+    };
+    if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(loop);
+    else requestAnimationFrame(loop);
+    c.classList.remove("hidden");
+    _hlsUpscaled = true;
+    const ws = document.getElementById("watchStatus");
+    if (ws) ws.textContent = "AI Upscale 2x active \u{2713} (WebGPU on-device)";
+  } catch(e){ /* plain playback */ }
+}
 function loadPlayer(){
   try { hideUpNext(); } catch(e){} // fresh video: no endgame card from the last one
   // sync clock restart: provider episode events arriving inside the 8s
@@ -4303,6 +4374,13 @@ function loadPlayer(){
   const spin = document.getElementById("playerSpin");
   if (spin) spin.style.display = "grid";
   const f = document.getElementById("player");
+  if (mirror === "hls") {
+    // dormant HLS shell: OUR OWN <video> + the WebSR upscaler (first-party,
+    // bar-drivable) — loadHlsPlayer handles both the dormant and live states
+    if (spin) spin.style.display = "none";
+    loadHlsPlayer();
+    return;
+  }
   if (mirror === "anipm") {
     // async ID mapping — the generic URL builder can't do this one
     window._lrT = 0; window._cinePlaying = false; window._anipmResume = 0;
