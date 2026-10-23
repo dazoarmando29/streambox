@@ -703,7 +703,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 209; // bump every release alongside version.txt
+  const BUILD_NUM = 210; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -2352,14 +2352,33 @@ function purgeRetiredCaches(){
     try { if (e.target && e.target.closest && e.target.closest("#ctlBar")) pokeHud(); } catch(err){}
   });
   // any pointer press ends keyboard-focus mode (next glow needs arrows/Tab again)
-  ["mousedown", "touchstart"].forEach(t => document.addEventListener(t, () => {
+  ["mousedown", "touchstart"].forEach(t => document.addEventListener(t, (e) => {
     window._kbNav = false;
     document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
+    // mobile: any touch on the player brings the controls alive right away
+    // (click is delayed on mobile, so touchstart must wake the HUD itself)
+    try {
+      const tgt = e.target && e.target.closest ? e.target.closest("#playerBox,#ctlBar") : null;
+      if (tgt) pokeHud();
+    } catch(err){}
   }, { capture: true, passive: true }));
   // pointer activity wakes the cinema UI (mouse/touch)
   document.addEventListener("click", (e) => {
     try { if (e.target && e.target.closest && e.target.closest("#ctlBar,#playerBox")) pokeHud(); } catch(err){}
   }, true);
+  // tap the video surface to play/pause when the controls are asleep
+  try {
+    document.getElementById("playerBox").addEventListener("touchend", (e) => {
+      if (document.getElementById("watchView").classList.contains("hidden")) return;
+      if (topPopup()) return;
+      const bar = document.getElementById("ctlBar");
+      if (e.target && e.target.closest && e.target.closest("#ctlBar")) return; // button owns its tap
+      if (bar && bar.classList.contains("bar-hidden") && (pState.dur || 0) > 0) {
+        e.preventDefault();
+        ctlToggle();
+      }
+    }, { passive: false });
+  } catch(e){}
   try {
     document.getElementById("playerBox").addEventListener("mousemove", () => pokeHud());
   } catch(e){}
@@ -4930,6 +4949,20 @@ function renderList(){
       openWatch(s.type, s.id, s.s || 1, s.e || 1, s.t || 0);
     } catch(e){}
   }
+  // capture the live playhead the instant the page is hidden (tab switch /
+  // app background / reload) so progress is never lost across a reload
+  (function(){
+    const persistPosition = () => {
+      try {
+        if (!watchState || watchState.id == null) return;
+        watchState.t = Math.max(0, Math.floor(pState.cur || watchState.t || 0));
+        saveWatchSession();
+      } catch(e){}
+    };
+    try { document.addEventListener("visibilitychange", () => { if (document.hidden) persistPosition(); }, { passive: true }); } catch(e){}
+    try { window.addEventListener("pagehide", persistPosition, { passive: true }); } catch(e){}
+    try { window.addEventListener("beforeunload", persistPosition, { passive: true }); } catch(e){}
+  })();
 const pState = { paused: true, muted: false, rate: 1, cur: 0, dur: 0, seeking: false };
 window._cmdQ = []; window._cineReady = false; window._qSeekD = 0;
 function sendCmd(command, args = []) {
@@ -6993,15 +7026,21 @@ function introHit(){
   const cur = pState.cur || 0;
   return _introRanges.find(r => cur >= r.start && cur < r.end - 1) || null;
 }
+function mirrorSeek(t){
+  // seek every drivable mirror to absolute seconds t — one dispatch instead
+  // of repeating the same if/else chain in intro/recap/outro skips
+  const tt = Math.max(0, Math.floor(t || 0));
+  if (mirror === "cinesrc") sendCmd("seek", [tt]);
+  else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: tt });
+  else if (mirror === "vidbolt") boltSkipTo(tt);
+  else if (mirror === "vidzen") zenSeekTo(tt);
+  else if (mirror === "anipm") anipmSend("seek", { time: tt });
+}
 function skipIntroNow(){
   const hit = introHit();
   if (!hit) return;
   _skipT = Date.now();
-  if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
-  else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
-  else if (mirror === "vidbolt") boltSkipTo(hit.end);
-  else if (mirror === "vidzen") zenSeekTo(hit.end);
-  else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
+  mirrorSeek(hit.end);
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Intro skipped \u{2713}";
   paintSkipPill();
@@ -7018,11 +7057,7 @@ function skipRecapNow(){
   const hit = recapHit();
   if (!hit) return;
   _skipT = Date.now();
-  if (mirror === "cinesrc") sendCmd("seek", [Math.floor(hit.end)]);
-  else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
-  else if (mirror === "vidbolt") boltSkipTo(hit.end);
-  else if (mirror === "vidzen") zenSeekTo(hit.end);
-  else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
+  mirrorSeek(hit.end);
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Recap skipped \u{2713}";
   paintSkipPill();
@@ -7081,11 +7116,7 @@ function skipOutroNow(){
   // finale or unknown lineup: jump to the end, let end-of-video flow take over
   const end = Math.floor((pState.dur || 0) > 0 ? pState.dur : (hit.end || 0));
   if (!end) return;
-  if (mirror === "cinesrc") sendCmd("seek", [end]);
-  else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: end });
-  else if (mirror === "vidbolt") boltSkipTo(end);
-  else if (mirror === "vidzen") zenSeekTo(end);
-  else if (mirror === "anipm") anipmSend("seek", { time: end });
+  mirrorSeek(end);
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Credits skipped \u{2713}";
   paintSkipPill();
