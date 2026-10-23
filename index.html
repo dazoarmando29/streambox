@@ -703,7 +703,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 211; // bump every release alongside version.txt
+  const BUILD_NUM = 213; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1677,7 +1677,11 @@ setTimeout(checkCinesrc, 2500);
 /* ---------- HOME ---------- */
 async function init(){
   try { autoSwitchRestore(); } catch(e){} // manual hop mode persists across visits
-  try { restoreWatchSession(); } catch(e){} // tab switch / reload returns to the player
+  // NOTE: the watch session is intentionally NOT restored on a full page load
+  // (Ctrl+Shift+R / fresh open). A reload lands on Home / the last browsed
+  // section, not back into the last video. Tab-switch return does not reload
+  // the page (the watch page stays loaded), so the session is kept naturally;
+  // goHome() clears it when you actually leave the player.
   renderContinue();
   const rows = document.getElementById("rows");
   // beauty: shimmer placeholders so the page never looks broken while loading

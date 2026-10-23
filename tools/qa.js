@@ -1296,8 +1296,8 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (gh && /clearWatchSession\(\)/.test(gh[0])) ok("leaving the player clears the session");
   else bad("goHome must clear the watch session");
   const ini = html.match(/async function init\s*\(\)\s*\{[\s\S]*?\n\}/);
-  if (ini && /restoreWatchSession\(\)/.test(ini[0])) ok("boot restores the session (tab switch returns to the player)");
-  else bad("init must call restoreWatchSession() -- a reload used to land on Home");
+  if (ini && !/restoreWatchSession\(\)/.test(ini[0])) ok("boot does NOT restore the watch session (a reload lands on Home, tab-switch keeps the page as-is)");
+  else bad("init must NOT call restoreWatchSession() -- a reload must land on Home, not jump back into the last video");
   if (rs && /search/.test(rs[0]) && /openWatch\(/.test(rs[0])) ok("restore reopens the title; deep links win");
   else bad("restoreWatchSession must reopen the title and let deep links win");
 }
