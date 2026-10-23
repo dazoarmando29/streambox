@@ -23,6 +23,16 @@
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 <link rel="dns-prefetch" href="https://cinesrc.st">
 <link rel="preconnect" href="https://cinesrc.st" crossorigin>
+<!-- Speed: warm every host the player touches so the first load skips the
+   handshake on slow TV Wi-Fi. Intro ranges load on every TV/anime episode,
+   the fallback poster host paints when art is missing, and the anime-mapping
+   hosts carry the season-aware route resolve that defers the anime boot. -->
+<link rel="preconnect" href="https://api.theintrodb.org" crossorigin>
+<link rel="dns-prefetch" href="https://api.theintrodb.org">
+<link rel="dns-prefetch" href="https://via.placeholder.com">
+<link rel="dns-prefetch" href="https://api.jikan.moe">
+<link rel="dns-prefetch" href="https://api.consumet.org">
+<link rel="dns-prefetch" href="https://graphql.anilist.co">
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -693,7 +703,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 208; // bump every release alongside version.txt
+  const BUILD_NUM = 209; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";

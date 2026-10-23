@@ -1302,5 +1302,56 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("restoreWatchSession must reopen the title and let deep links win");
 }
 
+/* ---------- 121. every host the site touches is pre-warmed ---------- */
+{
+  const warm = ["api.theintrodb.org", "via.placeholder.com",
+    "api.jikan.moe", "api.consumet.org", "graphql.anilist.co"];
+  const miss = warm.filter(hh => {
+    const re = new RegExp("(preconnect|dns-prefetch)[^>]*" + hh.replace(/\./g, "\\."), "i");
+    const re2 = new RegExp(hh.replace(/\./g, "\\.") + "[^>]*(preconnect|dns-prefetch)", "i");
+    if (re.test(html) || re2.test(html)) return false;
+    const idx = html.indexOf(hh);
+    return !(idx >= 0 && /preconnect|dns-prefetch/i.test(html.slice(Math.max(0, idx - 120), idx + 120)));
+  });
+  if (!miss.length) ok("preconnect/dns-prefetch warms every host the player touches (intro ranges, fallback posters, anime mapping)");
+  else bad("missing preconnect/dns-prefetch for: " + miss.join(", "));
+}
+
+/* ---------- 122. paint-as-you-land ---------- */
+{
+  const hero = /fetchpriority="high"[^>]*decoding="async"|decoding="async"[^>]*fetchpriority="high"/.test(html);
+  if (hero) ok("hero backdrop loads eager + async (fetchpriority=high, decoding=async)");
+  else bad("hero backdrop must use fetchpriority=high + decoding=async (first paint, no layout shift)");
+  const initFn = html.match(/async function init\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (initFn) {
+    const sk = initFn[0].indexOf("skeletonRow");
+    const tm = initFn[0].indexOf("withTimeout(tmdb");
+    if (sk >= 0 && tm >= 0 && sk < tm) ok("skeleton rows paint before the first catalog fetch");
+    else bad("init() must paint skeleton rows before awaiting the first catalog page");
+  } else bad("init() missing");
+}
+
+/* ---------- 123. D-pad never strands on an untagged control ---------- */
+{
+  const mo = html.match(/new MutationObserver[\s\S]{0,3000}/);
+  if (mo && /\.tabIndex\s*=\s*0/.test(mo[0])
+      && /setAttribute\("role",\s*"button"\)/.test(mo[0])
+      && /data-focusable/.test(mo[0]))
+    ok("MutationObserver tags late-added cards/buttons (tabindex=0, role=button, data-focusable=1)");
+  else bad("the MutationObserver must tag every dynamically added focusable so TV D-pad focus never strands");
+}
+
+/* ---------- 124. motion stays scoped (TV SoC safe) ---------- */
+{
+  if (/:root\s*\{\s*--mot/.test(html) && !/\*\s*\{[^}]*transition/.test(html))
+    ok("UI transitions are scoped via --mot, never a universal * rule that re-resolves on TV SoCs");
+  else bad("transitions must be scoped to a named list driven by --mot, not a universal * rule");
+  if (/body\.calm \*, body\.calm \*::before, body\.calm \*::after/.test(html)
+      && /animation:\s*none !important/.test(html)
+      && /transition:\s*none !important/.test(html))
+    ok("calm mode kills animation and transitions everywhere (max smoothness, no melt)");
+  else bad("body.calm must kill animation and transitions everywhere");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);
