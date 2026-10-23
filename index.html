@@ -703,7 +703,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 210; // bump every release alongside version.txt
+  const BUILD_NUM = 211; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -6920,7 +6920,10 @@ async function renderEpDrawer(){
     let st1 = "", st1c = "text-gray-400", st2 = "";
     if (unaired) {
       st1 = "COMING SOON"; st1c = "text-amber-400";
-      st2 = `${phAirLabel(unaired)} (PH) \u{00B7} ${phCountdown(unaired)}`;
+      // st2: what day it airs (PH), the time it flips (00:00 PH, since TMDB
+      // air dates carry no time — availability flips at midnight PH), and the
+      // live countdown in days+hours.
+      st2 = `${phAirLabel(unaired)} (PH) \u{00B7} 00:00 PH \u{00B7} ${phCountdown(unaired)}`;
     } else if (epIsNew(ep) && wi) {
       st1 = `NEW \u{00B7} ${Math.max(1, Math.ceil((wi.dur - wi.pos) / 60))} left`; st1c = "text-teal-300";
     } else if (epIsNew(ep)) {
