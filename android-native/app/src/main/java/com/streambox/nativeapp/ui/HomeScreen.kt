@@ -275,13 +275,41 @@ fun BrowseScreen(
         // Continue Watching is TAB-SCOPED (0.50): the anime tab never shows
         // movie/TV progress and vice versa; Korean dramas follow their own
         // tab (0.57); Home and My List show everything.
-        cont = Store.progressList(ctx).let { all ->
-            when (section) {
-                Section.MOVIES -> all.filter { it.type == "movie" }
-                Section.TV -> all.filter { it.type == "tv" && it.lang != "ko" }
-                Section.KDRAMA -> all.filter { it.type == "tv" && it.lang == "ko" }
-                Section.ANIME -> all.filter { it.type == "anime" }
-                else -> all
+        // 0.73 lifecycle: a DONE record (episode finished, nothing left to
+        // play) is OUT of the row - and it COMES BACK rolled to the first
+        // newer aired episode (the row opens the new episode itself) the
+        // moment one exists.
+        cont = withContext(Dispatchers.IO) {
+            Store.progressList(ctx).let { all ->
+                when (section) {
+                    Section.MOVIES -> all.filter { it.type == "movie" }
+                    Section.TV -> all.filter { it.type == "tv" && it.lang != "ko" }
+                    Section.KDRAMA -> all.filter { it.type == "tv" && it.lang == "ko" }
+                    Section.ANIME -> all.filter { it.type == "anime" }
+                    else -> all
+                }
+            }.mapNotNull { p ->
+                if (!p.done) {
+                    p
+                } else {
+                    val nx = runCatching {
+                        if (p.type == "movie") null else Api.nextAiredEpisode(p.id, p.season, p.episode)
+                    }.getOrNull()
+                    if (nx != null) {
+                        val rolled = p.copy(
+                            season = nx.first,
+                            episode = nx.second,
+                            cur = 0f,
+                            dur = 0f,
+                            at = System.currentTimeMillis(),
+                            done = false,
+                        )
+                        runCatching { Store.saveProgress(ctx, rolled) }
+                        rolled
+                    } else {
+                        null
+                    }
+                }
             }
         }
         myList = Store.listItems(ctx)
@@ -865,6 +893,10 @@ private fun ContinueRow(cont: List<Progress>, big: Boolean, onResume: (Progress)
                                 if (p.dur > 0 && p.cur > 5) {
                                     val leftM = maxOf(1, ((p.dur - p.cur) / 60f).toInt())
                                     (p.cur / p.dur * 100).toInt().toString() + "% watched  \u2022  " + leftM + "m left"
+                                } else if (p.type != "movie") {
+                                    // The new-episode revival row (0.73):
+                                    // the row points at the NEW episode.
+                                    "New episode  \u2022  ready to watch"
                                 } else "Not started",
                                 color = Accent,
                                 fontSize = 10.sp,
@@ -1143,7 +1175,11 @@ private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
         genres = withContext(Dispatchers.IO) {
             runCatching {
                 val g = Api.genres(if (kind == "movie") "movie" else "tv")
-                if (kind == "anime" || kind == "kdrama") g.filter { it.first != 16 } else g
+                val trimmed = if (kind == "anime" || kind == "kdrama") g.filter { it.first != 16 } else g
+                // The one VIRTUAL genre (0.73): isekai / reincarnated /
+                // another-world stories (real TMDB keywords) lead the strip
+                // on every kind.
+                listOf(Api.GENRE_ANOTHER_WORLD to Api.ANOTHER_WORLD_NAME) + trimmed
             }.getOrDefault(listOf())
         }
     }

@@ -478,11 +478,17 @@ fun DetailScreen(
                                     .focusRing(RoundedCornerShape(50), pop = false)
                                     .background(Pill, RoundedCornerShape(50))
                                     .clickable {
+                                        // Marked watched (0.73): the record
+                                        // goes DONE - out of Continue
+                                        // Watching; the new-episode revival
+                                        // brings the row back pointing at
+                                        // the next aired episode.
                                         Store.saveProgress(
                                             ctx,
                                             Progress(
                                                 rp.type, rp.id, rp.name, rp.poster, rp.season, rp.episode,
                                                 rp.dur, rp.dur, System.currentTimeMillis(), rp.mal, rp.ani,
+                                                rp.lang, true,
                                             ),
                                         )
                                         saved = Store.progressList(ctx)
@@ -628,6 +634,38 @@ fun DetailScreen(
                         )
                     }
                     Spacer(modifier = Modifier.height(10.dp))
+                    // Season status line (0.73): the season's finale episode
+                    // and the NEXT season when one exists - ready with its
+                    // count, or Coming Soon. No next season = no note
+                    // (nothing is invented).
+                    val lastEpN = episodes.maxOfOrNull { it.n }
+                    val nextS = det.seasons.firstOrNull { it.n == season + 1 && it.n >= 1 }
+                    val noteToday = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                        .format(java.util.Date())
+                    val seasonNote = buildString {
+                        if (lastEpN != null && lastEpN > 0) {
+                            append("E").append(lastEpN).append(" is the season finale")
+                        }
+                        if (nextS != null) {
+                            if (isNotEmpty()) append("  \u00b7  ")
+                            append("Next: Season ").append(nextS.n)
+                            if (nextS.air.isNotBlank() && nextS.air > noteToday) {
+                                append("  \u00b7  Coming Soon")
+                            } else if (nextS.count > 0) {
+                                append("  \u00b7  ").append(nextS.count).append(" episodes")
+                            }
+                        }
+                    }
+                    if (seasonNote.isNotEmpty()) {
+                        Text(
+                            seasonNote,
+                            color = Soft,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = if (big) 12.sp else 11.sp,
+                            maxLines = 2,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                    }
                     if (epsBusy && episodes.isEmpty()) {
                         CircularProgressIndicator(
                             color = Accent,
@@ -645,6 +683,7 @@ fun DetailScreen(
                     savedCur = if (cur) p!!.cur else 0f,
                     savedDur = if (cur) p!!.dur else 0f,
                     tickMs = tickMs,
+                    finale = ep.n == (episodes.maxOfOrNull { it.n } ?: -1),
                 ) {
                     episode = ep.n
                     if (title.type != "anime" || mapping != "loading") {
@@ -1042,6 +1081,9 @@ private fun EpisodeRow(
     savedCur: Float,
     savedDur: Float,
     tickMs: Long,
+    // 0.73: the season's last episode wears a SEASON FINALE line so the
+    // end of the season is visible while scanning the list.
+    finale: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -1219,6 +1261,16 @@ private fun EpisodeRow(
                             color = Soft,
                             fontWeight = FontWeight.Bold,
                             fontSize = if (big) 12.sp else 10.sp,
+                        )
+                    }
+                    if (finale) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            "SEASON FINALE",
+                            color = Cyan,
+                            fontWeight = FontWeight.Black,
+                            fontSize = if (big) 10.sp else 8.sp,
+                            letterSpacing = 1.sp,
                         )
                     }
                 }

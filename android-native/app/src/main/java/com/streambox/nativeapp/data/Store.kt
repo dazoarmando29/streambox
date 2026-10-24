@@ -18,6 +18,10 @@ data class Progress(
     val mal: Int?,
     val ani: Int?,
     val lang: String = "",
+    // Episode finished with nothing left to play (0.73): the record stays
+    // for the new-episode revival but is OUT of Continue Watching until a
+    // newer aired episode shows up.
+    val done: Boolean = false,
 )
 
 /** Per-title subtitle placement + sync memory (device-local). */
@@ -88,7 +92,7 @@ object Store {
         .put("poster", x.poster).put("season", x.season).put("episode", x.episode)
         .put("cur", x.cur.toDouble()).put("dur", x.dur.toDouble()).put("at", x.at)
         .put("mal", x.mal ?: JSONObject.NULL).put("ani", x.ani ?: JSONObject.NULL)
-        .put("lang", x.lang)
+        .put("lang", x.lang).put("done", x.done)
 
     private fun progressFrom(o: JSONObject): Progress = Progress(
         type = o.optString("type"),
@@ -103,6 +107,7 @@ object Store {
         mal = if (o.isNull("mal")) null else o.optInt("mal"),
         ani = if (o.isNull("ani")) null else o.optInt("ani"),
         lang = o.optString("lang", ""),
+        done = o.optBoolean("done", false),
     )
 
     fun progressList(ctx: Context): List<Progress> {

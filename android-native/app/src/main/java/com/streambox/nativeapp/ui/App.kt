@@ -268,6 +268,12 @@ fun StreamBoxApp() {
                                 clearSearch()
                                 screen = Screen.Browse(section)
                             },
+                            // Thank You screen (0.73): More Like This opens
+                            // the title's detail page.
+                            onOpen = {
+                                clearSearch()
+                                screen = Screen.Detail(it)
+                            },
                         )
                     }
                 }
@@ -286,6 +292,14 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.73" to listOf(
+        "Skip Intro / Skip Recap / Skip Outro land on the REAL timestamps now, and the timeline highlights exactly where they are",
+        "Skip Outro works - it skips the ending song automatically (and the Next Episode chain waits until the episode truly ends)",
+        "Rewinding no longer freezes or mutes the video - seeks heal themselves and your volume is protected",
+        "New Browse genre: Another World (isekai / reincarnated / another-world stories)",
+        "Episode rows show SEASON FINALE and the next season, and a Thank You screen with More Like This closes the season",
+        "Continue Watching drops finished episodes and comes back with the NEW episode the moment it airs",
+    ),
     "0.72" to listOf(
         "Smoother playback - the player bar no longer repaints over the video every beat",
         "Snappier navigation - tabs are warmed up in the background so none of them opens cold",

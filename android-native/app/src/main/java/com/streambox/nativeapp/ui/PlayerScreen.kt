@@ -13,6 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
@@ -72,6 +73,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -363,9 +367,19 @@ private fun fmt(s: Float): String {
     return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
 }
 
+/** Today as ISO date - next-season / unaired gates compare real TMDB air
+    dates (same rule as Api.today). */
+private fun todayIso(): String =
+    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+
 /** Skip hit (TV + anime only, never movies). Priority: recap -> intro ->
-    credits ("Next Ep") -> preview, same spirit as the website. The pill
-    exists ONLY inside the range. */
+    outro -> Next Episode -> preview, same spirit as the website. The pill
+    exists ONLY inside the range.
+    0.73: a credits range with a REAL end is the ending song ("Skip Outro"
+    seeks past it - post-credits scenes survive); only an OPEN-ENDED credits
+    range (runs to the end of the video) is the "Next Episode" case. The
+    old model mapped every credits range to Next Episode, so auto-skip
+    jumped OUT of the episode during the outro and no Skip Outro existed. */
 private data class SkipHit(val kind: String, val end: Float?, val label: String)
 
 private fun hitAt(cur: Float, dur: Float, skips: IntroDb.Skips): SkipHit? {
@@ -383,8 +397,11 @@ private fun hitAt(cur: Float, dur: Float, skips: IntroDb.Skips): SkipHit? {
     skips.intro.firstOrNull(::inRange)?.let {
         return SkipHit("intro", it.end, "Skip Intro")
     }
-    skips.credits.firstOrNull { inRange(it) && inTail(it) }?.let {
-        return SkipHit("credits", it.end, "Next Episode")
+    skips.credits.firstOrNull { inRange(it) && inTail(it) && it.end != null }?.let {
+        return SkipHit("outro", it.end, "Skip Outro")
+    }
+    skips.credits.firstOrNull { inRange(it) && inTail(it) && it.end == null }?.let {
+        return SkipHit("credits", null, "Next Episode")
     }
     skips.preview.firstOrNull { inRange(it) && inTail(it) }?.let {
         return SkipHit("preview", it.end, "Skip Preview")
@@ -1155,6 +1172,9 @@ fun PlayerScreen(
     ani: Int?,
     lang: String? = null,
     onHome: () -> Unit,
+    // Thank You screen (0.73): "More Like This" taps open the title's
+    // detail page from the end-of-season screen.
+    onOpen: (Title) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val big = AppEnv.isTv
@@ -1351,11 +1371,20 @@ fun PlayerScreen(
     val epsFirstFR = remember { FocusRequester() }
     val serverFirstFR = remember { FocusRequester() }
 
-    fun save(c: Float, d: Float) {
+    // Thank You screen (0.73): shown when the season (or show) has nothing
+    // left to play. While it is up, periodic saves stand down so the DONE
+    // flag cannot be clobbered by a stray timeupdate.
+    var showThanks by remember { mutableStateOf(false) }
+
+    fun save(c: Float, d: Float, done: Boolean = false) {
+        if (showThanks && !done) return
         try {
             Store.saveProgress(
                 ctx,
-                Progress(title.type, title.id, title.name, title.poster, epSeason, epNumber, c, d, System.currentTimeMillis(), mal, ani, contentLang),
+                Progress(
+                    title.type, title.id, title.name, title.poster, epSeason, epNumber,
+                    c, d, System.currentTimeMillis(), mal, ani, contentLang, done,
+                ),
             )
         } catch (e: Exception) {
         }
@@ -1493,6 +1522,38 @@ fun PlayerScreen(
         }
     }
 
+    // Seek reliability (0.73): a burst of back-seeks used to bury VidBolt
+    // in in-place seek commands - its player blacked the surface, dropped
+    // audio and froze until the video was exited and reopened. Two guards
+    // make that class dead:
+    // 1. COALESCE - the UI position moves instantly on every L/R press but
+    //    the provider gets at most ONE seek command per 450ms window (the
+    //    trailing target wins), so a rewind burst is one clean seek.
+    // 2. HEAL - after every seek the provider owes us life (play/pause/
+    //    timeupdate). Silence = a stuck surface: nudge play + re-send the
+    //    seek once, then reopen at the marker through startAt (the one
+    //    documented reliable seek) and RE-ASSERT the user's volume - the
+    //    page may have muted itself while dying (house rule: never
+    //    auto-mute, so an unmuted player is restored to unmuted).
+    var lastSeekCmdAt by remember { mutableStateOf(0L) }
+    var seekJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var seekPendingAt by remember { mutableStateOf(0L) }
+    var seekHealed by remember { mutableStateOf(false) }
+    val seekScope = rememberCoroutineScope()
+
+    fun sendSeekNow(target: Float) {
+        seekPendingAt = System.currentTimeMillis()
+        seekHealed = false
+        if (mirror == "vidcore" || mirror.startsWith("vidsrc")) {
+            // VidCore/VidSrc publish events only (no seek command) - their
+            // one documented seek is startAt, so the remote's L/R reopens at
+            // the target. Real control, no fake buttons (task rule).
+            load(startAt = target)
+            return
+        }
+        cmd("window.__sb && window.__sb.seek(" + target.toInt() + ")")
+    }
+
     fun seekTo(t: Float) {
         val target = t.coerceAtLeast(0f)
         cur = target
@@ -1502,14 +1563,42 @@ fun PlayerScreen(
             hp.seekTo((target * 1000).toLong())
             return
         }
-        if (mirror == "vidcore" || mirror.startsWith("vidsrc")) {
-            // VidCore/VidSrc publish events only (no seek command) - their
-            // one documented seek is startAt, so the remote's L/R reopens at
-            // the target. Real control, no fake buttons (task rule).
-            load(startAt = target)
-            return
+        val now = System.currentTimeMillis()
+        if (now - lastSeekCmdAt >= 450L) {
+            lastSeekCmdAt = now
+            seekJob?.cancel()
+            sendSeekNow(target)
+        } else {
+            seekJob?.cancel()
+            seekJob = seekScope.launch {
+                delay(450L - (now - lastSeekCmdAt))
+                lastSeekCmdAt = System.currentTimeMillis()
+                sendSeekNow(target)
+            }
         }
-        cmd("window.__sb && window.__sb.seek(" + target.toInt() + ")")
+    }
+
+    // The seek-heal watchdog: only fires when a commanded seek produced
+    // ZERO provider life for 8s (any play/pause/timeupdate clears it).
+    LaunchedEffect(mirror) {
+        while (true) {
+            delay(2000)
+            val since = System.currentTimeMillis() - seekPendingAt
+            if (seekPendingAt <= 0 || since < 8000) continue
+            seekPendingAt = 0
+            if (seekHealed) {
+                seekHealed = false
+                val at = cur
+                if (!muted) cmd("window.__sb && window.__sb.mute(false)")
+                load(startAt = at)
+            } else {
+                seekHealed = true
+                playing = true
+                cmd("window.__sb && window.__sb.play()")
+                cmd("window.__sb && window.__sb.seek(" + cur.toInt() + ")")
+                seekPendingAt = System.currentTimeMillis()
+            }
+        }
     }
 
     fun pokeChrome() {
@@ -1642,32 +1731,83 @@ fun PlayerScreen(
         return true
     }
 
+    /** Can the next episode be opened right now? Same guards as
+        advanceEpisode - season end rolls only into a next season that has
+        actually premiered (a dated future season is COMING SOON, never a
+        dead route). */
+    fun nextEpisodeAvailable(): Boolean {
+        val count = seasonEps
+        if (count > 0 && epNumber >= count) {
+            val nxt = seasonList.firstOrNull { it.n == epSeason + 1 && it.n >= 1 }
+            return nxt != null && nxt.count > 0 && (nxt.air.isBlank() || nxt.air.take(10) <= todayIso())
+        }
+        val next = epsList.firstOrNull { it.n == epNumber + 1 }
+        return next == null || next.aired
+    }
+
     /** Next episode (0.60): never step past the season's real end (the
         blind +1 built dead routes on finales) and never into an unaired
         episode - a finale rolls into the next season's E1 when it exists.
         Every next-episode path runs through here: the bar pill, the skip
-        pill, auto-skip credits, AND the providers' own Up Next (0.65). */
-    fun advanceEpisode() {
+        pill, auto-next on ended, AND the providers' own Up Next (0.65).
+        0.73: returns false when nothing playable is left - the Thank You
+        screen takes over instead of a dead end. */
+    fun advanceEpisode(): Boolean {
+        if (!nextEpisodeAvailable()) return false
         val count = seasonEps
         if (count > 0 && epNumber >= count) {
-            val nxt = seasonList.firstOrNull { it.n == epSeason + 1 && it.n >= 1 }
-            if (nxt == null || nxt.count <= 0) return
+            val nxt = seasonList.firstOrNull { it.n == epSeason + 1 && it.n >= 1 } ?: return false
             epSeason = nxt.n
             epNumber = 1
         } else {
-            val next = epsList.firstOrNull { it.n == epNumber + 1 }
-            if (next != null && !next.aired) return
             epNumber += 1
         }
         save(0f, dur)
         cur = 0f
         playing = true
         load()
+        return true
+    }
+
+    /** Season over: the episode (and its record) is DONE - hidden from
+        Continue Watching until a newer aired episode revives the row - and
+        the Thank You screen says so with More Like This. */
+    fun finishSeason() {
+        save(if (scrub >= 0) scrub else cur, dur, done = true)
+        showThanks = true
+    }
+
+    /** Every Next-episode trigger funnels here: bar pill, skip pill,
+        provider Up Next - and when nothing playable is left it finishes
+        the season instead of dying silently. */
+    fun goNext() {
+        if (!advanceEpisode()) finishSeason()
+    }
+
+    /** Replay from the Thank You screen (0.73). */
+    fun replayThanks() {
+        showThanks = false
+        endedHandled = false
+        cur = 0f
+        playing = true
+        load(startAt = 0f)
+    }
+
+    // More Like This for the Thank You screen (real TMDB similar titles).
+    var thanksSimilar by remember { mutableStateOf(listOf<Title>()) }
+    LaunchedEffect(showThanks) {
+        if (showThanks) {
+            thanksSimilar = withContext(Dispatchers.IO) {
+                runCatching { Api.similar(title.type, title.id) }.getOrDefault(listOf())
+            }
+        }
     }
 
     fun skipNow(h: SkipHit) {
         when {
-            h.kind == "credits" -> advanceEpisode()
+            // Open-ended credits ("Next Episode") moves on; a RANGED outro
+            // seeks past the ending song (0.73) so post-credits scenes play.
+            h.kind == "credits" -> goNext()
             mirror == "vidbolt" && h.end != null -> {
                 // VidBolt's in-place skip seeks can leave a black surface -
                 // reopen at the marker through startAt (website boltSkipTo).
@@ -1718,7 +1858,14 @@ fun PlayerScreen(
     // sources merge: AniSkip (MAL id), SkipDB (IMDb id, duration-matched)
     // and TheIntroDB (TMDB id). Empty sources add nothing; the fetch runs
     // again once real stream duration is known so duration matching works.
-    LaunchedEffect(title.id, title.type, epSeason, epNumber, mal, if (dur > 30) dur.toInt() else 0) {
+    // 0.73: AniSkip is keyed by the MAL ENTRY - split franchises carry one
+    // entry PER SEASON (Hajime no Ippo S2 = MAL 5258, not 263) and combined
+    // entries number absolutely (epBase). The old call sent the title's
+    // first-year entry with the per-season number, so the timestamps
+    // belonged to a DIFFERENT episode on every other anime. The merge
+    // (IntroDb.merge) then picks one clean set per kind: duration-calibrated
+    // answers win, overlapping losers are dropped.
+    LaunchedEffect(title.id, title.type, epSeason, epNumber, routeMal, epBase, if (dur > 30) dur.toInt() else 0) {
         if (title.type == "movie") {
             skips = IntroDb.Skips(listOf(), listOf(), listOf())
         } else {
@@ -1727,22 +1874,16 @@ fun PlayerScreen(
                 val db = runCatching {
                     IntroDb.fetch(title.id, epSeason, epNumber)
                 }.getOrDefault(IntroDb.Skips(listOf(), listOf(), listOf()))
-                val ani = if (mal != null) SkipTimes.aniSkip(mal, epNumber, d) else listOf()
+                val malEntry = routeMal ?: mal
+                val entryEp = (epBase + epNumber).coerceAtLeast(1)
+                val ani = if (malEntry != null) SkipTimes.aniSkip(malEntry, entryEp, d) else listOf()
                 val imdb = runCatching { Api.imdbId(title.type, title.id) }.getOrNull() ?: ""
                 val sk = if (imdb.isNotEmpty()) {
                     SkipTimes.skipDb(imdb, epSeason, epNumber, d)
                 } else {
                     listOf()
                 }
-                fun ranges(hits: List<SkipTimes.Hit>, kind: String): List<IntroDb.TRange> =
-                    hits.filter { it.kind == kind }.map { IntroDb.TRange(it.start, it.end) }
-                val all = ani + sk
-                IntroDb.Skips(
-                    intro = db.intro + ranges(all, "intro"),
-                    recap = db.recap + ranges(all, "recap"),
-                    credits = db.credits + ranges(all, "credits"),
-                    preview = db.preview + ranges(all, "preview"),
-                )
+                IntroDb.merge(db, ani, sk, d, d > 30f)
             }
         }
     }
@@ -1880,22 +2021,20 @@ fun PlayerScreen(
         }
     }
 
-    // Auto-skip: intro/recap/preview seek past; credits auto-advance (Next
-    // Ep), one skip per range per episode. Toggle lives in the Episodes
-    // sheet and persists per device.
+    // Auto-skip: recap/intro/outro/preview SEEK past, one skip per range
+    // per episode. 0.73: it never auto-advances out of the episode - an
+    // open-ended credits range is the manual "Next Episode" pill, and the
+    // chaining happens through auto-next at ended (so post-credits scenes
+    // always survive). Toggle lives in the Episodes sheet, per device.
     var autoSkip by remember { mutableStateOf(Store.autoSkip(ctx)) }
     var autoDone by remember { mutableStateOf("") }
     LaunchedEffect(cur, hit, autoSkip) {
         val h = hit
-        if (autoSkip && playing && h != null && h.end != null) {
+        if (autoSkip && playing && h != null && h.end != null && h.kind != "credits") {
             val key = epSeason.toString() + ":" + epNumber + ":" + h.kind + ":" + h.end
             if (autoDone != key) {
                 autoDone = key
-                if (h.kind == "credits") {
-                    advanceEpisode()
-                } else {
-                    h.end?.let { seekTo(it) }
-                }
+                seekTo(h.end)
             }
         }
     }
@@ -1993,7 +2132,7 @@ fun PlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
             .onPreviewKeyEvent { e ->
-                if (!big || showEps || showSubs || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                if (!big || showEps || showSubs || showThanks || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 pokeChrome()
                 val layers = layerList()
                 val i = layers.indexOf(layer).coerceAtLeast(0)
@@ -2250,10 +2389,17 @@ fun PlayerScreen(
                                     gotMedia = true
                                 }
                                 when (t) {
-                                    "play" -> playing = true
-                                    "pause" -> playing = false
+                                    "play" -> {
+                                        seekPendingAt = 0
+                                        playing = true
+                                    }
+                                    "pause" -> {
+                                        seekPendingAt = 0
+                                        playing = false
+                                    }
                                     "ended" -> {
                                         playing = false
+                                        seekPendingAt = 0
                                         // 0.66: Auto-play Next TAKES OVER the
                                         // transition - our advanceEpisode()
                                         // opens the next episode through the
@@ -2267,15 +2413,32 @@ fun PlayerScreen(
                                         // the end. Grace + the one-per-load
                                         // latch keep echoes from double-
                                         // stepping.
-                                        if (autoSkip && title.type != "movie" &&
-                                            mirror != "hls" &&
-                                            !endedHandled && pastSyncGrace()
-                                        ) {
+                                        if (!endedHandled && pastSyncGrace()) {
                                             endedHandled = true
-                                            advanceEpisode()
+                                            if (title.type == "movie") {
+                                                // Finished movie (0.73): the
+                                                // record is DONE - the row
+                                                // leaves Continue Watching.
+                                                save(if (scrub >= 0) scrub else cur, dur, done = true)
+                                            } else {
+                                                val more = nextEpisodeAvailable()
+                                                if (more && autoSkip && mirror != "hls") {
+                                                    advanceEpisode()
+                                                } else {
+                                                    // The episode is DONE
+                                                    // (0.73): out of Continue
+                                                    // Watching until a newer
+                                                    // aired episode revives
+                                                    // the row. Nothing left =
+                                                    // the Thank You screen.
+                                                    save(if (scrub >= 0) scrub else cur, dur, done = true)
+                                                    if (!more) showThanks = true
+                                                }
+                                            }
                                         }
                                     }
                                     "loadedmetadata" -> {
+                                        seekPendingAt = 0
                                         dur = o.optDouble("duration", 0.0).toFloat()
                                         if (pendingSeek >= 0f) {
                                             val t = pendingSeek
@@ -2284,6 +2447,7 @@ fun PlayerScreen(
                                         }
                                     }
                                     "timeupdate" -> {
+                                        seekPendingAt = 0
                                         cur = o.optDouble("currentTime", 0.0).toFloat()
                                         val d = o.optDouble("duration", 0.0).toFloat()
                                         if (d > 0) dur = d
@@ -2485,7 +2649,10 @@ fun PlayerScreen(
                                         // 0.66: the same grace as episodechange
                                         // - a nextup racing our own load or
                                         // advance must never double-step.
-                                        if (pastSyncGrace()) advanceEpisode()
+                                        // 0.73: goNext() - nothing left opens
+                                        // the Thank You screen, never a dead
+                                        // end.
+                                        if (pastSyncGrace()) goNext()
                                     }
                                     else -> {}
                                 }
@@ -2787,6 +2954,7 @@ fun PlayerScreen(
                 dur = dur,
                 scrub = scrub,
                 big = big,
+                marks = skips,
                 sliderFR = sliderFR,
                 onScrub = { scrub = it },
                 onScrubDone = { s2 ->
@@ -2820,17 +2988,12 @@ fun PlayerScreen(
                 BarPill("-10s", big) { seekRel(-10f) }
                 BarPill("+30s", big) { seekRel(30f) }
                 // Next Episode (design pack bar): series/anime only - and
-                // only when the next episode is real AND aired. Unaired
-                // stays a Coming Soon schedule row, never a dead target.
-                if (title.type != "movie") {
-                    val nextEp = epsList.firstOrNull { it.n == epNumber + 1 }
-                    if (epsList.isEmpty() || (nextEp != null && nextEp.aired) ||
-                        (seasonEps > 0 && epNumber >= seasonEps &&
-                            seasonList.any { it.n == epSeason + 1 && it.count > 0 })
-                    ) {
-                        BarPill("Next Episode", big, icon = Icons.Filled.SkipNext) {
-                            advanceEpisode()
-                        }
+                // only when the next episode is real AND aired (0.73: the
+                // shared nextEpisodeAvailable guard, so a dated future
+                // season can never render a dead pill).
+                if (title.type != "movie" && nextEpisodeAvailable()) {
+                    BarPill("Next Episode", big, icon = Icons.Filled.SkipNext) {
+                        goNext()
                     }
                 }
                 // Mute + rate exist only on mirrors we can actually drive
@@ -3750,63 +3913,209 @@ fun PlayerScreen(
         }
         }
         subsLayer(this)
+
+        // Thank You screen (0.73): the last panel on the box so it owns
+        // the whole surface when the season has nothing left to play.
+        if (showThanks) {
+            ThanksOverlay(
+                title = title,
+                big = big,
+                similar = thanksSimilar,
+                onReplay = { replayThanks() },
+                onOpen = onOpen,
+                onHome = onHome,
+            )
+        }
     }
 }
 
 /** Player timeline (0.72 perf): its own recomposition scope so the
     timeupdate heartbeat only redraws the time text + slider - the rest of
     the bar stays composed and skips. Weak TV boxes stuttered on the old
-    whole-bar recomposition over the live video surface. */
+    whole-bar recomposition over the live video surface.
+    0.73: the skip marks HIGHLIGHT the track - recap/intro/outro/preview
+    ranges paint as colored segments on the slider (plus a one-line legend)
+    so the intro/outro/recap timestamps are visible BEFORE they arrive. */
 @Composable
 private fun BarTimeline(
     cur: Float,
     dur: Float,
     scrub: Float,
     big: Boolean,
+    marks: IntroDb.Skips,
     sliderFR: FocusRequester,
     onScrub: (Float) -> Unit,
     onScrubDone: (Float) -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            fmt(if (scrub >= 0) scrub else cur),
-            color = Accent,
-            fontWeight = FontWeight.Bold,
-            fontSize = if (big) 16.sp else 13.sp,
-        )
-        Text(
-            "  /  " + fmt(dur),
-            color = Dim,
-            fontWeight = FontWeight.Bold,
-            fontSize = if (big) 15.sp else 12.sp,
-        )
-        Slider(
-            value = if (scrub >= 0) scrub else cur,
-            onValueChange = { onScrub(it) },
-            onValueChangeFinished = { onScrubDone(scrub) },
-            valueRange = 0f..(if (dur > 0) dur else 1f),
+    val legend = remember(marks) {
+        fun part(name: String, r: IntroDb.TRange): String {
+            if (r.end == null) return name + " " + fmt(r.start) + "+"
+            return name + " " + fmt(r.start) + "-" + fmt(r.end!!)
+        }
+        val bits = ArrayList<String>()
+        for (r in marks.recap) bits.add(part("Recap", r))
+        for (r in marks.intro) bits.add(part("Intro", r))
+        for (r in marks.credits) bits.add(if (r.end != null) part("Outro", r) else part("Next", r))
+        for (r in marks.preview) bits.add(part("Preview", r))
+        bits.joinToString("  ·  ")
+    }
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                fmt(if (scrub >= 0) scrub else cur),
+                color = Accent,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (big) 16.sp else 13.sp,
+            )
+            Text(
+                "  /  " + fmt(dur),
+                color = Dim,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (big) 15.sp else 12.sp,
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 10.dp),
+            ) {
+                Slider(
+                    value = if (scrub >= 0) scrub else cur,
+                    onValueChange = { onScrub(it) },
+                    onValueChangeFinished = { onScrubDone(scrub) },
+                    valueRange = 0f..(if (dur > 0) dur else 1f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(sliderFR),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Accent,
+                        activeTrackColor = Accent,
+                        inactiveTrackColor = Color(0xFF243247),
+                    ),
+                )
+                // Skip-mark highlights ON the track (the "little highlight"
+                // request): one rounded segment per known range, translucent
+                // so the thumb and progress stay readable.
+                if (dur > 0f) {
+                    Canvas(Modifier.matchParentSize()) {
+                        fun seg(r: IntroDb.TRange, color: Color) {
+                            val s = (r.start / dur).coerceIn(0f, 1f)
+                            val e = ((r.end ?: dur) / dur).coerceIn(0f, 1f)
+                            if (e - s < 0.004f) return
+                            drawRoundRect(
+                                color = color.copy(alpha = 0.8f),
+                                topLeft = Offset(s * size.width, size.height / 2f - 3.dp.toPx()),
+                                size = Size((e - s) * size.width, 6.dp.toPx()),
+                                cornerRadius = CornerRadius(3.dp.toPx()),
+                            )
+                        }
+                        for (r in marks.recap) seg(r, Soft)
+                        for (r in marks.intro) seg(r, Accent)
+                        for (r in marks.credits) seg(r, Cyan)
+                        for (r in marks.preview) seg(r, Dim)
+                    }
+                }
+            }
+            Text(
+                "-" + fmt(if (dur > 0) (dur - (if (scrub >= 0) scrub else cur)).coerceAtLeast(0f) else 0f),
+                color = Accent,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (big) 15.sp else 12.sp,
+            )
+            Text(
+                "  (" + fmt(dur) + ")",
+                color = Dim,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (big) 12.sp else 10.sp,
+            )
+        }
+        if (legend.isNotEmpty()) {
+            Text(
+                legend,
+                color = Dim,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (big) 11.sp else 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+    }
+}
+
+/** End-of-season screen (0.73): "Thank you for watching" + More Like This.
+    Extracted composable - the player-layers rule (big UI trees never
+    inline into PlayerScreen; JVM 64KB method limit). TV: the D-pad lands
+    on the first button and every target carries its focus ring. */
+@Composable
+private fun ThanksOverlay(
+    title: Title,
+    big: Boolean,
+    similar: List<Title>,
+    onReplay: () -> Unit,
+    onOpen: (Title) -> Unit,
+    onHome: () -> Unit,
+) {
+    val firstFR = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { firstFR.requestFocus() } }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xF20B111E))
+            .verticalScroll(rememberScrollState()),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 10.dp)
-                .focusRequester(sliderFR),
-            colors = SliderDefaults.colors(
-                thumbColor = Accent,
-                activeTrackColor = Accent,
-                inactiveTrackColor = Color(0xFF243247),
-            ),
-        )
-        Text(
-            "-" + fmt(if (dur > 0) (dur - (if (scrub >= 0) scrub else cur)).coerceAtLeast(0f) else 0f),
-            color = Accent,
-            fontWeight = FontWeight.Bold,
-            fontSize = if (big) 15.sp else 12.sp,
-        )
-        Text(
-            "  (" + fmt(dur) + ")",
-            color = Dim,
-            fontWeight = FontWeight.Bold,
-            fontSize = if (big) 12.sp else 10.sp,
-        )
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 40.dp),
+        ) {
+            Text(
+                "Thank you for watching",
+                color = Accent,
+                fontWeight = FontWeight.Black,
+                fontSize = if (big) 36.sp else 27.sp,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                title.name,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (big) 20.sp else 16.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Text(
+                "You are all caught up - nothing left to play right now.",
+                color = Dim,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (big) 14.sp else 12.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(top = 22.dp),
+            ) {
+                BarPill("Replay", big, modifier = Modifier.focusRequester(firstFR)) { onReplay() }
+                BarPill("Back to Browse", big) { onHome() }
+            }
+            if (similar.isNotEmpty()) {
+                Text(
+                    "MORE LIKE THIS",
+                    color = Dim,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.5.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 28.dp, bottom = 10.dp),
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(similar) { s -> PosterCard(s, onOpen) }
+                }
+            }
+        }
     }
 }
 

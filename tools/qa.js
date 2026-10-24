@@ -122,9 +122,11 @@
        resolve subtitles, matching their H list) - label values made both
        command paths no-op and captions never appeared
     45 skip pills speak plainly and honestly: names are "Skip Intro" /
-       "Next Episode" with no countdown suffix, and credits/preview ranges
-       carry a TAIL guard - one open-ended start=0 entry matched every
-       timestamp and the Next Episode pill sat over the S1E1 intro
+       "Skip Outro" / "Next Episode" with no countdown suffix, and
+       credits/preview ranges carry a TAIL guard - one open-ended start=0
+       entry matched every timestamp and the Next Episode pill sat over the
+       S1E1 intro. 0.73: a RANGED credits entry is the ending song ("Skip
+       Outro" seeks past it) and only OPEN-ENDED credits is "Next Episode"
     46 server auto-switch leads with VidBolt on every chain and never hops
        to VidRift (no pause button there - hopping strands the viewer)
     47 the Browse tab: pick the KIND (Movies / TV Shows / Anime / K-Dramas),
@@ -235,14 +237,53 @@
        the moment any server has it, Korean stays the house fallback, and
        the panel says so honestly instead of leaving the user hunting
     67 playback stutter + nav-bar lag (0.72): the player timeline runs in
-       its OWN recomposition scope (the timeupdate heartbeat redraws only
-       the time text + slider - the old whole-bar recomposition over the
-       live video stuttered on weak TV boxes), the caption lookup binary-
-       searches the sorted cue list instead of scanning it every tick, and
-       the tab feeds warm in the background behind the home screen (the
-       first-visit fetch behind a spinner was the laggish nav) - pausing
-       whenever the player owns the screen so playback keeps the line */
-const fs = require("fs");
+        its OWN recomposition scope (the timeupdate heartbeat redraws only
+        the time text + slider - the old whole-bar recomposition over the
+        live video stuttered on weak TV boxes), the caption lookup binary-
+        searches the sorted cue list instead of scanning it every tick, and
+        the tab feeds warm in the background behind the home screen (the
+        first-visit fetch behind a spinner was the laggish nav) - pausing
+        whenever the player owns the screen so playback keeps the line
+    68 skip timestamps are REAL (0.73): AniSkip is keyed by the MAL ENTRY -
+        split franchises carry one entry per season (Hajime no Ippo S2 =
+        MAL 5258, not 263) and combined entries number absolutely (epBase).
+        The old call sent the title's first-year entry with the per-season
+        number, so the timings belonged to a different episode on every
+        other anime. The three sources merge into ONE clean set per kind:
+        duration-calibrated answers (episodeLength / duration matching) win,
+        overlapping losers are dropped, junk fails the real-stream sanity
+        checks - a stale first-listed range can never shadow the real one
+    69 auto-skip SEEKS past (0.73): recap/intro/outro/preview skip forward
+        inside their ranges and auto-skip NEVER auto-advances - an open-
+        ended credits range is the manual Next Episode pill and the chaining
+        happens through auto-next at ended, so post-credits scenes always
+        survive the skipped outro
+    70 the timeline HIGHLIGHTS the skip marks (0.73): recap/intro/outro/
+        preview ranges paint as colored segments on the track plus a legend
+        line, so the timestamps are visible before they arrive
+    71 seek reliability (0.73): a burst of back-seeks buried VidBolt in
+        in-place seek commands - its player blacked the surface, dropped
+        audio and froze until the video was exited. Bursts now COALESCE to
+        one seek per 450ms window (trailing target), a seek that produces
+        zero provider life for 8s self-heals (nudge play + re-send once,
+        then reopen at the marker through startAt) and an unmuted player is
+        restored UNMUTED (house rule: never auto-mute)
+    72 the Another World genre (0.73): the one VIRTUAL chip leads every
+        Browse kind and rides real TMDB KEYWORDS (isekai / reverse isekai /
+        reincarnation / another world / other world / parallel world -
+        verified ids) through discover with_keywords - never invented ids
+        and never a fake provider route
+    73 the detail screen shows the season's shape (0.73): the last episode
+        wears a SEASON FINALE line and a note above the episodes names the
+        finale episode and the NEXT season (with its count, or Coming Soon)
+        - and when no next season exists nothing is invented
+    74 thank-you screen + Continue Watching lifecycle (0.73): when the
+        season has nothing left to play the player says "Thank you for
+        watching" with More Like This (real TMDB similar) and the record
+        goes DONE - out of Continue Watching - and the row COMES BACK
+        rolled to the first newer aired episode the moment one exists, so
+        the row always opens the new episode itself */
+ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const cp = require("child_process");
@@ -851,18 +892,20 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   }
 }
 
-/* ---------- 45. skip pills: plain names + tail-guarded credits ---------- */
+/* ---------- 45. skip pills: plain names + tail-guarded credits/outro ---------- */
 {
   const psSkip = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psSkip) bad("PlayerScreen.kt missing - skip pill rules cannot be verified");
   else if (/fun hitAt\(cur: Float, dur: Float/.test(psSkip) &&
            /fun inTail\(r: IntroDb\.TRange\)/.test(psSkip) &&
-           /inRange\(it\) && inTail\(it\)/.test(psSkip) &&
-           /SkipHit\("credits", it\.end, "Next Episode"\)/.test(psSkip) &&
+           /inRange\(it\) && inTail\(it\) && it\.end != null/.test(psSkip) &&
+           /SkipHit\("outro", it\.end, "Skip Outro"\)/.test(psSkip) &&
+           /inRange\(it\) && inTail\(it\) && it\.end == null/.test(psSkip) &&
+           /SkipHit\("credits", null, "Next Episode"\)/.test(psSkip) &&
            !/hit\.label \+ "  " \+ fmt/.test(psSkip)) {
-    ok("skip pills: plain Skip Intro / Next Episode names and credits only count in the episode tail");
+    ok("skip pills: Skip Recap / Skip Intro / Skip Outro over real ranges, Next Episode only for open-ended credits, all tail-guarded");
   } else {
-    bad("skip pills must use plain names (no countdown) and tail-guard credits/preview ranges (bogus start=0 ranges sat over the intro)");
+    bad("skip pills must use plain names (no countdown), show Skip Outro for RANGED credits (seek past the ending song) and Next Episode only for OPEN-ENDED credits, all tail-guarded (bogus start=0 ranges sat over the intro)");
   }
 }
 
@@ -1244,14 +1287,15 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   const psA = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psA) bad("PlayerScreen.kt missing - auto-next rules cannot be verified");
   else if (/if \(adoptProviderEpisode\(o\.optInt\("season", -1\), o\.optInt\("episode", -1\)\)\) \{\s*\n\s*load\(\)/.test(psA) &&
-           /"ended" -> \{[\s\S]{0,1600}?\!endedHandled && pastSyncGrace\(\)/.test(psA) &&
-           /endedHandled = true\s*\n\s*advanceEpisode\(\)/.test(psA) &&
-           /if \(pastSyncGrace\(\)\) advanceEpisode\(\)/.test(psA) &&
+           /"ended" -> \{[\s\S]{0,2200}?\!endedHandled && pastSyncGrace\(\)/.test(psA) &&
+           /endedHandled = true/.test(psA) &&
+           /"ended" -> \{[\s\S]{0,2200}?val more = nextEpisodeAvailable\(\)/.test(psA) &&
+           /if \(pastSyncGrace\(\)\) goNext\(\)/.test(psA) &&
            /fun pastSyncGrace\(\): Boolean/.test(psA) &&
            /endedHandled = false/.test(psA)) {
-    ok("auto-next is ours: provider switches re-open through load(), ended advances once per load through advanceEpisode(), everything grace-guarded");
+    ok("auto-next is ours: provider switches re-open through load(), ended is one-per-load (endedHandled + pastSyncGrace) and walks the shared next guards, nextup rides goNext()");
   } else {
-    bad("auto-next must never ride the embed's own Up Next - adopted switches reload through load(), ended runs advanceEpisode() once per load (endedHandled + pastSyncGrace), and nextup is grace-guarded");
+    bad("auto-next must never ride the embed's own Up Next - adopted switches reload through load(), ended runs once per load (endedHandled + pastSyncGrace) through advanceEpisode/finish, and nextup is grace-guarded through goNext()");
   }
 }
 
@@ -1262,18 +1306,21 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
   if (!psN || !stN) bad("PlayerScreen.kt/Store.kt missing - auto-next coverage cannot be verified");
   else {
-    const endedBlock = (psN.match(/"ended" -> \{[\s\S]{0,1600}?\n\s{20,}\}/) || [""])[0];
+    const endedBlock = (psN.match(/"ended" -> \{[\s\S]{0,3200}?\n\s{20,}\}(?=\n)/) || [""])[0];
     const anipmExcluded = /mirror != "anipm"/.test(endedBlock);
     const adoptResetsClock = /fun adoptProviderEpisode[\s\S]{0,1600}?The switch IS a transition/.test(psN) &&
       /fun adoptProviderEpisode[\s\S]{0,1600}?lastLoadAtMs = System\.currentTimeMillis\(\)/.test(psN);
     if (!anipmExcluded &&
-        /if \(autoSkip && title\.type != "movie" &&\s*\n\s*mirror != "hls" &&\s*\n\s*!endedHandled && pastSyncGrace\(\)/.test(endedBlock) &&
+        /if \(!endedHandled && pastSyncGrace\(\)\)/.test(endedBlock) &&
+        /val more = nextEpisodeAvailable\(\)/.test(endedBlock) &&
+        /if \(more && autoSkip && mirror != "hls"\)/.test(endedBlock) &&
+        /save\(if \(scrub >= 0\) scrub else cur, dur, done = true\)/.test(endedBlock) &&
         /getBoolean\(K_AUTO_NEXT, true\)/.test(stN) &&
         /private const val K_AUTO_NEXT = "auto_next_v2"/.test(stN) &&
         adoptResetsClock) {
-      ok("auto-next runs on every series: ended takeover covers all series mirrors, default ON, adopt restarts the sync clock");
+      ok("auto-next runs for every series: the ended takeover is total (no mirror exclusions), nothing-left goes DONE + Thank You, Store.autoSkip defaults ON, adopt restarts the sync clock");
     } else {
-      bad("auto-next must run for every series mirror (no anipm exclusion), Store.autoSkip must default ON on a fresh key, and adoptProviderEpisode must restart the sync clock - episodes sat stuck at the end");
+      bad("auto-next must run for every series mirror (no anipm exclusion), the ended takeover must advance when more exists and finish DONE when not, Store.autoSkip must default ON on a fresh key, and adoptProviderEpisode must restart the sync clock - episodes sat stuck at the end");
     }
   }
 }
@@ -1290,7 +1337,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
            /contentLang = det\.originalLanguage/.test(psL) &&
            /!booted && contentLang == "ko" && mirror != "vidbolt"/.test(psL) &&
            /\(title\.type == "movie" \|\| title\.lang\.isNotEmpty\(\)\)/.test(psL) &&
-           /mal, ani, contentLang\)/.test(psL) &&
+           /mal, ani, contentLang, done/.test(psL) &&
            /!koManual && contentLang == "ko" && mirror == "vidbolt"/.test(psL) &&
            !/var koAuto/.test(psL)) {
     ok("stored language heals before routing: contentLang from TMDB original_language, ko realigns to VidBolt before the first load, records self-heal on save");
@@ -1376,6 +1423,139 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("stutter + nav: timeline scoped, captions binary-searched, tab feeds warm in the background (paused during playback)");
   } else {
     bad("playback must keep the timeline in its own recomposition scope, captions must binary-search the sorted cues, and tab feeds must warm in the background (paused while the player owns the screen)");
+  }
+}
+
+/* ---------- 68. skip timestamps: real MAL entry + calibrated merge ---------- */
+{
+  const psM = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const inM = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/IntroDb.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/IntroDb.kt")) : "";
+  if (!psM || !inM) bad("PlayerScreen/IntroDb missing - skip timestamp rules cannot be verified");
+  else if (/val malEntry = routeMal \?: mal/.test(psM) &&
+           /val entryEp = \(epBase \+ epNumber\)\.coerceAtLeast\(1\)/.test(psM) &&
+           /SkipTimes\.aniSkip\(malEntry, entryEp, d\)/.test(psM) &&
+           /LaunchedEffect\(title\.id, title\.type, epSeason, epNumber, routeMal, epBase, if \(dur > 30\) dur\.toInt\(\) else 0\)/.test(psM) &&
+           /IntroDb\.merge\(db, ani, sk, d, d > 30f\)/.test(psM) &&
+           /fun merge\(/.test(inM) &&
+           /fun overlapFrac\(/.test(inM) &&
+           /val score: Int/.test(inM)) {
+    ok("skip timestamps: AniSkip rides the season's own MAL entry (entry-relative episode) and the sources merge into one calibrated, deduped set");
+  } else {
+    bad("skip timestamps must query AniSkip with the season-routed MAL entry + entry-relative episode (routeMal, epBase) and merge all sources with duration calibration + overlap dedupe - the old call sent the wrong entry and a stale first-listed range shadowed the real one");
+  }
+}
+
+/* ---------- 69. auto-skip seeks past, never auto-advances ---------- */
+{
+  const psS69 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  if (!psS69) bad("PlayerScreen.kt missing - auto-skip rules cannot be verified");
+  else {
+    const autoBlock = (psS69.match(/LaunchedEffect\(cur, hit, autoSkip\) \{[\s\S]{0,700}?\n    \}/) || [""])[0];
+    if (/h\.end != null && h\.kind != "credits"/.test(autoBlock) &&
+        /autoDone = key\s*\n\s*seekTo\(h\.end\)/.test(autoBlock) &&
+        !/advanceEpisode|goNext/.test(autoBlock)) {
+      ok("auto-skip seeks past recap/intro/outro/preview and never auto-advances - the outro keeps post-credits scenes and chaining waits for ended");
+    } else {
+      bad("auto-skip must SEEK past ranged skips (recap/intro/outro/preview) and never auto-advance out of the episode - the chaining belongs to auto-next at ended (0.73)");
+    }
+  }
+}
+
+/* ---------- 70. the timeline highlights the skip marks ---------- */
+{
+  const psT70 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  if (!psT70) bad("PlayerScreen.kt missing - timeline mark rules cannot be verified");
+  else if (/private fun BarTimeline\(/.test(psT70) &&
+           /marks: IntroDb\.Skips/.test(psT70) &&
+           /val legend = remember\(marks\)/.test(psT70) &&
+           /Canvas\(Modifier\.matchParentSize\(\)\)/.test(psT70) &&
+           /for \(r in marks\.credits\) seg\(r, Cyan\)/.test(psT70) &&
+           /marks = skips,/.test(psT70)) {
+    ok("timeline highlights the skip marks: recap/intro/outro/preview paint as segments on the track with a legend line");
+  } else {
+    bad("the timeline must HIGHLIGHT the known skip ranges (colored segments on the track + legend) so the intro/outro/recap timestamps are visible while watching (0.73)");
+  }
+}
+
+/* ---------- 71. seek reliability: coalesce + heal + anti-mute ---------- */
+{
+  const psS71 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  if (!psS71) bad("PlayerScreen.kt missing - seek reliability cannot be verified");
+  else if (/fun sendSeekNow\(target: Float\)/.test(psS71) &&
+           /if \(now - lastSeekCmdAt >= 450L\)/.test(psS71) &&
+           /seekPendingAt = System\.currentTimeMillis\(\)/.test(psS71) &&
+           /if \(seekPendingAt <= 0 \|\| since < 8000\) continue/.test(psS71) &&
+           /if \(!muted\) cmd\("window\.__sb && window\.__sb\.mute\(false\)"\)/.test(psS71) &&
+           /load\(startAt = at\)/.test(psS71) &&
+           /"timeupdate" -> \{\s*\n\s*seekPendingAt = 0/.test(psS71)) {
+    ok("seek reliability: bursts coalesce to one seek per window, silent seeks self-heal (nudge, then reopen at startAt) and an unmuted player is restored unmuted");
+  } else {
+    bad("seeking must coalesce bursts (one provider seek per 450ms), self-heal a seek that produces zero provider life (nudge once, then reopen at startAt) and restore the user's unmuted state - rapid back-seeks froze and muted the video (0.73)");
+  }
+}
+
+/* ---------- 72. the Another World (isekai) virtual genre ---------- */
+{
+  const apiK = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt")) : "";
+  const hsK = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt")) : "";
+  if (!apiK || !hsK) bad("Api/HomeScreen missing - the Another World genre cannot be verified");
+  else if (/const val GENRE_ANOTHER_WORLD = 237451/.test(apiK) &&
+           /const val ANOTHER_WORLD_NAME = "Another World"/.test(apiK) &&
+           /237451\|291482\|5484\|213756\|227624\|33465/.test(apiK) &&
+           /with_keywords=/.test(apiK) &&
+           /listOf\(Api\.GENRE_ANOTHER_WORLD to Api\.ANOTHER_WORLD_NAME\) \+ trimmed/.test(hsK)) {
+    ok("Another World genre: the virtual chip rides real TMDB keywords (isekai/reincarnation/another world) on every Browse kind");
+  } else {
+    bad("the Another World chip must ride REAL TMDB keyword ids through discover with_keywords (237451|291482|5484|213756|227624|33465) and lead the Browse genre strip - never invented ids or fake routes (0.73)");
+  }
+}
+
+/* ---------- 73. season finale + next season on detail ---------- */
+{
+  const dtF = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt")) : "";
+  if (!dtF) bad("DetailScreen.kt missing - finale/next-season rules cannot be verified");
+  else if (/"SEASON FINALE"/.test(dtF) &&
+           /"Next: Season "/.test(dtF) &&
+           /finale = ep\.n == \(episodes\.maxOfOrNull \{ it\.n \} \?: -1\)/.test(dtF) &&
+           /val nextS = det\.seasons\.firstOrNull \{ it\.n == season \+ 1 && it\.n >= 1 \}/.test(dtF)) {
+    ok("detail shows the season finale row and the next season (ready or Coming Soon) above the episodes");
+  } else {
+    bad("the detail screen must mark the season's last episode (SEASON FINALE) and name the NEXT season above the episodes (count or Coming Soon) - and invent nothing when none exists (0.73)");
+  }
+}
+
+/* ---------- 74. thank-you screen + Continue Watching lifecycle ---------- */
+{
+  const psD = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const stD = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt")) : "";
+  const apiD = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt")) : "";
+  const hsD = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt")) : "";
+  const apD = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt")) : "";
+  if (!psD || !stD || !apiD || !hsD || !apD) bad("Player/Store/Api/Home/App missing - the thank-you + CW lifecycle cannot be verified");
+  else if (/private fun ThanksOverlay\(/.test(psD) &&
+           /"Thank you for watching"/.test(psD) &&
+           /"MORE LIKE THIS"/.test(psD) &&
+           /fun finishSeason\(\)/.test(psD) &&
+           /showThanks = true/.test(psD) &&
+           /val done: Boolean = false/.test(stD) &&
+           /\.put\("done", x\.done\)/.test(stD) &&
+           /optBoolean\("done", false\)/.test(stD) &&
+           /fun nextAiredEpisode\(/.test(apiD) &&
+           /if \(!p\.done\)/.test(hsD) &&
+           /Api\.nextAiredEpisode\(p\.id, p\.season, p\.episode\)/.test(hsD) &&
+           /done = false,/.test(hsD) &&
+           /Thank You screen \(0\.73\)/.test(apD)) {
+    ok("thank-you screen + CW lifecycle: finished episodes go DONE and out of the row, a newer aired episode revives it rolled forward");
+  } else {
+    bad("nothing-left must open the Thank You screen with More Like This and mark the record DONE (out of Continue Watching) - and a newer aired episode must revive the row rolled to the NEW episode itself (0.73)");
   }
 }
 

@@ -308,19 +308,31 @@ object Api {
         (movie / tv / anime) with optional genre + year filters, popularity
         order. Returns the titles plus whether another page exists. The TV
         kind excludes animation (anime lives in its own kind); the anime
-        kind is Japanese animation (genre 16 + ja). */
+        kind is Japanese animation (genre 16 + ja).
+        GENRE_ANOTHER_WORLD (0.73) is the one VIRTUAL genre chip - isekai /
+        reincarnation / another-world stories ride TMDB KEYWORDS (real ids,
+        keyword namespace never collides with TMDB genre ids) instead of
+        with_genres. */
+    const val GENRE_ANOTHER_WORLD = 237451
+    const val ANOTHER_WORLD_NAME = "Another World"
+    private const val ISEKAI_KEYWORDS = "237451|291482|5484|213756|227624|33465"
+
     fun browsePage(kind: String, genre: Int?, year: Int?, page: Int): Pair<List<Title>, Boolean> {
         val q = StringBuilder()
+        val kw = if (genre == GENRE_ANOTHER_WORLD) "&with_keywords=" + ISEKAI_KEYWORDS else ""
+        val g = if (genre == GENRE_ANOTHER_WORLD) null else genre
         when (kind) {
             "movie" -> {
                 q.append("/api/tmdb/3/discover/movie?include_adult=false&sort_by=popularity.desc")
-                if (genre != null) q.append("&with_genres=").append(genre)
+                if (g != null) q.append("&with_genres=").append(g)
+                q.append(kw)
                 if (year != null) q.append("&primary_release_year=").append(year)
             }
             "anime" -> {
                 q.append("/api/tmdb/3/discover/tv?include_adult=false&sort_by=popularity.desc")
-                q.append("&with_genres=").append(if (genre != null) "16," + genre else "16")
+                q.append("&with_genres=").append(if (g != null) "16," + g else "16")
                 q.append("&with_original_language=ja")
+                q.append(kw)
                 if (year != null) q.append("&first_air_date_year=").append(year)
             }
             "kdrama" -> {
@@ -329,12 +341,14 @@ object Api {
                 // releases.
                 q.append("/api/tmdb/3/discover/tv?include_adult=false&sort_by=popularity.desc&without_genres=16")
                 q.append("&with_original_language=ko")
-                if (genre != null) q.append("&with_genres=").append(genre)
+                if (g != null) q.append("&with_genres=").append(g)
+                q.append(kw)
                 if (year != null) q.append("&first_air_date_year=").append(year)
             }
             else -> {
                 q.append("/api/tmdb/3/discover/tv?include_adult=false&sort_by=popularity.desc&without_genres=16")
-                if (genre != null) q.append("&with_genres=").append(genre)
+                if (g != null) q.append("&with_genres=").append(g)
+                q.append(kw)
                 if (year != null) q.append("&first_air_date_year=").append(year)
             }
         }
@@ -619,6 +633,27 @@ object Api {
             ?: return listOf()
         return titlesFrom(arr, if (type == "movie") "movie" else if (type == "anime") "anime" else null)
             .filter { it.poster != null }
+    }
+
+    /** First aired episode AFTER (seasonNo, episode) - the Continue Watching
+        new-episode revival (0.73). Walks the rest of the season first, then
+        the next seasons that have actually premiered. Null = nothing aired
+        yet (the row stays hidden). */
+    fun nextAiredEpisode(id: Int, seasonNo: Int, episode: Int): Pair<Int, Int>? {
+        return try {
+            val det = runCatching { details("tv", id) }.getOrNull() ?: return null
+            val eps = runCatching { season(id, seasonNo) }.getOrDefault(listOf())
+            eps.firstOrNull { it.n > episode && it.aired }?.let { return seasonNo to it.n }
+            val nxt = det.seasons.filter { it.n > seasonNo }
+                .sortedBy { it.n }
+                .firstOrNull { it.count > 0 && (it.air.isBlank() || it.air.take(10) <= today()) }
+            if (nxt == null) return null
+            val neps = runCatching { season(id, nxt.n) }.getOrDefault(listOf())
+            val first = neps.firstOrNull { it.aired } ?: return null
+            nxt.n to first.n
+        } catch (e: Exception) {
+            null
+        }
     }
 
     fun animeMap(name: String, year: Int): AnimeIds? {
