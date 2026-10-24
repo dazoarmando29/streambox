@@ -778,6 +778,7 @@ private val SB_HOOK = """
     // arriving while the element is unpaused - a 5s gap while the clock
     // races on is the render process dying and the shell rebuilds us.
     if (!window.__sbHasVideo || hookTicks % 5 === 0) hook();
+    crispAll();
     try {
       var v = findVideo();
       if (window.__sbFrameSeen && v && !v.paused && !v.ended &&
@@ -788,6 +789,47 @@ private val SB_HOOK = """
     } catch(e){}
   }
   setInterval(tick, 1000);
+  // Crisp (0.75): always-on perceptual sharpening for the picture - a
+  // mild unsharp convolve + a touch of contrast/saturation, injected as
+  // STYLE ONLY (SVG filter + CSS) into the page and its same-origin
+  // player frames. Provider player JS bodies are NEVER touched (the
+  // 0.45/0.46 lesson) and it is never labeled with unreported quality
+  // claims. The style stands down while the slow-network autopilot owns
+  // the pipeline (recovery first, GPU budget for playback).
+  function crispTo(doc, on){
+    try {
+      if (!doc || !doc.body) return;
+      var wrap = doc.getElementById('sbCrispSvg');
+      if (!wrap) {
+        wrap = doc.createElement('div');
+        wrap.id = 'sbCrispSvg';
+        wrap.setAttribute('aria-hidden', 'true');
+        wrap.style.cssText = 'position:fixed;width:0;height:0;overflow:hidden';
+        wrap.innerHTML = '<svg width="0" height="0"><filter id="sbCrispF" x="0" y="0" width="100%" height="100%"><feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="0 -0.45 0 -0.45 2.8 -0.45 0 -0.45 0"/></filter></svg>';
+        doc.body.appendChild(wrap);
+      }
+      var st = doc.getElementById('sbCrispStyle');
+      if (!st) {
+        st = doc.createElement('style');
+        st.id = 'sbCrispStyle';
+        st.textContent = 'video{filter:url(#sbCrispF) contrast(1.03) saturate(1.06);}';
+        (doc.head || doc.body).appendChild(st);
+      }
+      st.disabled = !on;
+    } catch(e){}
+  }
+  function crispAll(){
+    var on = !window.__sbSlow;
+    crispTo(document, on);
+    try {
+      for (var i = 0; i < window.frames.length; i++) {
+        var fd = null;
+        try { fd = window.frames[i].document; } catch(e2){}
+        if (fd) crispTo(fd, on);
+      }
+    } catch(e){}
+  }
+  crispAll();
   // Motion clarity (0.52): measure the REAL content frame rate from the
   // decoded frames (rVFC mediaTime deltas) and report it once. The shell
   // then asks the display for a matching refresh mode - integer multiples
@@ -915,7 +957,11 @@ private val SB_HOOK = """
       VBT.qualSel = String(val); vbPublish();
     },
     autoNext: function(on){ if(ANIPM) anipmSend('setAutoNext', {on: !!on}); },
-    autoSkip: function(on){ if(ANIPM) anipmSend('setAutoSkip', {on: !!on}); }
+    autoSkip: function(on){ if(ANIPM) anipmSend('setAutoSkip', {on: !!on}); },
+    // Slow-network autopilot hook (0.75): stands the Crisp style down
+    // while the shell recovers - the picture pass is cosmetic and must
+    // never compete with playback.
+    slow: function(on){ window.__sbSlow = !!on; crispAll(); }
   };
   // VidBolt track discovery (0.41/0.43): the wrapper page and the player
   // iframe share origin (both vidbolt.pro), so we read the player's own
@@ -923,7 +969,7 @@ private val SB_HOOK = """
   // only, no stream URL ever leaves the WebView. The player's own
   // mobile-panel delegation (narrow viewports) merges into the same
   // snapshot with its exact command values.
-  var VBT = { audios: {}, subs: {}, audioSel: "", subSel: "", quals: {}, qualsByLang: {}, qualSel: "" };
+  var VBT = { audios: {}, subs: {}, audioSel: "", subSel: "", quals: {}, qualsByLang: {}, mp4ByLang: {}, qualSel: "" };
   var VB_RESOLVE = {};
   var VB_PENDING = {};
   var VB_PUBSIG = "";
@@ -935,7 +981,7 @@ private val SB_HOOK = """
     // Publish only REAL changes (0.70): the discovery retries used to push
     // an identical snapshot every tick and recomposed the player for
     // nothing on a weak TV.
-    var sig = au.join() + "#" + su.join() + "#" + qr.length + "#" + qb.join() + "#" + VBT.audioSel + "#" + VBT.subSel + "#" + VBT.qualSel;
+    var sig = au.join() + "#" + su.join() + "#" + qr.length + "#" + qb.join() + "#" + VBT.audioSel + "#" + VBT.subSel + "#" + VBT.qualSel + "#" + JSON.stringify(VBT.mp4ByLang);
     if (sig === VB_PUBSIG) return;
     VB_PUBSIG = sig;
     send("vb:tracks", {
@@ -945,6 +991,7 @@ private val SB_HOOK = """
       subSel: VBT.subSel || "",
       quals: qr,
       qualsByLang: VBT.qualsByLang,
+      mp4ByLang: VBT.mp4ByLang,
       qualSel: VBT.qualSel || ""
     });
   }
@@ -1061,6 +1108,14 @@ private val SB_HOOK = """
             if (qz) {
               if (!VBT.qualsByLang[lab]) VBT.qualsByLang[lab] = [];
               if (VBT.qualsByLang[lab].indexOf(qz) < 0) VBT.qualsByLang[lab].push(qz);
+              // Progressive MP4 rungs per language (0.75): the slow-network
+              // autopilot prefers a real MP4 file over same-quality HLS
+              // segments (one steady stream instead of many small fetches).
+              // Provider-reported kinds only - nothing invented.
+              if (String(n.kind || "").toLowerCase() === "mp4") {
+                if (!VBT.mp4ByLang[lab]) VBT.mp4ByLang[lab] = [];
+                if (VBT.mp4ByLang[lab].indexOf(qz) < 0) VBT.mp4ByLang[lab].push(qz);
+              }
             }
           });
           // VidBolt subtitle ROWS carry their command INDEX (0.54 fix):
@@ -1372,6 +1427,24 @@ fun PlayerScreen(
     var vbQualRows by remember { mutableStateOf(listOf<Triple<String, String, String>>()) }
     var vbQualsByLang by remember { mutableStateOf(mapOf<String, List<String>>()) }
     var vbQualSel by remember { mutableStateOf("") }
+    // Progressive MP4 rungs per language (0.75) - provider-reported source
+    // kinds from the resolve snapshot; the slow-network autopilot prefers
+    // these over same-quality HLS when one exists at or below the rung.
+    var vbMp4 by remember { mutableStateOf(mapOf<String, List<String>>()) }
+    // Slow-WiFi autopilot (0.75): session-only (never persisted - the
+    // house rule: a stall may lighten the stream but never pins a viewer
+    // below HD forever). While set, the quality steps down one rung per
+    // stall through the provider's OWN reported ladder and the picture
+    // pass stands down.
+    var slowSession by remember { mutableStateOf(false) }
+    var netNote by remember { mutableStateOf("") }
+    // First-start timing (0.75): a boot that needs more than ~12s before
+    // the first real clock tick is a slow line - the autopilot lightens
+    // the stream before the viewer ever feels a stall.
+    var bootAt by remember { mutableStateOf(0L) }
+    var firstTuAfterLoad by remember { mutableStateOf(true) }
+    // Next-episode warm start (0.75): one embed-page prefetch per episode.
+    val prefetched = remember { java.util.Collections.synchronizedSet(HashSet<String>()) }
 
     fun setSub(name: String, lang: String, cues: List<Cue>) {
         if (cues.isEmpty()) {
@@ -1498,6 +1571,8 @@ fun PlayerScreen(
         val q = cinesrcQ
         lastLoadAtMs = System.currentTimeMillis()
         endedHandled = false
+        bootAt = lastLoadAtMs
+        firstTuAfterLoad = true
         // Mirrors whose URL carries startAt (vidzen/vidbolt/anipm) keep the
         // position themselves; the rest get one seek when the player reports
         // ready - switching providers never loses your place (task rule).
@@ -1595,6 +1670,80 @@ fun PlayerScreen(
     var seekJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val seekScope = rememberCoroutineScope()
 
+    /** Slow-WiFi autopilot step (0.75): ONE quality rung down, session-
+        only, and ONLY through ladders the provider itself reported -
+        AniPM's own heights, VidBolt's resolve quality labels (+ real MP4
+        source kinds), CineSrc's documented ""/1080/720/480 cycle. Nothing
+        is invented, nothing is persisted, and an unknown ladder is a
+        clean no-op (the next stall tries again). */
+    fun slowStep() {
+        when {
+            mirror == "anipm" -> {
+                val curQ = anipmQ ?: anipmQs.firstOrNull() ?: return
+                val i = anipmQs.indexOfFirst { it == curQ }
+                if (i < 0 || i >= anipmQs.size - 1) return
+                val next = anipmQs[i + 1]
+                anipmQ = next
+                cmd("window.__sb && window.__sb.q(" + next + ")")
+            }
+            mirror == "vidbolt" -> {
+                fun num(q: String): Int = q.takeWhile { it.isDigit() }.toIntOrNull() ?: 0
+                val langKey = vbAudios.firstOrNull { it.second == vbAudioSel }?.first
+                    ?: vbQualsByLang.keys.firstOrNull()
+                val ladder = (if (langKey != null) vbQualsByLang[langKey] else null)
+                    ?: vbQualsByLang.values.flatten().distinct()
+                if (ladder.isEmpty()) return
+                val curLab = vbQualSel.ifEmpty { ladder.maxByOrNull { num(it) } ?: return }
+                val mp4 = (if (langKey != null) vbMp4[langKey] else null)
+                    ?: vbMp4.values.flatten().distinct()
+                // (a) a real progressive MP4 at this rung or below - one
+                // steady stream beats HLS segments on a thin line.
+                if (curLab !in mp4) {
+                    val target = mp4.filter { num(it) <= num(curLab) }.maxByOrNull { num(it) }
+                    if (target != null) {
+                        vbQualSel = target
+                        cmd(
+                            "window.__sb && window.__sb.vbqual('sourceQuality'," +
+                                org.json.JSONObject.quote(target) + ")",
+                        )
+                        return
+                    }
+                }
+                // (b) else one rung DOWN the reported ladder.
+                val lower = ladder.filter { num(it) < num(curLab) }.maxByOrNull { num(it) } ?: return
+                vbQualSel = lower
+                cmd(
+                    "window.__sb && window.__sb.vbqual('sourceQuality'," +
+                        org.json.JSONObject.quote(lower) + ")",
+                )
+            }
+            mirror == "cinesrc" -> {
+                val next = when (cinesrcQ) {
+                    "" -> "720"
+                    "1080" -> "720"
+                    "720" -> "480"
+                    else -> null
+                } ?: return
+                cinesrcQ = next
+                load(startAt = cur)
+            }
+        }
+    }
+
+    /** A stall or a slow first start puts the line in slow mode (0.75):
+        the quality lightens, the picture pass stands down, and an honest
+        one-liner says so. Session-only - closing the player forgets it. */
+    fun enterSlow() {
+        if (slowSession) {
+            slowStep()
+            return
+        }
+        slowSession = true
+        netNote = "Slow network - playing a lighter quality for smooth playback"
+        cmd("window.__sb && window.__sb.slow(true)")
+        slowStep()
+    }
+
     fun sendSeekNow(target: Float) {
         if (mirror == "vidcore" || mirror.startsWith("vidsrc")) {
             // VidCore/VidSrc publish events only (no seek command) - their
@@ -1671,6 +1820,10 @@ fun PlayerScreen(
             when (stallStep) {
                 0 -> {
                     stallStep = 1
+                    // A stall means the line cannot sustain this stream -
+                    // the slow-WiFi autopilot lightens it (0.75) before
+                    // nudging playback back.
+                    enterSlow()
                     playing = true
                     cmd("window.__sb && window.__sb.play()")
                     cmd("window.__sb && window.__sb.seek(" + cur.toInt() + ")")
@@ -1682,6 +1835,7 @@ fun PlayerScreen(
                 }
                 else -> {
                     stallStep = 0
+                    enterSlow()
                     webGen += 1
                 }
             }
@@ -1691,6 +1845,7 @@ fun PlayerScreen(
     // 5s while the element was unpaused) - straight to the heavy steps.
     LaunchedEffect(stallKick) {
         if (stallKick == 0 || !playing || showThanks || mirror == "hls") return@LaunchedEffect
+        enterSlow()
         if (stallStep == 0) {
             stallStep = 2
             if (!muted) cmd("window.__sb && window.__sb.mute(false)")
@@ -1710,6 +1865,23 @@ fun PlayerScreen(
         if (!muted) cmd("window.__sb && window.__sb.mute(false)")
         playing = true
         load(startAt = cur)
+    }
+
+    // Slow-network note auto-hides (0.75) - honest, transient, never a
+    // standing warning.
+    LaunchedEffect(netNote) {
+        if (netNote.isNotEmpty()) {
+            delay(6000)
+            netNote = ""
+        }
+    }
+    // A fresh page loses the slow flag (the hook boots clean) - re-assert
+    // it after every load while the session is still slow (0.75).
+    LaunchedEffect(slowSession, epSeason, epNumber, webGen) {
+        if (slowSession) {
+            delay(2500)
+            cmd("window.__sb && window.__sb.slow(true)")
+        }
     }
 
     fun pokeChrome() {
@@ -1822,6 +1994,43 @@ fun PlayerScreen(
         tracked pair are no-ops, settling noise inside EP_SYNC_GRACE_MS after
         our own load is dropped, and a number outside the real season range is
         dropped. */
+    /** The (season, episode) the next-episode paths WOULD open - read-only
+        twin of advanceEpisode, for the warm-start prefetch (0.75). */
+    fun nextTargetPair(): Pair<Int, Int>? {
+        val count = seasonEps
+        if (count > 0 && epNumber >= count) {
+            val nxt = seasonList.firstOrNull { it.n == epSeason + 1 && it.n >= 1 } ?: return null
+            if (nxt.count <= 0 || !(nxt.air.isBlank() || nxt.air.take(10) <= todayIso())) return null
+            return nxt.n to 1
+        }
+        val next = epsList.firstOrNull { it.n == epNumber + 1 } ?: return epSeason to (epNumber + 1)
+        return if (next.aired) epSeason to next.n else null
+    }
+
+    // Next-episode warm start (0.75): after 45s of stable playback on a
+    // FAST session, fetch the next episode's VidBolt embed page into the
+    // shim cache in the background - the auto-next hop then lands on a
+    // cache hit instead of a cold fetch. Never on slow sessions (the line
+    // belongs to the video), once per episode, VidBolt only (the shimmed
+    // page is the fetch we own).
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(15000)
+            if (mirror != "vidbolt" || slowSession || showThanks || !playing) continue
+            if (System.currentTimeMillis() - lastLoadAtMs < 45000) continue
+            val np = nextTargetPair() ?: continue
+            val pKey = np.first.toString() + ":" + np.second
+            if (!prefetched.add(pKey)) continue
+            val url = playerUrl(
+                title, np.first, np.second, routeMal, routeAni, mirror,
+                0f, anipmLang, cinesrcQ, epBase, contentLang == "ko",
+            )
+            withContext(Dispatchers.IO) {
+                runCatching { vbShimmedDoc(url) }
+            }
+        }
+    }
+
     fun adoptProviderEpisode(sIn: Int, eIn: Int): Boolean {
         val e = eIn
         if (e <= 0) return false
@@ -2593,6 +2802,17 @@ fun PlayerScreen(
                                         // seekTo() writes cur directly and
                                         // must never count as movement.
                                         lastRepPos = cur
+                                        if (firstTuAfterLoad) {
+                                            firstTuAfterLoad = false
+                                            // Slow first start (0.75): over
+                                            // 12s to the first real clock
+                                            // tick is a thin line - lighten
+                                            // the stream before the viewer
+                                            // ever feels a stall.
+                                            if (bootAt > 0 && System.currentTimeMillis() - bootAt > 12000) {
+                                                enterSlow()
+                                            }
+                                        }
                                         val d = o.optDouble("duration", 0.0).toFloat()
                                         if (d > 0) dur = d
                                         val now = System.currentTimeMillis()
@@ -2714,6 +2934,24 @@ fun PlayerScreen(
                                             }
                                         }
                                         vbQualsByLang = qMap
+                                        // Progressive MP4 rungs (0.75) -
+                                        // provider-reported source kinds,
+                                        // consumed only by the slow-network
+                                        // autopilot (never invented).
+                                        val mp4Map = mutableMapOf<String, List<String>>()
+                                        val mbl = o.optJSONObject("mp4ByLang")
+                                        if (mbl != null) {
+                                            for (k in mbl.keys()) {
+                                                val ma = mbl.optJSONArray(k) ?: continue
+                                                val ms = mutableListOf<String>()
+                                                for (mi in 0 until ma.length()) {
+                                                    val mq = ma.optString(mi, "")
+                                                    if (mq.isNotBlank() && mq != "null") ms.add(mq)
+                                                }
+                                                if (ms.isNotEmpty()) mp4Map[k] = ms
+                                            }
+                                        }
+                                        vbMp4 = mp4Map
                                         val qSel = o.optString("qualSel", "")
                                         if (qSel.isNotBlank() && qSel != "null") vbQualSel = qSel
                                         // K-drama defaults (0.64): Tagalog
@@ -4076,6 +4314,11 @@ fun PlayerScreen(
         }
         subsLayer(this)
 
+        // Slow-network note (0.75): transient, honest, auto-hides.
+        if (netNote.isNotEmpty()) {
+            NetNotePill(netNote, big, Modifier.align(Alignment.TopCenter))
+        }
+
         // Thank You screen (0.73): the last panel on the box so it owns
         // the whole surface when the season has nothing left to play.
         if (showThanks) {
@@ -4201,6 +4444,25 @@ private fun BarTimeline(
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
+    }
+}
+
+/** Transient slow-network note (0.75): one honest line over the player,
+    auto-hides after a few seconds. Extracted composable (player-layers
+    rule - big UI trees never inline into PlayerScreen). */
+@Composable
+private fun NetNotePill(text: String, big: Boolean, modifier: Modifier = Modifier) {
+    Box(modifier = modifier.padding(top = 12.dp), contentAlignment = Alignment.TopCenter) {
+        Text(
+            text,
+            color = Soft,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (big) 13.sp else 11.sp,
+            maxLines = 1,
+            modifier = Modifier
+                .background(Pill, RoundedCornerShape(50))
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+        )
     }
 }
 

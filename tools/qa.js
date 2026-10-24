@@ -303,7 +303,27 @@
         tick once a video is live, the fps scan retires after it attaches
         (the rVFC loop stays only as the frame pump), timeupdates thin to
         ~4Hz on BOTH sides of the JS bridge, and onTrimMemory drops the
-        shim page cache so the render process keeps its headroom */
+        shim page cache so the render process keeps its headroom
+    78 the slow-WiFi autopilot (0.75): a stall or a slow first start
+        lightens the stream ONE rung - and ONLY through ladders the
+        provider itself reported (AniPM's own heights, VidBolt's resolve
+        quality labels with their real MP4 source kinds, CineSrc's
+        documented ""/1080/720/480 cycle). A real progressive MP4 at or
+        below the rung is preferred over same-quality HLS segments (one
+        steady stream instead of many small fetches). Session-only (never
+        persisted - a stall may lighten playback but never pins a viewer
+        below HD forever), one honest note, and an unknown ladder is a
+        clean no-op
+    79 the Crisp picture pass (0.75): always-on perceptual sharpening +
+        vividness - an SVG unsharp convolve and a CSS filter injected as
+        STYLE ONLY into the page and its same-origin player frames (the
+        0.45/0.46 lesson: provider player JS bodies are NEVER touched).
+        It stands down while the slow-network autopilot owns the pipeline
+        and never carries unreported quality claims (qa 26)
+    80 the next-episode warm start (0.75): the VidBolt embed page
+        prefetches into the shim cache ONCE per episode after 45s of
+        stable playback - never on slow sessions (the line belongs to the
+        video), so the auto-next hop lands on a cache hit */
  const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1631,6 +1651,57 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("weak-box pressure is down: hooks slow after the first video, the fps scan retires after attach, timeupdates thin to ~4Hz on both sides of the bridge, and memory pressure drops the shim cache");
   } else {
     bad("the shell must not carry runaway timers (0.74) - the 1s hook slows once a video is live, the fps scan retires after attach, timeupdates thin to ~4Hz on BOTH sides of the bridge, and onTrimMemory drops the shim page cache so the render process keeps headroom");
+  }
+}
+
+/* ---------- 78. slow-WiFi autopilot: session-only, reported ladders only ---------- */
+{
+  const psN78 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  if (!psN78) bad("PlayerScreen.kt missing - slow-WiFi rules cannot be verified");
+  else if (/fun enterSlow\(\)/.test(psN78) &&
+           /fun slowStep\(\)/.test(psN78) &&
+           /slowSession = true/.test(psN78) &&
+           /netNote = "Slow network/.test(psN78) &&
+           /vbqual\('sourceQuality',/.test(psN78) &&
+           /window\.__sb && window\.__sb\.q\(/.test(psN78) &&
+           /cinesrcQ = next/.test(psN78) &&
+           /val mp4 = \(if \(langKey != null\) vbMp4\[langKey\] else null\)/.test(psN78) &&
+           /enterSlow\(\)/.test(psN78) &&
+           !/Store\.[a-zA-Z]*Slow/.test(psN78)) {
+    ok("slow-WiFi autopilot: stalls and slow starts lighten the stream one rung through provider-reported ladders only (AniPM heights, VidBolt quality labels + real MP4 kinds, CineSrc cycle), session-only with an honest note");
+  } else {
+    bad("the slow-network autopilot (0.75) must step quality down through PROVIDER-REPORTED ladders only (never invented values), prefer a real reported MP4 file at or below the rung over same-quality HLS, stay session-only (never persisted), and say so with one honest note");
+  }
+}
+
+/* ---------- 79. Crisp picture pass: style injection only, never JS bodies ---------- */
+{
+  const psC79 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  if (!psC79) bad("PlayerScreen.kt missing - the Crisp picture pass cannot be verified");
+  else if (/function crispTo\(doc, on\)/.test(psC79) &&
+           /feConvolveMatrix/.test(psC79) &&
+           /sbCrispStyle/.test(psC79) &&
+           /filter:url\(#sbCrispF\)/.test(psC79) &&
+           /crispAll\(\);/.test(psC79) &&
+           /slow: function\(on\)\{ window\.__sbSlow = !!on; crispAll\(\); \}/.test(psC79)) {
+    ok("Crisp picture pass: always-on SVG sharpen + vividness injected as style into the page and its same-origin frames, standing down during slow-network recovery");
+  } else {
+    bad("the Crisp picture pass (0.75) must be STYLE-ONLY (SVG convolve filter + CSS, never a provider JS body), reach the page and its same-origin frames, and stand down while the slow-network autopilot owns the pipeline");
+  }
+}
+
+/* ---------- 80. next-episode warm start ---------- */
+{
+  const psP80 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  if (!psP80) bad("PlayerScreen.kt missing - the warm start cannot be verified");
+  else if (/Next-episode warm start \(0\.75\)/.test(psP80) &&
+           /fun nextTargetPair\(\): Pair<Int, Int>\?/.test(psP80) &&
+           /if \(mirror != "vidbolt" \|\| slowSession \|\| showThanks \|\| !playing\) continue/.test(psP80) &&
+           /if \(!prefetched\.add\(pKey\)\) continue/.test(psP80) &&
+           /runCatching \{ vbShimmedDoc\(url\) \}/.test(psP80)) {
+    ok("next-episode warm start: the VidBolt embed page prefetches once per episode after 45s of stable playback, never on slow sessions");
+  } else {
+    bad("the next-episode warm start (0.75) must prefetch the VidBolt embed page once per episode after stable playback, never on a slow session (the line belongs to the video) and never twice");
   }
 }
 

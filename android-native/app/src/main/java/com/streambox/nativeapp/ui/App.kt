@@ -292,6 +292,11 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.75" to listOf(
+        "Slow Wi-Fi handled automatically - the player detects a thin connection, plays a lighter quality (and the smoother MP4 files when available) and never stops and starts; it says so with one honest note and remembers nothing after you leave",
+        "Crisp picture is always on - a real sharpening + vividness pass on every server for a cleaner, sharper look",
+        "Next episodes warm up in the background so auto-next starts instantly",
+    ),
     "0.74" to listOf(
         "Fixed the freeze where the video stuttered, went silent and stopped moving - the player now detects the stall and rebuilds itself automatically (your volume is kept)",
         "Long sessions stay smoother on weak TV boxes - background overhead is trimmed and memory pressure is handled before playback feels it",
