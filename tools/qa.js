@@ -261,13 +261,11 @@
     70 the timeline HIGHLIGHTS the skip marks (0.73): recap/intro/outro/
         preview ranges paint as colored segments on the track plus a legend
         line, so the timestamps are visible before they arrive
-    71 seek reliability (0.73): a burst of back-seeks buried VidBolt in
-        in-place seek commands - its player blacked the surface, dropped
-        audio and froze until the video was exited. Bursts now COALESCE to
-        one seek per 450ms window (trailing target), a seek that produces
-        zero provider life for 8s self-heals (nudge play + re-send once,
-        then reopen at the marker through startAt) and an unmuted player is
-        restored UNMUTED (house rule: never auto-mute)
+    71 seek reliability (0.73/0.74): a burst of back-seeks buried VidBolt
+        in in-place seek commands - its player blacked the surface, dropped
+        audio and froze until the video was exited. Bursts COALESCE to one
+        seek per 450ms window (trailing target wins) - the stall class
+        itself is owned by the watchdog ladder now (75/76)
     72 the Another World genre (0.73): the one VIRTUAL chip leads every
         Browse kind and rides real TMDB KEYWORDS (isekai / reverse isekai /
         reincarnation / another world / other world / parallel world -
@@ -282,7 +280,30 @@
         watching" with More Like This (real TMDB similar) and the record
         goes DONE - out of Continue Watching - and the row COMES BACK
         rolled to the first newer aired episode the moment one exists, so
-        the row always opens the new episode itself */
+        the row always opens the new episode itself
+    75 the FREEZE self-heals (0.74): "after some minutes it stutters, then
+        mutes, then the picture freezes and seeks never move it" hit every
+        provider (AniPM, CineSrc, VidBolt) because the shared stack is our
+        WebView shell. While we think the video is PLAYING, the provider-
+        REPORTED position must keep moving - a frozen position walks a
+        ladder: nudge play + re-send the seek, then reopen at startAt with
+        the user's VOLUME restored (a dying page may have muted itself -
+        never auto-mute), then rebuild. The JS frame-gap detector
+        ("video:stall": frames stop for 5s while unpaused) jumps the queue
+        when the clock races on over dead frames. Pause, load windows and
+        seekTo-written positions are never stalls
+    76 a killed render process is a ZOMBIE (0.74): Chromium kills the
+        render process under memory pressure and the WebView can never be
+        revived - evaluateJavascript becomes a no-op and even load() dies
+        silently. onRenderProcessGone is handled: the view leaves through
+        onRelease (destroy), key(webGen) builds a NEW WebView, the factory
+        auto-boot is first-generation only, and the reopen effect resumes
+        at the live position with the user's volume
+    77 weak-box pressure stays low (0.74): the 1s hook slowed to every 5th
+        tick once a video is live, the fps scan retires after it attaches
+        (the rVFC loop stays only as the frame pump), timeupdates thin to
+        ~4Hz on BOTH sides of the JS bridge, and onTrimMemory drops the
+        shim page cache so the render process keeps its headroom */
  const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1478,20 +1499,17 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   }
 }
 
-/* ---------- 71. seek reliability: coalesce + heal + anti-mute ---------- */
+/* ---------- 71. seek bursts coalesce (one provider seek per window) ---------- */
 {
   const psS71 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
   if (!psS71) bad("PlayerScreen.kt missing - seek reliability cannot be verified");
   else if (/fun sendSeekNow\(target: Float\)/.test(psS71) &&
            /if \(now - lastSeekCmdAt >= 450L\)/.test(psS71) &&
-           /seekPendingAt = System\.currentTimeMillis\(\)/.test(psS71) &&
-           /if \(seekPendingAt <= 0 \|\| since < 8000\) continue/.test(psS71) &&
-           /if \(!muted\) cmd\("window\.__sb && window\.__sb\.mute\(false\)"\)/.test(psS71) &&
-           /load\(startAt = at\)/.test(psS71) &&
-           /"timeupdate" -> \{\s*\n\s*seekPendingAt = 0/.test(psS71)) {
-    ok("seek reliability: bursts coalesce to one seek per window, silent seeks self-heal (nudge, then reopen at startAt) and an unmuted player is restored unmuted");
+           /seekJob = seekScope\.launch/.test(psS71) &&
+           /fun seekTo\(t: Float\)/.test(psS71)) {
+    ok("seek bursts coalesce: the UI moves instantly but the provider gets one seek per 450ms window (trailing target wins)");
   } else {
-    bad("seeking must coalesce bursts (one provider seek per 450ms), self-heal a seek that produces zero provider life (nudge once, then reopen at startAt) and restore the user's unmuted state - rapid back-seeks froze and muted the video (0.73)");
+    bad("seeking must coalesce bursts into one provider seek per 450ms window - rapid back-seeks buried the provider in in-place seek commands and froze the player (0.73)");
   }
 }
 
@@ -1556,6 +1574,63 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("thank-you screen + CW lifecycle: finished episodes go DONE and out of the row, a newer aired episode revives it rolled forward");
   } else {
     bad("nothing-left must open the Thank You screen with More Like This and mark the record DONE (out of Continue Watching) - and a newer aired episode must revive the row rolled to the NEW episode itself (0.73)");
+  }
+}
+
+/* ---------- 75. stall watchdog: the freeze self-heals ---------- */
+{
+  const psW = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  if (!psW) bad("PlayerScreen.kt missing - stall rules cannot be verified");
+  else if (/Stall watchdog \(0\.74\)/.test(psW) &&
+           /lastRepPos/.test(psW) &&
+           /if \(now - lastMoveAt < 8000\) continue/.test(psW) &&
+           /stallStep = 1/.test(psW) &&
+           /stallStep = 2/.test(psW) &&
+           /webGen \+= 1/.test(psW) &&
+           /"video:stall" -> \{/.test(psW) &&
+           /stallKick \+= 1/.test(psW) &&
+           /if \(!muted\) cmd\("window\.__sb && window\.__sb\.mute\(false\)"\)/.test(psW)) {
+    ok("stall watchdog: a frozen position while playing walks the ladder (nudge, reopen at startAt + volume restore, rebuild) and the frame-gap signal jumps the queue");
+  } else {
+    bad("the player must self-heal the freeze class (0.74) - while playing, the PROVIDER-REPORTED position must keep moving or the ladder nudges, reopens at startAt, and finally rebuilds; the JS frame-gap detector (video:stall) jumps the queue; an unmuted player is always restored unmuted");
+  }
+}
+
+/* ---------- 76. render-process death rebuilds the WebView ---------- */
+{
+  const psR = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  if (!psR) bad("PlayerScreen.kt missing - render-process recovery cannot be verified");
+  else if (/override fun onRenderProcessGone\(/.test(psR) &&
+           /key\(webGen\) \{/.test(psR) &&
+           /onRelease = \{ old ->/.test(psR) &&
+           /old\.destroy\(\)/.test(psR) &&
+           /webGen == 0 && title\.type != "anime"/.test(psR) &&
+           /LaunchedEffect\(webGen\)/.test(psR) &&
+           /load\(startAt = cur\)/.test(psR)) {
+    ok("render-process death rebuilds the WebView (onRenderProcessGone -> key(webGen), old view destroyed in onRelease) and reopens at the live position");
+  } else {
+    bad("a killed render process leaves a zombie WebView that NO seek or reload can revive (0.74) - onRenderProcessGone must be handled, the view rebuilt via key(webGen) with destroy on release, the factory auto-boot gated to the first generation, and the episode reopened at the live position");
+  }
+}
+
+/* ---------- 77. weak-box pressure: no runaway timers + thinned bridge + memory valve ---------- */
+{
+  const psP77 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const appT77 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/MainActivity.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/MainActivity.kt")) : "";
+  if (!psP77 || !appT77) bad("PlayerScreen/MainActivity missing - pressure rules cannot be verified");
+  else if (!/setInterval\(hook, 1000\)/.test(psP77) &&
+           /if \(!window\.__sbHasVideo \|\| hookTicks % 5 === 0\) hook\(\);/.test(psP77) &&
+           /window\.__sbFrameAt = Date\.now\(\);/.test(psP77) &&
+           /clearInterval\(window\.__sbFpsInt\)/.test(psP77) &&
+           /window\.__sbLastTu/.test(psP77) &&
+           /tuGate\.get\(\) < 250/.test(psP77) &&
+           /fun vbTrimMemory\(\)/.test(psP77) &&
+           /override fun onTrimMemory/.test(appT77) &&
+           /vbTrimMemory\(\)/.test(appT77)) {
+    ok("weak-box pressure is down: hooks slow after the first video, the fps scan retires after attach, timeupdates thin to ~4Hz on both sides of the bridge, and memory pressure drops the shim cache");
+  } else {
+    bad("the shell must not carry runaway timers (0.74) - the 1s hook slows once a video is live, the fps scan retires after attach, timeupdates thin to ~4Hz on BOTH sides of the bridge, and onTrimMemory drops the shim page cache so the render process keeps headroom");
   }
 }
 

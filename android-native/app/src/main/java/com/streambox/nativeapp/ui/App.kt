@@ -292,6 +292,10 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.74" to listOf(
+        "Fixed the freeze where the video stuttered, went silent and stopped moving - the player now detects the stall and rebuilds itself automatically (your volume is kept)",
+        "Long sessions stay smoother on weak TV boxes - background overhead is trimmed and memory pressure is handled before playback feels it",
+    ),
     "0.73" to listOf(
         "Skip Intro / Skip Recap / Skip Outro land on the REAL timestamps now, and the timeline highlights exactly where they are",
         "Skip Outro works - it skips the ending song automatically (and the Next Episode chain waits until the episode truly ends)",

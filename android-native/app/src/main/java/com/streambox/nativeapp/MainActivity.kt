@@ -41,6 +41,18 @@ class MainActivity : ComponentActivity() {
             false
         }
     }
+
+    // Memory pressure valve (0.74): weak TV boxes kill the WebView render
+    // process first when memory runs out ("stutters, then mutes, then the
+    // picture freezes"). Drop our cached shim pages the moment the system
+    // flags pressure - they refetch from the CDN instantly - so the render
+    // process keeps its headroom.
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            com.streambox.nativeapp.ui.vbTrimMemory()
+        }
+    }
 }
 
 object AppEnv {

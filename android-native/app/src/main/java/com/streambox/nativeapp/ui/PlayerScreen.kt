@@ -58,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -442,6 +443,14 @@ private const val VB_UA =
     server bounces) skip the extra fetch entirely. Four entries max. */
 private val VB_DOC_CACHE = java.util.Collections.synchronizedMap(HashMap<String, String>())
 
+/** Memory-pressure valve (0.74): the shim page cache is the biggest
+    allocation we own on the WebView side - drop it when the system is
+    under pressure (weak TV boxes kill the render process first). The
+    pages refetch from the CDN instantly, so this only costs one fetch. */
+fun vbTrimMemory() {
+    VB_DOC_CACHE.clear()
+}
+
 /** Serve the VidBolt embed PAGE with the gate shim as its first inline
     script - deterministic: the shim is in the document before their module
     can evaluate, so the command listener registers on TVs too. FAIL-SAFE:
@@ -572,7 +581,19 @@ private fun restoreDisplayRate(ctx: android.content.Context) {
 private val SB_HOOK = """
 (function(){
   if (window.__sbHooked) return; window.__sbHooked = true;
-  function send(t, o){ try { Android.event(t, JSON.stringify(o||{})); } catch(e){} }
+  function send(t, o){
+    try {
+      // Bridge thinning (0.74): timeupdates run up to ~8/s per video and
+      // every one crossed into Kotlin - the clock only needs ~4Hz. The
+      // freeze detector below never rides this throttle ("video:stall").
+      if (t === "timeupdate") {
+        var n = Date.now();
+        if (window.__sbLastTu && n - window.__sbLastTu < 250) return;
+        window.__sbLastTu = n;
+      }
+      Android.event(t, JSON.stringify(o||{}));
+    } catch(e){}
+  }
   var h = location.hostname;
   var ANIPM = h === "ani.pm" || h.endsWith(".ani.pm");
   var VR = h === "vidrift.net" || h.endsWith(".vidrift.net");
@@ -723,10 +744,22 @@ private val SB_HOOK = """
       }
     }
   });
+  // The live video: the shell page first, then the same-origin player
+  // iframe (0.74 - the frame video is the real one on VidBolt/AniPM and
+  // it is where the freeze happens).
+  function findVideo(){
+    try { var v = document.querySelector('video'); if (v) return v; } catch(e){}
+    try {
+      var fw = window.frames[0];
+      if (fw && fw.document) return fw.document.querySelector('video');
+    } catch(e){}
+    return null;
+  }
   function hook(){
-    var v = document.querySelector('video');
+    var v = findVideo();
     if (!v || v.__sb) return;
     v.__sb = true;
+    window.__sbHasVideo = true;
     v.addEventListener('play', function(){ send('play', {}); });
     v.addEventListener('pause', function(){ send('pause', {}); });
     v.addEventListener('ended', function(){ send('ended', {}); });
@@ -736,35 +769,52 @@ private val SB_HOOK = """
     send('ready', {});
   }
   hook();
-  setInterval(hook, 1000);
+  var hookTicks = 0;
+  function tick(){
+    hookTicks++;
+    // The forever-1s hook was pure overhead once a video is live (weak
+    // boxes stuttered on it) - slow it to every 5th tick and spend the
+    // tick on the FREEZE detector instead (0.74): frames must keep
+    // arriving while the element is unpaused - a 5s gap while the clock
+    // races on is the render process dying and the shell rebuilds us.
+    if (!window.__sbHasVideo || hookTicks % 5 === 0) hook();
+    try {
+      var v = findVideo();
+      if (window.__sbFrameSeen && v && !v.paused && !v.ended &&
+          Date.now() - (window.__sbFrameAt || 0) > 5000) {
+        window.__sbFrameAt = Date.now();
+        send("video:stall", {});
+      }
+    } catch(e){}
+  }
+  setInterval(tick, 1000);
   // Motion clarity (0.52): measure the REAL content frame rate from the
   // decoded frames (rVFC mediaTime deltas) and report it once. The shell
   // then asks the display for a matching refresh mode - integer multiples
   // kill judder (24fps on 120Hz runs an even 5:5 cadence) and the highest
   // matching refresh cuts sample-and-hold smear in fast motion. Watches
-  // the shell video AND the same-origin player iframe.
+  // the shell video AND the same-origin player iframe. 0.74: the rVFC
+  // loop stays as the FRAME PUMP for the freeze detector (it stops when
+  // frames stop - that IS the signal), the fps math runs once, and the
+  // scan interval retires itself after a video is found.
   function fpsWatch(){
-    var v = null;
-    try { v = document.querySelector('video'); } catch(e){}
-    if (!v) {
-      try {
-        var fw = window.frames[0];
-        v = fw && fw.document && fw.document.querySelector('video');
-      } catch(e){}
-    }
+    var v = findVideo();
     if (!v || v.__sbFps || typeof v.requestVideoFrameCallback !== 'function') return;
     v.__sbFps = true;
+    window.__sbFpsOn = true;
     var last = -1, hits = 0, acc = 0, sent = false;
     function cb(now, meta){
+      window.__sbFrameAt = Date.now();
+      window.__sbFrameSeen = true;
       try {
         var mt = meta && meta.mediaTime;
-        if (typeof mt === 'number') {
+        if (typeof mt === 'number' && !sent) {
           if (last >= 0) {
             var d = mt - last;
             if (d > 0.004 && d < 0.25) { acc += d; hits++; }
           }
           last = mt;
-          if (!sent && hits >= 24 && acc > 0) {
+          if (hits >= 24 && acc > 0) {
             sent = true;
             var fps = Math.round(hits / acc);
             if (fps >= 15 && fps <= 121) send('video:fps', { fps: fps });
@@ -774,8 +824,9 @@ private val SB_HOOK = """
       v.requestVideoFrameCallback(cb);
     }
     v.requestVideoFrameCallback(cb);
+    if (window.__sbFpsInt) { clearInterval(window.__sbFpsInt); window.__sbFpsInt = null; }
   }
-  setInterval(fpsWatch, 1000);
+  window.__sbFpsInt = setInterval(fpsWatch, 1000);
   window.__sb = {
     play: function(){
       var v=document.querySelector('video'); if(v) v.play();
@@ -1214,6 +1265,14 @@ fun PlayerScreen(
     var epNumber by remember(title.id, title.type, season, episode) { mutableIntStateOf(episode) }
     var skips by remember { mutableStateOf(IntroDb.Skips(listOf(), listOf(), listOf())) }
     var web by remember { mutableStateOf<WebView?>(null) }
+    // WebView GENERATION (0.74): Chromium kills the render process under
+    // memory pressure on weak boxes ("stutters, then mutes, then the
+    // picture freezes and seeks never move it" - a dead render process is
+    // a ZOMBIE: evaluateJavascript becomes a no-op and the old WebView can
+    // never be revived, which is exactly why the 0.73 seek-heal never
+    // recovered it). key(webGen) rebuilds the AndroidView and the reopen
+    // effect resumes at the live position.
+    var webGen by remember { mutableIntStateOf(0) }
     // Direct HLS slot (pre-build): the Media3 engine is created ONLY when
     // the hidden hlstest flag opens the slot - dormant in every normal run.
     val hlsPlayer = remember {
@@ -1248,6 +1307,11 @@ fun PlayerScreen(
     var chromeVisible by remember { mutableStateOf(true) }
     var pokeTick by remember { mutableIntStateOf(0) }
     val main = remember { Handler(Looper.getMainLooper()) }
+    // Bridge thinning (0.74): provider timeupdates arrive up to ~8/s and
+    // every one of them crossed into Kotlin, parsed JSON and posted to the
+    // main thread - steady CPU on weak boxes right next to the video
+    // decode. The clock only needs ~4Hz for the timeline and skip pills.
+    val tuGate = remember { java.util.concurrent.atomic.AtomicLong(0L) }
 
     // Subtitles (website Subs panel): file + Wyzie search, position + sync.
     var showSubs by remember { mutableStateOf(false) }
@@ -1522,28 +1586,16 @@ fun PlayerScreen(
         }
     }
 
-    // Seek reliability (0.73): a burst of back-seeks used to bury VidBolt
-    // in in-place seek commands - its player blacked the surface, dropped
-    // audio and froze until the video was exited and reopened. Two guards
-    // make that class dead:
-    // 1. COALESCE - the UI position moves instantly on every L/R press but
-    //    the provider gets at most ONE seek command per 450ms window (the
-    //    trailing target wins), so a rewind burst is one clean seek.
-    // 2. HEAL - after every seek the provider owes us life (play/pause/
-    //    timeupdate). Silence = a stuck surface: nudge play + re-send the
-    //    seek once, then reopen at the marker through startAt (the one
-    //    documented reliable seek) and RE-ASSERT the user's volume - the
-    //    page may have muted itself while dying (house rule: never
-    //    auto-mute, so an unmuted player is restored to unmuted).
+    // Seek reliability (0.73/0.74): a burst of back-seeks used to bury
+    // VidBolt in in-place seek commands - its player blacked the surface,
+    // dropped audio and froze. Bursts still COALESCE: the UI position moves
+    // instantly on every L/R press but the provider gets at most ONE seek
+    // command per 450ms window (the trailing target wins).
     var lastSeekCmdAt by remember { mutableStateOf(0L) }
     var seekJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    var seekPendingAt by remember { mutableStateOf(0L) }
-    var seekHealed by remember { mutableStateOf(false) }
     val seekScope = rememberCoroutineScope()
 
     fun sendSeekNow(target: Float) {
-        seekPendingAt = System.currentTimeMillis()
-        seekHealed = false
         if (mirror == "vidcore" || mirror.startsWith("vidsrc")) {
             // VidCore/VidSrc publish events only (no seek command) - their
             // one documented seek is startAt, so the remote's L/R reopens at
@@ -1578,27 +1630,86 @@ fun PlayerScreen(
         }
     }
 
-    // The seek-heal watchdog: only fires when a commanded seek produced
-    // ZERO provider life for 8s (any play/pause/timeupdate clears it).
+    // Stall watchdog (0.74) - the "stutters, then mutes, then the picture
+    // freezes and seeks never move it" class. It showed up after some
+    // minutes on EVERY provider (AniPM, CineSrc, VidBolt) because the
+    // shared stack is OUR WebView shell: under memory pressure Chromium
+    // KILLS the render process and the WebView becomes a zombie that no
+    // seek, play or reload can revive. Detection: while we think the video
+    // is PLAYING, the PROVIDER-REPORTED position must keep changing (the
+    // JS frame-gap detector "video:stall" jumps the queue when frames stop
+    // but the clock races on). Ladder, one step per 8s of dead air:
+    //   1. nudge play + re-send the seek (recoverable stalls)
+    //   2. reopen at the marker through startAt + re-assert the user's
+    //      volume (a dying page may have muted itself - never auto-mute)
+    //   3. rebuild the WebView (dead render process) and reopen at cur
+    // Any real position movement resets the ladder. load() windows and the
+    // pause state are NOT stalls.
+    var lastRepPos by remember { mutableStateOf(-1f) }
+    var seenPos by remember { mutableStateOf(-1f) }
+    var lastMoveAt by remember { mutableStateOf(0L) }
+    var stallStep by remember { mutableIntStateOf(0) }
+    var stallKick by remember { mutableIntStateOf(0) }
     LaunchedEffect(mirror) {
         while (true) {
             delay(2000)
-            val since = System.currentTimeMillis() - seekPendingAt
-            if (seekPendingAt <= 0 || since < 8000) continue
-            seekPendingAt = 0
-            if (seekHealed) {
-                seekHealed = false
-                val at = cur
-                if (!muted) cmd("window.__sb && window.__sb.mute(false)")
-                load(startAt = at)
-            } else {
-                seekHealed = true
-                playing = true
-                cmd("window.__sb && window.__sb.play()")
-                cmd("window.__sb && window.__sb.seek(" + cur.toInt() + ")")
-                seekPendingAt = System.currentTimeMillis()
+            val now = System.currentTimeMillis()
+            if (mirror == "hls" || !playing || showThanks || scrub >= 0f ||
+                !gotMedia || now - lastLoadAtMs < 20000
+            ) {
+                lastMoveAt = now
+                continue
+            }
+            if (lastRepPos != seenPos) {
+                seenPos = lastRepPos
+                lastMoveAt = now
+                if (stallStep != 0) stallStep = 0
+                continue
+            }
+            if (now - lastMoveAt < 8000) continue
+            lastMoveAt = now
+            when (stallStep) {
+                0 -> {
+                    stallStep = 1
+                    playing = true
+                    cmd("window.__sb && window.__sb.play()")
+                    cmd("window.__sb && window.__sb.seek(" + cur.toInt() + ")")
+                }
+                1 -> {
+                    stallStep = 2
+                    if (!muted) cmd("window.__sb && window.__sb.mute(false)")
+                    load(startAt = cur)
+                }
+                else -> {
+                    stallStep = 0
+                    webGen += 1
+                }
             }
         }
+    }
+    // Frame-gap signal ("video:stall" from the hook: frames stopped for
+    // 5s while the element was unpaused) - straight to the heavy steps.
+    LaunchedEffect(stallKick) {
+        if (stallKick == 0 || !playing || showThanks || mirror == "hls") return@LaunchedEffect
+        if (stallStep == 0) {
+            stallStep = 2
+            if (!muted) cmd("window.__sb && window.__sb.mute(false)")
+            load(startAt = cur)
+        } else {
+            stallStep = 0
+            webGen += 1
+        }
+    }
+    // Render-process recovery reopen (0.74): a rebuilt WebView (from
+    // onRenderProcessGone OR the ladder's top step) reopens the episode at
+    // the LIVE position - and re-asserts the user's volume, because the
+    // dying page may have muted itself (house rule: never auto-mute).
+    LaunchedEffect(webGen) {
+        if (webGen == 0) return@LaunchedEffect
+        delay(350)
+        if (!muted) cmd("window.__sb && window.__sb.mute(false)")
+        playing = true
+        load(startAt = cur)
     }
 
     fun pokeChrome() {
@@ -2239,6 +2350,12 @@ fun PlayerScreen(
                 )
             }
         } else {
+        // key(webGen) (0.74): the render-process recovery swaps in a whole
+        // NEW WebView - a fresh identity runs the factory again and the old
+        // view leaves through onRelease (destroy). The factory auto-boot
+        // only runs on the FIRST generation; every rebuild is reopened at
+        // the live position by the webGen effect below.
+        key(webGen) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctxWeb ->
@@ -2370,9 +2487,36 @@ fun PlayerScreen(
                             }
                             handler?.cancel()
                         }
+
+                        // Render-process recovery (0.74): under memory
+                        // pressure Chromium KILLS the render process and the
+                        // WebView becomes a zombie (every command is a
+                        // no-op). The documented response is to destroy it
+                        // and build a new one - return true so the app does
+                        // not crash, bump webGen so key(webGen) swaps in a
+                        // fresh WebView (onRelease destroys the old one),
+                        // and the reopen effect resumes at the live spot.
+                        override fun onRenderProcessGone(
+                            view: WebView?,
+                            detail: android.webkit.RenderProcessGoneDetail?,
+                        ): Boolean {
+                            main.post {
+                                try {
+                                    web = null
+                                } catch (e: Exception) {
+                                }
+                                webGen += 1
+                            }
+                            return true
+                        }
                     }
                     webChromeClient = WebChromeClient()
                     addJavascriptInterface(SBBridge({ t, j ->
+                        if (t == "timeupdate") {
+                            val tn = System.currentTimeMillis()
+                            if (tn - tuGate.get() < 250) return@SBBridge
+                            tuGate.set(tn)
+                        }
                         main.post {
                             try {
                                 val o = org.json.JSONObject(j)
@@ -2390,16 +2534,13 @@ fun PlayerScreen(
                                 }
                                 when (t) {
                                     "play" -> {
-                                        seekPendingAt = 0
                                         playing = true
                                     }
                                     "pause" -> {
-                                        seekPendingAt = 0
                                         playing = false
                                     }
                                     "ended" -> {
                                         playing = false
-                                        seekPendingAt = 0
                                         // 0.66: Auto-play Next TAKES OVER the
                                         // transition - our advanceEpisode()
                                         // opens the next episode through the
@@ -2438,7 +2579,6 @@ fun PlayerScreen(
                                         }
                                     }
                                     "loadedmetadata" -> {
-                                        seekPendingAt = 0
                                         dur = o.optDouble("duration", 0.0).toFloat()
                                         if (pendingSeek >= 0f) {
                                             val t = pendingSeek
@@ -2447,8 +2587,12 @@ fun PlayerScreen(
                                         }
                                     }
                                     "timeupdate" -> {
-                                        seekPendingAt = 0
                                         cur = o.optDouble("currentTime", 0.0).toFloat()
+                                        // PROVIDER-reported position - the
+                                        // stall watchdog's pulse (0.74);
+                                        // seekTo() writes cur directly and
+                                        // must never count as movement.
+                                        lastRepPos = cur
                                         val d = o.optDouble("duration", 0.0).toFloat()
                                         if (d > 0) dur = d
                                         val now = System.currentTimeMillis()
@@ -2456,6 +2600,12 @@ fun PlayerScreen(
                                             lastSave = now
                                             save(cur, dur)
                                         }
+                                    }
+                                    "video:stall" -> {
+                                        // Frames stopped for 5s while the
+                                        // element was unpaused (0.74) - the
+                                        // freeze detector in the hook.
+                                        stallKick += 1
                                     }
                                     "anipm:quality" -> {
                                         val arr = o.optJSONArray("qualities")
@@ -2711,8 +2861,10 @@ fun PlayerScreen(
                     // heals it from TMDB before the first load. Movies and
                     // titles with a known language boot immediately. The
                     // boot also starts the sync grace clock (0.65) like
-                    // every load.
-                    if (title.type != "anime" && !title.isAnime &&
+                    // every load. 0.74: FIRST generation only - a rebuilt
+                    // WebView (render-process recovery) reopens through the
+                    // webGen effect at the LIVE position instead.
+                    if (webGen == 0 && title.type != "anime" && !title.isAnime &&
                         (title.type == "movie" || title.lang.isNotEmpty())
                     ) {
                         booted = true
@@ -2722,7 +2874,17 @@ fun PlayerScreen(
                     web = this
                 }
             },
+            onRelease = { old ->
+                // A swapped-out WebView is ALWAYS destroyed (0.74): a
+                // wedged render process leaks the whole renderer otherwise.
+                try {
+                    old.stopLoading()
+                    old.destroy()
+                } catch (e: Exception) {
+                }
+            },
         )
+        }
         }
 
         // Top bar (design pack TV HUD): the title card carries the show,
