@@ -1199,6 +1199,122 @@ private val SB_HOOK = """
 })();
 """
 
+/** Player state holder (0.76): the player keeps its states on ONE
+    remembered object instead of a hundred local delegates. The 0.65 lesson
+    (JVM 64KB method limit) already moved the big layers out; by 0.75 the
+    remaining local remember() preambles + per-state lambda captures still
+    overflowed the register file - D8 emitted a primitive move over a boxed
+    Integer and ART rejected the whole class ("copy-cat" VerifyError: the TV
+    crashed at BOOT because TvLegend pulls KeyChip from this class). One
+    holder = one remember = the method stays small as features grow. */
+private class PlayerMem(
+    title: Title,
+    season: Int,
+    episode: Int,
+    mal: Int?,
+    ani: Int?,
+    lang: String?,
+    resumeAt: Float,
+    bootMirror: String,
+    ctx: android.content.Context,
+) {
+    private val subPref = Store.subsPref(ctx, title.type, title.id)
+    var playing by mutableStateOf(true)
+    var cur by mutableFloatStateOf(resumeAt)
+    var dur by mutableFloatStateOf(0f)
+    var muted by mutableStateOf(false)
+    var rateIdx by mutableIntStateOf(0)
+    var cinesrcQ by mutableStateOf("")
+    var scrub by mutableFloatStateOf(-1f)
+    var showEps by mutableStateOf(false)
+    var epSeason by mutableIntStateOf(season)
+    var epNumber by mutableIntStateOf(episode)
+    var skips by mutableStateOf(IntroDb.Skips(listOf(), listOf(), listOf()))
+    var web by mutableStateOf<WebView?>(null)
+    var webGen by mutableIntStateOf(0)
+    val hlsPlayer = if (AppEnv.hlsTest) ExoPlayer.Builder(ctx).build().also { it.playWhenReady = true } else null
+    var hlsLoaded by mutableStateOf(false)
+    var layer by mutableStateOf(LAYER_VIDEO)
+    var lastSave by mutableStateOf(0L)
+    var mirror by mutableStateOf(bootMirror)
+    var gotMedia by mutableStateOf(false)
+    var hopped by mutableStateOf(false)
+    var lastMediaAt by mutableStateOf(0L)
+    var pendingSeek by mutableStateOf(if (resumeAt > 0f && !urlCarriesStart(bootMirror)) resumeAt else -1f)
+    var chromeVisible by mutableStateOf(true)
+    var pokeTick by mutableIntStateOf(0)
+    val main = Handler(Looper.getMainLooper())
+    val tuGate = java.util.concurrent.atomic.AtomicLong(0L)
+    var showSubs by mutableStateOf(false)
+    var subs by mutableStateOf<SubFile?>(null)
+    var wyzLang by mutableStateOf("en")
+    var wyzItems by mutableStateOf(listOf<WyzItem>())
+    var subMsg by mutableStateOf("")
+    var wyzBusy by mutableStateOf(false)
+    var subPos by mutableStateOf(subPref.pos)
+    var subOffset by mutableFloatStateOf(subPref.offset)
+    var subStyle by mutableStateOf(Store.subStyle(ctx))
+    var anipmQs by mutableStateOf(listOf<Int>())
+    var anipmQ by mutableStateOf<Int?>(null)
+    var anipmLang by // Start language: the detail SUB|DUB pick wins, else the pinned
+        // house default (Dragon Ball dub, everything else sub).
+        mutableStateOf(
+            lang?.takeIf { it == "dub" || it == "sub" }
+                ?: (if (title.name.contains("dragon ball", true)) "dub" else "sub")
+        )
+    var anipmSubLabels by mutableStateOf(listOf<String>())
+    var anipmSubIdx by mutableIntStateOf(-1)
+    var vbAudios by mutableStateOf(listOf<Pair<String, String>>())
+    var vbSubs by mutableStateOf(listOf<Pair<String, String>>())
+    var vbAudioSel by mutableStateOf("")
+    var vbSubSel by mutableStateOf("")
+    var contentLang by mutableStateOf(title.lang)
+    var koManual by mutableStateOf(false)
+    var koAudioCmd by mutableStateOf("")
+    var koSubCmd by mutableStateOf("")
+    var vbQualRows by mutableStateOf(listOf<Triple<String, String, String>>())
+    var vbQualsByLang by mutableStateOf(mapOf<String, List<String>>())
+    var vbQualSel by mutableStateOf("")
+    var vbMp4 by mutableStateOf(mapOf<String, List<String>>())
+    var slowSession by mutableStateOf(false)
+    var netNote by mutableStateOf("")
+    var bootAt by mutableStateOf(0L)
+    var firstTuAfterLoad by mutableStateOf(true)
+    val prefetched = java.util.Collections.synchronizedSet(HashSet<String>())
+    val sliderFR = FocusRequester()
+    val playFR = FocusRequester()
+    val skipFR = FocusRequester()
+    val keySinkFR = FocusRequester()
+    val epsFirstFR = FocusRequester()
+    val serverFirstFR = FocusRequester()
+    var showThanks by mutableStateOf(false)
+    var seasonList by mutableStateOf(listOf<SeasonInfo>())
+    var seasonEps by mutableIntStateOf(0)
+    var routeMal by mutableStateOf(mal)
+    var routeAni by mutableStateOf(ani)
+    var epBase by mutableIntStateOf(0)
+    var resolvedSeason by mutableIntStateOf(-1)
+    var pendingLoadAt by mutableFloatStateOf(-1f)
+    var lastLoadAtMs by mutableStateOf(0L)
+    var endedHandled by mutableStateOf(false)
+    var booted by mutableStateOf(false)
+    var lastSeekCmdAt by mutableStateOf(0L)
+    var seekJob by mutableStateOf<kotlinx.coroutines.Job?>(null)
+    var lastRepPos by mutableStateOf(-1f)
+    var seenPos by mutableStateOf(-1f)
+    var lastMoveAt by mutableStateOf(0L)
+    var stallStep by mutableIntStateOf(0)
+    var stallKick by mutableIntStateOf(0)
+    var epsList by mutableStateOf(listOf<Ep>())
+    var epsBusy by mutableStateOf(false)
+    var thanksSimilar by mutableStateOf(listOf<Title>())
+    var cert by mutableStateOf("")
+    var clock by mutableStateOf("")
+    var bsTick by mutableIntStateOf(0)
+    var autoSkip by mutableStateOf(Store.autoSkip(ctx))
+    var autoDone by mutableStateOf("")
+}
+
 /** Receives player events forwarded by the injected JS hook. */
 class SBBridge(private val on: (String, String) -> Unit) {
     @JavascriptInterface
@@ -1303,23 +1419,11 @@ fun PlayerScreen(
         ) sp.cur else 0f
     }
 
-    var playing by remember { mutableStateOf(true) }
-    var cur by remember { mutableFloatStateOf(resumeAt) }
-    var dur by remember { mutableFloatStateOf(0f) }
-    var muted by remember { mutableStateOf(false) }
-    var rateIdx by remember { mutableIntStateOf(0) }
     // CineSrc quality pick ("" = Auto): rides the embed URL, so a change
     // reopens at the current position like the startAt seeks.
-    var cinesrcQ by remember { mutableStateOf("") }
-    var scrub by remember { mutableFloatStateOf(-1f) }
-    var showEps by remember { mutableStateOf(false) }
     // Keyed per title/play session (0.48): un-keyed remember silently kept
     // the previous playback's season/episode when a new play arrived at the
     // same call site - belt and braces under App.kt's key() wrapper.
-    var epSeason by remember(title.id, title.type, season, episode) { mutableIntStateOf(season) }
-    var epNumber by remember(title.id, title.type, season, episode) { mutableIntStateOf(episode) }
-    var skips by remember { mutableStateOf(IntroDb.Skips(listOf(), listOf(), listOf())) }
-    var web by remember { mutableStateOf<WebView?>(null) }
     // WebView GENERATION (0.74): Chromium kills the render process under
     // memory pressure on weak boxes ("stutters, then mutes, then the
     // picture freezes and seeks never move it" - a dead render process is
@@ -1327,83 +1431,42 @@ fun PlayerScreen(
     // never be revived, which is exactly why the 0.73 seek-heal never
     // recovered it). key(webGen) rebuilds the AndroidView and the reopen
     // effect resumes at the live position.
-    var webGen by remember { mutableIntStateOf(0) }
     // Direct HLS slot (pre-build): the Media3 engine is created ONLY when
     // the hidden hlstest flag opens the slot - dormant in every normal run.
-    val hlsPlayer = remember {
-        if (AppEnv.hlsTest) ExoPlayer.Builder(ctx).build().also { it.playWhenReady = true } else null
-    }
-    var hlsLoaded by remember { mutableStateOf(false) }
-    var layer by remember { mutableStateOf(LAYER_VIDEO) }
-    var lastSave by remember { mutableStateOf(0L) }
     // Active mirror (website routing): per-title default; a mid-session
     // switch never changes the next title's primary.
     val bootMirror = if (AppEnv.hlsTest) "hls" else defaultMirror(title, mal, ani)
-    var mirror by remember {
-        mutableStateOf(bootMirror)
+
+    // ONE remembered holder for every player state (0.76) - see PlayerMem.
+    val pm = remember(title.id, title.type, season, episode) {
+        PlayerMem(title, season, episode, mal, ani, lang, resumeAt, bootMirror, ctx)
     }
     val serverList = remember(title.id, title.type, mal, ani) {
         mirrorsFor(title, mal, ani) + if (AppEnv.hlsTest) listOf("hls") else listOf()
     }
     // Auto-recovery: bad route / website page / dead embed gets ONE hop to
     // the next allowed mirror (never loops - one hop per title).
-    var gotMedia by remember { mutableStateOf(false) }
-    var hopped by remember { mutableStateOf(false) }
     // Last real media traffic (segment/manifest requests) - the watchdog's
     // patience meter (0.37: slow AniPM/CineSrc loads must never hop away).
-    var lastMediaAt by remember { mutableStateOf(0L) }
     // One deferred seek for mirrors without URL startAt (provider switches
     // AND the boot resume on URL-less mirrors like cinesrc/vidrift).
-    var pendingSeek by remember {
-        mutableStateOf(if (resumeAt > 0f && !urlCarriesStart(bootMirror)) resumeAt else -1f)
-    }
     // Netflix behavior: chrome fades while playing after idle; any touch/key
     // wakes it; it STAYS up while paused or while you are using it.
-    var chromeVisible by remember { mutableStateOf(true) }
-    var pokeTick by remember { mutableIntStateOf(0) }
-    val main = remember { Handler(Looper.getMainLooper()) }
     // Bridge thinning (0.74): provider timeupdates arrive up to ~8/s and
     // every one of them crossed into Kotlin, parsed JSON and posted to the
     // main thread - steady CPU on weak boxes right next to the video
     // decode. The clock only needs ~4Hz for the timeline and skip pills.
-    val tuGate = remember { java.util.concurrent.atomic.AtomicLong(0L) }
 
     // Subtitles (website Subs panel): file + Wyzie search, position + sync.
-    var showSubs by remember { mutableStateOf(false) }
-    var subs by remember { mutableStateOf<SubFile?>(null) }
-    var wyzLang by remember { mutableStateOf("en") }
-    var wyzItems by remember { mutableStateOf(listOf<WyzItem>()) }
-    var subMsg by remember { mutableStateOf("") }
-    var wyzBusy by remember { mutableStateOf(false) }
     // Placement + sync are settings, remembered per title (site behavior):
     // they outlive the file and every episode of the title.
-    val subPref = Store.subsPref(ctx, title.type, title.id)
-    var subPos by remember { mutableStateOf(subPref.pos) }
-    var subOffset by remember { mutableFloatStateOf(subPref.offset) }
     // Caption style (task spec: size/color/background opacity of OUR
     // overlay - device-local taste, never the embed's captions).
-    var subStyle by remember { mutableStateOf(Store.subStyle(ctx)) }
     // AniPM protocol state (website anipm.player parity): the player reports
     // its quality ladder, audio language, and its own subtitle tracks.
-    var anipmQs by remember { mutableStateOf(listOf<Int>()) }
-    var anipmQ by remember { mutableStateOf<Int?>(null) }
-    var anipmLang by remember {
-        // Start language: the detail SUB|DUB pick wins, else the pinned
-        // house default (Dragon Ball dub, everything else sub).
-        mutableStateOf(
-            lang?.takeIf { it == "dub" || it == "sub" }
-                ?: (if (title.name.contains("dragon ball", true)) "dub" else "sub")
-        )
-    }
-    var anipmSubLabels by remember { mutableStateOf(listOf<String>()) }
-    var anipmSubIdx by remember { mutableIntStateOf(-1) } // -1 = player subs off
     // VidBolt real tracks (0.41/0.43): label + command VALUE pairs the
     // player's own data reports - the value is echoed verbatim into its
     // mobile-option contract so picks always land on the right track.
-    var vbAudios by remember { mutableStateOf(listOf<Pair<String, String>>()) }
-    var vbSubs by remember { mutableStateOf(listOf<Pair<String, String>>()) }
-    var vbAudioSel by remember { mutableStateOf("") }
-    var vbSubSel by remember { mutableStateOf("") }
     // K-drama house rules (0.64): Korean dramas on VidBolt play the TAGALOG
     // dub by default (Korean when the release carries no Tagalog track) and
     // always ride VidBolt's OWN English subtitles - our Wyzie/TSDB/
@@ -1416,48 +1479,35 @@ fun PlayerScreen(
     // K-Drama defaults never fired. Blank titles heal from TMDB's
     // original_language before the first load, and the next save rewrites
     // the record with the healed value.
-    var contentLang by remember { mutableStateOf(title.lang) }
-    var koManual by remember { mutableStateOf(false) }
-    var koAudioCmd by remember { mutableStateOf("") }
-    var koSubCmd by remember { mutableStateOf("") }
     // VidBolt quality (0.50): provider-reported labels only. Rows either
     // come from the player's own mobile-panel delegation (option + value
     // echoed verbatim) or from its resolve files per language - never an
     // invented ladder (a stream without a higher rung never shows one).
-    var vbQualRows by remember { mutableStateOf(listOf<Triple<String, String, String>>()) }
-    var vbQualsByLang by remember { mutableStateOf(mapOf<String, List<String>>()) }
-    var vbQualSel by remember { mutableStateOf("") }
     // Progressive MP4 rungs per language (0.75) - provider-reported source
     // kinds from the resolve snapshot; the slow-network autopilot prefers
     // these over same-quality HLS when one exists at or below the rung.
-    var vbMp4 by remember { mutableStateOf(mapOf<String, List<String>>()) }
     // Slow-WiFi autopilot (0.75): session-only (never persisted - the
     // house rule: a stall may lighten the stream but never pins a viewer
     // below HD forever). While set, the quality steps down one rung per
     // stall through the provider's OWN reported ladder and the picture
     // pass stands down.
-    var slowSession by remember { mutableStateOf(false) }
-    var netNote by remember { mutableStateOf("") }
     // First-start timing (0.75): a boot that needs more than ~12s before
     // the first real clock tick is a slow line - the autopilot lightens
     // the stream before the viewer ever feels a stall.
-    var bootAt by remember { mutableStateOf(0L) }
-    var firstTuAfterLoad by remember { mutableStateOf(true) }
     // Next-episode warm start (0.75): one embed-page prefetch per episode.
-    val prefetched = remember { java.util.Collections.synchronizedSet(HashSet<String>()) }
 
     fun setSub(name: String, lang: String, cues: List<Cue>) {
         if (cues.isEmpty()) {
-            subMsg = "Couldn't read that file - is it .srt or .vtt?"
+            pm.subMsg = "Couldn't read that file - is it .srt or .vtt?"
             return
         }
         // Sorted once here so the caption lookup can binary-search (0.72).
-        subs = SubFile(name, lang, cues.sortedBy { it.s })
-        subMsg = "Loaded " + cues.size + " lines."
+        pm.subs = SubFile(name, lang, cues.sortedBy { it.s })
+        pm.subMsg = "Loaded " + cues.size + " lines."
         // A manual file on a K-drama stands the VidBolt auto-pick down (the
         // clear of the provider captions rides the subs watcher below -
         // cmd() lives further down this body).
-        koManual = true
+        pm.koManual = true
     }
 
     val pickSub = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1468,7 +1518,7 @@ fun PlayerScreen(
                 val name = uri.lastPathSegment ?: "picked.srt"
                 setSub(name, Subs.guessLang(name), Subs.parse(text))
             }.onFailure {
-                subMsg = "Couldn't open that file."
+                pm.subMsg = "Couldn't open that file."
             }
         }
     }
@@ -1480,47 +1530,40 @@ fun PlayerScreen(
                 runCatching { Wyz.fetchFile(item.url) }.getOrNull()
             }
             if (text == null) {
-                subMsg = "Download failed - try another release."
+                pm.subMsg = "Download failed - try another release."
             } else {
-                val lang = item.display.ifEmpty { wyzLang.uppercase() }
+                val lang = item.display.ifEmpty { pm.wyzLang.uppercase() }
                 setSub(item.release, lang, Subs.parse(text))
                 // Remember the pick for THIS episode so reopening restores it.
                 Store.saveSubPick(
-                    ctx, title.type, title.id, epSeason, epNumber,
+                    ctx, title.type, title.id, pm.epSeason, pm.epNumber,
                     SubPick(item.url, item.release, lang),
                 )
             }
         }
     }
 
-    val sliderFR = remember { FocusRequester() }
-    val playFR = remember { FocusRequester() }
-    val skipFR = remember { FocusRequester() }
     // Key sink: an invisible focus holder. Compose only routes D-pad keys
     // through onPreviewKeyEvent while SOME node keeps focus - the old
     // clearFocus() on fade/layer-reset left none, so once chrome minimized
     // the remote went dead and the chrome could never come back (TV bug).
-    val keySinkFR = remember { FocusRequester() }
     // Sheet entry points: on TV an open sheet OWNS the remote - focus lands
     // inside it and stays trapped there (focusProperties exit=Cancel). It
     // used to stay on the player-bar button BEHIND the panel, so the D-pad
     // kept driving the player instead of the sheet (bug report).
-    val epsFirstFR = remember { FocusRequester() }
-    val serverFirstFR = remember { FocusRequester() }
 
     // Thank You screen (0.73): shown when the season (or show) has nothing
     // left to play. While it is up, periodic saves stand down so the DONE
     // flag cannot be clobbered by a stray timeupdate.
-    var showThanks by remember { mutableStateOf(false) }
 
     fun save(c: Float, d: Float, done: Boolean = false) {
-        if (showThanks && !done) return
+        if (pm.showThanks && !done) return
         try {
             Store.saveProgress(
                 ctx,
                 Progress(
-                    title.type, title.id, title.name, title.poster, epSeason, epNumber,
-                    c, d, System.currentTimeMillis(), mal, ani, contentLang, done,
+                    title.type, title.id, title.name, title.poster, pm.epSeason, pm.epNumber,
+                    c, d, System.currentTimeMillis(), mal, ani, pm.contentLang, done,
                 ),
             )
         } catch (e: Exception) {
@@ -1530,61 +1573,51 @@ fun PlayerScreen(
     // Anime season routing state (0.60) - declared before load() because the
     // loader guards on the resolved season and builds its URL from the
     // season's own entry ids + episode base.
-    var seasonList by remember(title.id, title.type) { mutableStateOf(listOf<SeasonInfo>()) }
-    var seasonEps by remember(title.id, title.type) { mutableIntStateOf(0) }
-    var routeMal by remember(title.id, title.type) { mutableStateOf(mal) }
-    var routeAni by remember(title.id, title.type) { mutableStateOf(ani) }
-    var epBase by remember(title.id, title.type) { mutableIntStateOf(0) }
-    var resolvedSeason by remember(title.id, title.type) { mutableIntStateOf(-1) }
-    var pendingLoadAt by remember(title.id, title.type) { mutableFloatStateOf(-1f) }
     // When WE last navigated the player (0.65): provider episode events
     // inside EP_SYNC_GRACE_MS are settling noise and never adopted.
-    var lastLoadAtMs by remember(title.id, title.type) { mutableStateOf(0L) }
     // 0.66: one Auto-play Next advance per load - the dying page's echoed
     // ended must never double-step past the episode we just opened.
-    var endedHandled by remember(title.id, title.type) { mutableStateOf(false) }
     fun pastSyncGrace(): Boolean =
-        System.currentTimeMillis() - lastLoadAtMs >= EP_SYNC_GRACE_MS
-    var booted by remember(title.id, title.type, season, episode) { mutableStateOf(false) }
+        System.currentTimeMillis() - pm.lastLoadAtMs >= EP_SYNC_GRACE_MS
 
     fun load(startAt: Float = 0f) {
         // 0.60: anime routes resolve per season - hold the load until the
         // route matches the target season (first boot and in-player season
         // switches land here a few ms early). The resolver fires it next.
-        if ((title.type == "anime" || title.isAnime) && resolvedSeason != epSeason) {
-            pendingLoadAt = startAt
+        if ((title.type == "anime" || title.isAnime) && pm.resolvedSeason != pm.epSeason) {
+            pm.pendingLoadAt = startAt
             return
         }
-        chromeVisible = true
+        pm.chromeVisible = true
         // Capture the TARGET now (0.65): the posted load used to read
         // epSeason/epNumber LATE, so a queued provider episodechange landing
         // between advanceEpisode() and the post swapped the URL under us -
         // K-drama Next Episode opened a different video. The URL is built
         // from the numbers the CALLER intended, period. Same for the route
         // fields the resolver owns.
-        val s = epSeason
-        val ep = epNumber
-        val rMal = routeMal
-        val rAni = routeAni
-        val base = epBase
-        val lang = anipmLang
-        val q = cinesrcQ
-        lastLoadAtMs = System.currentTimeMillis()
-        endedHandled = false
-        bootAt = lastLoadAtMs
-        firstTuAfterLoad = true
+        val s = pm.epSeason
+        val ep = pm.epNumber
+        val rMal = pm.routeMal
+        val rAni = pm.routeAni
+        val base = pm.epBase
+        val lang = pm.anipmLang
+        val q = pm.cinesrcQ
+        pm.lastLoadAtMs = System.currentTimeMillis()
+        pm.endedHandled = false
+        pm.bootAt = pm.lastLoadAtMs
+        pm.firstTuAfterLoad = true
         // Mirrors whose URL carries startAt (vidzen/vidbolt/anipm) keep the
         // position themselves; the rest get one seek when the player reports
         // ready - switching providers never loses your place (task rule).
-        pendingSeek = if (startAt > 0f && !urlCarriesStart(mirror)) startAt else -1f
-        if (mirror == "hls") {
+        pm.pendingSeek = if (startAt > 0f && !urlCarriesStart(pm.mirror)) startAt else -1f
+        if (pm.mirror == "hls") {
             // The HLS slot carries its own start position - no deferred seek
             // and no WebView. hlsLoaded latches here so the surface's boot
             // effect can never race a server-switch load back to 0.
-            hlsLoaded = true
-            val p = hlsPlayer ?: return
+            pm.hlsLoaded = true
+            val p = pm.hlsPlayer ?: return
             val at = (startAt * 1000).toLong().coerceAtLeast(0)
-            main.post {
+            pm.main.post {
                 try {
                     p.setMediaItem(
                         MediaItem.fromUri(AppEnv.hlsTestUrl.ifEmpty { HLS_TEST_URL }),
@@ -1597,13 +1630,13 @@ fun PlayerScreen(
             }
             return
         }
-        main.post {
+        pm.main.post {
             try {
-                val w = web ?: return@post
+                val w = pm.web ?: return@post
                 loadMirror(
                     w,
-                    playerUrl(title, s, ep, rMal, rAni, mirror, startAt, lang, q, base, contentLang == "ko"),
-                    mirror,
+                    playerUrl(title, s, ep, rMal, rAni, pm.mirror, startAt, lang, q, base, pm.contentLang == "ko"),
+                    pm.mirror,
                 )
             } catch (e: Exception) {
             }
@@ -1611,21 +1644,21 @@ fun PlayerScreen(
     }
 
     fun cmd(js: String) {
-        main.post {
+        pm.main.post {
             try {
-                web?.evaluateJavascript(js, null)
+                pm.web?.evaluateJavascript(js, null)
             } catch (e: Exception) {
             }
         }
     }
 
     fun hopMirror() {
-        if (hopped) return
-        val fb = fallbackChain(mirror).firstOrNull { it != mirror && serverList.contains(it) } ?: return
-        hopped = true
-        val at = cur
-        mirror = fb
-        playing = true
+        if (pm.hopped) return
+        val fb = fallbackChain(pm.mirror).firstOrNull { it != pm.mirror && serverList.contains(it) } ?: return
+        pm.hopped = true
+        val at = pm.cur
+        pm.mirror = fb
+        pm.playing = true
         // The auto-hop keeps the spot (task rule: switching providers never
         // loses your place) - it used to reset to 0 like a fresh play.
         load(startAt = at)
@@ -1640,15 +1673,15 @@ fun PlayerScreen(
     // swallow autoplay-with-sound, so a VidBolt/VidZen frame that has not
     // reported anything gets an explicit play nudge (8s, then 18s) before
     // the watchdog gives up - a no-op once frames are flowing.
-    LaunchedEffect(mirror, epSeason, epNumber) {
-        gotMedia = false
+    LaunchedEffect(pm.mirror, pm.epSeason, pm.epNumber) {
+        pm.gotMedia = false
         val start = System.currentTimeMillis()
         var kicked = 0
         while (true) {
             delay(5000)
-            if (gotMedia) break
-            val idleFor = System.currentTimeMillis() - maxOf(start, lastMediaAt)
-            if ((mirror == "vidbolt" || mirror == "vidzen") && kicked < 2 &&
+            if (pm.gotMedia) break
+            val idleFor = System.currentTimeMillis() - maxOf(start, pm.lastMediaAt)
+            if ((pm.mirror == "vidbolt" || pm.mirror == "vidzen") && kicked < 2 &&
                 idleFor >= (if (kicked == 0) 8000L else 18000L)
             ) {
                 kicked += 1
@@ -1666,8 +1699,6 @@ fun PlayerScreen(
     // dropped audio and froze. Bursts still COALESCE: the UI position moves
     // instantly on every L/R press but the provider gets at most ONE seek
     // command per 450ms window (the trailing target wins).
-    var lastSeekCmdAt by remember { mutableStateOf(0L) }
-    var seekJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val seekScope = rememberCoroutineScope()
 
     /** Slow-WiFi autopilot step (0.75): ONE quality rung down, session-
@@ -1678,30 +1709,30 @@ fun PlayerScreen(
         clean no-op (the next stall tries again). */
     fun slowStep() {
         when {
-            mirror == "anipm" -> {
-                val curQ = anipmQ ?: anipmQs.firstOrNull() ?: return
-                val i = anipmQs.indexOfFirst { it == curQ }
-                if (i < 0 || i >= anipmQs.size - 1) return
-                val next = anipmQs[i + 1]
-                anipmQ = next
+            pm.mirror == "anipm" -> {
+                val curQ = pm.anipmQ ?: pm.anipmQs.firstOrNull() ?: return
+                val i = pm.anipmQs.indexOfFirst { it == curQ }
+                if (i < 0 || i >= pm.anipmQs.size - 1) return
+                val next = pm.anipmQs[i + 1]
+                pm.anipmQ = next
                 cmd("window.__sb && window.__sb.q(" + next + ")")
             }
-            mirror == "vidbolt" -> {
+            pm.mirror == "vidbolt" -> {
                 fun num(q: String): Int = q.takeWhile { it.isDigit() }.toIntOrNull() ?: 0
-                val langKey = vbAudios.firstOrNull { it.second == vbAudioSel }?.first
-                    ?: vbQualsByLang.keys.firstOrNull()
-                val ladder = (if (langKey != null) vbQualsByLang[langKey] else null)
-                    ?: vbQualsByLang.values.flatten().distinct()
+                val langKey = pm.vbAudios.firstOrNull { it.second == pm.vbAudioSel }?.first
+                    ?: pm.vbQualsByLang.keys.firstOrNull()
+                val ladder = (if (langKey != null) pm.vbQualsByLang[langKey] else null)
+                    ?: pm.vbQualsByLang.values.flatten().distinct()
                 if (ladder.isEmpty()) return
-                val curLab = vbQualSel.ifEmpty { ladder.maxByOrNull { num(it) } ?: return }
-                val mp4 = (if (langKey != null) vbMp4[langKey] else null)
-                    ?: vbMp4.values.flatten().distinct()
+                val curLab = pm.vbQualSel.ifEmpty { ladder.maxByOrNull { num(it) } ?: return }
+                val mp4 = (if (langKey != null) pm.vbMp4[langKey] else null)
+                    ?: pm.vbMp4.values.flatten().distinct()
                 // (a) a real progressive MP4 at this rung or below - one
                 // steady stream beats HLS segments on a thin line.
                 if (curLab !in mp4) {
                     val target = mp4.filter { num(it) <= num(curLab) }.maxByOrNull { num(it) }
                     if (target != null) {
-                        vbQualSel = target
+                        pm.vbQualSel = target
                         cmd(
                             "window.__sb && window.__sb.vbqual('sourceQuality'," +
                                 org.json.JSONObject.quote(target) + ")",
@@ -1711,21 +1742,21 @@ fun PlayerScreen(
                 }
                 // (b) else one rung DOWN the reported ladder.
                 val lower = ladder.filter { num(it) < num(curLab) }.maxByOrNull { num(it) } ?: return
-                vbQualSel = lower
+                pm.vbQualSel = lower
                 cmd(
                     "window.__sb && window.__sb.vbqual('sourceQuality'," +
                         org.json.JSONObject.quote(lower) + ")",
                 )
             }
-            mirror == "cinesrc" -> {
-                val next = when (cinesrcQ) {
+            pm.mirror == "cinesrc" -> {
+                val next = when (pm.cinesrcQ) {
                     "" -> "720"
                     "1080" -> "720"
                     "720" -> "480"
                     else -> null
                 } ?: return
-                cinesrcQ = next
-                load(startAt = cur)
+                pm.cinesrcQ = next
+                load(startAt = pm.cur)
             }
         }
     }
@@ -1734,18 +1765,18 @@ fun PlayerScreen(
         the quality lightens, the picture pass stands down, and an honest
         one-liner says so. Session-only - closing the player forgets it. */
     fun enterSlow() {
-        if (slowSession) {
+        if (pm.slowSession) {
             slowStep()
             return
         }
-        slowSession = true
-        netNote = "Slow network - playing a lighter quality for smooth playback"
+        pm.slowSession = true
+        pm.netNote = "Slow network - playing a lighter quality for smooth playback"
         cmd("window.__sb && window.__sb.slow(true)")
         slowStep()
     }
 
     fun sendSeekNow(target: Float) {
-        if (mirror == "vidcore" || mirror.startsWith("vidsrc")) {
+        if (pm.mirror == "vidcore" || pm.mirror.startsWith("vidsrc")) {
             // VidCore/VidSrc publish events only (no seek command) - their
             // one documented seek is startAt, so the remote's L/R reopens at
             // the target. Real control, no fake buttons (task rule).
@@ -1757,23 +1788,23 @@ fun PlayerScreen(
 
     fun seekTo(t: Float) {
         val target = t.coerceAtLeast(0f)
-        cur = target
-        val hp = hlsPlayer
-        if (mirror == "hls" && hp != null) {
+        pm.cur = target
+        val hp = pm.hlsPlayer
+        if (pm.mirror == "hls" && hp != null) {
             // Native seek - the HLS slot owns its playback clock.
             hp.seekTo((target * 1000).toLong())
             return
         }
         val now = System.currentTimeMillis()
-        if (now - lastSeekCmdAt >= 450L) {
-            lastSeekCmdAt = now
-            seekJob?.cancel()
+        if (now - pm.lastSeekCmdAt >= 450L) {
+            pm.lastSeekCmdAt = now
+            pm.seekJob?.cancel()
             sendSeekNow(target)
         } else {
-            seekJob?.cancel()
-            seekJob = seekScope.launch {
-                delay(450L - (now - lastSeekCmdAt))
-                lastSeekCmdAt = System.currentTimeMillis()
+            pm.seekJob?.cancel()
+            pm.seekJob = seekScope.launch {
+                delay(450L - (now - pm.lastSeekCmdAt))
+                pm.lastSeekCmdAt = System.currentTimeMillis()
                 sendSeekNow(target)
             }
         }
@@ -1794,125 +1825,120 @@ fun PlayerScreen(
     //   3. rebuild the WebView (dead render process) and reopen at cur
     // Any real position movement resets the ladder. load() windows and the
     // pause state are NOT stalls.
-    var lastRepPos by remember { mutableStateOf(-1f) }
-    var seenPos by remember { mutableStateOf(-1f) }
-    var lastMoveAt by remember { mutableStateOf(0L) }
-    var stallStep by remember { mutableIntStateOf(0) }
-    var stallKick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(mirror) {
+    LaunchedEffect(pm.mirror) {
         while (true) {
             delay(2000)
             val now = System.currentTimeMillis()
-            if (mirror == "hls" || !playing || showThanks || scrub >= 0f ||
-                !gotMedia || now - lastLoadAtMs < 20000
+            if (pm.mirror == "hls" || !pm.playing || pm.showThanks || pm.scrub >= 0f ||
+                !pm.gotMedia || now - pm.lastLoadAtMs < 20000
             ) {
-                lastMoveAt = now
+                pm.lastMoveAt = now
                 continue
             }
-            if (lastRepPos != seenPos) {
-                seenPos = lastRepPos
-                lastMoveAt = now
-                if (stallStep != 0) stallStep = 0
+            if (pm.lastRepPos != pm.seenPos) {
+                pm.seenPos = pm.lastRepPos
+                pm.lastMoveAt = now
+                if (pm.stallStep != 0) pm.stallStep = 0
                 continue
             }
-            if (now - lastMoveAt < 8000) continue
-            lastMoveAt = now
-            when (stallStep) {
+            if (now - pm.lastMoveAt < 8000) continue
+            pm.lastMoveAt = now
+            when (pm.stallStep) {
                 0 -> {
-                    stallStep = 1
+                    pm.stallStep = 1
                     // A stall means the line cannot sustain this stream -
                     // the slow-WiFi autopilot lightens it (0.75) before
                     // nudging playback back.
                     enterSlow()
-                    playing = true
+                    pm.playing = true
                     cmd("window.__sb && window.__sb.play()")
-                    cmd("window.__sb && window.__sb.seek(" + cur.toInt() + ")")
+                    cmd("window.__sb && window.__sb.seek(" + pm.cur.toInt() + ")")
                 }
                 1 -> {
-                    stallStep = 2
-                    if (!muted) cmd("window.__sb && window.__sb.mute(false)")
-                    load(startAt = cur)
+                    pm.stallStep = 2
+                    if (!pm.muted) cmd("window.__sb && window.__sb.mute(false)")
+                    load(startAt = pm.cur)
                 }
                 else -> {
-                    stallStep = 0
+                    pm.stallStep = 0
                     enterSlow()
-                    webGen += 1
+                    pm.webGen += 1
                 }
             }
         }
     }
     // Frame-gap signal ("video:stall" from the hook: frames stopped for
     // 5s while the element was unpaused) - straight to the heavy steps.
-    LaunchedEffect(stallKick) {
-        if (stallKick == 0 || !playing || showThanks || mirror == "hls") return@LaunchedEffect
+    LaunchedEffect(pm.stallKick) {
+        if (pm.stallKick == 0 || !pm.playing || pm.showThanks || pm.mirror == "hls") return@LaunchedEffect
         enterSlow()
-        if (stallStep == 0) {
-            stallStep = 2
-            if (!muted) cmd("window.__sb && window.__sb.mute(false)")
-            load(startAt = cur)
+        if (pm.stallStep == 0) {
+            pm.stallStep = 2
+            if (!pm.muted) cmd("window.__sb && window.__sb.mute(false)")
+            load(startAt = pm.cur)
         } else {
-            stallStep = 0
-            webGen += 1
+            pm.stallStep = 0
+            pm.webGen += 1
         }
     }
     // Render-process recovery reopen (0.74): a rebuilt WebView (from
     // onRenderProcessGone OR the ladder's top step) reopens the episode at
     // the LIVE position - and re-asserts the user's volume, because the
     // dying page may have muted itself (house rule: never auto-mute).
-    LaunchedEffect(webGen) {
-        if (webGen == 0) return@LaunchedEffect
+    LaunchedEffect(pm.webGen) {
+        if (pm.webGen == 0) return@LaunchedEffect
         delay(350)
-        if (!muted) cmd("window.__sb && window.__sb.mute(false)")
-        playing = true
-        load(startAt = cur)
+        if (!pm.muted) cmd("window.__sb && window.__sb.mute(false)")
+        pm.playing = true
+        load(startAt = pm.cur)
     }
 
     // Slow-network note auto-hides (0.75) - honest, transient, never a
     // standing warning.
-    LaunchedEffect(netNote) {
-        if (netNote.isNotEmpty()) {
+    LaunchedEffect(pm.netNote) {
+        if (pm.netNote.isNotEmpty()) {
             delay(6000)
-            netNote = ""
+            pm.netNote = ""
         }
     }
     // A fresh page loses the slow flag (the hook boots clean) - re-assert
     // it after every load while the session is still slow (0.75).
-    LaunchedEffect(slowSession, epSeason, epNumber, webGen) {
-        if (slowSession) {
+    LaunchedEffect(pm.slowSession, pm.epSeason, pm.epNumber, pm.webGen) {
+        if (pm.slowSession) {
             delay(2500)
             cmd("window.__sb && window.__sb.slow(true)")
         }
     }
 
     fun pokeChrome() {
-        chromeVisible = true
-        pokeTick += 1
+        pm.chromeVisible = true
+        pm.pokeTick += 1
     }
 
     // Idle fade: only while actually playing with no panel open. On fade the
     // TV focus resets to the video layer so keys keep working blind.
-    LaunchedEffect(chromeVisible, playing, showEps, showSubs, pokeTick) {
-        if (chromeVisible && playing && !showEps && !showSubs) {
+    LaunchedEffect(pm.chromeVisible, pm.playing, pm.showEps, pm.showSubs, pm.pokeTick) {
+        if (pm.chromeVisible && pm.playing && !pm.showEps && !pm.showSubs) {
             delay(4500)
-            chromeVisible = false
-            layer = LAYER_VIDEO
-            runCatching { keySinkFR.requestFocus() }
+            pm.chromeVisible = false
+            pm.layer = LAYER_VIDEO
+            runCatching { pm.keySinkFR.requestFocus() }
         }
     }
 
     fun seekRel(d: Float) {
-        seekTo((if (scrub >= 0) scrub else cur) + d)
+        seekTo((if (pm.scrub >= 0) pm.scrub else pm.cur) + d)
     }
 
     fun togglePlay() {
         pokeChrome()
-        playing = !playing
-        val hp = hlsPlayer
-        if (mirror == "hls" && hp != null) {
-            if (playing) hp.play() else hp.pause()
+        pm.playing = !pm.playing
+        val hp = pm.hlsPlayer
+        if (pm.mirror == "hls" && hp != null) {
+            if (pm.playing) hp.play() else hp.pause()
             return
         }
-        cmd(if (playing) "window.__sb && window.__sb.play()" else "window.__sb && window.__sb.pause()")
+        cmd(if (pm.playing) "window.__sb && window.__sb.play()" else "window.__sb && window.__sb.pause()")
     }
 
     // Anime season routing (0.60): split franchises carry one ENTRY PER
@@ -1922,7 +1948,7 @@ fun PlayerScreen(
     // against THAT entry - the old code sent the show's first-year entry
     // with the per-season number, so season 2 episode 1 played S1E1. The
     // route is always ready before the first load (deferred boot).
-    LaunchedEffect(title.id, title.type, epSeason) {
+    LaunchedEffect(title.id, title.type, pm.epSeason) {
         if (title.type != "movie") {
             val det = withContext(Dispatchers.IO) {
                 runCatching { Api.details("tv", title.id) }.getOrNull()
@@ -1932,25 +1958,25 @@ fun PlayerScreen(
             // (no Tagalog dub there) and the K-Drama defaults never fired.
             // TMDB's original_language fills the gap BEFORE the first load
             // picks a mirror, and the next save rewrites the record.
-            if (contentLang.isEmpty() && det != null && det.originalLanguage.isNotBlank()) {
-                contentLang = det.originalLanguage
+            if (pm.contentLang.isEmpty() && det != null && det.originalLanguage.isNotBlank()) {
+                pm.contentLang = det.originalLanguage
             }
             // K-Drama rides VidBolt (Tagalog dub + its own English subs) -
             // realign the primary before the first load when the language
             // only just arrived.
-            if (!booted && contentLang == "ko" && mirror != "vidbolt") {
-                mirror = "vidbolt"
+            if (!pm.booted && pm.contentLang == "ko" && pm.mirror != "vidbolt") {
+                pm.mirror = "vidbolt"
             }
             val seasons = det?.seasons ?: listOf()
-            seasonList = seasons
-            seasonEps = seasons.firstOrNull { it.n == epSeason }?.count ?: 0
+            pm.seasonList = seasons
+            pm.seasonEps = seasons.firstOrNull { it.n == pm.epSeason }?.count ?: 0
             fun cumBefore(n: Int): Int = seasons.filter { it.n in 1 until n }.sumOf { it.count }
-            val airYear = (seasons.firstOrNull { it.n == epSeason }?.air ?: "").take(4).toIntOrNull() ?: 0
+            val airYear = (seasons.firstOrNull { it.n == pm.epSeason }?.air ?: "").take(4).toIntOrNull() ?: 0
             var rMal = mal
             var rAni = ani
-            var base = cumBefore(epSeason)
+            var base = cumBefore(pm.epSeason)
             if (title.type == "anime" || title.isAnime) {
-                if (epSeason >= 2 && airYear > 0 && airYear != title.year) {
+                if (pm.epSeason >= 2 && airYear > 0 && airYear != title.year) {
                     val mapped = withContext(Dispatchers.IO) {
                         runCatching { Api.animeMap(title.name, airYear) }.getOrNull()
                     }
@@ -1963,28 +1989,26 @@ fun PlayerScreen(
                     }
                 }
             }
-            routeMal = rMal
-            routeAni = rAni
-            epBase = base
+            pm.routeMal = rMal
+            pm.routeAni = rAni
+            pm.epBase = base
         }
-        resolvedSeason = epSeason
-        if (pendingLoadAt >= 0f) {
+        pm.resolvedSeason = pm.epSeason
+        if (pm.pendingLoadAt >= 0f) {
             // A load landed before the route was right (in-player season
             // switch): fire it now that the numbering matches.
-            val at = pendingLoadAt
-            pendingLoadAt = -1f
+            val at = pm.pendingLoadAt
+            pm.pendingLoadAt = -1f
             load(startAt = at)
-        } else if (!booted) {
-            booted = true
+        } else if (!pm.booted) {
+            pm.booted = true
             load(startAt = resumeAt)
         }
     }
 
-    var epsList by remember { mutableStateOf(listOf<Ep>()) }
-    var epsBusy by remember { mutableStateOf(false) }
 
     /** Adopt a provider-internal episode switch (0.65) - the ONE door into
-        epSeason/epNumber for every mirror (VidBolt/VidRift episodechange,
+        pm.epSeason/pm.epNumber for every pm.mirror (VidBolt/VidRift episodechange,
         AniPM episodechange) and every type (anime, TV, K-drama). Raw provider
         numbers used to stomp state blindly: a boot echo, an event racing our
         navigation, or a mis-shaped payload left the state pointing at ANOTHER
@@ -1997,14 +2021,14 @@ fun PlayerScreen(
     /** The (season, episode) the next-episode paths WOULD open - read-only
         twin of advanceEpisode, for the warm-start prefetch (0.75). */
     fun nextTargetPair(): Pair<Int, Int>? {
-        val count = seasonEps
-        if (count > 0 && epNumber >= count) {
-            val nxt = seasonList.firstOrNull { it.n == epSeason + 1 && it.n >= 1 } ?: return null
+        val count = pm.seasonEps
+        if (count > 0 && pm.epNumber >= count) {
+            val nxt = pm.seasonList.firstOrNull { it.n == pm.epSeason + 1 && it.n >= 1 } ?: return null
             if (nxt.count <= 0 || !(nxt.air.isBlank() || nxt.air.take(10) <= todayIso())) return null
             return nxt.n to 1
         }
-        val next = epsList.firstOrNull { it.n == epNumber + 1 } ?: return epSeason to (epNumber + 1)
-        return if (next.aired) epSeason to next.n else null
+        val next = pm.epsList.firstOrNull { it.n == pm.epNumber + 1 } ?: return pm.epSeason to (pm.epNumber + 1)
+        return if (next.aired) pm.epSeason to next.n else null
     }
 
     // Next-episode warm start (0.75): after 45s of stable playback on a
@@ -2016,14 +2040,14 @@ fun PlayerScreen(
     LaunchedEffect(Unit) {
         while (true) {
             delay(15000)
-            if (mirror != "vidbolt" || slowSession || showThanks || !playing) continue
-            if (System.currentTimeMillis() - lastLoadAtMs < 45000) continue
+            if (pm.mirror != "vidbolt" || pm.slowSession || pm.showThanks || !pm.playing) continue
+            if (System.currentTimeMillis() - pm.lastLoadAtMs < 45000) continue
             val np = nextTargetPair() ?: continue
             val pKey = np.first.toString() + ":" + np.second
-            if (!prefetched.add(pKey)) continue
+            if (!pm.prefetched.add(pKey)) continue
             val url = playerUrl(
-                title, np.first, np.second, routeMal, routeAni, mirror,
-                0f, anipmLang, cinesrcQ, epBase, contentLang == "ko",
+                title, np.first, np.second, pm.routeMal, pm.routeAni, pm.mirror,
+                0f, pm.anipmLang, pm.cinesrcQ, pm.epBase, pm.contentLang == "ko",
             )
             withContext(Dispatchers.IO) {
                 runCatching { vbShimmedDoc(url) }
@@ -2034,20 +2058,20 @@ fun PlayerScreen(
     fun adoptProviderEpisode(sIn: Int, eIn: Int): Boolean {
         val e = eIn
         if (e <= 0) return false
-        val s = if (sIn > 0) sIn else epSeason
-        if (s == epSeason && e == epNumber) return false
+        val s = if (sIn > 0) sIn else pm.epSeason
+        if (s == pm.epSeason && e == pm.epNumber) return false
         if (!pastSyncGrace()) return false
-        val count = if (s == epSeason) maxOf(seasonEps, epsList.size)
-        else seasonList.firstOrNull { it.n == s }?.count ?: 0
+        val count = if (s == pm.epSeason) maxOf(pm.seasonEps, pm.epsList.size)
+        else pm.seasonList.firstOrNull { it.n == s }?.count ?: 0
         if (count > 0 && e > count) return false
-        save(0f, dur)
-        epSeason = s
-        epNumber = e
-        cur = 0f
+        save(0f, pm.dur)
+        pm.epSeason = s
+        pm.epNumber = e
+        pm.cur = 0f
         // The switch IS a transition (0.67): restart the sync clock so the
         // old page's echoed ended/nextup can never double-step on top of it,
         // no matter which provider advanced by itself.
-        lastLoadAtMs = System.currentTimeMillis()
+        pm.lastLoadAtMs = System.currentTimeMillis()
         return true
     }
 
@@ -2056,12 +2080,12 @@ fun PlayerScreen(
         actually premiered (a dated future season is COMING SOON, never a
         dead route). */
     fun nextEpisodeAvailable(): Boolean {
-        val count = seasonEps
-        if (count > 0 && epNumber >= count) {
-            val nxt = seasonList.firstOrNull { it.n == epSeason + 1 && it.n >= 1 }
+        val count = pm.seasonEps
+        if (count > 0 && pm.epNumber >= count) {
+            val nxt = pm.seasonList.firstOrNull { it.n == pm.epSeason + 1 && it.n >= 1 }
             return nxt != null && nxt.count > 0 && (nxt.air.isBlank() || nxt.air.take(10) <= todayIso())
         }
-        val next = epsList.firstOrNull { it.n == epNumber + 1 }
+        val next = pm.epsList.firstOrNull { it.n == pm.epNumber + 1 }
         return next == null || next.aired
     }
 
@@ -2074,17 +2098,17 @@ fun PlayerScreen(
         screen takes over instead of a dead end. */
     fun advanceEpisode(): Boolean {
         if (!nextEpisodeAvailable()) return false
-        val count = seasonEps
-        if (count > 0 && epNumber >= count) {
-            val nxt = seasonList.firstOrNull { it.n == epSeason + 1 && it.n >= 1 } ?: return false
-            epSeason = nxt.n
-            epNumber = 1
+        val count = pm.seasonEps
+        if (count > 0 && pm.epNumber >= count) {
+            val nxt = pm.seasonList.firstOrNull { it.n == pm.epSeason + 1 && it.n >= 1 } ?: return false
+            pm.epSeason = nxt.n
+            pm.epNumber = 1
         } else {
-            epNumber += 1
+            pm.epNumber += 1
         }
-        save(0f, dur)
-        cur = 0f
-        playing = true
+        save(0f, pm.dur)
+        pm.cur = 0f
+        pm.playing = true
         load()
         return true
     }
@@ -2093,8 +2117,8 @@ fun PlayerScreen(
         Continue Watching until a newer aired episode revives the row - and
         the Thank You screen says so with More Like This. */
     fun finishSeason() {
-        save(if (scrub >= 0) scrub else cur, dur, done = true)
-        showThanks = true
+        save(if (pm.scrub >= 0) pm.scrub else pm.cur, pm.dur, done = true)
+        pm.showThanks = true
     }
 
     /** Every Next-episode trigger funnels here: bar pill, skip pill,
@@ -2106,18 +2130,17 @@ fun PlayerScreen(
 
     /** Replay from the Thank You screen (0.73). */
     fun replayThanks() {
-        showThanks = false
-        endedHandled = false
-        cur = 0f
-        playing = true
+        pm.showThanks = false
+        pm.endedHandled = false
+        pm.cur = 0f
+        pm.playing = true
         load(startAt = 0f)
     }
 
     // More Like This for the Thank You screen (real TMDB similar titles).
-    var thanksSimilar by remember { mutableStateOf(listOf<Title>()) }
-    LaunchedEffect(showThanks) {
-        if (showThanks) {
-            thanksSimilar = withContext(Dispatchers.IO) {
+    LaunchedEffect(pm.showThanks) {
+        if (pm.showThanks) {
+            pm.thanksSimilar = withContext(Dispatchers.IO) {
                 runCatching { Api.similar(title.type, title.id) }.getOrDefault(listOf())
             }
         }
@@ -2128,15 +2151,15 @@ fun PlayerScreen(
             // Open-ended credits ("Next Episode") moves on; a RANGED outro
             // seeks past the ending song (0.73) so post-credits scenes play.
             h.kind == "credits" -> goNext()
-            mirror == "vidbolt" && h.end != null -> {
+            pm.mirror == "vidbolt" && h.end != null -> {
                 // VidBolt's in-place skip seeks can leave a black surface -
                 // reopen at the marker through startAt (website boltSkipTo).
-                h.end?.let { e -> cur = e; load(startAt = e) }
+                h.end?.let { e -> pm.cur = e; load(startAt = e) }
             }
-            (mirror == "vidcore" || mirror.startsWith("vidsrc")) && h.end != null -> {
+            (pm.mirror == "vidcore" || pm.mirror.startsWith("vidsrc")) && h.end != null -> {
                 // VidCore/VidSrc expose no seek command (events out only) -
                 // skips reopen at startAt, the only seek they document.
-                h.end?.let { e -> cur = e; load(startAt = e) }
+                h.end?.let { e -> pm.cur = e; load(startAt = e) }
             }
             else -> h.end?.let { seekTo(it) }
         }
@@ -2145,31 +2168,29 @@ fun PlayerScreen(
     // Quick-select rail for the Episodes sheet (design pack): real TMDB
     // season episodes, prefetched while the video loads so the sheet opens
     // instantly (speed pass 0.32).
-    LaunchedEffect(epSeason, title.id) {
+    LaunchedEffect(pm.epSeason, title.id) {
         if (title.type != "movie") {
-            epsBusy = true
-            epsList = withContext(Dispatchers.IO) {
-                runCatching { Api.season(title.id, epSeason) }.getOrDefault(listOf())
+            pm.epsBusy = true
+            pm.epsList = withContext(Dispatchers.IO) {
+                runCatching { Api.season(title.id, pm.epSeason) }.getOrDefault(listOf())
             }
-            epsBusy = false
+            pm.epsBusy = false
         }
     }
 
     // Real US certification for the HUD chip ("" when TMDB reports none -
     // the chip simply does not render, nothing is ever invented).
-    var cert by remember { mutableStateOf("") }
     LaunchedEffect(title.id, title.type) {
-        cert = withContext(Dispatchers.IO) {
+        pm.cert = withContext(Dispatchers.IO) {
             runCatching { Api.cert(title.type, title.id) }.getOrDefault("")
         }
     }
 
     // HUD clock (design pack top bar, both player HUD and the sheets).
-    var clock by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {
         val f = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.US)
         while (true) {
-            clock = f.format(java.util.Date())
+            pm.clock = f.format(java.util.Date())
             kotlinx.coroutines.delay(30000)
         }
     }
@@ -2185,21 +2206,21 @@ fun PlayerScreen(
     // belonged to a DIFFERENT episode on every other anime. The merge
     // (IntroDb.merge) then picks one clean set per kind: duration-calibrated
     // answers win, overlapping losers are dropped.
-    LaunchedEffect(title.id, title.type, epSeason, epNumber, routeMal, epBase, if (dur > 30) dur.toInt() else 0) {
+    LaunchedEffect(title.id, title.type, pm.epSeason, pm.epNumber, pm.routeMal, pm.epBase, if (pm.dur > 30) pm.dur.toInt() else 0) {
         if (title.type == "movie") {
-            skips = IntroDb.Skips(listOf(), listOf(), listOf())
+            pm.skips = IntroDb.Skips(listOf(), listOf(), listOf())
         } else {
-            val d = if (dur > 30) dur else 0f
-            skips = withContext(Dispatchers.IO) {
+            val d = if (pm.dur > 30) pm.dur else 0f
+            pm.skips = withContext(Dispatchers.IO) {
                 val db = runCatching {
-                    IntroDb.fetch(title.id, epSeason, epNumber)
+                    IntroDb.fetch(title.id, pm.epSeason, pm.epNumber)
                 }.getOrDefault(IntroDb.Skips(listOf(), listOf(), listOf()))
-                val malEntry = routeMal ?: mal
-                val entryEp = (epBase + epNumber).coerceAtLeast(1)
+                val malEntry = pm.routeMal ?: mal
+                val entryEp = (pm.epBase + pm.epNumber).coerceAtLeast(1)
                 val ani = if (malEntry != null) SkipTimes.aniSkip(malEntry, entryEp, d) else listOf()
                 val imdb = runCatching { Api.imdbId(title.type, title.id) }.getOrNull() ?: ""
                 val sk = if (imdb.isNotEmpty()) {
-                    SkipTimes.skipDb(imdb, epSeason, epNumber, d)
+                    SkipTimes.skipDb(imdb, pm.epSeason, pm.epNumber, d)
                 } else {
                     listOf()
                 }
@@ -2211,7 +2232,6 @@ fun PlayerScreen(
     // Subtitle search chain (website rules): Wyzie first (1,000/day shared
     // key), straight to backups when it is empty/capped/missing - TSDB
     // (keyless) then BetaSeries (TV only). Manual re-run pill bumps bsTick.
-    var bsTick by remember { mutableIntStateOf(0) }
     suspend fun fetchSubChain(): Pair<String, List<WyzItem>> {
         val isTv = title.type != "movie"
         var note = ""
@@ -2219,9 +2239,9 @@ fun PlayerScreen(
             withContext(Dispatchers.IO) {
                 Wyz.search(
                     title.id,
-                    wyzLang,
-                    if (isTv) epSeason else null,
-                    if (isTv) epNumber else null,
+                    pm.wyzLang,
+                    if (isTv) pm.epSeason else null,
+                    if (isTv) pm.epNumber else null,
                 )
             }
         } catch (e: Exception) {
@@ -2236,14 +2256,14 @@ fun PlayerScreen(
             items = withContext(Dispatchers.IO) {
                 val tsdb = runCatching {
                     Backups.tsdbFind(
-                        title.id, isTv, wyzLang,
-                        if (isTv) epSeason else null,
-                        if (isTv) epNumber else null,
+                        title.id, isTv, pm.wyzLang,
+                        if (isTv) pm.epSeason else null,
+                        if (isTv) pm.epNumber else null,
                     )
                 }.getOrDefault(listOf())
                 if (tsdb.isNotEmpty()) tsdb
                 else if (isTv) runCatching {
-                    Backups.bsFind(title.id, wyzLang, epSeason, epNumber)
+                    Backups.bsFind(title.id, pm.wyzLang, pm.epSeason, pm.epNumber)
                 }.getOrDefault(listOf())
                 else listOf()
             }
@@ -2251,26 +2271,26 @@ fun PlayerScreen(
         }
         return note to items
     }
-    LaunchedEffect(showSubs, wyzLang, title.id, epSeason, epNumber, bsTick) {
-        if (showSubs) {
+    LaunchedEffect(pm.showSubs, pm.wyzLang, title.id, pm.epSeason, pm.epNumber, pm.bsTick) {
+        if (pm.showSubs) {
             // K-dramas ride the provider's own English subtitles (0.64):
             // our Wyzie/TSDB/BetaSeries chain never runs over them.
-            if (contentLang == "ko") {
-                wyzItems = listOf()
-                wyzBusy = false
-                subMsg = "K-Dramas use the provider's own English subtitles - not our chain."
+            if (pm.contentLang == "ko") {
+                pm.wyzItems = listOf()
+                pm.wyzBusy = false
+                pm.subMsg = "K-Dramas use the provider's own English subtitles - not our chain."
                 return@LaunchedEffect
             }
-            wyzBusy = true
-            subMsg = ""
+            pm.wyzBusy = true
+            pm.subMsg = ""
             val (note, items) = fetchSubChain()
-            wyzItems = items
-            subMsg = when {
+            pm.wyzItems = items
+            pm.subMsg = when {
                 items.isEmpty() && note.isEmpty() -> "No subtitles found - load a .srt/.vtt file below."
                 items.isEmpty() -> note + " Nothing found - load a .srt/.vtt file below."
                 else -> note
             }
-            wyzBusy = false
+            pm.wyzBusy = false
         }
     }
 
@@ -2281,34 +2301,34 @@ fun PlayerScreen(
     // on from the first frame without opening the Subs sheet. Anime keeps
     // its embed's own captioning (a Faulconer dub has no business carrying
     // forced English text).
-    LaunchedEffect(title.id, epSeason, epNumber) {
+    LaunchedEffect(title.id, pm.epSeason, pm.epNumber) {
         // K-dramas ride the provider's own English subtitles (0.64): our
         // chain never auto-loads or restores over them.
-        if (contentLang == "ko") return@LaunchedEffect
+        if (pm.contentLang == "ko") return@LaunchedEffect
         val pick = withContext(Dispatchers.IO) {
-            runCatching { Store.subPick(ctx, title.type, title.id, epSeason, epNumber) }.getOrNull()
+            runCatching { Store.subPick(ctx, title.type, title.id, pm.epSeason, pm.epNumber) }.getOrNull()
         }
         if (pick != null) {
             val text = withContext(Dispatchers.IO) {
                 runCatching { Wyz.fetchFile(pick.url) }.getOrNull()
             }
-            if (text != null && subs == null) {
+            if (text != null && pm.subs == null) {
                 setSub(pick.name, pick.lang, Subs.parse(text))
                 return@LaunchedEffect
             }
         }
-        if (title.type == "anime" || subs != null) return@LaunchedEffect
+        if (title.type == "anime" || pm.subs != null) return@LaunchedEffect
         val first = fetchSubChain().second.firstOrNull() ?: return@LaunchedEffect
         val text = withContext(Dispatchers.IO) {
             runCatching { Wyz.fetchFile(first.url) }.getOrNull()
         } ?: return@LaunchedEffect
-        if (subs == null) {
-            val lang = first.display.ifEmpty { wyzLang.uppercase() }
+        if (pm.subs == null) {
+            val lang = first.display.ifEmpty { pm.wyzLang.uppercase() }
             setSub(first.release, lang, Subs.parse(text))
             // Remember it as THIS episode's pick so reopening restores the
             // same file instead of spending the chain again.
             Store.saveSubPick(
-                ctx, title.type, title.id, epSeason, epNumber,
+                ctx, title.type, title.id, pm.epSeason, pm.epNumber,
                 SubPick(first.url, first.release, lang),
             )
         }
@@ -2317,27 +2337,27 @@ fun PlayerScreen(
     // K-drama + a manual file: clear the provider captions so two caption
     // layers never stack. Watches vbSubSel too - a track republish that
     // re-selects English gets cleared again (0.64).
-    LaunchedEffect(subs, contentLang, mirror, vbSubSel) {
-        if (contentLang == "ko" && subs != null && mirror == "vidbolt" && vbSubSel != "-1") {
-            vbSubSel = "-1"
+    LaunchedEffect(pm.subs, pm.contentLang, pm.mirror, pm.vbSubSel) {
+        if (pm.contentLang == "ko" && pm.subs != null && pm.mirror == "vidbolt" && pm.vbSubSel != "-1") {
+            pm.vbSubSel = "-1"
             cmd("window.__sb && window.__sb.vbsub(-1)")
         }
     }
 
-    val capCue = remember(cur, subs, subOffset) {
-        val f = subs ?: return@remember null
-        val t = cur + subOffset
+    val capCue = remember(pm.cur, pm.subs, pm.subOffset) {
+        val f = pm.subs ?: return@remember null
+        val t = pm.cur + pm.subOffset
         cueAt(f.cues, t)
     }
 
-    val hit = remember(cur, skips, title.type) {
-            if (title.type == "movie") null else hitAt(cur, dur, skips)
+    val hit = remember(pm.cur, pm.skips, title.type) {
+            if (title.type == "movie") null else hitAt(pm.cur, pm.dur, pm.skips)
     }
     // pill vanished under us (range ended): fall back to the video layer
     LaunchedEffect(hit == null) {
-        if (hit == null && layer == LAYER_SKIP) {
-            layer = LAYER_VIDEO
-            runCatching { keySinkFR.requestFocus() }
+        if (hit == null && pm.layer == LAYER_SKIP) {
+            pm.layer = LAYER_VIDEO
+            runCatching { pm.keySinkFR.requestFocus() }
         }
     }
 
@@ -2346,14 +2366,12 @@ fun PlayerScreen(
     // open-ended credits range is the manual "Next Episode" pill, and the
     // chaining happens through auto-next at ended (so post-credits scenes
     // always survive). Toggle lives in the Episodes sheet, per device.
-    var autoSkip by remember { mutableStateOf(Store.autoSkip(ctx)) }
-    var autoDone by remember { mutableStateOf("") }
-    LaunchedEffect(cur, hit, autoSkip) {
+    LaunchedEffect(pm.cur, hit, pm.autoSkip) {
         val h = hit
-        if (autoSkip && playing && h != null && h.end != null && h.kind != "credits") {
-            val key = epSeason.toString() + ":" + epNumber + ":" + h.kind + ":" + h.end
-            if (autoDone != key) {
-                autoDone = key
+        if (pm.autoSkip && pm.playing && h != null && h.end != null && h.kind != "credits") {
+            val key = pm.epSeason.toString() + ":" + pm.epNumber + ":" + h.kind + ":" + h.end
+            if (pm.autoDone != key) {
+                pm.autoDone = key
                 seekTo(h.end)
             }
         }
@@ -2363,14 +2381,14 @@ fun PlayerScreen(
     // unwind the UI layers like the TV apps do.
     BackHandler {
         when {
-            showSubs -> showSubs = false
-            showEps -> showEps = false
-            big && layer != LAYER_VIDEO -> {
-                layer = LAYER_VIDEO
-                runCatching { keySinkFR.requestFocus() }
+            pm.showSubs -> pm.showSubs = false
+            pm.showEps -> pm.showEps = false
+            big && pm.layer != LAYER_VIDEO -> {
+                pm.layer = LAYER_VIDEO
+                runCatching { pm.keySinkFR.requestFocus() }
             }
             else -> {
-                save(if (scrub >= 0) scrub else cur, dur)
+                save(if (pm.scrub >= 0) pm.scrub else pm.cur, pm.dur)
                 onHome()
             }
         }
@@ -2378,8 +2396,8 @@ fun PlayerScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            save(if (scrub >= 0) scrub else cur, dur)
-            try { hlsPlayer?.release() } catch (e: Exception) {}
+            save(if (pm.scrub >= 0) pm.scrub else pm.cur, pm.dur)
+            try { pm.hlsPlayer?.release() } catch (e: Exception) {}
         }
     }
 
@@ -2387,22 +2405,22 @@ fun PlayerScreen(
     // REAL playback only counts for the watchdog (Media3's isPlaying is
     // false while buffering/stalled - same rule as the web seam, where
     // metadata/preview never counted as media).
-    DisposableEffect(hlsPlayer) {
-        val p = hlsPlayer
+    DisposableEffect(pm.hlsPlayer) {
+        val p = pm.hlsPlayer
         val l = if (p == null) null else object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
-                    gotMedia = true
-                    playing = true
+                    pm.gotMedia = true
+                    pm.playing = true
                 }
             }
 
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_ENDED) playing = false
+                if (state == Player.STATE_ENDED) pm.playing = false
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                playing = false
+                pm.playing = false
             }
         }
         if (p != null && l != null) p.addListener(l)
@@ -2410,18 +2428,18 @@ fun PlayerScreen(
             if (p != null && l != null) p.removeListener(l)
         }
     }
-    LaunchedEffect(hlsPlayer, mirror) {
-        val p = hlsPlayer ?: return@LaunchedEffect
-        if (mirror != "hls") return@LaunchedEffect
+    LaunchedEffect(pm.hlsPlayer, pm.mirror) {
+        val p = pm.hlsPlayer ?: return@LaunchedEffect
+        if (pm.mirror != "hls") return@LaunchedEffect
         while (true) {
             val d = p.duration
             if (d > 0) {
-                cur = p.currentPosition / 1000f
-                dur = d / 1000f
+                pm.cur = p.currentPosition / 1000f
+                pm.dur = d / 1000f
                 val now = System.currentTimeMillis()
-                if (now - lastSave > 5000) {
-                    lastSave = now
-                    save(cur, dur)
+                if (now - pm.lastSave > 5000) {
+                    pm.lastSave = now
+                    save(pm.cur, pm.dur)
                 }
             }
             delay(500)
@@ -2436,13 +2454,13 @@ fun PlayerScreen(
     }
 
     fun goLayer(target: String) {
-        layer = target
+        pm.layer = target
         runCatching {
             when (target) {
-                LAYER_VIDEO -> keySinkFR.requestFocus()
-                LAYER_SKIP -> skipFR.requestFocus()
-                LAYER_SLIDER -> sliderFR.requestFocus()
-                LAYER_BUTTONS -> playFR.requestFocus()
+                LAYER_VIDEO -> pm.keySinkFR.requestFocus()
+                LAYER_SKIP -> pm.skipFR.requestFocus()
+                LAYER_SLIDER -> pm.sliderFR.requestFocus()
+                LAYER_BUTTONS -> pm.playFR.requestFocus()
             }
         }
     }
@@ -2452,10 +2470,10 @@ fun PlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
             .onPreviewKeyEvent { e ->
-                if (!big || showEps || showSubs || showThanks || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                if (!big || pm.showEps || pm.showSubs || pm.showThanks || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 pokeChrome()
                 val layers = layerList()
-                val i = layers.indexOf(layer).coerceAtLeast(0)
+                val i = layers.indexOf(pm.layer).coerceAtLeast(0)
                 when (e.key) {
                     Key.DirectionDown -> {
                         if (i < layers.size - 1) goLayer(layers[i + 1])
@@ -2491,35 +2509,35 @@ fun PlayerScreen(
         Box(
             Modifier
                 .matchParentSize()
-                .focusRequester(keySinkFR)
+                .focusRequester(pm.keySinkFR)
                 .focusable(),
         )
 
         // TV: keys must work from the very first press, and closing a panel
         // must hand focus back to the active layer - never leave zero focus.
         LaunchedEffect(Unit) {
-            if (big) runCatching { keySinkFR.requestFocus() }
+            if (big) runCatching { pm.keySinkFR.requestFocus() }
         }
-        LaunchedEffect(showEps, showSubs) {
-            if (big && !showEps && !showSubs) {
+        LaunchedEffect(pm.showEps, pm.showSubs) {
+            if (big && !pm.showEps && !pm.showSubs) {
                 runCatching {
-                    when (layer) {
-                        LAYER_SKIP -> skipFR.requestFocus()
-                        LAYER_SLIDER -> sliderFR.requestFocus()
-                        LAYER_BUTTONS -> playFR.requestFocus()
-                        else -> keySinkFR.requestFocus()
+                    when (pm.layer) {
+                        LAYER_SKIP -> pm.skipFR.requestFocus()
+                        LAYER_SLIDER -> pm.sliderFR.requestFocus()
+                        LAYER_BUTTONS -> pm.playFR.requestFocus()
+                        else -> pm.keySinkFR.requestFocus()
                     }
                 }
             }
         }
-        LaunchedEffect(showEps, showSubs) {
+        LaunchedEffect(pm.showEps, pm.showSubs) {
             if (big) {
                 runCatching {
                     when {
-                        showEps -> epsFirstFR.requestFocus()
+                        pm.showEps -> pm.epsFirstFR.requestFocus()
                         // The merged Audio & Subtitles panel enters at its
                         // first column (Servers).
-                        showSubs -> serverFirstFR.requestFocus()
+                        pm.showSubs -> pm.serverFirstFR.requestFocus()
                     }
                 }
             }
@@ -2528,12 +2546,12 @@ fun PlayerScreen(
         // Direct HLS slot: our own Media3 surface. Every chrome feature
         // (skip pills, captions, fade, watchdog, saves) reads the same
         // cur/dur/playing seam, so the bar below works unchanged.
-        if (mirror == "hls") {
-            val hp = hlsPlayer
+        if (pm.mirror == "hls") {
+            val hp = pm.hlsPlayer
             if (hp != null) {
                 LaunchedEffect(hp) {
-                    if (!hlsLoaded) {
-                        hlsLoaded = true
+                    if (!pm.hlsLoaded) {
+                        pm.hlsLoaded = true
                         load(startAt = resumeAt)
                     }
                 }
@@ -2550,8 +2568,8 @@ fun PlayerScreen(
                                 onTap = {
                                     if (big) pokeChrome()
                                     else {
-                                        chromeVisible = !chromeVisible
-                                        pokeTick += 1
+                                        pm.chromeVisible = !pm.chromeVisible
+                                        pm.pokeTick += 1
                                     }
                                 },
                             )
@@ -2564,7 +2582,7 @@ fun PlayerScreen(
         // view leaves through onRelease (destroy). The factory auto-boot
         // only runs on the FIRST generation; every rebuild is reopened at
         // the live position by the webGen effect below.
-        key(webGen) {
+        key(pm.webGen) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctxWeb ->
@@ -2611,7 +2629,7 @@ fun PlayerScreen(
                                 // only and never sandboxes the player -
                                 // playback always wins.
                                 if (ext in MEDIA_EXTS) {
-                                    main.post { lastMediaAt = System.currentTimeMillis() }
+                                    pm.main.post { pm.lastMediaAt = System.currentTimeMillis() }
                                 } else {
                                     val host = (request?.url?.host ?: "").lowercase(java.util.Locale.US)
                                     val lp = rawPath.lowercase(java.util.Locale.US)
@@ -2709,12 +2727,12 @@ fun PlayerScreen(
                             view: WebView?,
                             detail: android.webkit.RenderProcessGoneDetail?,
                         ): Boolean {
-                            main.post {
+                            pm.main.post {
                                 try {
-                                    web = null
+                                    pm.web = null
                                 } catch (e: Exception) {
                                 }
-                                webGen += 1
+                                pm.webGen += 1
                             }
                             return true
                         }
@@ -2723,10 +2741,10 @@ fun PlayerScreen(
                     addJavascriptInterface(SBBridge({ t, j ->
                         if (t == "timeupdate") {
                             val tn = System.currentTimeMillis()
-                            if (tn - tuGate.get() < 250) return@SBBridge
-                            tuGate.set(tn)
+                            if (tn - pm.tuGate.get() < 250) return@SBBridge
+                            pm.tuGate.set(tn)
                         }
-                        main.post {
+                        pm.main.post {
                             try {
                                 val o = org.json.JSONObject(j)
                                 // Watchdog counts REAL playback only - an idle
@@ -2739,17 +2757,17 @@ fun PlayerScreen(
                                 if (t == "play" || t == "timeupdate" || t == "ended" ||
                                     t.startsWith("anipm:") || t == "mirror:episode" || t == "mirror:nextup"
                                 ) {
-                                    gotMedia = true
+                                    pm.gotMedia = true
                                 }
                                 when (t) {
                                     "play" -> {
-                                        playing = true
+                                        pm.playing = true
                                     }
                                     "pause" -> {
-                                        playing = false
+                                        pm.playing = false
                                     }
                                     "ended" -> {
-                                        playing = false
+                                        pm.playing = false
                                         // 0.66: Auto-play Next TAKES OVER the
                                         // transition - our advanceEpisode()
                                         // opens the next episode through the
@@ -2763,16 +2781,16 @@ fun PlayerScreen(
                                         // the end. Grace + the one-per-load
                                         // latch keep echoes from double-
                                         // stepping.
-                                        if (!endedHandled && pastSyncGrace()) {
-                                            endedHandled = true
+                                        if (!pm.endedHandled && pastSyncGrace()) {
+                                            pm.endedHandled = true
                                             if (title.type == "movie") {
                                                 // Finished movie (0.73): the
                                                 // record is DONE - the row
                                                 // leaves Continue Watching.
-                                                save(if (scrub >= 0) scrub else cur, dur, done = true)
+                                                save(if (pm.scrub >= 0) pm.scrub else pm.cur, pm.dur, done = true)
                                             } else {
                                                 val more = nextEpisodeAvailable()
-                                                if (more && autoSkip && mirror != "hls") {
+                                                if (more && pm.autoSkip && pm.mirror != "hls") {
                                                     advanceEpisode()
                                                 } else {
                                                     // The episode is DONE
@@ -2781,51 +2799,51 @@ fun PlayerScreen(
                                                     // aired episode revives
                                                     // the row. Nothing left =
                                                     // the Thank You screen.
-                                                    save(if (scrub >= 0) scrub else cur, dur, done = true)
-                                                    if (!more) showThanks = true
+                                                    save(if (pm.scrub >= 0) pm.scrub else pm.cur, pm.dur, done = true)
+                                                    if (!more) pm.showThanks = true
                                                 }
                                             }
                                         }
                                     }
                                     "loadedmetadata" -> {
-                                        dur = o.optDouble("duration", 0.0).toFloat()
-                                        if (pendingSeek >= 0f) {
-                                            val t = pendingSeek
-                                            pendingSeek = -1f
+                                        pm.dur = o.optDouble("duration", 0.0).toFloat()
+                                        if (pm.pendingSeek >= 0f) {
+                                            val t = pm.pendingSeek
+                                            pm.pendingSeek = -1f
                                             seekTo(t)
                                         }
                                     }
                                     "timeupdate" -> {
-                                        cur = o.optDouble("currentTime", 0.0).toFloat()
+                                        pm.cur = o.optDouble("currentTime", 0.0).toFloat()
                                         // PROVIDER-reported position - the
                                         // stall watchdog's pulse (0.74);
                                         // seekTo() writes cur directly and
                                         // must never count as movement.
-                                        lastRepPos = cur
-                                        if (firstTuAfterLoad) {
-                                            firstTuAfterLoad = false
+                                        pm.lastRepPos = pm.cur
+                                        if (pm.firstTuAfterLoad) {
+                                            pm.firstTuAfterLoad = false
                                             // Slow first start (0.75): over
                                             // 12s to the first real clock
                                             // tick is a thin line - lighten
                                             // the stream before the viewer
                                             // ever feels a stall.
-                                            if (bootAt > 0 && System.currentTimeMillis() - bootAt > 12000) {
+                                            if (pm.bootAt > 0 && System.currentTimeMillis() - pm.bootAt > 12000) {
                                                 enterSlow()
                                             }
                                         }
                                         val d = o.optDouble("duration", 0.0).toFloat()
-                                        if (d > 0) dur = d
+                                        if (d > 0) pm.dur = d
                                         val now = System.currentTimeMillis()
-                                        if (now - lastSave > 5000) {
-                                            lastSave = now
-                                            save(cur, dur)
+                                        if (now - pm.lastSave > 5000) {
+                                            pm.lastSave = now
+                                            save(pm.cur, pm.dur)
                                         }
                                     }
                                     "video:stall" -> {
                                         // Frames stopped for 5s while the
                                         // element was unpaused (0.74) - the
                                         // freeze detector in the hook.
-                                        stallKick += 1
+                                        pm.stallKick += 1
                                     }
                                     "anipm:quality" -> {
                                         val arr = o.optJSONArray("qualities")
@@ -2841,9 +2859,9 @@ fun PlayerScreen(
                                                 if (height in 240..4320) qs.add(height)
                                             }
                                         }
-                                        anipmQs = qs.distinct().sortedDescending()
+                                        pm.anipmQs = qs.distinct().sortedDescending()
                                         val curQ = o.optInt("quality", -1)
-                                        if (curQ > 0) anipmQ = curQ
+                                        if (curQ > 0) pm.anipmQ = curQ
                                     }
                                     "anipm:subtitles" -> {
                                         val arr = o.optJSONArray("tracks")
@@ -2861,11 +2879,11 @@ fun PlayerScreen(
                                                 if (label.isNotBlank()) labels.add(label)
                                             }
                                         }
-                                        anipmSubLabels = labels.distinct()
+                                        pm.anipmSubLabels = labels.distinct()
                                     }
                                     "anipm:lang" -> {
                                         val l = o.optString("lang").lowercase()
-                                        if (l == "dub" || l == "sub") anipmLang = l
+                                        if (l == "dub" || l == "sub") pm.anipmLang = l
                                     }
                                     "anipm:episode" -> {
                                         // The player switched episodes itself
@@ -2880,7 +2898,7 @@ fun PlayerScreen(
                                             // the shared adoption (0.65)
                                             // validates the pair before it
                                             // may touch state.
-                                            adoptProviderEpisode(s, (e - epBase).coerceAtLeast(1))
+                                            adoptProviderEpisode(s, (e - pm.epBase).coerceAtLeast(1))
                                         }
                                     }
                                     "vb:tracks" -> {
@@ -2900,10 +2918,10 @@ fun PlayerScreen(
                                         }
                                         val aSel = o.optString("audioSel", "")
                                         val sSel = o.optString("subSel", "")
-                                        vbAudios = parseTracks(o.optJSONArray("audios"))
-                                        vbSubs = parseTracks(o.optJSONArray("subs"))
-                                        if (aSel.isNotBlank() && aSel != "null") vbAudioSel = aSel
-                                        if (sSel.isNotBlank() && sSel != "null") vbSubSel = sSel
+                                        pm.vbAudios = parseTracks(o.optJSONArray("audios"))
+                                        pm.vbSubs = parseTracks(o.optJSONArray("subs"))
+                                        if (aSel.isNotBlank() && aSel != "null") pm.vbAudioSel = aSel
+                                        if (sSel.isNotBlank() && sSel != "null") pm.vbSubSel = sSel
                                         // Quality (0.50): their mobile-panel
                                         // rows keep option + value verbatim;
                                         // the per-language map is the
@@ -2919,7 +2937,7 @@ fun PlayerScreen(
                                                 if (qv.isNotBlank() && qv != "null") qRows.add(Triple(ql, qv, qo))
                                             }
                                         }
-                                        vbQualRows = qRows
+                                        pm.vbQualRows = qRows
                                         val qMap = mutableMapOf<String, List<String>>()
                                         val qbl = o.optJSONObject("qualsByLang")
                                         if (qbl != null) {
@@ -2933,7 +2951,7 @@ fun PlayerScreen(
                                                 if (qs.isNotEmpty()) qMap[k] = qs
                                             }
                                         }
-                                        vbQualsByLang = qMap
+                                        pm.vbQualsByLang = qMap
                                         // Progressive MP4 rungs (0.75) -
                                         // provider-reported source kinds,
                                         // consumed only by the slow-network
@@ -2951,9 +2969,9 @@ fun PlayerScreen(
                                                 if (ms.isNotEmpty()) mp4Map[k] = ms
                                             }
                                         }
-                                        vbMp4 = mp4Map
+                                        pm.vbMp4 = mp4Map
                                         val qSel = o.optString("qualSel", "")
-                                        if (qSel.isNotBlank() && qSel != "null") vbQualSel = qSel
+                                        if (qSel.isNotBlank() && qSel != "null") pm.vbQualSel = qSel
                                         // K-drama defaults (0.64): Tagalog
                                         // dub first, Korean when the release
                                         // carries none, and VidBolt's OWN
@@ -2963,27 +2981,27 @@ fun PlayerScreen(
                                         // publish - Tagalog surfacing late
                                         // upgrades a Korean pick. A manual
                                         // pick (koManual) stands down.
-                                        if (!koManual && contentLang == "ko" && mirror == "vidbolt") {
-                                            val au = vbAudios.firstOrNull {
+                                        if (!pm.koManual && pm.contentLang == "ko" && pm.mirror == "vidbolt") {
+                                            val au = pm.vbAudios.firstOrNull {
                                                 it.first.contains("tagalog", true) ||
                                                     it.first.contains("filipino", true) ||
                                                     it.first.equals("fil", true) ||
                                                     it.first.equals("tl", true) ||
                                                     it.first.equals("tgl", true)
-                                            } ?: vbAudios.firstOrNull { it.first.contains("korean", true) }
-                                            if (au != null && koAudioCmd != au.second) {
-                                                koAudioCmd = au.second
-                                                vbAudioSel = au.second
+                                            } ?: pm.vbAudios.firstOrNull { it.first.contains("korean", true) }
+                                            if (au != null && pm.koAudioCmd != au.second) {
+                                                pm.koAudioCmd = au.second
+                                                pm.vbAudioSel = au.second
                                                 cmd("window.__sb && window.__sb.vbaudio('" + au.second.replace("'", "") + "')")
                                             }
-                                            val en = vbSubs.firstOrNull {
+                                            val en = pm.vbSubs.firstOrNull {
                                                 val l = it.first.lowercase()
                                                 l.contains("english") || l == "eng" || l == "en" ||
                                                     l.startsWith("en-") || l.startsWith("en ")
                                             }
-                                            if (en != null && koSubCmd != en.second) {
-                                                koSubCmd = en.second
-                                                vbSubSel = en.second
+                                            if (en != null && pm.koSubCmd != en.second) {
+                                                pm.koSubCmd = en.second
+                                                pm.vbSubSel = en.second
                                                 cmd("window.__sb && window.__sb.vbsub('" + en.second.replace("'", "") + "')")
                                             }
                                         }
@@ -3004,10 +3022,10 @@ fun PlayerScreen(
                                     "ready" -> {
                                         // VidBolt TV: its shell waits for a
                                         // play kick (website parity).
-                                        if (big && mirror == "vidbolt") cmd("window.__sb && window.__sb.play()")
-                                        if (pendingSeek >= 0f) {
-                                            val t = pendingSeek
-                                            pendingSeek = -1f
+                                        if (big && pm.mirror == "vidbolt") cmd("window.__sb && window.__sb.play()")
+                                        if (pm.pendingSeek >= 0f) {
+                                            val t = pm.pendingSeek
+                                            pm.pendingSeek = -1f
                                             seekTo(t)
                                         }
                                     }
@@ -3066,7 +3084,7 @@ fun PlayerScreen(
                             val now = System.currentTimeMillis()
                             val x = ev.x
                             val half = v.width / 2f
-                            main.post {
+                            pm.main.post {
                                 if (big) {
                                     pokeChrome()
                                 } else {
@@ -3078,11 +3096,11 @@ fun PlayerScreen(
                                     } else {
                                         lastTapMs = now
                                         lastTapX = x
-                                        main.postDelayed({
+                                        pm.main.postDelayed({
                                             if (lastTapMs != 0L && System.currentTimeMillis() - lastTapMs >= 290) {
                                                 lastTapMs = 0
-                                                chromeVisible = !chromeVisible
-                                                pokeTick += 1
+                                                pm.chromeVisible = !pm.chromeVisible
+                                                pm.pokeTick += 1
                                             }
                                         }, 300)
                                     }
@@ -3102,14 +3120,14 @@ fun PlayerScreen(
                     // every load. 0.74: FIRST generation only - a rebuilt
                     // WebView (render-process recovery) reopens through the
                     // webGen effect at the LIVE position instead.
-                    if (webGen == 0 && title.type != "anime" && !title.isAnime &&
+                    if (pm.webGen == 0 && title.type != "anime" && !title.isAnime &&
                         (title.type == "movie" || title.lang.isNotEmpty())
                     ) {
-                        booted = true
-                        lastLoadAtMs = System.currentTimeMillis()
-                        loadMirror(this, playerUrl(title, epSeason, epNumber, mal, ani, mirror, resumeAt, anipmLang, cinesrcQ, tagalog = contentLang == "ko"), mirror)
+                        pm.booted = true
+                        pm.lastLoadAtMs = System.currentTimeMillis()
+                        loadMirror(this, playerUrl(title, pm.epSeason, pm.epNumber, mal, ani, pm.mirror, resumeAt, pm.anipmLang, pm.cinesrcQ, tagalog = pm.contentLang == "ko"), pm.mirror)
                     }
-                    web = this
+                    pm.web = this
                 }
             },
             onRelease = { old ->
@@ -3136,7 +3154,7 @@ fun PlayerScreen(
         // VAL, whose body compiles to its own class. Never inline big UI
         // trees back into this function.
         val topHudLayer: @Composable BoxScope.() -> Unit = {
-        if (chromeVisible) {
+        if (pm.chromeVisible) {
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -3153,14 +3171,14 @@ fun PlayerScreen(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            val epTitle = epsList.firstOrNull { it.n == epNumber }?.name ?: ""
+            val epTitle = pm.epsList.firstOrNull { it.n == pm.epNumber }?.name ?: ""
             Text(
                 when {
-                    mirror == "hls" -> "HLS SHELL TEST"
+                    pm.mirror == "hls" -> "HLS SHELL TEST"
                     title.type == "movie" -> "MOVIE"
-                    epTitle.isNotBlank() && epTitle != "Episode " + epNumber ->
-                        "S" + epSeason + ":E" + epNumber + "  \u201C" + epTitle + "\u201D"
-                    else -> "S" + epSeason + ":E" + epNumber
+                    epTitle.isNotBlank() && epTitle != "Episode " + pm.epNumber ->
+                        "S" + pm.epSeason + ":E" + pm.epNumber + "  \u201C" + epTitle + "\u201D"
+                    else -> "S" + pm.epSeason + ":E" + pm.epNumber
                 },
                 color = Color.White,
                 fontWeight = FontWeight.Black,
@@ -3168,17 +3186,17 @@ fun PlayerScreen(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (cert.isNotBlank() || subs != null) {
+            if (pm.cert.isNotBlank() || pm.subs != null) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (cert.isNotBlank()) {
+                    if (pm.cert.isNotBlank()) {
                         Box(
                             modifier = Modifier
                                 .background(Color(0x66000000), RoundedCornerShape(4.dp))
                                 .padding(horizontal = 6.dp, vertical = 2.dp),
                         ) {
                             Text(
-                                cert,
+                                pm.cert,
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 9.sp,
@@ -3186,7 +3204,7 @@ fun PlayerScreen(
                             )
                         }
                     }
-                    if (subs != null) {
+                    if (pm.subs != null) {
                         Box(
                             modifier = Modifier
                                 .background(Color(0x66000000), RoundedCornerShape(4.dp))
@@ -3211,7 +3229,7 @@ fun PlayerScreen(
                 .align(Alignment.TopEnd)
                 .padding(12.dp),
         ) {
-            if (!playing) {
+            if (!pm.playing) {
                 Box(
                     modifier = Modifier
                         .background(Color(0xCC0B111E), RoundedCornerShape(50))
@@ -3232,7 +3250,7 @@ fun PlayerScreen(
                     .padding(horizontal = 12.dp, vertical = 5.dp),
             ) {
                 Text(
-                    clock,
+                    pm.clock,
                     color = Color.White,
                     fontWeight = FontWeight.Black,
                     fontSize = if (big) 13.sp else 11.sp,
@@ -3249,17 +3267,17 @@ fun PlayerScreen(
         // while the bar is showing (TV bar is taller, so higher there) and
         // sink toward the bottom when it minimizes (Netflix feel).
         val captionLayer: @Composable BoxScope.() -> Unit = {
-        if (capCue != null && !showEps && !showSubs) {
+        if (capCue != null && !pm.showEps && !pm.showSubs) {
             val bottomPad by animateDpAsState(
-                targetValue = if (chromeVisible) (if (big) 156.dp else 112.dp) else (if (big) 38.dp else 30.dp),
+                targetValue = if (pm.chromeVisible) (if (big) 156.dp else 112.dp) else (if (big) 38.dp else 30.dp),
                 label = "capBottom",
             )
-            val capMod = when (subPos) {
+            val capMod = when (pm.subPos) {
                 "top" -> Modifier.align(Alignment.TopCenter).padding(top = 70.dp)
                 "center" -> Modifier.align(Alignment.Center)
                 else -> Modifier.align(Alignment.BottomCenter).padding(bottom = bottomPad)
             }
-            val capColor = when (subStyle.color) {
+            val capColor = when (pm.subStyle.color) {
                 1 -> Color(0xFFFFE066)
                 2 -> Color(0xFF7FE7F5)
                 else -> Color.White
@@ -3269,10 +3287,10 @@ fun PlayerScreen(
                 color = capColor,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
-                fontSize = (if (big) subStyle.size + 4 else subStyle.size).sp,
+                fontSize = (if (big) pm.subStyle.size + 4 else pm.subStyle.size).sp,
                 modifier = capMod
                     .padding(horizontal = 28.dp)
-                    .background(Color(0xFF000000).copy(alpha = subStyle.bg / 100f), RoundedCornerShape(8.dp))
+                    .background(Color(0xFF000000).copy(alpha = pm.subStyle.bg / 100f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
@@ -3281,7 +3299,7 @@ fun PlayerScreen(
 
         // Center overlay while paused (website style).
         val pausedLayer: @Composable BoxScope.() -> Unit = {
-        if (!playing && !showEps) {
+        if (!pm.playing && !pm.showEps) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(22.dp),
@@ -3294,7 +3312,7 @@ fun PlayerScreen(
                         .focusRingCircle()
                         .glow(CircleShape)
                         .background(Accent, CircleShape)
-                        .clickable { if (!playing) togglePlay() },
+                        .clickable { if (!pm.playing) togglePlay() },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Filled.PlayArrow, contentDescription = "Play", tint = Ink, modifier = Modifier.size(40.dp))
@@ -3308,7 +3326,7 @@ fun PlayerScreen(
         // Bottom control bar (website style): skip pill + time row + buttons.
         // Chrome fades when idle; the skip pill stays while in its range.
         val barLayer: @Composable BoxScope.() -> Unit = {
-        if (chromeVisible || hit != null) {
+        if (pm.chromeVisible || hit != null) {
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -3327,7 +3345,7 @@ fun PlayerScreen(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .focusRequester(skipFR)
+                            .focusRequester(pm.skipFR)
                             .focusRing(RoundedCornerShape(50))
                             .background(Accent, RoundedCornerShape(50))
                             .clickable { skipNow(hit) }
@@ -3343,24 +3361,24 @@ fun PlayerScreen(
                 }
             }
 
-            if (chromeVisible) {
+            if (pm.chromeVisible) {
             // 0.72 stutter: the timeline runs in its OWN recomposition
             // scope - time text + slider redraw on every timeupdate while
             // the buttons and pills stay composed and skip. The old
             // whole-bar recomposition over the video surface was visible
             // stutter on weak TV boxes.
             BarTimeline(
-                cur = cur,
-                dur = dur,
-                scrub = scrub,
+                cur = pm.cur,
+                dur = pm.dur,
+                scrub = pm.scrub,
                 big = big,
-                marks = skips,
-                sliderFR = sliderFR,
-                onScrub = { scrub = it },
+                marks = pm.skips,
+                sliderFR = pm.sliderFR,
+                onScrub = { pm.scrub = it },
                 onScrubDone = { s2 ->
                     if (s2 >= 0) {
                         seekTo(s2)
-                        scrub = -1f
+                        pm.scrub = -1f
                     }
                 },
             )
@@ -3371,7 +3389,7 @@ fun PlayerScreen(
                 Box(
                     modifier = Modifier
                         .size(if (big) 56.dp else 48.dp)
-                        .focusRequester(playFR)
+                        .focusRequester(pm.playFR)
                         .focusRingCircle()
                         .glow(CircleShape, elevation = 12.dp)
                         .background(Accent, CircleShape)
@@ -3379,10 +3397,10 @@ fun PlayerScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (playing) "Pause" else "Play",
+                        if (pm.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (pm.playing) "Pause" else "Play",
                         tint = Ink,
-                        modifier = Modifier.size(if (playing) 22.dp else 28.dp),
+                        modifier = Modifier.size(if (pm.playing) 22.dp else 28.dp),
                     )
                 }
                 BarPill("-10s", big) { seekRel(-10f) }
@@ -3401,63 +3419,63 @@ fun PlayerScreen(
                 // a volume nor a rate command). The HLS slot is fully ours,
                 // and VidBolt speaks volume + speed through its own
                 // message contract (0.41/0.42).
-                if (mirror == "cinesrc" || mirror == "anipm" || mirror == "hls" || mirror == "vidbolt") {
+                if (pm.mirror == "cinesrc" || pm.mirror == "anipm" || pm.mirror == "hls" || pm.mirror == "vidbolt") {
                 Box(
                     modifier = Modifier
                         .size(if (big) 56.dp else 48.dp)
                         .focusRingCircle()
                         .background(Pill, CircleShape)
                         .clickable {
-                            muted = !muted
-                            val hp = hlsPlayer
-                            if (mirror == "hls" && hp != null) hp.volume = if (muted) 0f else 1f
-                            cmd("window.__sb && window.__sb.mute(" + muted + ")")
+                            pm.muted = !pm.muted
+                            val hp = pm.hlsPlayer
+                            if (pm.mirror == "hls" && hp != null) hp.volume = if (pm.muted) 0f else 1f
+                            cmd("window.__sb && window.__sb.mute(" + pm.muted + ")")
                         },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                        if (pm.muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
                         contentDescription = "Mute",
                         tint = Color.White,
                         modifier = Modifier.size(20.dp),
                     )
                 }
                 BarPill(
-                    RATES[rateIdx].let { if (it == it.toInt().toFloat()) it.toInt().toString() + "x" else it.toString() + "x" },
+                    RATES[pm.rateIdx].let { if (it == it.toInt().toFloat()) it.toInt().toString() + "x" else it.toString() + "x" },
                     big,
                 ) {
-                    rateIdx = (rateIdx + 1) % RATES.size
-                    val hp = hlsPlayer
-                    if (mirror == "hls" && hp != null) hp.playbackParameters = PlaybackParameters(RATES[rateIdx])
-                    cmd("window.__sb && window.__sb.rate(" + RATES[rateIdx] + ")")
+                    pm.rateIdx = (pm.rateIdx + 1) % RATES.size
+                    val hp = pm.hlsPlayer
+                    if (pm.mirror == "hls" && hp != null) hp.playbackParameters = PlaybackParameters(RATES[pm.rateIdx])
+                    cmd("window.__sb && window.__sb.rate(" + RATES[pm.rateIdx] + ")")
                 }
                 }
                 // CineSrc quality changer (website QLEVELS cycle):
                 // Auto -> 1080p -> 720p -> 480p. Each pick rides the embed
                 // URL, so the stream reopens at the current position.
-                if (mirror == "cinesrc") {
-                    BarPill(if (cinesrcQ.isEmpty()) "Auto" else cinesrcQ + "p", big) {
-                        cinesrcQ = CINE_Q[(CINE_Q.indexOf(cinesrcQ).let { if (it < 0) 0 else it } + 1) % CINE_Q.size]
-                        val at = cur
+                if (pm.mirror == "cinesrc") {
+                    BarPill(if (pm.cinesrcQ.isEmpty()) "Auto" else pm.cinesrcQ + "p", big) {
+                        pm.cinesrcQ = CINE_Q[(CINE_Q.indexOf(pm.cinesrcQ).let { if (it < 0) 0 else it } + 1) % CINE_Q.size]
+                        val at = pm.cur
                         load(startAt = at)
                     }
                 }
                 // AniPM quality ladder (only real, player-reported values -
                 // never invent 4K: house rule).
-                if (anipmQs.isNotEmpty()) {
-                    BarPill(anipmQ?.let { it.toString() + "p" } ?: "Q", big) {
-                        val i = anipmQ?.let { q -> anipmQs.indexOfFirst { it == q } } ?: -1
-                        val next = anipmQs[(i + 1) % anipmQs.size]
-                        anipmQ = next
+                if (pm.anipmQs.isNotEmpty()) {
+                    BarPill(pm.anipmQ?.let { it.toString() + "p" } ?: "Q", big) {
+                        val i = pm.anipmQ?.let { q -> pm.anipmQs.indexOfFirst { it == q } } ?: -1
+                        val next = pm.anipmQs[(i + 1) % pm.anipmQs.size]
+                        pm.anipmQ = next
                         cmd("window.__sb && window.__sb.q(" + next + ")")
                     }
                 }
                 // Sub/Dub pill (anime on AniPM - setLanguage live). DBZ
                 // default dub is decided at URL build; this switches.
-                if (title.type == "anime" && mirror == "anipm") {
-                    BarPill(if (anipmLang == "dub") "Dub" else "Sub", big) {
-                        val next = if (anipmLang == "dub") "sub" else "dub"
-                        anipmLang = next
+                if (title.type == "anime" && pm.mirror == "anipm") {
+                    BarPill(if (pm.anipmLang == "dub") "Dub" else "Sub", big) {
+                        val next = if (pm.anipmLang == "dub") "sub" else "dub"
+                        pm.anipmLang = next
                         cmd("window.__sb && window.__sb.lang('" + next + "')")
                     }
                 }
@@ -3465,10 +3483,10 @@ fun PlayerScreen(
                 // Design pack bar: one Audio & Subtitles entry - the merged
                 // panel carries the SERVER picker as its first column (the
                 // separate server sheet is gone: no redundant buttons).
-                BarPill("Audio & Subtitles", big, icon = Icons.Filled.Subtitles) { showSubs = true }
+                BarPill("Audio & Subtitles", big, icon = Icons.Filled.Subtitles) { pm.showSubs = true }
                 // Movies have no episodes - the switcher is series/anime only.
                 if (title.type != "movie") {
-                    BarPill("Episodes", big, icon = Icons.Filled.Menu) { showEps = true }
+                    BarPill("Episodes", big, icon = Icons.Filled.Menu) { pm.showEps = true }
                 }
                 // No Home pill: Back already goes home (Netflix-style) - one
                 // less target on the bar and one less button to hunt on TV.
@@ -3506,13 +3524,13 @@ fun PlayerScreen(
         // VISIBLE (0.38 fix: the old bottom-anchored Load pill sat below
         // the fold and focus escaped to the player behind the sheet).
         val epsLayer: @Composable BoxScope.() -> Unit = {
-        if (showEps) {
+        if (pm.showEps) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color(0x99000000))
                     .focusProperties { exit = { FocusRequester.Cancel } }
-                    .pointerInput(Unit) { detectTapGestures { showEps = false } },
+                    .pointerInput(Unit) { detectTapGestures { pm.showEps = false } },
                 contentAlignment = Alignment.Center,
             ) {
                 Column(
@@ -3551,8 +3569,8 @@ fun PlayerScreen(
                             )
                             Text(
                                 title.name +
-                                    (if (title.type != "movie") "  \u2022  Season " + epSeason +
-                                        (if (epsList.isNotEmpty()) "  \u2022  " + epsList.size + " Total Episodes" else "") else ""),
+                                    (if (title.type != "movie") "  \u2022  Season " + pm.epSeason +
+                                        (if (pm.epsList.isNotEmpty()) "  \u2022  " + pm.epsList.size + " Total Episodes" else "") else ""),
                                 color = Dim,
                                 fontFamily = BodyFont,
                                 fontSize = 11.sp,
@@ -3560,7 +3578,7 @@ fun PlayerScreen(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        BarPill("Close", big) { showEps = false }
+                        BarPill("Close", big) { pm.showEps = false }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     if (title.type != "movie") {
@@ -3570,16 +3588,16 @@ fun PlayerScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            BarPill("S  -", big) { epSeason = (epSeason - 1).coerceAtLeast(1) }
+                            BarPill("S  -", big) { pm.epSeason = (pm.epSeason - 1).coerceAtLeast(1) }
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                "Season " + epSeason,
+                                "Season " + pm.epSeason,
                                 color = Color.White,
                                 fontWeight = FontWeight.Black,
                                 fontSize = if (big) 17.sp else 15.sp,
                             )
                             Spacer(modifier = Modifier.width(10.dp))
-                            BarPill("S  +", big) { epSeason += 1 }
+                            BarPill("S  +", big) { pm.epSeason += 1 }
                             Spacer(modifier = Modifier.weight(1f))
                             Text(
                                 "Auto-play Next",
@@ -3588,28 +3606,28 @@ fun PlayerScreen(
                                 fontSize = 13.sp,
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            BarPill(if (autoSkip) "ON" else "OFF", big) {
-                                autoSkip = !autoSkip
-                                Store.setAutoSkip(ctx, autoSkip)
+                            BarPill(if (pm.autoSkip) "ON" else "OFF", big) {
+                                pm.autoSkip = !pm.autoSkip
+                                Store.setAutoSkip(ctx, pm.autoSkip)
                             }
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         // Quick-select (design pack): range chips ("Episodes
                         // 1-10", "11-20"...) drive a 10-card window - the
                         // sheet stays smooth on 1,400-episode seasons.
-                        val total = epsList.size
+                        val total = pm.epsList.size
                         val rangeSize = 10
-                        var rangeStart by remember(epSeason) { mutableIntStateOf(-1) }
+                        var rangeStart by remember(pm.epSeason) { mutableIntStateOf(-1) }
                         val winStart = when {
                             total <= rangeSize -> 0
                             rangeStart >= 0 -> rangeStart.coerceIn(0, (total - 1).coerceAtLeast(0))
                             else -> {
-                                val idx = epsList.indexOfFirst { it.n == epNumber }.let { if (it < 0) 0 else it }
+                                val idx = pm.epsList.indexOfFirst { it.n == pm.epNumber }.let { if (it < 0) 0 else it }
                                 (idx / rangeSize) * rangeSize
                             }
                         }
-                        val win = if (total <= rangeSize) epsList else {
-                            epsList.subList(winStart, minOf(winStart + rangeSize, total))
+                        val win = if (total <= rangeSize) pm.epsList else {
+                            pm.epsList.subList(winStart, minOf(winStart + rangeSize, total))
                         }
                         // Saved progress for THIS title: the one slot the
                         // Store keeps - cards read resume/off it honestly.
@@ -3631,7 +3649,7 @@ fun PlayerScreen(
                                             .padding(horizontal = 12.dp, vertical = 8.dp),
                                     ) {
                                         Text(
-                                            "Episodes " + epsList[s].n + "-" + epsList[e - 1].n,
+                                            "Episodes " + pm.epsList[s].n + "-" + pm.epsList[e - 1].n,
                                             color = if (on) Ink else Color.White,
                                             fontWeight = FontWeight.Black,
                                             fontSize = 11.sp,
@@ -3655,7 +3673,7 @@ fun PlayerScreen(
                             Spacer(modifier = Modifier.weight(1f))
                             Text(
                                 if (total > 0) "Showing " + (win.firstOrNull()?.n ?: 0) + "-" + (win.lastOrNull()?.n ?: 0) + " of " + total
-                                else if (epsBusy) "Loading..." else "No episode data",
+                                else if (pm.epsBusy) "Loading..." else "No episode data",
                                 color = Dim,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp,
@@ -3669,7 +3687,7 @@ fun PlayerScreen(
                                 .heightIn(max = if (big) 360.dp else 300.dp)
                                 .verticalScroll(rememberScrollState()),
                         ) {
-                            if (epsBusy && epsList.isEmpty()) {
+                            if (pm.epsBusy && pm.epsList.isEmpty()) {
                                 CircularProgressIndicator(
                                     color = Accent,
                                     modifier = Modifier.padding(16.dp).size(if (big) 36.dp else 26.dp),
@@ -3680,31 +3698,31 @@ fun PlayerScreen(
                             // starts INSIDE the cards - never on something
                             // below the fold (0.38 focus-escape fix).
                             val cols = if (big) 5 else 2
-                            val entryN = if (win.any { it.n == epNumber }) epNumber
+                            val entryN = if (win.any { it.n == pm.epNumber }) pm.epNumber
                                 else win.firstOrNull()?.n ?: -1
                             win.chunked(cols).forEach { rowEps ->
                                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     rowEps.forEach { ep ->
                                         val resumeEp = savedProg?.takeIf {
-                                            it.season == epSeason && it.episode == ep.n && it.cur > 5f &&
+                                            it.season == pm.epSeason && it.episode == ep.n && it.cur > 5f &&
                                                 !(it.dur > 0 && it.cur >= it.dur * 0.95f)
                                         }
                                         QuickEpCard(
                                             ep = ep,
                                             big = big,
-                                            selected = ep.n == epNumber,
-                                            upNext = ep.n == epNumber + 1 && ep.aired,
+                                            selected = ep.n == pm.epNumber,
+                                            upNext = ep.n == pm.epNumber + 1 && ep.aired,
                                             resume = resumeEp,
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .then(if (ep.n == entryN) Modifier.focusRequester(epsFirstFR) else Modifier),
+                                                .then(if (ep.n == entryN) Modifier.focusRequester(pm.epsFirstFR) else Modifier),
                                         ) {
                                             val at = resumeEp?.cur ?: 0f
-                                            epNumber = ep.n
-                                            showEps = false
-                                            save(0f, dur)
-                                            cur = at
-                                            playing = true
+                                            pm.epNumber = ep.n
+                                            pm.showEps = false
+                                            save(0f, pm.dur)
+                                            pm.cur = at
+                                            pm.playing = true
                                             load(startAt = at)
                                         }
                                     }
@@ -3744,13 +3762,13 @@ fun PlayerScreen(
         // SUBTITLES and STYLING & SYNC under one glass header - the server
         // picker lives HERE now (0.36 request), no separate sheet.
         val subsLayer: @Composable BoxScope.() -> Unit = {
-        if (showSubs) {
+        if (pm.showSubs) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color(0x99000000))
                     .focusProperties { exit = { FocusRequester.Cancel } }
-                    .pointerInput(Unit) { detectTapGestures { showSubs = false } },
+                    .pointerInput(Unit) { detectTapGestures { pm.showSubs = false } },
                 contentAlignment = Alignment.Center,
             ) {
                 Column(
@@ -3778,14 +3796,14 @@ fun PlayerScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(modifier = Modifier.size(7.dp).background(Accent, CircleShape))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text(MIRROR_NAMES[mirror] ?: mirror, color = Soft, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text(MIRROR_NAMES[pm.mirror] ?: pm.mirror, color = Soft, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                             Text("  /  ", color = Dim, fontSize = 11.sp)
                             Box(modifier = Modifier.size(7.dp).background(Accent, CircleShape))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text(subs?.lang ?: "Subs off", color = Soft, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text(pm.subs?.lang ?: "Subs off", color = Soft, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
                         Spacer(modifier = Modifier.width(12.dp))
-                        BarPill("Close", big) { showSubs = false }
+                        BarPill("Close", big) { pm.showSubs = false }
                     }
                     Spacer(modifier = Modifier.height(14.dp))
 
@@ -3802,19 +3820,19 @@ fun PlayerScreen(
                             serverList.forEachIndexed { i, id ->
                                 OptRow(
                                     label = MIRROR_NAMES[id] ?: id,
-                                    detail = if (id == mirror) "Playing now" else "Keeps your position",
-                                    chip = if (id == mirror) "ACTIVE" else "",
-                                    active = id == mirror,
+                                    detail = if (id == pm.mirror) "Playing now" else "Keeps your position",
+                                    chip = if (id == pm.mirror) "ACTIVE" else "",
+                                    active = id == pm.mirror,
                                     big = big,
-                                    modifier = if (i == 0) Modifier.focusRequester(serverFirstFR) else Modifier,
+                                    modifier = if (i == 0) Modifier.focusRequester(pm.serverFirstFR) else Modifier,
                                 ) {
-                                    if (id != mirror) {
-                                        val at = cur
-                                        mirror = id
-                                        playing = true
+                                    if (id != pm.mirror) {
+                                        val at = pm.cur
+                                        pm.mirror = id
+                                        pm.playing = true
                                         load(startAt = at)
                                     }
-                                    showSubs = false
+                                    pm.showSubs = false
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
                             }
@@ -3824,14 +3842,14 @@ fun PlayerScreen(
                             // files per language (sourceQuality by the exact
                             // quality label). Never invented - a stream that
                             // reports only one rung shows only that rung.
-                            if (mirror == "vidbolt") {
+                            if (pm.mirror == "vidbolt") {
                                 Spacer(modifier = Modifier.height(10.dp))
                                 PanelColTitle("QUALITY")
                                 Spacer(modifier = Modifier.height(6.dp))
-                                val derived = vbQualsByLang[vbAudioSel]
-                                    ?: vbQualsByLang.values.flatten().distinct()
+                                val derived = pm.vbQualsByLang[pm.vbAudioSel]
+                                    ?: pm.vbQualsByLang.values.flatten().distinct()
                                 val qualRows: List<Triple<String, String, String>> =
-                                    if (vbQualRows.isNotEmpty()) vbQualRows
+                                    if (pm.vbQualRows.isNotEmpty()) pm.vbQualRows
                                     else derived
                                         .sortedByDescending { q -> q.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
                                         .map { Triple(it, it, "sourceQuality") }
@@ -3845,7 +3863,7 @@ fun PlayerScreen(
                                     )
                                 } else {
                                     qualRows.forEach { (lbl, value, option) ->
-                                        val on = vbQualSel == value
+                                        val on = pm.vbQualSel == value
                                         OptRow(
                                             label = lbl,
                                             detail = "VidBolt quality - keeps your position",
@@ -3853,7 +3871,7 @@ fun PlayerScreen(
                                             active = on,
                                             big = big,
                                         ) {
-                                            vbQualSel = value
+                                            pm.vbQualSel = value
                                             cmd(
                                                 "window.__sb && window.__sb.vbqual('" +
                                                     option.replace("'", "") + "','" +
@@ -3871,9 +3889,9 @@ fun PlayerScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             PanelColTitle("AUDIO TRACKS")
                             Spacer(modifier = Modifier.height(6.dp))
-                            if (mirror == "anipm") {
+                            if (pm.mirror == "anipm") {
                                 listOf("dub" to "English (Dub)", "sub" to "Japanese (Sub)").forEach { (code, name) ->
-                                    val on = anipmLang == code
+                                    val on = pm.anipmLang == code
                                     val pinned = (if (title.name.contains("dragon ball", true)) "dub" else "sub") == code
                                     OptRow(
                                         label = name,
@@ -3882,19 +3900,19 @@ fun PlayerScreen(
                                         active = on,
                                         big = big,
                                     ) {
-                                        anipmLang = code
+                                        pm.anipmLang = code
                                         cmd("window.__sb && window.__sb.lang('" + code + "')")
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
                                 }
-                            } else if (mirror == "vidbolt") {
+                            } else if (pm.mirror == "vidbolt") {
                                 // 0.71 honesty: when a K-Drama has no
                                 // Tagalog dub on ANY server right now, say
                                 // so - the dub itself is provider-side and
                                 // their catalog rotates. Korean is the
                                 // house fallback and Filipino subtitles
                                 // stay available below.
-                                if (contentLang == "ko" && vbAudios.none {
+                                if (pm.contentLang == "ko" && pm.vbAudios.none {
                                         it.first.contains("tagalog", true) ||
                                             it.first.contains("filipino", true) ||
                                             it.first.equals("fil", true) ||
@@ -3915,7 +3933,7 @@ fun PlayerScreen(
                                 // labels its resolved stream reports. Until
                                 // the stream lands there is nothing to pick,
                                 // so we say so instead of dead buttons.
-                                if (vbAudios.isEmpty()) {
+                                if (pm.vbAudios.isEmpty()) {
                                     OptRow(
                                         label = "Original Audio",
                                         detail = "VidBolt tracks appear once the stream loads",
@@ -3924,8 +3942,8 @@ fun PlayerScreen(
                                         big = big,
                                     )
                                 } else {
-                                    vbAudios.forEach { (lbl, value) ->
-                                        val on = vbAudioSel == value
+                                    pm.vbAudios.forEach { (lbl, value) ->
+                                        val on = pm.vbAudioSel == value
                                         OptRow(
                                             label = lbl,
                                             detail = "VidBolt audio track",
@@ -3933,8 +3951,8 @@ fun PlayerScreen(
                                             active = on,
                                             big = big,
                                         ) {
-                                            koManual = true
-                                            vbAudioSel = value
+                                            pm.koManual = true
+                                            pm.vbAudioSel = value
                                             cmd("window.__sb && window.__sb.vbaudio('" + value.replace("'", "") + "')")
                                         }
                                         Spacer(modifier = Modifier.height(6.dp))
@@ -3957,16 +3975,16 @@ fun PlayerScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                             // K-dramas (0.68): no chain chrome at all - the
                             // provider's own English tracks below do the work.
-                            if (contentLang != "ko") {
+                            if (pm.contentLang != "ko") {
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     items(SUBLANGS.size) { i ->
                                         val (code, label) = SUBLANGS[i]
-                                        val on = code == wyzLang
+                                        val on = code == pm.wyzLang
                                         Box(
                                             modifier = Modifier
                                                 .focusRing(RoundedCornerShape(50), pop = false)
                                                 .background(if (on) Accent else Pill, RoundedCornerShape(50))
-                                                .clickable { wyzLang = code }
+                                                .clickable { pm.wyzLang = code }
                                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                                         ) {
                                             Text(
@@ -3980,12 +3998,12 @@ fun PlayerScreen(
                                 }
                                 Spacer(modifier = Modifier.height(8.dp))
                             }
-                            if (subMsg.isNotEmpty()) {
-                                Text(subMsg, color = Amber, fontFamily = BodyFont, fontSize = 11.sp)
+                            if (pm.subMsg.isNotEmpty()) {
+                                Text(pm.subMsg, color = Amber, fontFamily = BodyFont, fontSize = 11.sp)
                                 Spacer(modifier = Modifier.height(6.dp))
                             }
 
-                            val loadedSub = subs
+                            val loadedSub = pm.subs
                             OptRow(
                                 label = "Off",
                                 detail = "No captions",
@@ -3993,10 +4011,10 @@ fun PlayerScreen(
                                 active = loadedSub == null,
                                 big = big,
                             ) {
-                                subs = null
-                                subMsg = ""
+                                pm.subs = null
+                                pm.subMsg = ""
                                 // Forgetting the pick keeps it gone after reopen.
-                                Store.saveSubPick(ctx, title.type, title.id, epSeason, epNumber, null)
+                                Store.saveSubPick(ctx, title.type, title.id, pm.epSeason, pm.epNumber, null)
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                             if (loadedSub != null) {
@@ -4009,14 +4027,14 @@ fun PlayerScreen(
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                             }
-                            if (contentLang != "ko") {
-                                if (wyzBusy) {
+                            if (pm.contentLang != "ko") {
+                                if (pm.wyzBusy) {
                                     CircularProgressIndicator(
                                         color = Accent,
                                         modifier = Modifier.padding(10.dp).size(24.dp),
                                     )
                                 } else {
-                                    wyzItems.take(10).forEach { item ->
+                                    pm.wyzItems.take(10).forEach { item ->
                                         OptRow(
                                             label = item.release,
                                             detail = listOf(
@@ -4031,14 +4049,14 @@ fun PlayerScreen(
                                         ) { loadFrom(item) }
                                         Spacer(modifier = Modifier.height(6.dp))
                                     }
-                                    if (wyzItems.isEmpty()) {
+                                    if (pm.wyzItems.isEmpty()) {
                                         OptRow(
                                             label = "Try backups (TSDB + BetaSeries)",
                                             detail = "Same title, different releases",
                                             chip = "",
                                             active = false,
                                             big = big,
-                                        ) { bsTick += 1 }
+                                        ) { pm.bsTick += 1 }
                                         Spacer(modifier = Modifier.height(6.dp))
                                     }
                                 }
@@ -4054,30 +4072,30 @@ fun PlayerScreen(
                             }
                             // AniPM's own tracks (player-side) - real labels
                             // only, website setSubtitles parity.
-                            if (anipmSubLabels.isNotEmpty()) {
+                            if (pm.anipmSubLabels.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 PanelColTitle("PLAYER TRACKS")
                                 Spacer(modifier = Modifier.height(6.dp))
                                 OptRow(
                                     label = "Off",
                                     detail = "Player captions off",
-                                    chip = if (anipmSubIdx < 0) "ACTIVE" else "",
-                                    active = anipmSubIdx < 0,
+                                    chip = if (pm.anipmSubIdx < 0) "ACTIVE" else "",
+                                    active = pm.anipmSubIdx < 0,
                                     big = big,
                                 ) {
-                                    anipmSubIdx = -1
+                                    pm.anipmSubIdx = -1
                                     cmd("window.__sb && window.__sb.subs(false)")
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
-                                anipmSubLabels.forEachIndexed { i, lbl ->
+                                pm.anipmSubLabels.forEachIndexed { i, lbl ->
                                     OptRow(
                                         label = lbl,
                                         detail = "Player track",
-                                        chip = if (anipmSubIdx == i) "ACTIVE" else "",
-                                        active = anipmSubIdx == i,
+                                        chip = if (pm.anipmSubIdx == i) "ACTIVE" else "",
+                                        active = pm.anipmSubIdx == i,
                                         big = big,
                                     ) {
-                                        anipmSubIdx = i
+                                        pm.anipmSubIdx = i
                                         cmd("window.__sb && window.__sb.subs(true, '" + lbl.replace("'", "") + "')")
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
@@ -4086,24 +4104,24 @@ fun PlayerScreen(
                             // VidBolt's own subtitle tracks (0.41/0.43): real
                             // labels + command values from the stream - Off
                             // first, then each provider track.
-                            if (mirror == "vidbolt" && vbSubs.isNotEmpty()) {
+                            if (pm.mirror == "vidbolt" && pm.vbSubs.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 PanelColTitle("VIDBOLT TRACKS")
                                 Spacer(modifier = Modifier.height(6.dp))
                                 OptRow(
                                     label = "Off",
                                     detail = "Provider captions off",
-                                    chip = if (vbSubSel.isEmpty() || vbSubSel == "-1") "ACTIVE" else "",
-                                    active = vbSubSel.isEmpty() || vbSubSel == "-1",
+                                    chip = if (pm.vbSubSel.isEmpty() || pm.vbSubSel == "-1") "ACTIVE" else "",
+                                    active = pm.vbSubSel.isEmpty() || pm.vbSubSel == "-1",
                                     big = big,
                                 ) {
-                                    koManual = true
-                                    vbSubSel = "-1"
+                                    pm.koManual = true
+                                    pm.vbSubSel = "-1"
                                     cmd("window.__sb && window.__sb.vbsub(-1)")
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
-                                vbSubs.forEach { (lbl, value) ->
-                                    val on = vbSubSel == value
+                                pm.vbSubs.forEach { (lbl, value) ->
+                                    val on = pm.vbSubSel == value
                                     OptRow(
                                         label = lbl,
                                         detail = "Provider track",
@@ -4111,8 +4129,8 @@ fun PlayerScreen(
                                         active = on,
                                         big = big,
                                     ) {
-                                        koManual = true
-                                        vbSubSel = value
+                                        pm.koManual = true
+                                        pm.vbSubSel = value
                                         cmd("window.__sb && window.__sb.vbsub('" + value.replace("'", "") + "')")
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
@@ -4144,7 +4162,7 @@ fun PlayerScreen(
                             Text("TEXT SIZE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                             Spacer(modifier = Modifier.weight(1f))
                             Text(
-                                subStyle.size.toString() + "sp",
+                                pm.subStyle.size.toString() + "sp",
                                 color = Accent,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 12.sp,
@@ -4153,18 +4171,21 @@ fun PlayerScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf(14 to "Normal", 18 to "Large", 24 to "Huge").forEach { (v, name) ->
-                                StyleChip(name, subStyle.size == v, big) {
-                                    subStyle = subStyle.copy(size = v)
-                                    Store.saveSubStyle(ctx, subStyle)
+                                StyleChip(name, pm.subStyle.size == v, big) {
+
+                                    pm.subStyle = pm.subStyle.copy(size = v)
+                                    Store.saveSubStyle(ctx, pm.subStyle)
                                 }
                             }
                             StyleChip("A-", on = false, big = big) {
-                                subStyle = subStyle.copy(size = (subStyle.size - 2).coerceIn(12, 26))
-                                Store.saveSubStyle(ctx, subStyle)
+
+                                pm.subStyle = pm.subStyle.copy(size = (pm.subStyle.size - 2).coerceIn(12, 26))
+                                Store.saveSubStyle(ctx, pm.subStyle)
                             }
                             StyleChip("A+", on = false, big = big) {
-                                subStyle = subStyle.copy(size = (subStyle.size + 2).coerceIn(12, 26))
-                                Store.saveSubStyle(ctx, subStyle)
+
+                                pm.subStyle = pm.subStyle.copy(size = (pm.subStyle.size + 2).coerceIn(12, 26))
+                                Store.saveSubStyle(ctx, pm.subStyle)
                             }
                         }
                         Spacer(modifier = Modifier.height(12.dp))
@@ -4172,7 +4193,7 @@ fun PlayerScreen(
                             Text("TIMING SYNC", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                             Spacer(modifier = Modifier.weight(1f))
                             Text(
-                                subOffset.let { (if (it >= 0) "+" else "") + String.format("%.1f", it) + "s" },
+                                pm.subOffset.let { (if (it >= 0) "+" else "") + String.format("%.1f", it) + "s" },
                                 color = Accent,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 12.sp,
@@ -4184,24 +4205,24 @@ fun PlayerScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             StyleChip("-0.5s", on = false, big = big) {
-                                val o = Math.round((subOffset - 0.5f) * 10) / 10f
-                                subOffset = o.coerceIn(-30f, 30f)
-                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                                val o = Math.round((pm.subOffset - 0.5f) * 10) / 10f
+                                pm.subOffset = o.coerceIn(-30f, 30f)
+                                Store.saveSubsPref(ctx, title.type, title.id, pm.subPos, pm.subOffset)
                             }
                             StyleChip("<", on = false, big = big) {
-                                val o = Math.round((subOffset - 0.5f) * 10) / 10f
-                                subOffset = o.coerceIn(-30f, 30f)
-                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                                val o = Math.round((pm.subOffset - 0.5f) * 10) / 10f
+                                pm.subOffset = o.coerceIn(-30f, 30f)
+                                Store.saveSubsPref(ctx, title.type, title.id, pm.subPos, pm.subOffset)
                             }
                             StyleChip(">", on = false, big = big) {
-                                val o = Math.round((subOffset + 0.5f) * 10) / 10f
-                                subOffset = o.coerceIn(-30f, 30f)
-                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                                val o = Math.round((pm.subOffset + 0.5f) * 10) / 10f
+                                pm.subOffset = o.coerceIn(-30f, 30f)
+                                Store.saveSubsPref(ctx, title.type, title.id, pm.subPos, pm.subOffset)
                             }
                             StyleChip("+0.5s", on = false, big = big) {
-                                val o = Math.round((subOffset + 0.5f) * 10) / 10f
-                                subOffset = o.coerceIn(-30f, 30f)
-                                Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                                val o = Math.round((pm.subOffset + 0.5f) * 10) / 10f
+                                pm.subOffset = o.coerceIn(-30f, 30f)
+                                Store.saveSubsPref(ctx, title.type, title.id, pm.subPos, pm.subOffset)
                             }
                         }
                         Spacer(modifier = Modifier.height(12.dp))
@@ -4211,9 +4232,9 @@ fun PlayerScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf("top" to "Top", "center" to "Center", "bottom" to "Bottom").forEach { (v, name) ->
-                                StyleChip(name, subPos == v, big) {
-                                    subPos = v
-                                    Store.saveSubsPref(ctx, title.type, title.id, subPos, subOffset)
+                                StyleChip(name, pm.subPos == v, big) {
+                                    pm.subPos = v
+                                    Store.saveSubsPref(ctx, title.type, title.id, pm.subPos, pm.subOffset)
                                 }
                             }
                         }
@@ -4224,9 +4245,10 @@ fun PlayerScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf(0 to "White", 1 to "Yellow", 2 to "Cyan").forEach { (idx, name) ->
-                                StyleChip(name, subStyle.color == idx, big) {
-                                    subStyle = subStyle.copy(color = idx)
-                                    Store.saveSubStyle(ctx, subStyle)
+                                StyleChip(name, pm.subStyle.color == idx, big) {
+
+                                    pm.subStyle = pm.subStyle.copy(color = idx)
+                                    Store.saveSubStyle(ctx, pm.subStyle)
                                 }
                             }
                         }
@@ -4237,9 +4259,10 @@ fun PlayerScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf(0 to "None", 60 to "Semi (50%)", 100 to "Solid (100%)").forEach { (v, name) ->
-                                StyleChip(name, subStyle.bg == v, big) {
-                                    subStyle = subStyle.copy(bg = v)
-                                    Store.saveSubStyle(ctx, subStyle)
+                                StyleChip(name, pm.subStyle.bg == v, big) {
+
+                                    pm.subStyle = pm.subStyle.copy(bg = v)
+                                    Store.saveSubStyle(ctx, pm.subStyle)
                                 }
                             }
                         }
@@ -4264,20 +4287,20 @@ fun PlayerScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF000000).copy(alpha = subStyle.bg / 100f), RoundedCornerShape(10.dp))
+                            .background(Color(0xFF000000).copy(alpha = pm.subStyle.bg / 100f), RoundedCornerShape(10.dp))
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             "Sample: StreamBox captions ride in this exact style.",
-                            color = when (subStyle.color) {
+                            color = when (pm.subStyle.color) {
                                 1 -> Color(0xFFFFE066)
                                 2 -> Color(0xFF7FE7F5)
                                 else -> Color.White
                             },
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center,
-                            fontSize = subStyle.size.sp,
+                            fontSize = pm.subStyle.size.sp,
                         )
                     }
                     // TV 10-foot legend (design pack panel footer).
@@ -4315,17 +4338,17 @@ fun PlayerScreen(
         subsLayer(this)
 
         // Slow-network note (0.75): transient, honest, auto-hides.
-        if (netNote.isNotEmpty()) {
-            NetNotePill(netNote, big, Modifier.align(Alignment.TopCenter))
+        if (pm.netNote.isNotEmpty()) {
+            NetNotePill(pm.netNote, big, Modifier.align(Alignment.TopCenter))
         }
 
         // Thank You screen (0.73): the last panel on the box so it owns
         // the whole surface when the season has nothing left to play.
-        if (showThanks) {
+        if (pm.showThanks) {
             ThanksOverlay(
                 title = title,
                 big = big,
-                similar = thanksSimilar,
+                similar = pm.thanksSimilar,
                 onReplay = { replayThanks() },
                 onOpen = onOpen,
                 onHome = onHome,

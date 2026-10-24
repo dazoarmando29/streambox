@@ -323,7 +323,18 @@
     80 the next-episode warm start (0.75): the VidBolt embed page
         prefetches into the shim cache ONCE per episode after 45s of
         stable playback - never on slow sessions (the line belongs to the
-        video), so the auto-next hop lands on a cache hit */
+        video), so the auto-next hop lands on a cache hit
+    81 the player keeps its states in ONE holder (0.76): the0.65 lesson
+        (JVM 64KB method limit) moved the big layers out, but by 0.75 the
+        remaining local remember() preambles + per-state captures still
+        overflowed PlayerScreen()'s register file (311 registers) - D8
+        emitted a primitive move over a boxed Integer and ART rejected the
+        whole CLASS ("copy-cat" VerifyError). The TV died at BOOT because
+        TvLegend pulls KeyChip from this class, so any future VerifyError
+        there is an instant TV black-screen. The states live on one
+        remembered PlayerMem (val pm) and the method stays small (77
+        registers) - never reintroduce a field of bare `var x by remember`
+        inside PlayerScreen */
  const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -336,6 +347,10 @@ const ROOT = path.resolve(__dirname, "..");
 const _readFileSync = fs.readFileSync.bind(fs);
 const qaRead = (p) => _readFileSync(p, "utf8").replace(/\r\n/g, "\n");
 const read = (f) => qaRead(path.join(ROOT, f));
+// The 0.76 state-holder renamed the player states to pm.x - the behavioral
+// invariants below still judge the same shapes, so player reads normalize
+// the qualifier away (checks that assert the HOLDER itself use raw qaRead).
+const qaPlayer = (f) => qaRead(f, "utf8").replace(/\bpm\./g, "");
 
 let fails = 0, warns = 0;
 const bad = (m) => { console.log("FAIL  " + m); fails++; };
@@ -530,7 +545,7 @@ else natBad.forEach((x) => bad("deprecated volume icon (use Icons.AutoMirrored.F
 /* ---------- 16. native SB_HOOK bridge JS parses ---------- */
 const psPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/PlayerScreen.kt");
 if (fs.existsSync(psPath)) {
-  const ps = qaRead(psPath, "utf8");
+  const ps = qaPlayer(psPath);
   const m = ps.match(/private val SB_HOOK = """\n([\s\S]*?)\n?"""/);
   if (!m) bad("SB_HOOK raw string not found in PlayerScreen.kt");
   else {
@@ -577,7 +592,7 @@ else ok("HLS test asset never touches the website");
 // only the hidden flag opens it (dormant pre-build rule).
 if (!fs.existsSync(psPath)) bad("PlayerScreen.kt missing - HLS slot gates cannot be verified");
 else {
-  const ps2 = qaRead(psPath, "utf8");
+  const ps2 = qaPlayer(psPath);
   const mf = ps2.match(/private fun mirrorsFor[\s\S]*?\n\}/);
   if (mf && !/"hls"/.test(mf[0])) ok("mirrorsFor never lists the HLS slot");
   else bad("mirrorsFor lists \"hls\" - the slot must stay out of the normal server sheet");
@@ -616,7 +631,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 19. native quality cycle matches QLEVELS ---------- */
 {
-  const psq = qaRead(psPath, "utf8");
+  const psq = qaPlayer(psPath);
   const m = psq.match(/private val CINE_Q = listOf\(([^)]*)\)/);
   const vals = m ? [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]) : null;
   if (vals && vals.join(",") === ",1080,720,480") ok("native CineSrc quality cycle is only \"\"/1080/720/480");
@@ -656,7 +671,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 21. player resume boots at the saved position ---------- */
 {
-  const psResume = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psResume = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psResume) bad("PlayerScreen.kt missing - resume boot cannot be verified");
   else {
     if (/val resumeAt = run \{[\s\S]*?Store\.progressList\(ctx\)/.test(psResume)) ok("resumeAt derives from saved Store progress");
@@ -692,7 +707,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 23. watchdog hops only on real silence ---------- */
 {
-  const psW = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psW = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psW) bad("PlayerScreen.kt missing - watchdog cannot be verified");
   else {
     if (/lastMediaAt/.test(psW) && /idleFor/.test(psW)) ok("watchdog is idle-based (media traffic keeps it patient)");
@@ -721,7 +736,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 25. VidBolt unsandboxed + media never blocked ---------- */
 {
-  const psVb = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psVb = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psVb) bad("PlayerScreen.kt missing - VidBolt rules cannot be verified");
   else {
     if (/sandbox\s*=/.test(psVb)) bad("sandbox attribute in PlayerScreen - VidBolt renders Playback disabled when sandboxed");
@@ -738,7 +753,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 26. VidBolt gate shim is document-level, JS bodies untouched ---------- */
 {
-  const psG = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psG = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psG) bad("PlayerScreen.kt missing - VidBolt gate rules cannot be verified");
   else {
     if (/patchedVbJs|VB_JS_CACHE/.test(psG)) {
@@ -762,7 +777,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 27. SB_HOOK rides the wrapped shell markup ---------- */
 {
-  const psH = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psH = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psH) bad("PlayerScreen.kt missing - shell hook embed cannot be verified");
   else if (/"<script>" \+ SB_HOOK \+ "<\/script>"/.test(psH)) {
     ok("SB_HOOK rides the wrapped shell markup (attached before the iframe speaks)");
@@ -773,7 +788,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 28. silent-start kicks before the watchdog hops ---------- */
 {
-  const psK = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psK = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psK) bad("PlayerScreen.kt missing - start kicks cannot be verified");
   else if (/mirror == "vidbolt" \|\| mirror == "vidzen"\) && kicked < 2[\s\S]{0,240}window\.__sb && window\.__sb\.play\(\)/.test(psK)) {
     ok("silent-start kicks nudge VidBolt/VidZen before the 30s idle hop (website parity)");
@@ -891,7 +906,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 54. anime season routing ---------- */
 {
-  const psA = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psA = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psA) bad("PlayerScreen.kt missing - anime season routing cannot be verified");
   else if (/Api\.animeMap\(title\.name, airYear\)/.test(psA) &&
            /val sameEntry/.test(psA) &&
@@ -906,7 +921,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 55. next episode never steps past the season ---------- */
 {
-  const psN = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psN = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psN) bad("PlayerScreen.kt missing - episode advance rules cannot be verified");
   else if (/fun advanceEpisode\(\)/.test(psN) &&
            /epNumber >= count/.test(psN) &&
@@ -920,7 +935,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 44. VidBolt subtitles carry their command index ---------- */
 {
-  const psSub = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psSub = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psSub) bad("PlayerScreen.kt missing - VidBolt subtitle rules cannot be verified");
   else if (/VBT\.subs\[String\(k\)\]/.test(psSub) &&
            /String\(nat\.length \+ j\)/.test(psSub) &&
@@ -935,7 +950,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 45. skip pills: plain names + tail-guarded credits/outro ---------- */
 {
-  const psSkip = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psSkip = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psSkip) bad("PlayerScreen.kt missing - skip pill rules cannot be verified");
   else if (/fun hitAt\(cur: Float, dur: Float/.test(psSkip) &&
            /fun inTail\(r: IntroDb\.TRange\)/.test(psSkip) &&
@@ -952,7 +967,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 46. server auto-switch leads with VidBolt ---------- */
 {
-  const psHop = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psHop = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psHop) bad("PlayerScreen.kt missing - auto-switch rules cannot be verified");
   else {
     const chain = (psHop.match(/private fun fallbackChain[\s\S]*?\n}\n/) || [""])[0];
@@ -1009,7 +1024,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 49. routing honors isAnime ---------- */
 {
-  const psR = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psR = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psR) bad("PlayerScreen.kt missing - routing rules cannot be verified");
   else if (/title\.type == "anime" \|\| title\.isAnime -> if \(mal != null \|\| ani != null\) "anipm"/.test(psR)) {
     ok("player routing honors isAnime - Japanese animation rides the anime route");
@@ -1108,7 +1123,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 35. VidBolt quality plumbing is provider-reported only ---------- */
 {
-  const psQ = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psQ = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psQ) bad("PlayerScreen.kt missing - VidBolt quality rules cannot be verified");
   else if (/vbqual: function\(opt, val\)/.test(psQ) &&
            /o\.group === "Quality"/.test(psQ) &&
@@ -1186,7 +1201,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 40. player speed: doc cache + preconnects + one resolve ---------- */
 {
-  const psF = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psF = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psF) bad("PlayerScreen.kt missing - player speed rules cannot be verified");
   else if (/VB_DOC_CACHE/.test(psF) &&
            /rel=\\"preconnect\\"/.test(psF) &&
@@ -1214,7 +1229,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 42. motion clarity + judder reduction ---------- */
 {
-  const psM = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psM = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psM) bad("PlayerScreen.kt missing - motion rules cannot be verified");
   else if (/requestVideoFrameCallback/.test(psM) &&
            /'video:fps'/.test(psM) &&
@@ -1229,10 +1244,10 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 56. K-drama VidBolt defaults ---------- */
 {
-  const psK = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psK = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psK) bad("PlayerScreen.kt missing - K-drama defaults cannot be verified");
-  else if (/var contentLang by remember \{ mutableStateOf\(title\.lang\) \}/.test(psK) &&
-           /var koManual by remember \{ mutableStateOf\(false\) \}/.test(psK) &&
+  else if (/var contentLang by (?:remember \{ )?mutableStateOf\(title\.lang\)/.test(psK) &&
+           /var koManual by (?:remember \{ )?mutableStateOf\(false\)/.test(psK) &&
            /contains\("tagalog", true\)/.test(psK) &&
            /contains\("korean", true\)/.test(psK) &&
            /l\.contains\("english"\) \|\| l == "eng"/.test(psK) &&
@@ -1287,7 +1302,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 59. provider episode events never steer the load ---------- */
 {
-  const psE = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psE = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psE) bad("PlayerScreen.kt missing - episode-sync rules cannot be verified");
   else {
     const lateRead = /playerUrl\(title, epSeason, epNumber, routeMal, routeAni, mirror, startAt, anipmLang, cinesrcQ, epBase\)/.test(psE);
@@ -1310,7 +1325,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 60. player UI lives outside PlayerScreen's method ---------- */
 {
-  const psM = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psM = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psM) bad("PlayerScreen.kt missing - JVM method-limit rules cannot be verified");
   else {
     const layers = ["topHudLayer", "captionLayer", "pausedLayer", "barLayer", "epsLayer", "subsLayer"];
@@ -1325,7 +1340,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 61. auto-next is ours (canonical route, no double-step) ---------- */
 {
-  const psA = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psA = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psA) bad("PlayerScreen.kt missing - auto-next rules cannot be verified");
   else if (/if \(adoptProviderEpisode\(o\.optInt\("season", -1\), o\.optInt\("episode", -1\)\)\) \{\s*\n\s*load\(\)/.test(psA) &&
            /"ended" -> \{[\s\S]{0,2200}?\!endedHandled && pastSyncGrace\(\)/.test(psA) &&
@@ -1342,7 +1357,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 62. auto-next runs on every series ---------- */
 {
-  const psN = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psN = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   const stN = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
     ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"), "utf8") : "";
   if (!psN || !stN) bad("PlayerScreen.kt/Store.kt missing - auto-next coverage cannot be verified");
@@ -1368,7 +1383,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 63. the stored language heals before routing ---------- */
 {
-  const psL = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psL = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   const apiL = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"))
     ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"), "utf8") : "";
   if (!psL || !apiL) bad("PlayerScreen.kt/Api.kt missing - language heal cannot be verified");
@@ -1389,7 +1404,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 64. VidBolt track discovery always finds the real tracks ---------- */
 {
-  const psT = fs.existsSync(psPath) ? qaRead(psPath) : "";
+  const psT = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psT) bad("PlayerScreen.kt missing - track discovery rules cannot be verified");
   else if (psT.includes("function vbRoute()") &&
            psT.includes("var r = vbRoute();") &&
@@ -1405,7 +1420,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 65. resolve hardening + weak-TV speed ---------- */
 {
-  const psT = fs.existsSync(psPath) ? qaRead(psPath) : "";
+  const psT = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   const appT = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
     ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt")) : "";
   const hsT = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
@@ -1428,7 +1443,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 66. Tagalog-first for K-Dramas ---------- */
 {
-  const psG = fs.existsSync(psPath) ? qaRead(psPath) : "";
+  const psG = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psG) bad("PlayerScreen.kt missing - Tagalog-first rules cannot be verified");
   else if (/tagalog: Boolean = false/.test(psG) &&
            /if \(tagalog\) "&audio=Tagalog" else ""/.test(psG) &&
@@ -1446,7 +1461,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 67. playback stutter + nav-bar lag ---------- */
 {
-  const psP = fs.existsSync(psPath) ? qaRead(psPath) : "";
+  const psP = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   const subP = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Subs.kt"))
     ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Subs.kt")) : "";
   const hsP2 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
@@ -1469,7 +1484,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 68. skip timestamps: real MAL entry + calibrated merge ---------- */
 {
-  const psM = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psM = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   const inM = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/IntroDb.kt"))
     ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/IntroDb.kt")) : "";
   if (!psM || !inM) bad("PlayerScreen/IntroDb missing - skip timestamp rules cannot be verified");
@@ -1489,7 +1504,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 69. auto-skip seeks past, never auto-advances ---------- */
 {
-  const psS69 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psS69 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psS69) bad("PlayerScreen.kt missing - auto-skip rules cannot be verified");
   else {
     const autoBlock = (psS69.match(/LaunchedEffect\(cur, hit, autoSkip\) \{[\s\S]{0,700}?\n    \}/) || [""])[0];
@@ -1505,7 +1520,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 70. the timeline highlights the skip marks ---------- */
 {
-  const psT70 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psT70 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psT70) bad("PlayerScreen.kt missing - timeline mark rules cannot be verified");
   else if (/private fun BarTimeline\(/.test(psT70) &&
            /marks: IntroDb\.Skips/.test(psT70) &&
@@ -1521,7 +1536,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 71. seek bursts coalesce (one provider seek per window) ---------- */
 {
-  const psS71 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psS71 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psS71) bad("PlayerScreen.kt missing - seek reliability cannot be verified");
   else if (/fun sendSeekNow\(target: Float\)/.test(psS71) &&
            /if \(now - lastSeekCmdAt >= 450L\)/.test(psS71) &&
@@ -1568,7 +1583,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 74. thank-you screen + Continue Watching lifecycle ---------- */
 {
-  const psD = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psD = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   const stD = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
     ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt")) : "";
   const apiD = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"))
@@ -1599,7 +1614,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 75. stall watchdog: the freeze self-heals ---------- */
 {
-  const psW = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psW = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psW) bad("PlayerScreen.kt missing - stall rules cannot be verified");
   else if (/Stall watchdog \(0\.74\)/.test(psW) &&
            /lastRepPos/.test(psW) &&
@@ -1618,7 +1633,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 76. render-process death rebuilds the WebView ---------- */
 {
-  const psR = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psR = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psR) bad("PlayerScreen.kt missing - render-process recovery cannot be verified");
   else if (/override fun onRenderProcessGone\(/.test(psR) &&
            /key\(webGen\) \{/.test(psR) &&
@@ -1635,7 +1650,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 77. weak-box pressure: no runaway timers + thinned bridge + memory valve ---------- */
 {
-  const psP77 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psP77 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   const appT77 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/MainActivity.kt"))
     ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/MainActivity.kt")) : "";
   if (!psP77 || !appT77) bad("PlayerScreen/MainActivity missing - pressure rules cannot be verified");
@@ -1656,7 +1671,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 78. slow-WiFi autopilot: session-only, reported ladders only ---------- */
 {
-  const psN78 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psN78 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psN78) bad("PlayerScreen.kt missing - slow-WiFi rules cannot be verified");
   else if (/fun enterSlow\(\)/.test(psN78) &&
            /fun slowStep\(\)/.test(psN78) &&
@@ -1676,7 +1691,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 79. Crisp picture pass: style injection only, never JS bodies ---------- */
 {
-  const psC79 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psC79 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psC79) bad("PlayerScreen.kt missing - the Crisp picture pass cannot be verified");
   else if (/function crispTo\(doc, on\)/.test(psC79) &&
            /feConvolveMatrix/.test(psC79) &&
@@ -1692,7 +1707,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 
 /* ---------- 80. next-episode warm start ---------- */
 {
-  const psP80 = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  const psP80 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psP80) bad("PlayerScreen.kt missing - the warm start cannot be verified");
   else if (/Next-episode warm start \(0\.75\)/.test(psP80) &&
            /fun nextTargetPair\(\): Pair<Int, Int>\?/.test(psP80) &&
@@ -1702,6 +1717,28 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("next-episode warm start: the VidBolt embed page prefetches once per episode after 45s of stable playback, never on slow sessions");
   } else {
     bad("the next-episode warm start (0.75) must prefetch the VidBolt embed page once per episode after stable playback, never on a slow session (the line belongs to the video) and never twice");
+  }
+}
+
+/* ---------- 81. player states live in ONE holder (register budget) ---------- */
+{
+  const psH = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  if (!psH) bad("PlayerScreen.kt missing - the state-holder rule cannot be verified");
+  else {
+    const fnS = psH.indexOf("fun PlayerScreen(");
+    const fnE = psH.indexOf("/** Player timeline", fnS);
+    const body = fnS >= 0 && fnE > fnS ? psH.slice(fnS, fnE) : "";
+    // Only the function's OWN state declarations bloat its method - nested
+    // composable lambdas compile into their own classes and may remember.
+    const bareRemembers = (body.match(/^ {4}var \w+ by remember/gm) || []).length;
+    if (/private class PlayerMem\(/.test(psH) &&
+        /val pm = remember\(title\.id, title\.type, season, episode\) \{/.test(psH) &&
+        /PlayerMem\(title, season, episode, mal, ani, lang, resumeAt, bootMirror, ctx\)/.test(body) &&
+        bareRemembers === 0) {
+      ok("player states live in one PlayerMem holder (one remember, no bare var-by-remember) - the method's register file stays healthy");
+    } else {
+      bad("PlayerScreen's states must live on ONE remembered PlayerMem (val pm) - a field of bare `var x by remember` inflates the method until ART rejects the class (copy-cat VerifyError) and the TV dies at boot (0.76)");
+    }
   }
 }
 

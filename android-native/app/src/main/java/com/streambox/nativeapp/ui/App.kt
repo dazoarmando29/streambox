@@ -292,6 +292,9 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.76" to listOf(
+        "Fixed the app not opening on Android TV (black screen then close) after the last update - the player internals were rebuilt so it cannot happen again",
+    ),
     "0.75" to listOf(
         "Slow Wi-Fi handled automatically - the player detects a thin connection, plays a lighter quality (and the smoother MP4 files when available) and never stops and starts; it says so with one honest note and remembers nothing after you leave",
         "Crisp picture is always on - a real sharpening + vividness pass on every server for a cleaner, sharper look",
