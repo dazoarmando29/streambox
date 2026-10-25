@@ -1563,7 +1563,10 @@ fun PlayerScreen(
                 ctx,
                 Progress(
                     title.type, title.id, title.name, title.poster, pm.epSeason, pm.epNumber,
-                    c, d, System.currentTimeMillis(), mal, ani, pm.contentLang, done,
+                    // The ROUTED entry ids (0.77): the record then speaks the
+                    // season's own MAL entry, which the drop-gate needs.
+                    c, d, System.currentTimeMillis(), pm.routeMal ?: mal, pm.routeAni ?: ani,
+                    pm.contentLang, done,
                 ),
             )
         } catch (e: Exception) {
@@ -2172,7 +2175,11 @@ fun PlayerScreen(
         if (title.type != "movie") {
             pm.epsBusy = true
             pm.epsList = withContext(Dispatchers.IO) {
-                runCatching { Api.season(title.id, pm.epSeason) }.getOrDefault(listOf())
+                val raw = runCatching { Api.season(title.id, pm.epSeason) }.getOrDefault(listOf())
+                // Drop truth (0.77): anime episodes unlock only when AniPM
+                // has them - auto-next and the sheet can never point at an
+                // episode that 404s.
+                runCatching { Api.gateAnimeEpisodes(title, pm.epSeason, raw) }.getOrDefault(raw)
             }
             pm.epsBusy = false
         }

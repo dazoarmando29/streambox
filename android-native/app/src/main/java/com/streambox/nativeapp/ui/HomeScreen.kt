@@ -293,7 +293,8 @@ fun BrowseScreen(
                     p
                 } else {
                     val nx = runCatching {
-                        if (p.type == "movie") null else Api.nextAiredEpisode(p.id, p.season, p.episode)
+                        if (p.type == "movie") null
+                        else Api.nextAiredEpisode(p.id, p.season, p.episode, p.mal, p.ani)
                     }.getOrNull()
                     if (nx != null) {
                         val rolled = p.copy(

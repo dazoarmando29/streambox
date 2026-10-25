@@ -137,7 +137,10 @@ fun DetailScreen(
             // 'episode 1' click ANOTHER season's E1 while the fetch ran.
             episodes = listOf()
             episodes = withContext(Dispatchers.IO) {
-                runCatching { Api.season(title.id, season) }.getOrDefault(listOf())
+                val raw = runCatching { Api.season(title.id, season) }.getOrDefault(listOf())
+                // Drop truth (0.77): anime rows unlock only when AniPM has
+                // the episode - the date alone released up to a day early.
+                runCatching { Api.gateAnimeEpisodes(title, season, raw) }.getOrDefault(raw)
             }
             epsBusy = false
         }
@@ -684,6 +687,7 @@ fun DetailScreen(
                     savedDur = if (cur) p!!.dur else 0f,
                     tickMs = tickMs,
                     finale = ep.n == (episodes.maxOfOrNull { it.n } ?: -1),
+                    anime = title.type == "anime" || title.isAnime,
                 ) {
                     episode = ep.n
                     if (title.type != "anime" || mapping != "loading") {
@@ -1084,6 +1088,9 @@ private fun EpisodeRow(
     // 0.73: the season's last episode wears a SEASON FINALE line so the
     // end of the season is visible while scanning the list.
     finale: Boolean = false,
+    // 0.77: anime releases follow the AniPM drop, not the PH date flip -
+    // a locked row past its date says so honestly.
+    anime: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -1222,6 +1229,10 @@ private fun EpisodeRow(
                     java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
                         .format(java.util.Date(System.currentTimeMillis() - 7L * 24 * 3600 * 1000))
                 }
+                val todayStr = remember {
+                    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                        .format(java.util.Date())
+                }
                 val isNew = ep.aired && ep.air.isNotBlank() && ep.air >= weekAgo
                 val inProgress = ep.aired && current && savedDur > 0 && savedCur > 5
                 val left = if (inProgress) {
@@ -1236,7 +1247,15 @@ private fun EpisodeRow(
                     else -> ""
                 }
                 val detail = if (!ep.aired && ep.air.isNotBlank()) {
-                    phAirLabel(ep.air) + " (PH)  \u00b7  " + phCountdown(ep.air, tickMs)
+                    if (anime && ep.air.take(10) <= todayStr) {
+                        // The date has passed but the provider has not
+                        // dropped it yet (0.77) - say so, never fake an
+                        // availability clock.
+                        "Waiting for the AniPM drop"
+                    } else {
+                        phAirLabel(ep.air) + (if (anime) " (JP)" else " (PH)") +
+                            "  \u00b7  " + phCountdown(ep.air, tickMs)
+                    }
                 } else {
                     ""
                 }

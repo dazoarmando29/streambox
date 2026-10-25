@@ -334,7 +334,18 @@
         there is an instant TV black-screen. The states live on one
         remembered PlayerMem (val pm) and the method stays small (77
         registers) - never reintroduce a field of bare `var x by remember`
-        inside PlayerScreen */
+        inside PlayerScreen
+    82 anime availability = the AniPM DROP (0.77): the old model flipped
+        playability at 00:00 PH of the TMDB air date - up to a day BEFORE
+        the Japanese release that AniPM follows (Dragon Ball Super: the row
+        went playable while the provider still 404d). The embed route the
+        player already navigates to answers HEAD 200 when the episode
+        exists and 404 before the drop, so anime boundary episodes start
+        LOCKED and unlock only when the provider has them ("Waiting for the
+        AniPM drop" is the honest line), an early drop unlocks early, the
+        unreachable-probe fallback flips the day AFTER the date, and the CW
+        new-episode revival never returns a 404 episode. Non-anime keeps
+        its TMDB dates. Metadata only - a status code, never a stream */
  const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1393,7 +1404,8 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
            /contentLang = det\.originalLanguage/.test(psL) &&
            /!booted && contentLang == "ko" && mirror != "vidbolt"/.test(psL) &&
            /\(title\.type == "movie" \|\| title\.lang\.isNotEmpty\(\)\)/.test(psL) &&
-           /mal, ani, contentLang, done/.test(psL) &&
+           /routeMal \?: mal, routeAni \?: ani/.test(psL) &&
+           /contentLang, done/.test(psL) &&
            /!koManual && contentLang == "ko" && mirror == "vidbolt"/.test(psL) &&
            !/var koAuto/.test(psL)) {
     ok("stored language heals before routing: contentLang from TMDB original_language, ko realigns to VidBolt before the first load, records self-heal on save");
@@ -1603,7 +1615,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
            /optBoolean\("done", false\)/.test(stD) &&
            /fun nextAiredEpisode\(/.test(apiD) &&
            /if \(!p\.done\)/.test(hsD) &&
-           /Api\.nextAiredEpisode\(p\.id, p\.season, p\.episode\)/.test(hsD) &&
+           /Api\.nextAiredEpisode\(p\.id, p\.season, p\.episode, p\.mal, p\.ani\)/.test(hsD) &&
            /done = false,/.test(hsD) &&
            /Thank You screen \(0\.73\)/.test(apD)) {
     ok("thank-you screen + CW lifecycle: finished episodes go DONE and out of the row, a newer aired episode revives it rolled forward");
@@ -1739,6 +1751,31 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     } else {
       bad("PlayerScreen's states must live on ONE remembered PlayerMem (val pm) - a field of bare `var x by remember` inflates the method until ART rejects the class (copy-cat VerifyError) and the TV dies at boot (0.76)");
     }
+  }
+}
+
+/* ---------- 82. anime availability = the AniPM drop ---------- */
+{
+  const apiG = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt")) : "";
+  const psG = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
+  const dtG = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt"))
+    ? qaPlayer(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/DetailScreen.kt")) : "";
+  if (!apiG || !psG || !dtG) bad("Api/PlayerScreen/DetailScreen missing - the drop-gate cannot be verified");
+  else if (/fun aniPmHas\(mal: Int\?, aep: Int\): Boolean\?/.test(apiG) &&
+           /"https:\/\/ani\.pm\/embed\/mal\/" \+ mal \+ "\/" \+ aep \+ "\/sub"/.test(apiG) &&
+           /requestMethod = "HEAD"/.test(apiG) &&
+           /in 200\.\.299 -> true/.test(apiG) &&
+           /404 -> false/.test(apiG) &&
+           /fun gateAnimeEpisodes\(/.test(apiG) &&
+           /fun animeEntry\(/.test(apiG) &&
+           /ep\.air\.take\(10\) < today/.test(apiG) &&
+           /Api\.gateAnimeEpisodes\(title, season, raw\)/.test(dtG) &&
+           /Api\.gateAnimeEpisodes\(title, epSeason, raw\)/.test(psG) &&
+           /Waiting for the AniPM drop/.test(dtG)) {
+    ok("anime availability = the AniPM drop: boundary episodes stay locked until the embed answers 200, early drops unlock early, and the fallback flips the day AFTER the date");
+  } else {
+    bad("anime episodes must unlock on the AniPM DROP (0.77) - probe the documented embed route (HEAD 200 = out, 404 = not yet), start boundary episodes LOCKED with an honest Waiting for the AniPM drop line, fall back to the day AFTER the date, and never invent stream URLs");
   }
 }
 

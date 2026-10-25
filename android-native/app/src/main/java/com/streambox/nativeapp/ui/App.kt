@@ -292,6 +292,10 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.77" to listOf(
+        "Anime episodes now release exactly when AniPM drops them - an episode stays Coming Soon until the provider actually has it (no more early unlocks)",
+        "If a date has passed but the drop is late, the row says Waiting for the AniPM drop instead of pretending",
+    ),
     "0.76" to listOf(
         "Fixed the app not opening on Android TV (black screen then close) after the last update - the player internals were rebuilt so it cannot happen again",
     ),

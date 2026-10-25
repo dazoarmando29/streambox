@@ -73,6 +73,10 @@ data class TDetail(
         blank (legacy Continue Watching records) so Korean dramas still
         route to VidBolt and the Tagalog dub. */
     val originalLanguage: String = "",
+    /** Title identity (0.77): the drop-gate routes anime seasons through
+        the same entry rule as the player and needs the name + year. */
+    val name: String = "",
+    val year: Int = 0,
 )
 
 /** Client for the streambox-api Worker: TMDB catalog (key stays server-side)
@@ -469,6 +473,111 @@ object Api {
         return out
     }
 
+    /** AniPM drop truth (0.77): an anime episode is OUT when the provider
+        actually has it. The exact embed route the player navigates to
+        answers HEAD 200 when the episode exists and 404 before the drop
+        (probed live 2026-10-24: DBZ ep 291 = 200, 292 = 404 - Dalvik/Chrome
+        UAs both fine). Metadata only - the STATUS CODE of a page we already
+        embed, never a stream URL. "Drop" answers are cached 30 min, "not
+        yet" answers 90 s so a drop shows up quickly. */
+    private val aniPmDrop =
+        java.util.Collections.synchronizedMap(HashMap<String, Pair<Boolean, Long>>())
+
+    fun aniPmHas(mal: Int?, aep: Int): Boolean? {
+        if (mal == null || mal <= 0 || aep <= 0) return null
+        val key = mal.toString() + ":" + aep
+        val hit = aniPmDrop[key]
+        if (hit != null) {
+            val ttl = if (hit.first) 1800000L else 90000L
+            if (System.currentTimeMillis() - hit.second < ttl) return hit.first
+        }
+        return try {
+            val conn = URL("https://ani.pm/embed/mal/" + mal + "/" + aep + "/sub")
+                .openConnection() as HttpURLConnection
+            conn.requestMethod = "HEAD"
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            val code = try {
+                conn.responseCode
+            } finally {
+                conn.disconnect()
+            }
+            val out = when (code) {
+                in 200..299 -> true
+                404 -> false
+                else -> null
+            }
+            if (out != null) aniPmDrop[key] = out to System.currentTimeMillis()
+            out
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Anime entry routing (the 0.60 rule, shared): split franchises carry
+        one ENTRY PER SEASON (by air year) and combined entries number
+        absolutely (epBase = episodes before this season). */
+    data class AnimeEntry(val mal: Int?, val ani: Int?, val epBase: Int)
+
+    fun animeEntry(
+        name: String,
+        titleYear: Int,
+        seasons: List<SeasonInfo>,
+        seasonNo: Int,
+        titleMal: Int?,
+        titleAni: Int?,
+    ): AnimeEntry {
+        var mal = titleMal
+        var ani = titleAni
+        var base = seasons.filter { it.n in 1 until seasonNo }.sumOf { it.count }
+        val airYear = seasons.firstOrNull { it.n == seasonNo }?.air?.take(4)?.toIntOrNull() ?: 0
+        if (seasonNo >= 2 && airYear > 0 && airYear != titleYear) {
+            val mapped = runCatching { animeMap(name, airYear) }.getOrNull()
+            val sameEntry = mapped != null && (mapped.mal ?: mapped.ani) == (titleMal ?: titleAni)
+            if (mapped != null && !sameEntry && (mapped.mal != null || mapped.ani != null)) {
+                mal = mapped.mal ?: mal
+                ani = mapped.ani ?: ani
+                base = 0
+            }
+        }
+        return AnimeEntry(mal, ani, base)
+    }
+
+    /** Gate anime episodes on the AniPM drop (0.77) - "the release on AniPM
+        is the priority". Boundary episodes (blank dates, the past week, the
+        future) start LOCKED and unlock only when the provider answers 200,
+        so a row can never look playable and then 404. An early drop on
+        AniPM unlocks EARLY (JP-first reality). When the probe is
+        unreachable the flip falls back to the day AFTER the air date - the
+        old 00:00-of-the-date flip (the PH idea) released up to a day
+        before the drop. Non-anime passes through untouched. */
+    fun gateAnimeEpisodes(t: Title, seasonNo: Int, eps: List<Ep>): List<Ep> {
+        if (!(t.type == "anime" || t.isAnime) || eps.isEmpty()) return eps
+        val det = runCatching { details("tv", t.id) }.getOrNull()
+        val seasons = det?.seasons ?: listOf()
+        val titleMap = runCatching { animeMap(t.name, t.year) }.getOrNull()
+        val entry = animeEntry(t.name, t.year, seasons, seasonNo, titleMap?.mal, titleMap?.ani)
+        val today = today()
+        val weekAgo = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            .format(java.util.Date(System.currentTimeMillis() - 7L * 24 * 3600 * 1000))
+        var probes = 0
+        return eps.map { ep ->
+            val boundary = ep.air.isBlank() || ep.air.take(10) >= weekAgo || !ep.aired
+            if (!boundary) {
+                ep
+            } else if (probes >= 12) {
+                ep.copy(aired = if (ep.air.isNotBlank()) ep.air.take(10) < today else false)
+            } else {
+                probes += 1
+                when (aniPmHas(entry.mal, (entry.epBase + ep.n).coerceAtLeast(1))) {
+                    true -> if (ep.aired) ep else ep.copy(aired = true)
+                    false -> if (!ep.aired) ep else ep.copy(aired = false)
+                    null -> ep.copy(aired = if (ep.air.isNotBlank()) ep.air.take(10) < today else false)
+                }
+            }
+        }
+    }
+
     /** Core title details (one TMDB call): genres, runtime, the season
         directory, studio/languages and the aired gate. Cert + videos are
         separate calls so the detail screen can fetch everything in
@@ -525,6 +634,8 @@ object Api {
                 aired = dateOf(o, "release_date").ifEmpty { dateOf(o, "first_air_date") }
                     .let { it.isBlank() || it.take(10) <= today() },
                 originalLanguage = o.optString("original_language", ""),
+                name = titleOf(o),
+                year = yearOf(o),
             )
         } catch (e: Exception) {
             TDetail(listOf(), 0, listOf(), "", "", "", listOf())
@@ -637,20 +748,35 @@ object Api {
 
     /** First aired episode AFTER (seasonNo, episode) - the Continue Watching
         new-episode revival (0.73). Walks the rest of the season first, then
-        the next seasons that have actually premiered. Null = nothing aired
+        the next seasons that have actually premiered. For anime the
+        candidate must ALSO be really dropped on AniPM (0.77) - the row must
+        never return pointing at an episode that 404s. Null = nothing out
         yet (the row stays hidden). */
-    fun nextAiredEpisode(id: Int, seasonNo: Int, episode: Int): Pair<Int, Int>? {
+    fun nextAiredEpisode(id: Int, seasonNo: Int, episode: Int, titleMal: Int? = null, titleAni: Int? = null): Pair<Int, Int>? {
         return try {
             val det = runCatching { details("tv", id) }.getOrNull() ?: return null
+            fun out(s: Int, ep: Ep): Pair<Int, Int>? {
+                // Anime candidates must be REALLY dropped on AniPM (0.77) -
+                // the row must never return pointing at an episode that404s. With no MAL id there is nothing to probe.
+                if (titleMal != null) {
+                    val entry = animeEntry(det.name, det.year, det.seasons, s, titleMal, titleAni)
+                    if (aniPmHas(entry.mal, (entry.epBase + ep.n).coerceAtLeast(1)) == false) return null
+                }
+                return s to ep.n
+            }
             val eps = runCatching { season(id, seasonNo) }.getOrDefault(listOf())
-            eps.firstOrNull { it.n > episode && it.aired }?.let { return seasonNo to it.n }
+            for (cand in eps.filter { it.n > episode && it.aired }) {
+                out(seasonNo, cand)?.let { return it }
+            }
             val nxt = det.seasons.filter { it.n > seasonNo }
                 .sortedBy { it.n }
                 .firstOrNull { it.count > 0 && (it.air.isBlank() || it.air.take(10) <= today()) }
             if (nxt == null) return null
             val neps = runCatching { season(id, nxt.n) }.getOrDefault(listOf())
-            val first = neps.firstOrNull { it.aired } ?: return null
-            nxt.n to first.n
+            for (cand in neps.filter { it.aired }) {
+                out(nxt.n, cand)?.let { return it }
+            }
+            return null
         } catch (e: Exception) {
             null
         }
