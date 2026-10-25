@@ -292,6 +292,11 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.78" to listOf(
+        "Found the real freeze cause - the app no longer switches your TV display mode mid-video (the stutter, then mute, then frozen screen on Android TV)",
+        "Playback recovers itself faster: a stalled or muted video is detected sooner, your volume is always restored, and reloads always resume playing",
+        "When the picture starts to stutter the stream lightens itself before anything can freeze",
+    ),
     "0.77" to listOf(
         "Anime episodes now release exactly when AniPM drops them - an episode stays Coming Soon until the provider actually has it (no more early unlocks)",
         "If a date has passed but the drop is late, the row says Waiting for the AniPM drop instead of pretending",

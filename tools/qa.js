@@ -345,7 +345,18 @@
         AniPM drop" is the honest line), an early drop unlocks early, the
         unreachable-probe fallback flips the day AFTER the date, and the CW
         new-episode revival never returns a 404 episode. Non-anime keeps
-        its TMDB dates. Metadata only - a status code, never a stream */
+        its TMDB dates. Metadata only - a status code, never a stream
+    83 the freeze class stays dead (0.78): the REAL cause of "stutters,
+        then mutes, then the picture freezes and never plays again" was the
+        mid-playback DISPLAY MODE switch (motion clarity lands right when
+        the fps probe completes = "after some time") - on weak TV panels the
+        transition wedges the video SURFACE itself and no WebView rebuild
+        can revive it. TV never switches modes (phones keep it), every heal
+        restores the panel mode first, every load re-arms the play nudges +
+        the user's mute state + the Crisp level (a heal reload used to land
+        silent and stay paused), a muted-under-us video is restored
+        continuously, and repeated 1s frame gaps (jank) lighten the stream
+        BEFORE the death spiral */
  const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1705,7 +1716,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 {
   const psC79 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psC79) bad("PlayerScreen.kt missing - the Crisp picture pass cannot be verified");
-  else if (/function crispTo\(doc, on\)/.test(psC79) &&
+  else if (/function crispTo\(doc, on/.test(psC79) &&
            /feConvolveMatrix/.test(psC79) &&
            /sbCrispStyle/.test(psC79) &&
            /filter:url\(#sbCrispF\)/.test(psC79) &&
@@ -1723,7 +1734,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   if (!psP80) bad("PlayerScreen.kt missing - the warm start cannot be verified");
   else if (/Next-episode warm start \(0\.75\)/.test(psP80) &&
            /fun nextTargetPair\(\): Pair<Int, Int>\?/.test(psP80) &&
-           /if \(mirror != "vidbolt" \|\| slowSession \|\| showThanks \|\| !playing\) continue/.test(psP80) &&
+           /if \(mirror != "vidbolt" \|\| slowSession \|\| showThanks \|\| !playing( \|\| big)?\) continue/.test(psP80) &&
            /if \(!prefetched\.add\(pKey\)\) continue/.test(psP80) &&
            /runCatching \{ vbShimmedDoc\(url\) \}/.test(psP80)) {
     ok("next-episode warm start: the VidBolt embed page prefetches once per episode after 45s of stable playback, never on slow sessions");
@@ -1776,6 +1787,28 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("anime availability = the AniPM drop: boundary episodes stay locked until the embed answers 200, early drops unlock early, and the fallback flips the day AFTER the date");
   } else {
     bad("anime episodes must unlock on the AniPM DROP (0.77) - probe the documented embed route (HEAD 200 = out, 404 = not yet), start boundary episodes LOCKED with an honest Waiting for the AniPM drop line, fall back to the day AFTER the date, and never invent stream URLs");
+  }
+}
+
+/* ---------- 83. the freeze class stays dead (display mode + re-arms) ---------- */
+{
+  const psF = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
+  const psRaw = fs.existsSync(psPath) ? qaRead(psPath, "utf8") : "";
+  if (!psF || !psRaw) bad("PlayerScreen.kt missing - the freeze-class rules cannot be verified");
+  else {
+    const restores = (psF.match(/restoreDisplayRate\(ctx\)/g) || []).length;
+    if (/private fun matchContentRate\(ctx: android\.content\.Context, fps: Float\) \{\n    if \(AppEnv\.isTv\) return/.test(psF) &&
+        restores >= 4 &&
+        /loadGen \+= 1/.test(psF) &&
+        /LaunchedEffect\(loadGen\)/.test(psF) &&
+        /__sbUserMuted/.test(psRaw) &&
+        /video:jank/.test(psRaw) &&
+        /crispMode\(" \+ \(if \(big\) 1 else 2\)/.test(psF) &&
+        /Date\.now\(\) - \(window\.__sbFrameAt \|\| 0\) > 2500/.test(psRaw)) {
+      ok("freeze class stays dead: TV never switches display modes, heals restore the panel mode, loads re-arm nudges + mute state + Crisp, and jank lightens the stream before the spiral");
+    } else {
+      bad("the mid-playback DISPLAY MODE switch wedges TV video surfaces (0.78) - TV must never switch modes (phones keep it), every heal must restoreDisplayRate first, every load must re-arm the play nudges/user mute/Crisp level, muted-under-us must self-restore, and jank (repeated 1s frame gaps) must lighten the stream");
+    }
   }
 }
 

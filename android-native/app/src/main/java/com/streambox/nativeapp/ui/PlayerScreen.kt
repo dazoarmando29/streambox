@@ -528,10 +528,17 @@ private fun modeSize(m: android.view.Display.Mode): IntArray {
     120Hz runs an even 5:5 cadence (no 3:2 pulldown judder) and the highest
     matching refresh cuts sample-and-hold smear on fast motion. Native
     resolution only (never trade pixels for rate); falls back to the
-    closest refresh. The player restores the default mode on exit. */
+    closest refresh. The player restores the default mode on exit.
+    0.78: NEVER on TV. The switch lands mid-playback (right when the fps
+    probe completes - "after some time it stutters, mutes, freezes") and on
+    weak TV panels the mode transition wedges the VIDEO SURFACE itself:
+    no WebView reload can revive it, which is why the 0.74/0.75 WebView
+    heals never fixed the report. Phones keep it - they mode-switch
+    routinely; the TV plays in its own panel mode untouched. */
 private var matchModeActive = 0
 
 private fun matchContentRate(ctx: android.content.Context, fps: Float) {
+    if (AppEnv.isTv) return
     try {
         val act = findActivity(ctx) ?: return
         val dm = act.getSystemService(android.hardware.display.DisplayManager::class.java) ?: return
@@ -778,11 +785,18 @@ private val SB_HOOK = """
     // arriving while the element is unpaused - a 5s gap while the clock
     // races on is the render process dying and the shell rebuilds us.
     if (!window.__sbHasVideo || hookTicks % 5 === 0) hook();
-    crispAll();
+    if (hookTicks % 5 === 0) crispAll();
     try {
       var v = findVideo();
+      // Anti-mute (0.78): the house rule is the user's volume, period - if
+      // the page (or a dying audio pipeline) flips muted/volume under us,
+      // restore it. The user's own mute travels in __sbUserMuted.
+      if (v && !window.__sbUserMuted && (v.muted || v.volume === 0)) {
+        v.muted = false; v.volume = 1;
+        try { for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({type:'volume', volume:1}, '*'); } catch(e2){}
+      }
       if (window.__sbFrameSeen && v && !v.paused && !v.ended &&
-          Date.now() - (window.__sbFrameAt || 0) > 5000) {
+          Date.now() - (window.__sbFrameAt || 0) > 2500) {
         window.__sbFrameAt = Date.now();
         send("video:stall", {});
       }
@@ -796,11 +810,15 @@ private val SB_HOOK = """
   // 0.45/0.46 lesson) and it is never labeled with unreported quality
   // claims. The style stands down while the slow-network autopilot owns
   // the pipeline (recovery first, GPU budget for playback).
-  function crispTo(doc, on){
+  // Crisp levels (0.78): 2 = full (SVG unsharp + color, phones), 1 = the
+  // cheap color pass only (TV - the convolve shader on a weak TV GPU was
+  // an amplifier for the stutter class), 0 = off. Slow/jank sessions stand
+  // everything down (recovery first).
+  function crispTo(doc, on, lvl){
     try {
       if (!doc || !doc.body) return;
       var wrap = doc.getElementById('sbCrispSvg');
-      if (!wrap) {
+      if (!wrap && lvl >= 2) {
         wrap = doc.createElement('div');
         wrap.id = 'sbCrispSvg';
         wrap.setAttribute('aria-hidden', 'true');
@@ -808,24 +826,29 @@ private val SB_HOOK = """
         wrap.innerHTML = '<svg width="0" height="0"><filter id="sbCrispF" x="0" y="0" width="100%" height="100%"><feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="0 -0.45 0 -0.45 2.8 -0.45 0 -0.45 0"/></filter></svg>';
         doc.body.appendChild(wrap);
       }
+      if (wrap) wrap.style.display = (on && lvl >= 2) ? '' : 'none';
       var st = doc.getElementById('sbCrispStyle');
       if (!st) {
         st = doc.createElement('style');
         st.id = 'sbCrispStyle';
-        st.textContent = 'video{filter:url(#sbCrispF) contrast(1.03) saturate(1.06);}';
         (doc.head || doc.body).appendChild(st);
       }
-      st.disabled = !on;
+      var want = lvl >= 2
+        ? 'video{filter:url(#sbCrispF) contrast(1.03) saturate(1.06);}'
+        : 'video{filter:contrast(1.03) saturate(1.06);}';
+      if (st.textContent !== want) st.textContent = want;
+      st.disabled = !on || lvl <= 0;
     } catch(e){}
   }
   function crispAll(){
-    var on = !window.__sbSlow;
-    crispTo(document, on);
+    var lvl = window.__sbCrispLvl == null ? 2 : window.__sbCrispLvl;
+    var on = !window.__sbSlow && lvl > 0;
+    crispTo(document, on, lvl);
     try {
       for (var i = 0; i < window.frames.length; i++) {
         var fd = null;
         try { fd = window.frames[i].document; } catch(e2){}
-        if (fd) crispTo(fd, on);
+        if (fd) crispTo(fd, on, lvl);
       }
     } catch(e){}
   }
@@ -850,16 +873,37 @@ private val SB_HOOK = """
       window.__sbFrameSeen = true;
       try {
         var mt = meta && meta.mediaTime;
-        if (typeof mt === 'number' && !sent) {
-          if (last >= 0) {
-            var d = mt - last;
-            if (d > 0.004 && d < 0.25) { acc += d; hits++; }
+        if (typeof mt === 'number') {
+          // Jank detector (0.78): a 1-10s media gap between consecutive
+          // frames is the pipeline choking (bigger = a seek, not jank).
+          // Three in 20s = the stutter class - the shell lightens the
+          // stream BEFORE it escalates into mute + freeze.
+          if (window.__sbLastMt != null) {
+            var gap = mt - window.__sbLastMt;
+            if (gap > 1 && gap < 10) {
+              var jt = window.__sbJankTimes || (window.__sbJankTimes = []);
+              jt.push(Date.now());
+              while (jt.length > 3) jt.shift();
+              if (jt.length >= 3 && Date.now() - jt[0] < 20000 &&
+                  Date.now() - (window.__sbJankSent || 0) > 30000) {
+                window.__sbJankSent = Date.now();
+                jt.length = 0;
+                send('video:jank', {});
+              }
+            }
           }
-          last = mt;
-          if (hits >= 24 && acc > 0) {
-            sent = true;
-            var fps = Math.round(hits / acc);
-            if (fps >= 15 && fps <= 121) send('video:fps', { fps: fps });
+          window.__sbLastMt = mt;
+          if (!sent) {
+            if (last >= 0) {
+              var d = mt - last;
+              if (d > 0.004 && d < 0.25) { acc += d; hits++; }
+            }
+            last = mt;
+            if (hits >= 24 && acc > 0) {
+              sent = true;
+              var fps = Math.round(hits / acc);
+              if (fps >= 15 && fps <= 121) send('video:fps', { fps: fps });
+            }
           }
         }
       } catch(e){}
@@ -896,6 +940,7 @@ private val SB_HOOK = """
       try{window.postMessage({type:'cinesrc:command',command:'seek',args:[t]},'*');}catch(e){}
     },
     mute: function(m){
+      window.__sbUserMuted = !!m;
       var v=document.querySelector('video'); if(v) v.muted=!!m;
       if (ANIPM) anipmSend('setMuted', {muted: !!m});
       // VidBolt speaks volume (its message contract): 0 mutes, 1 restores.
@@ -961,7 +1006,9 @@ private val SB_HOOK = """
     // Slow-network autopilot hook (0.75): stands the Crisp style down
     // while the shell recovers - the picture pass is cosmetic and must
     // never compete with playback.
-    slow: function(on){ window.__sbSlow = !!on; crispAll(); }
+    slow: function(on){ window.__sbSlow = !!on; crispAll(); },
+    // Crisp level (0.78): 2 = full, 1 = color-only (TV), 0 = off.
+    crispMode: function(l){ window.__sbCrispLvl = l; crispAll(); }
   };
   // VidBolt track discovery (0.41/0.43): the wrapper page and the player
   // iframe share origin (both vidbolt.pro), so we read the player's own
@@ -1296,6 +1343,10 @@ private class PlayerMem(
     var resolvedSeason by mutableIntStateOf(-1)
     var pendingLoadAt by mutableFloatStateOf(-1f)
     var lastLoadAtMs by mutableStateOf(0L)
+    // Load GENERATION (0.78): bumps on every load() so the post-load
+    // re-asserts (mute state, Crisp level, play nudges) re-arm after EVERY
+    // reopen - a heal reload used to land silent on TV and stay paused.
+    var loadGen by mutableIntStateOf(0)
     var endedHandled by mutableStateOf(false)
     var booted by mutableStateOf(false)
     var lastSeekCmdAt by mutableStateOf(0L)
@@ -1609,6 +1660,7 @@ fun PlayerScreen(
         pm.endedHandled = false
         pm.bootAt = pm.lastLoadAtMs
         pm.firstTuAfterLoad = true
+        pm.loadGen += 1
         // Mirrors whose URL carries startAt (vidzen/vidbolt/anipm) keep the
         // position themselves; the rest get one seek when the player reports
         // ready - switching providers never loses your place (task rule).
@@ -1676,7 +1728,11 @@ fun PlayerScreen(
     // swallow autoplay-with-sound, so a VidBolt/VidZen frame that has not
     // reported anything gets an explicit play nudge (8s, then 18s) before
     // the watchdog gives up - a no-op once frames are flowing.
-    LaunchedEffect(pm.mirror, pm.epSeason, pm.epNumber) {
+    // 0.78: keyed on loadGen too - every reopen (skip, heal, rebuild) gets
+    // its own silent-start kicks and its own dead-air hop window. A heal
+    // reload used to land with autoplay swallowed and nothing nudged it
+    // back to life.
+    LaunchedEffect(pm.mirror, pm.epSeason, pm.epNumber, pm.loadGen) {
         pm.gotMedia = false
         val start = System.currentTimeMillis()
         var kicked = 0
@@ -1860,11 +1916,13 @@ fun PlayerScreen(
                 1 -> {
                     pm.stallStep = 2
                     if (!pm.muted) cmd("window.__sb && window.__sb.mute(false)")
+                    restoreDisplayRate(ctx)
                     load(startAt = pm.cur)
                 }
                 else -> {
                     pm.stallStep = 0
                     enterSlow()
+                    restoreDisplayRate(ctx)
                     pm.webGen += 1
                 }
             }
@@ -1878,9 +1936,11 @@ fun PlayerScreen(
         if (pm.stallStep == 0) {
             pm.stallStep = 2
             if (!pm.muted) cmd("window.__sb && window.__sb.mute(false)")
+            restoreDisplayRate(ctx)
             load(startAt = pm.cur)
         } else {
             pm.stallStep = 0
+            restoreDisplayRate(ctx)
             pm.webGen += 1
         }
     }
@@ -1891,6 +1951,9 @@ fun PlayerScreen(
     LaunchedEffect(pm.webGen) {
         if (pm.webGen == 0) return@LaunchedEffect
         delay(350)
+        // A leftover display-mode switch can keep the surface dead (0.78) -
+        // restore the panel's own mode before reopening.
+        restoreDisplayRate(ctx)
         if (!pm.muted) cmd("window.__sb && window.__sb.mute(false)")
         pm.playing = true
         load(startAt = pm.cur)
@@ -1904,12 +1967,24 @@ fun PlayerScreen(
             pm.netNote = ""
         }
     }
-    // A fresh page loses the slow flag (the hook boots clean) - re-assert
-    // it after every load while the session is still slow (0.75).
-    LaunchedEffect(pm.slowSession, pm.epSeason, pm.epNumber, pm.webGen) {
-        if (pm.slowSession) {
-            delay(2500)
-            cmd("window.__sb && window.__sb.slow(true)")
+    // Post-load re-assert (0.78): a fresh page loses every flag, and a TV
+    // WebView can swallow autoplay-with-sound - so after EVERY load (not
+    // just first boot) the shell re-asserts the user's mute state + Crisp
+    // level and nudges playback when playback is intended. The 0.47
+    // silent-start lesson re-armed per load: a heal reload used to land
+    // silent and stay paused forever ("pause it and it never plays again").
+    LaunchedEffect(pm.loadGen) {
+        if (pm.loadGen == 0) return@LaunchedEffect
+        val repBefore = pm.lastRepPos
+        delay(2500)
+        cmd("window.__sb && window.__sb.mute(" + pm.muted + ")")
+        cmd("window.__sb && window.__sb.crispMode(" + (if (big) 1 else 2) + ")")
+        if (pm.slowSession) cmd("window.__sb && window.__sb.slow(true)")
+        if (pm.playing) cmd("window.__sb && window.__sb.play()")
+        delay(5000)
+        if (pm.playing && pm.lastRepPos == repBefore) {
+            cmd("window.__sb && window.__sb.play()")
+            cmd("window.__sb && window.__sb.seek(" + pm.cur.toInt() + ")")
         }
     }
 
@@ -2043,7 +2118,7 @@ fun PlayerScreen(
     LaunchedEffect(Unit) {
         while (true) {
             delay(15000)
-            if (pm.mirror != "vidbolt" || pm.slowSession || pm.showThanks || !pm.playing) continue
+            if (pm.mirror != "vidbolt" || pm.slowSession || pm.showThanks || !pm.playing || big) continue
             if (System.currentTimeMillis() - pm.lastLoadAtMs < 45000) continue
             val np = nextTargetPair() ?: continue
             val pKey = np.first.toString() + ":" + np.second
@@ -2847,10 +2922,18 @@ fun PlayerScreen(
                                         }
                                     }
                                     "video:stall" -> {
-                                        // Frames stopped for 5s while the
-                                        // element was unpaused (0.74) - the
-                                        // freeze detector in the hook.
+                                        // Frames stopped for 2.5s while the
+                                        // element was unpaused (0.74/0.78) -
+                                        // the freeze detector in the hook.
                                         pm.stallKick += 1
+                                    }
+                                    "video:jank" -> {
+                                        // The pipeline is choking (0.78):
+                                        // repeated 1s+ frame gaps mean the
+                                        // stutter class is starting -
+                                        // lighten the stream before it
+                                        // escalates into mute + freeze.
+                                        enterSlow()
                                     }
                                     "anipm:quality" -> {
                                         val arr = o.optJSONArray("qualities")
