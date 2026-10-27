@@ -2048,28 +2048,26 @@ fun PlayerScreen(
             val seasons = det?.seasons ?: listOf()
             pm.seasonList = seasons
             pm.seasonEps = seasons.firstOrNull { it.n == pm.epSeason }?.count ?: 0
-            fun cumBefore(n: Int): Int = seasons.filter { it.n in 1 until n }.sumOf { it.count }
-            val airYear = (seasons.firstOrNull { it.n == pm.epSeason }?.air ?: "").take(4).toIntOrNull() ?: 0
-            var rMal = mal
-            var rAni = ani
-            var base = cumBefore(pm.epSeason)
-            if (title.type == "anime" || title.isAnime) {
-                if (pm.epSeason >= 2 && airYear > 0 && airYear != title.year) {
-                    val mapped = withContext(Dispatchers.IO) {
-                        runCatching { Api.animeMap(title.name, airYear) }.getOrNull()
-                    }
-                    val sameEntry = mapped != null && (mapped.mal ?: mapped.ani) == (mal ?: ani)
-                    if (mapped != null && !sameEntry && (mapped.mal != null || mapped.ani != null)) {
-                        // The season's own entry: its episodes start at 1.
-                        rMal = mapped.mal ?: rMal
-                        rAni = mapped.ani ?: rAni
-                        base = 0
-                    }
+            // Entry routing (0.79) delegates to Api.animeEntry - the ONE
+            // split-vs-combined truth shared with the drop gate and the CW
+            // revival. The old local copy asked whether the entry changed
+            // vs the carried id, but Continue Watching stores ROUTED ids,
+            // so a resumed season already carried the season's own entry,
+            // the test flipped, epBase stayed cumulative, and S2E1 loaded
+            // as episode 13 (provider: Episode 13 is not available).
+            val routeEntry = if (title.type == "anime" || title.isAnime) {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        Api.animeEntry(title.name, title.year, seasons, pm.epSeason, pm.routeMal ?: mal, pm.routeAni ?: ani)
+                    }.getOrNull()
                 }
+            } else {
+                null
             }
-            pm.routeMal = rMal
-            pm.routeAni = rAni
-            pm.epBase = base
+            pm.routeMal = routeEntry?.mal ?: mal
+            pm.routeAni = routeEntry?.ani ?: ani
+            pm.epBase = routeEntry?.epBase
+                ?: seasons.filter { it.n in 1 until pm.epSeason }.sumOf { it.count }
         }
         pm.resolvedSeason = pm.epSeason
         if (pm.pendingLoadAt >= 0f) {

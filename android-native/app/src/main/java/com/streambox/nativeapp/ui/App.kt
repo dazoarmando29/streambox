@@ -292,6 +292,10 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.79" to listOf(
+        "Anime season 2 and up plays again - Continue Watching resumed the wrong episode number (episode 13 of a 12-episode season) and the provider said not available",
+        "Episode numbering is decided at the source for EVERY TV show and anime - the player, the release gate and Continue Watching all agree on the same numbers now",
+    ),
     "0.78" to listOf(
         "Found the real freeze cause - the app no longer switches your TV display mode mid-video (the stutter, then mute, then frozen screen on Android TV)",
         "Playback recovers itself faster: a stalled or muted video is detected sooner, your volume is always restored, and reloads always resume playing",

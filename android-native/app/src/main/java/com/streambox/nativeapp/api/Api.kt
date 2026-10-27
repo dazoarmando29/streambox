@@ -25,7 +25,7 @@ data class Title(
         get() = 16 in genreIds && lang == "ja"
 }
 
-data class AnimeIds(val mal: Int?, val ani: Int?)
+data class AnimeIds(val mal: Int?, val ani: Int?, val year: Int = 0)
 
 /** One episode of a TV/anime season (real TMDB fields only - a missing
     still or runtime is normal, especially on long-running anime). aired
@@ -516,7 +516,13 @@ object Api {
 
     /** Anime entry routing (the 0.60 rule, shared): split franchises carry
         one ENTRY PER SEASON (by air year) and combined entries number
-        absolutely (epBase = episodes before this season). */
+        absolutely (epBase = episodes before this season). The split
+        decision compares the AIR-YEAR entry against the TITLE-YEAR entry
+        (0.79) - NEVER against the carried id: Continue Watching stores
+        ROUTED ids (0.77), so a resumed season already carries the season's
+        own entry and the old did-the-entry-change test flipped its answer,
+        kept epBase cumulative, and S2E1 went out as episode 13 of a
+        12-episode entry (the provider Episode not available page). */
     data class AnimeEntry(val mal: Int?, val ani: Int?, val epBase: Int)
 
     fun animeEntry(
@@ -533,11 +539,20 @@ object Api {
         val airYear = seasons.firstOrNull { it.n == seasonNo }?.air?.take(4)?.toIntOrNull() ?: 0
         if (seasonNo >= 2 && airYear > 0 && airYear != titleYear) {
             val mapped = runCatching { animeMap(name, airYear) }.getOrNull()
-            val sameEntry = mapped != null && (mapped.mal ?: mapped.ani) == (titleMal ?: titleAni)
-            if (mapped != null && !sameEntry && (mapped.mal != null || mapped.ani != null)) {
+            if (mapped != null && (mapped.mal != null || mapped.ani != null)) {
                 mal = mapped.mal ?: mal
                 ani = mapped.ani ?: ani
-                base = 0
+                // Split = the air-year lookup resolved a DIFFERENT entry
+                // than the title's own (one entry per season, episodes from
+                // 1). Same entry = combined, absolute numbering. The entry's
+                // own year is the tie-breaker when the title-year lookup fails.
+                val first = runCatching { animeMap(name, titleYear) }.getOrNull()
+                val split = if (first != null && (first.mal != null || first.ani != null)) {
+                    (mapped.mal ?: mapped.ani) != (first.mal ?: first.ani)
+                } else {
+                    mapped.year > 0 && titleYear > 0 && mapped.year != titleYear
+                }
+                if (split) base = 0
             }
         }
         return AnimeEntry(mal, ani, base)
@@ -782,17 +797,28 @@ object Api {
         }
     }
 
+    /** Session memo (0.79): every anime route resolves BOTH the air-year
+        and the title-year entry - repeats must not repeat the network.
+        Failed lookups are never cached (0.46). */
+    private val mapMemo =
+        java.util.Collections.synchronizedMap(HashMap<String, AnimeIds>())
+
     fun animeMap(name: String, year: Int): AnimeIds? {
+        val key = name.lowercase() + ":" + year
+        mapMemo[key]?.let { return it }
         return try {
             val o = get(
                 "/api/anime-map?title=" + java.net.URLEncoder.encode(name, "UTF-8") +
                     "&year=" + year
             )
-            if (o.has("error")) null
+            val out = if (o.has("error")) null
             else AnimeIds(
                 mal = if (o.isNull("mal")) null else o.optInt("mal"),
                 ani = if (o.isNull("ani")) null else o.optInt("ani"),
+                year = if (o.isNull("year")) 0 else o.optInt("year"),
             )
+            if (out != null) mapMemo[key] = out
+            out
         } catch (e: Exception) {
             null
         }

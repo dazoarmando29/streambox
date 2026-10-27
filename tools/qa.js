@@ -356,7 +356,16 @@
         the user's mute state + the Crisp level (a heal reload used to land
         silent and stay paused), a muted-under-us video is restored
         continuously, and repeated 1s frame gaps (jank) lighten the stream
-        BEFORE the death spiral */
+        BEFORE the death spiral
+     84 anime numbering splits on ENTRY IDENTITY, never the carried id
+        (0.79): Continue Watching stores ROUTED entry ids (0.77), so the old
+        did-the-entry-change-vs-the-carried-id test flipped its answer on
+        every resumed season - epBase stayed cumulative and S2E1 went out as
+        episode 13 of a 12-episode entry (the provider Episode not available
+        page). The split compares the AIR-YEAR entry against the TITLE-YEAR
+        entry (ids, or the entry's own year when a lookup fails) inside the
+        one shared Api.animeEntry - the player route, the drop gate and the
+        CW revival all derive their episode numbers from that truth */
  const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -930,14 +939,14 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
 {
   const psA = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psA) bad("PlayerScreen.kt missing - anime season routing cannot be verified");
-  else if (/Api\.animeMap\(title\.name, airYear\)/.test(psA) &&
-           /val sameEntry/.test(psA) &&
+  else if (/Api\.animeEntry\(title\.name, title\.year, seasons,/.test(psA) &&
+           !/val sameEntry/.test(psA) &&
            /epBase: Int = 0,/.test(psA) &&
            /val aep = \(epBase \+ episode\)\.coerceAtLeast\(1\)/.test(psA) &&
            /resolvedSeason != epSeason/.test(psA)) {
-    ok("anime season routing: season-air-year entry resolution + entry-relative episodes (deferred boot)");
+    ok("anime season routing: the season's entry and numbering resolve through the shared Api.animeEntry (deferred boot, entry-relative episodes)");
   } else {
-    bad("anime must resolve the season's own entry by air year and number episodes against THAT entry (S2E1 played S1E1)");
+    bad("anime must resolve the season's own entry through Api.animeEntry and number episodes against THAT entry (S2E1 played S1E1)");
   }
 }
 
@@ -1808,6 +1817,29 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
       ok("freeze class stays dead: TV never switches display modes, heals restore the panel mode, loads re-arm nudges + mute state + Crisp, and jank lightens the stream before the spiral");
     } else {
       bad("the mid-playback DISPLAY MODE switch wedges TV video surfaces (0.78) - TV must never switch modes (phones keep it), every heal must restoreDisplayRate first, every load must re-arm the play nudges/user mute/Crisp level, muted-under-us must self-restore, and jank (repeated 1s frame gaps) must lighten the stream");
+    }
+  }
+}
+
+/* ---------- 84. numbering splits on entry identity, never the carried id ---------- */
+{
+  const apiP = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Api.kt");
+  const apiN = fs.existsSync(apiP) ? qaRead(apiP) : "";
+  const psN84 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
+  if (!apiN || !psN84) bad("Api/PlayerScreen missing - the entry-numbering rules cannot be verified");
+  else {
+    const entryBody = (apiN.match(/fun animeEntry\([\s\S]*?\n    \}/) || [""])[0];
+    if (/val first = runCatching \{ animeMap\(name, titleYear\) \}\.getOrNull\(\)/.test(entryBody) &&
+        /\(mapped\.mal \?: mapped\.ani\) != \(first\.mal \?: first\.ani\)/.test(entryBody) &&
+        /mapped\.year > 0 && titleYear > 0 && mapped\.year != titleYear/.test(entryBody) &&
+        /if \(split\) base = 0/.test(entryBody) &&
+        !/sameEntry/.test(apiN) &&
+        !/sameEntry/.test(psN84) &&
+        /val aep = \(epBase \+ episode\)\.coerceAtLeast\(1\)/.test(psN84) &&
+        /animeEntry\(det\.name, det\.year, det\.seasons, s, titleMal, titleAni\)/.test(apiN)) {
+      ok("episode numbering splits on entry identity (air-year entry vs title-year entry) - the carried id is never consulted and the player route, drop gate and CW revival all ride Api.animeEntry");
+    } else {
+      bad("epBase must split on ENTRY IDENTITY (air-year entry vs title-year entry, or the entry's own year) - comparing the carried id flips for Continue Watching records that store ROUTED ids and sent S2E1 out as episode 13 (0.79)");
     }
   }
 }
