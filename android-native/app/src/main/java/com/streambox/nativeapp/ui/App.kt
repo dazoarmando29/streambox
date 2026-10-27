@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
@@ -49,8 +50,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,8 +78,12 @@ import androidx.compose.ui.window.Dialog
 import com.streambox.nativeapp.AppEnv
 import com.streambox.nativeapp.BuildConfig
 import com.streambox.nativeapp.api.Title
+import com.streambox.nativeapp.api.Updater
 import com.streambox.nativeapp.data.Store
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /* Design tokens live in Theme.kt (Obsidian Glow Cinematic). */
 enum class Section(val label: String, val icon: ImageVector) {
@@ -172,6 +179,26 @@ fun StreamBoxApp() {
         if (prev != v) {
             whatsNew = v to whatsNewBullets(prev, v)
             Store.setLastSeenVersion(appCtx, v)
+        }
+    }
+    // In-app updates (0.80): the rolling latest-native prerelease is the
+    // update channel - one honest popup when a NEWER build is published and
+    // one button that downloads and goes straight to the package installer.
+    // The APK file never piles up: leftovers are wiped here on every boot
+    // (the installer needs the file alive while it works and the install
+    // kills this process, so the NEXT launch is the first chance to clean).
+    var upd by remember { mutableStateOf<Updater.Release?>(null) }
+    val updState = remember { UpdateMem() }
+    val updScope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        Updater.cleanLeftovers(appCtx)
+        // The release lookup is tiny but the self-hash fallback is not -
+        // at most one look per few minutes so a crash loop can never
+        // hammer the API (58 lookups an hour left for everyone else).
+        if (System.currentTimeMillis() - Store.updateCheckAt(appCtx) > 5 * 60 * 1000L) {
+            Store.setUpdateCheckAt(appCtx, System.currentTimeMillis())
+            val rel = withContext(Dispatchers.IO) { Updater.check(appCtx) }
+            if (rel != null) upd = rel
         }
     }
     // 0.72 nav perf: warm every tab's feed behind the home screen so the
@@ -284,6 +311,50 @@ fun StreamBoxApp() {
             whatsNew?.let { (ver, bullets) ->
                 WhatsNewDialog(ver, bullets) { whatsNew = null }
             }
+            // The What's New card owns the screen first; the update offer
+            // waits its turn so two dialogs never stack.
+            if (whatsNew == null) {
+                upd?.let { rel ->
+                    UpdateDialog(
+                        rel = rel,
+                        st = updState,
+                        onDismiss = { upd = null },
+                        onInstall = {
+                            if (updState.progress < 0) {
+                                updState.error = ""
+                                updScope.launch {
+                                    if (withContext(Dispatchers.IO) { !Updater.installsAllowed(appCtx) }) {
+                                        // First run walks through the system
+                                        // gate (phone AND TV); the button
+                                        // stays and finishes on the next tap.
+                                        updState.needsPermission = true
+                                        withContext(Dispatchers.IO) { Updater.openInstallPermission(appCtx) }
+                                        return@launch
+                                    }
+                                    updState.progress = 0
+                                    val f = withContext(Dispatchers.IO) {
+                                        Updater.download(appCtx, rel) { p -> updState.progress = p }
+                                    }
+                                    if (f == null) {
+                                        updState.progress = -1
+                                        updState.error = "The download did not verify. Nothing was installed - try again."
+                                        return@launch
+                                    }
+                                    val ok = withContext(Dispatchers.IO) { Updater.install(appCtx, f) }
+                                    if (ok) {
+                                        // The system installer owns the
+                                        // screen now - stand down.
+                                        upd = null
+                                    } else {
+                                        updState.progress = -1
+                                        updState.error = "The system installer did not open. Try again."
+                                    }
+                                }
+                            }
+                        },
+                    )
+                }
+            }
         }
         }
     }
@@ -292,6 +363,10 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.80" to listOf(
+        "In-app updates - when a new build is ready a popup greets you at startup and Download and Install does everything (no more uninstall and reinstall)",
+        "The update file is verified against the published SHA-256 before anything installs and is deleted on the next launch - nothing piles up in storage",
+    ),
     "0.79" to listOf(
         "Anime season 2 and up plays again - Continue Watching resumed the wrong episode number (episode 13 of a 12-episode season) and the provider said not available",
         "Episode numbering is decided at the source for EVERY TV show and anime - the player, the release gate and Continue Watching all agree on the same numbers now",
@@ -566,6 +641,109 @@ private fun WhatsNewDialog(version: String, bullets: List<String>, onDone: () ->
                 "Start Watching", big, accent = true, icon = Icons.Filled.PlayArrow,
                 modifier = Modifier.fillMaxWidth(),
             ) { onDone() }
+        }
+    }
+}
+
+/** Update flow state (0.80): the dialog renders it, one coroutine drives
+    it. progress -1 = idle, 0..100 = downloading. */
+private class UpdateMem {
+    var progress by mutableIntStateOf(-1)
+    var error by mutableStateOf("")
+    var needsPermission by mutableStateOf(false)
+}
+
+/** The update offer (design pack glass). Download & Install is the ONE
+    action: it downloads, the sha256 must match the published digest, and
+    the system installer opens straight away - the app updates in place
+    (frozen versionCode, one preview key) with no uninstall step. Both
+    pills are real TV focus targets; Back = Later while idle. */
+@Composable
+private fun UpdateDialog(
+    rel: Updater.Release,
+    st: UpdateMem,
+    onDismiss: () -> Unit,
+    onInstall: () -> Unit,
+) {
+    val big = AppEnv.isTv
+    Dialog(onDismissRequest = { if (st.progress < 0) onDismiss() }) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = if (big) 640.dp else 420.dp)
+                .background(Card, RoundedCornerShape(24.dp))
+                .padding(if (big) 28.dp else 20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .glow(RoundedCornerShape(12.dp))
+                        .background(Accent, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Download, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text("Update available", color = Color.White, fontWeight = FontWeight.Black, fontSize = if (big) 26.sp else 21.sp)
+                    Text(
+                        "VERSION " + rel.version + "  \u00B7  " + Updater.prettyDate(rel.publishedAt),
+                        color = Dim,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (big) 12.sp else 10.sp,
+                        letterSpacing = 2.sp,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(
+                "A new build of StreamBox is ready. Download and install it in place - no uninstall needed and everything stays.",
+                color = Soft,
+                fontFamily = BodyFont,
+                fontSize = if (big) 15.sp else 13.sp,
+            )
+            if (st.progress >= 0) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .background(Color(0x22FFFFFF), RoundedCornerShape(3.dp)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction = (st.progress / 100f).coerceIn(0.02f, 1f))
+                            .height(6.dp)
+                            .background(Accent, RoundedCornerShape(3.dp)),
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Downloading " + st.progress + "%",
+                    color = Dim,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (big) 13.sp else 11.sp,
+                    letterSpacing = 1.sp,
+                )
+            }
+            if (st.error.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(st.error, color = Amber, fontFamily = BodyFont, fontSize = if (big) 14.sp else 12.sp)
+            }
+            if (st.progress < 0) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PillButton(
+                        if (st.needsPermission) "Allow Installs, Then Tap Again" else "Download & Install",
+                        big,
+                        accent = true,
+                        icon = Icons.Filled.Download,
+                        modifier = Modifier.weight(1f),
+                    ) { onInstall() }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    PillButton("Later", big, outline = true, modifier = Modifier.weight(1f)) { onDismiss() }
+                }
+            }
         }
     }
 }

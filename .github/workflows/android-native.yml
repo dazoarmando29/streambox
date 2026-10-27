@@ -42,6 +42,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cp android-native/app/build/outputs/apk/debug/app-debug.apk streambox-native.apk
+          VN=$(sed -n 's/.*versionName = "\([0-9.]*\)".*/\1/p' android-native/app/build.gradle.kts | head -n1)
           # separate channel from the WebView app: latest-native never touches
           # the rolling 'latest' tag that carries streambox.apk/lite
           for i in 1 2 3 4 5; do
@@ -49,7 +50,7 @@ jobs:
             sleep 3
             if gh release create latest-native --prerelease \
               --title "StreamBox native app (preview)" \
-              --notes "Auto-built from native branch (${{ github.sha }}). Native Compose preview (phone + Android TV), package com.streambox.nativeapp - installs alongside the WebView app. Catalog via the streambox-api Worker; the player screen hosts the provider embeds. Preview build: expect gaps while the native UX grows." \
+              --notes "versionName: $VN. Auto-built from native branch (${{ github.sha }}). Native Compose preview (phone + Android TV), package com.streambox.nativeapp - installs alongside the WebView app. Catalog via the streambox-api Worker; the player screen hosts the provider embeds. Preview build: expect gaps while the native UX grows." \
               streambox-native.apk; then
               break
             fi

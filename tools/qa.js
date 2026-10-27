@@ -365,7 +365,18 @@
         page). The split compares the AIR-YEAR entry against the TITLE-YEAR
         entry (ids, or the entry's own year when a lookup fails) inside the
         one shared Api.animeEntry - the player route, the drop gate and the
-        CW revival all derive their episode numbers from that truth */
+        CW revival all derive their episode numbers from that truth
+     85 in-app updates (0.80): the rolling latest-native prerelease is the
+        update channel - one startup popup, one button, download and
+        straight to the package installer over the CURRENT install (frozen
+        versionCode, one preview key - never an uninstall step). A
+        versioned release offers only a strictly NEWER build and unversioned
+        notes fall back to byte identity; the downloaded APK must match the
+        sha256 the release API reports before the installer is ever shown;
+        only the GitHub release hosts are contacted over TLS; the hand-off
+        is a FileProvider content URI (never a file URI); and the APK file
+        is wiped on every boot and before every download so it never piles
+        up in storage */
  const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1841,6 +1852,49 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     } else {
       bad("epBase must split on ENTRY IDENTITY (air-year entry vs title-year entry, or the entry's own year) - comparing the carried id flips for Continue Watching records that store ROUTED ids and sent S2E1 out as episode 13 (0.79)");
     }
+  }
+}
+
+/* ---------- 85. in-app updates: verify the bytes, install in place, clean up ---------- */
+{
+  const upP = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/api/Updater.kt");
+  const upU = fs.existsSync(upP) ? qaRead(upP) : "";
+  const apP = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt");
+  const apU = fs.existsSync(apP) ? qaRead(apP) : "";
+  const mfP = path.join(ROOT, "android-native/app/src/main/AndroidManifest.xml");
+  const mfU = fs.existsSync(mfP) ? qaRead(mfP) : "";
+  const fpP = path.join(ROOT, "android-native/app/src/main/res/xml/file_paths.xml");
+  const fpU = fs.existsSync(fpP) ? qaRead(fpP) : "";
+  const wfP = path.join(ROOT, ".github/workflows/android-native.yml");
+  const wfU = fs.existsSync(wfP) ? qaRead(wfP) : "";
+  const stU = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt")) : "";
+  if (!upU || !apU || !mfU || !fpU || !stU || !wfU) bad("Updater/App/Manifest/file_paths/Store/workflow missing - the in-app update rules cannot be verified");
+  else if (/fun check\(ctx: Context\): Release\?/.test(upU) &&
+           /compareVersions\(rel\.version, BuildConfig\.VERSION_NAME\) > 0/.test(upU) &&
+           /MessageDigest\.getInstance\("SHA-256"\)/.test(upU) &&
+           /hex != rel\.digest\.removePrefix\("sha256:"\)/.test(upU) &&
+           /out\.delete\(\)/.test(upU) &&
+           /FileProvider\.getUriForFile/.test(upU) &&
+           /application\/vnd\.android\.package-archive/.test(upU) &&
+           /FLAG_GRANT_READ_URI_PERMISSION/.test(upU) &&
+           /fun cleanLeftovers\(ctx: Context\)/.test(upU) &&
+           /objects\.githubusercontent\.com/.test(upU) &&
+           /canRequestPackageInstalls\(\)/.test(upU) &&
+           !/http:\/\//.test(upU) &&
+           /Updater\.cleanLeftovers\(appCtx\)/.test(apU) &&
+           /Updater\.check\(appCtx\)/.test(apU) &&
+           /UpdateDialog\(/.test(apU) &&
+           /Store\.updateCheckAt\(appCtx\)/.test(apU) &&
+           /fun updateCheckAt\(ctx: Context\): Long/.test(stU) &&
+           /REQUEST_INSTALL_PACKAGES/.test(mfU) &&
+           /androidx\.core\.content\.FileProvider/.test(mfU) &&
+           /files-path name="updates" path="updates\/"/.test(fpU) &&
+           wfU.includes('--notes "versionName: $VN. ') &&
+           wfU.includes('VN=$(sed')) {
+    ok("in-app updates: a startup offer for a strictly newer build, sha256-verified download straight to the package installer (FileProvider content URI), GitHub release hosts only over TLS, leftovers wiped on boot");
+  } else {
+    bad("the in-app update flow (0.80) must offer only a genuinely NEWER build (release-notes versionName, byte identity as fallback), verify the downloaded APK against the published sha256 BEFORE the installer opens, contact only the GitHub release hosts over TLS, hand off via FileProvider (never a file URI), throttle the lookups, and delete the APK file on the next boot and before every download");
   }
 }
 

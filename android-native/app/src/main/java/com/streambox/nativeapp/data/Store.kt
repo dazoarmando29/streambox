@@ -48,6 +48,7 @@ object Store {
     private const val K_SUB_STYLE = "sub_style"
     private const val K_AUTO_NEXT = "auto_next_v2"
     private const val K_FEED = "feed_cache"
+    private const val K_UPD_CHECK = "upd_checked_at"
 
     private fun prefs(ctx: Context) =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -178,6 +179,14 @@ object Store {
     /** Last app version whose What's New card was seen (device-local). A
         mismatch with BuildConfig.VERSION_NAME opens the card ONCE per
         fresh update (0.51). */
+    /** In-app update lookups are throttled (0.80) - a crash loop must
+        never hammer the release API. */
+    fun updateCheckAt(ctx: Context): Long = prefs(ctx).getLong(K_UPD_CHECK, 0L)
+
+    fun setUpdateCheckAt(ctx: Context, at: Long) {
+        prefs(ctx).edit().putLong(K_UPD_CHECK, at).apply()
+    }
+
     fun lastSeenVersion(ctx: Context): String =
         prefs(ctx).getString(K_LAST_SEEN, "") ?: ""
 
