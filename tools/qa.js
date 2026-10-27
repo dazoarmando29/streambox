@@ -1872,6 +1872,8 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   if (!upU || !apU || !mfU || !fpU || !stU || !wfU) bad("Updater/App/Manifest/file_paths/Store/workflow missing - the in-app update rules cannot be verified");
   else if (/fun check\(ctx: Context\): Release\?/.test(upU) &&
            /compareVersions\(rel\.version, BuildConfig\.VERSION_NAME\) > 0/.test(upU) &&
+           !/versionName:\\\\s\*\(\[0-9\.\]\+\)/.test(upU) &&
+           /versionName:\\\\s\*\(\[0-9\]\+\(\?:\\\\\.\[0-9\]\+\)\*\)/.test(upU) &&
            /MessageDigest\.getInstance\("SHA-256"\)/.test(upU) &&
            /hex != rel\.digest\.removePrefix\("sha256:"\)/.test(upU) &&
            /out\.delete\(\)/.test(upU) &&

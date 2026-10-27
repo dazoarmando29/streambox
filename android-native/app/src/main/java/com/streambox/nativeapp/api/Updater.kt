@@ -69,7 +69,8 @@ object Updater {
             val url = a.optString("browser_download_url", "")
             if (!digest.startsWith("sha256:") || url.isEmpty() || !allowed(url)) return null
             val rel = Release(
-                version = Regex("versionName:\\s*([0-9.]+)").find(o.optString("body"))?.groupValues?.get(1) ?: "",
+                version = Regex("versionName:\\s*([0-9]+(?:\\.[0-9]+)*)")
+                    .find(o.optString("body"))?.groupValues?.get(1) ?: "",
                 digest = digest,
                 size = a.optLong("size"),
                 url = url,

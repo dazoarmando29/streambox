@@ -363,6 +363,10 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.81" to listOf(
+        "The update popup had a parsing bug in the first 0.80 build - this build fixes it so the offer always appears when a newer build is out",
+        "In-app updates - a popup at startup, Download and Install does everything, and the file is verified and cleaned up by itself",
+    ),
     "0.80" to listOf(
         "In-app updates - when a new build is ready a popup greets you at startup and Download and Install does everything (no more uninstall and reinstall)",
         "The update file is verified against the published SHA-256 before anything installs and is deleted on the next launch - nothing piles up in storage",
