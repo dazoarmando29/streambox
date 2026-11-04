@@ -19,8 +19,10 @@ import android.widget.FrameLayout;
 public class MainActivity extends Activity {
     private static final String HOME = BuildConfig.HOME_URL;
     private WebView web;
+    private WebChromeClient chromeClient;
     private View fullscreenView;
     private WebChromeClient.CustomViewCallback fullscreenCallback;
+    private boolean webviewCrashed;
 
     private static boolean isHostOrSubdomain(String host, String domain) {
         return host.equals(domain) || host.endsWith("." + domain);
@@ -69,9 +71,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Fresh-start guarantee: once per app version, wipe WebView data
-        // (cache, DOM storage, service workers) BEFORE creating the WebView,
-        // so the first launch after every update can never serve stale pages.
+        // Fresh-start guarantee: once per app version, wipe the WebView's
+        // CACHE layers + service worker BEFORE creating the WebView, so the
+        // first launch after every update can never serve stale pages. User
+        // data (Local Storage: watch progress, My List, PIN, settings;
+        // IndexedDB; cookies) is preserved across updates.
         freshStartIfNewVersion();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -90,6 +94,7 @@ public class MainActivity extends Activity {
         s.setUseWideViewPort(true);
         s.setBuiltInZoomControls(false);
         s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setTextZoom(100);
@@ -118,6 +123,11 @@ public class MainActivity extends Activity {
                     if (!url.startsWith("http://") && !url.startsWith("https://")) return true;
                     return false;
                 }
+                // Main-frame scheme gate FIRST: intent://, javascript:,
+                // content:// and friends must never reach the host allowlist
+                // (intent:// URLs carry a look-alike host and can launch
+                // other apps). Same rule the subframe branch applies.
+                if (!url.startsWith("http://") && !url.startsWith("https://")) return true;
                 String host = "";
                 try { host = request.getUrl().getHost(); if (host == null) host = ""; }
                 catch (Exception ignored) { host = ""; }
@@ -211,9 +221,27 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) {}
                 handler.cancel();
             }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                // A dead renderer can never be revived (low-memory TV sticks
+                // hit this under memory pressure). The default handler kills
+                // the whole app - instead destroy the dead shell and rebuild,
+                // so playback recovers with one reload instead of a crash.
+                try {
+                    if (web != null) {
+                        web.destroy();
+                        web = null;
+                    }
+                } catch (Exception ignored) {}
+                hideFullscreen();
+                webviewCrashed = true;
+                recreate();
+                return true;
+            }
         });
 
-        web.setWebChromeClient(new WebChromeClient() {
+        chromeClient = new WebChromeClient() {
             @Override
             public void onShowCustomView(View view, CustomViewCallback callback) {
                 if (fullscreenView != null) { callback.onCustomViewHidden(); return; }
@@ -235,29 +263,29 @@ public class MainActivity extends Activity {
 
             @Override
             public void onHideCustomView() {
-                if (fullscreenView == null) return;
-                FrameLayout decor = (FrameLayout) getWindow().getDecorView();
-                decor.removeView(fullscreenView);
-                decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
-                fullscreenView = null;
-                fullscreenCallback = null;
-                web.setVisibility(View.VISIBLE);
+                hideFullscreen();
             }
 
             @Override
             public Bitmap getDefaultVideoPoster() {
                 return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888);
             }
-        });
+        };
+        web.setWebChromeClient(chromeClient);
 
-        if (savedInstanceState != null) {
-            web.restoreState(savedInstanceState);
+        if (!webviewCrashed && savedInstanceState != null && web.restoreState(savedInstanceState) != null) {
+            // state restored after process death
         } else {
+            // restoreState failed, fresh launch, or rebuild after a renderer
+            // crash: never leave a blank WebView
             web.loadUrl(startUrl());
         }
     }
 
-    /** Wipes WebView profile + cache once per app version (first launch only). */
+    /** Wipes the WebView's cache layers + service worker once per app version
+        (first launch only). Local Storage / IndexedDB / Databases / Cookies
+        are NEVER deleted: they hold watch progress, My List, the adult PIN
+        and every user preference — an update must never lose user data. */
     private void freshStartIfNewVersion() {
         String ver;
         try {
@@ -267,7 +295,13 @@ public class MainActivity extends Activity {
         }
         android.content.SharedPreferences prefs = getSharedPreferences("streambox", MODE_PRIVATE);
         if (ver.equals(prefs.getString("fresh_cleared_for", ""))) return;
-        deleteRecursive(new java.io.File(getApplicationInfo().dataDir, "app_webview"));
+        java.io.File wv = new java.io.File(getApplicationInfo().dataDir, "app_webview");
+        // caches + the service worker (registration AND its CacheStorage):
+        // deleting "Service Worker" is what guarantees no stale page/script
+        // can survive an update; everything else here is rebuildable cache.
+        for (String d : new String[] {"Cache", "Code Cache", "GPUCache", "Service Worker", "Session Storage"}) {
+            deleteRecursive(new java.io.File(wv, d));
+        }
         deleteRecursive(getCacheDir());
         prefs.edit().putString("fresh_cleared_for", ver != null ? ver : "0").apply();
     }
@@ -287,17 +321,35 @@ public class MainActivity extends Activity {
         if (web != null) web.saveState(outState);
     }
 
+    /** Tears down the HTML5 fullscreen custom view (idempotent). */
+    private void hideFullscreen() {
+        if (fullscreenView == null) return;
+        FrameLayout decor = (FrameLayout) getWindow().getDecorView();
+        decor.removeView(fullscreenView);
+        decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        fullscreenView = null;
+        fullscreenCallback = null;
+        if (web != null) web.setVisibility(View.VISIBLE);
+    }
+
     @Override
     public void onBackPressed() {
         if (fullscreenView != null) {
-            web.getWebChromeClient().onHideCustomView();
+            // App-initiated dismissal: the WebChromeClient contract requires
+            // onCustomViewHidden() so the media element leaves its fullscreen
+            // state (without it the next fullscreen request never fires).
+            WebChromeClient.CustomViewCallback cb = fullscreenCallback;
+            hideFullscreen();
+            if (cb != null) {
+                try { cb.onCustomViewHidden(); } catch (Exception ignored) {}
+            }
             return;
         }
         if (web == null) { super.onBackPressed(); return; }
         // The site is a single-page app (no history entries), so route Back
         // through its own navigation: player -> browse -> close popup -> exit.
         web.evaluateJavascript(
-            "(function(){"
+            "(function(){try{"
             + "var ae=document.activeElement;"
             + "if(ae&&ae.tagName==='IFRAME'){ae.blur();var mb=document.querySelector('#mirrorBar:not(.hidden) button');if(mb){mb.focus();return 'refocus';}var b=document.getElementById('ctlPlay');if(b)b.focus();return 'refocus';}"
             + "if(document.body.classList.contains('video-fs')){exitVideoFs();goHome();return 'home';}"
@@ -323,10 +375,12 @@ public class MainActivity extends Activity {
             + "if(m&&!m.classList.contains('hidden')){closeModal();return 'modal';}"
             + "var w=document.getElementById('watchView');"
             + "if(w&&!w.classList.contains('hidden')){goHome();return 'home';}"
-            + "return 'exit';})();",
+            + "return 'exit';}catch(e){return 'exit';}})();",
             value -> {
+                // Fail-safe: a JS error (site and APK version-decoupled) or a
+                // missing value must NEVER swallow the Back press — exit.
                 String v = value == null ? "" : value.replace("\"", "");
-                if ("exit".equals(v)) {
+                if ("exit".equals(v) || "null".equals(v) || v.isEmpty()) {
                     MainActivity.super.onBackPressed();
                 }
             });

@@ -11,10 +11,12 @@ import android.view.View;
 public class SplashActivity extends Activity {
     private static final long DELAY_MS = 1400;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private boolean handedOff;
     private final Runnable go = new Runnable() {
         @Override
         public void run() {
-            if (isFinishing()) return;
+            if (isFinishing() || handedOff) return;
+            handedOff = true;
             startActivity(new Intent(SplashActivity.this, MainActivity.class));
             finish();
         }
@@ -33,7 +35,22 @@ public class SplashActivity extends Activity {
                     | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                     | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         } catch (Exception ignored) {}
-        handler.postDelayed(go, DELAY_MS);
+        // countdown armed in onResume (only while visible)
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Start the countdown only while visible: a delayed start from a
+        // backgrounded splash is a restricted background activity start on
+        // Android 10+ (dropped launch / dead task on return).
+        if (!handedOff) handler.postDelayed(go, DELAY_MS);
+    }
+
+    @Override
+    protected void onPause() {
+        handler.removeCallbacks(go);
+        super.onPause();
     }
 
     @Override

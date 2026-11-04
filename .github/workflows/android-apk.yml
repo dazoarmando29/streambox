@@ -8,6 +8,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # serialize publishes: parallel runs racing the same rolling release can
+    # interleave edit/upload and leave mixed-asset releases
+    concurrency:
+      group: rolling-release
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -46,19 +51,28 @@ jobs:
           # create-or-update: NEVER delete first (a flake between delete and
           # create used to leave the rolling release missing entirely). Assets
           # replace in place with --clobber; the tag survives every publish.
+          NOTES="Auto-built from main (${{ github.sha }}). Two flavors, install one or both side-by-side: streambox.apk = full motion, streambox-lite.apk = calm (max smoothness + battery). Signed with the stable preview key: updates install over the old app in place (one-time: builds from before this key need a manual uninstall first)."
+          published=0
           for i in 1 2 3 4 5; do
             if gh release view latest >/dev/null 2>&1; then
-              gh release edit latest \
-                --title "StreamBox latest APKs" \
-                --notes "Auto-built from main (${{ github.sha }}). Two flavors, install one or both side-by-side: streambox.apk = full motion, streambox-lite.apk = calm (max smoothness + battery). Uninstall the old app on your TV first, then install." && \
-              gh release upload latest streambox.apk streambox-lite.apk --clobber && break
+              if gh release edit latest --title "StreamBox latest APKs" --notes "$NOTES" && \
+                 gh release upload latest streambox.apk streambox-lite.apk --clobber; then
+                published=1; break
+              fi
             else
-              gh release create latest --prerelease \
-                --title "StreamBox latest APKs" \
-                --notes "Auto-built from main (${{ github.sha }}). Two flavors, install one or both side-by-side: streambox.apk = full motion, streambox-lite.apk = calm (max smoothness + battery). Uninstall the old app on your TV first, then install." \
-                streambox.apk streambox-lite.apk && break
+              if gh release create latest --prerelease --target "${{ github.sha }}" \
+                 --title "StreamBox latest APKs" --notes "$NOTES" \
+                 streambox.apk streambox-lite.apk; then
+                published=1; break
+              fi
             fi
             echo "release publish attempt $i failed, retrying..."
             sleep 10
           done
+          # a green job must MEAN the new APKs are live: notes claiming this
+          # sha over stale assets is a lying release - fail loudly instead.
+          if [ "$published" != "1" ]; then
+            echo "release publish failed after 5 attempts" >&2
+            exit 1
+          fi
           gh release view latest --json tagName,publishedAt,url

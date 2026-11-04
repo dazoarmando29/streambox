@@ -11,7 +11,7 @@ android {
         minSdk 24
         targetSdk 34
         versionCode 23
-        versionName '2.12'
+        versionName '2.13'
     }
 
     buildFeatures {
@@ -33,12 +33,27 @@ android {
         }
     }
 
+    // Every build (local + CI) signs with the SAME committed preview key so
+    // an APK always installs OVER the previous one. The runner-minted debug
+    // key re-signed every build and "update" failed with an install error.
+    // Sideload preview key, intentionally public - not a production secret.
+    signingConfigs {
+        preview {
+            storeFile file("../preview.keystore")
+            storePassword "streambox"
+            keyAlias "streambox"
+            keyPassword "streambox"
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.preview
         }
         debug {
             applicationIdSuffix '.debug'
+            signingConfig signingConfigs.preview
         }
     }
     compileOptions {
