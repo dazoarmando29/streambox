@@ -153,7 +153,26 @@
    119 captions float up while the control bar is up and settle back to their
        own position when the bar minimizes again
    120 the player page survives a tab switch/reload: the watch session is
-       saved on play, restored on boot, and cleared when leaving the player */
+        saved on play, restored on boot, and cleared when leaving the player
+   125 the WebView wrapper never calls WebView.getWebChromeClient() (API 26
+       with minSdk 24 crashed on Android 7.x exiting fullscreen), the
+       app-initiated fullscreen exit honors onCustomViewHidden(), renderer
+       death rebuilds the WebView, and main-frame navigations get the
+       http(s) scheme gate BEFORE the host allowlist
+   126 updates never lose user data: the fresh-start wipe clears cache
+       layers + the service worker only - never the WebView profile
+       (Local Storage = watch progress / My List / PIN / settings)
+   127 a green publish MEANS the APKs are live: the rolling-release loop
+       tracks success and fails the job when every attempt fails
+   128 error bodies never poison caches: tmdb() and feedFetchJson() throw
+       on non-OK before anything is cached
+   129 metadata sinks ride escapeHtml (hero overview + card titles)
+   130 one auto-hop per title everywhere: every setMirror(..., true) path
+       takes the heal-once budget (no ping-pong loops on dead titles)
+   131 the service worker caches only shell statics, every cache write
+       rides waitUntil, and cache-busted polls (version.txt) pass through
+   132 every wrapper build signs with the SAME committed preview keystore
+       (updates install in place; runner-minted debug keys never return) */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1351,6 +1370,106 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
       && /transition:\s*none !important/.test(html))
     ok("calm mode kills animation and transitions everywhere (max smoothness, no melt)");
   else bad("body.calm must kill animation and transitions everywhere");
+}
+
+/* ---------- 125. wrapper crash floor (API 26 vs minSdk 24) ---------- */
+{
+  let ma = "";
+  try { ma = read("android/app/src/main/java/com/streambox/app/MainActivity.java"); } catch (e) {}
+  if (!ma) bad("MainActivity.java missing");
+  else {
+    if (/getWebChromeClient\(\)/.test(ma)) bad("MainActivity calls WebView.getWebChromeClient() - API 26 with minSdk 24 crashes on Android 7.x");
+    else ok("wrapper never calls WebView.getWebChromeClient (API-26 crash on Android 7)");
+    if (/onCustomViewHidden\(\)/.test(ma)) ok("fullscreen exit honors CustomViewCallback.onCustomViewHidden");
+    else bad("the app-initiated fullscreen exit must call onCustomViewHidden() - without it the media element stays logically fullscreen");
+    if (/onRenderProcessGone/.test(ma) && /recreate\(\)/.test(ma)) ok("renderer death rebuilds the WebView (onRenderProcessGone -> recreate)");
+    else bad("onRenderProcessGone must rebuild the WebView - the default handler kills the whole app on low-RAM boxes");
+    if (/return true;\s*\n\s*String host = ""/.test(ma))
+      ok("main-frame navigations carry the http(s) scheme gate (intent:// look-alike hosts can never escape)");
+    else bad("the main-frame branch must gate schemes before the host allowlist");
+  }
+}
+
+/* ---------- 126. updates never lose user data ---------- */
+{
+  let ma = "";
+  try { ma = read("android/app/src/main/java/com/streambox/app/MainActivity.java"); } catch (e) {}
+  if (!ma) bad("MainActivity.java missing");
+  else {
+    if (/deleteRecursive\(new java\.io\.File\(getApplicationInfo\(\)\.dataDir, "app_webview"\)\)/.test(ma))
+      bad("the fresh-start wipe deletes app_webview wholesale - watch progress / My List / PIN die on every update");
+    else ok("the fresh-start wipe never deletes the WebView profile wholesale");
+    const arr = ma.match(/new String\[\] \{([^}]*)\}/);
+    if (!arr) bad("freshStartIfNewVersion must clear its cache layers from an explicit dir list");
+    else {
+      const list = arr[1];
+      if (/Local Storage|IndexedDB|Cookies|Databases/.test(list))
+        bad("the wipe list must never contain user-data dirs (Local Storage / IndexedDB / Cookies / Databases)");
+      else if (/"Cache"/.test(list) && /"Service Worker"/.test(list))
+        ok("the wipe clears cache layers + the service worker only (user data survives updates)");
+      else bad("the wipe list must clear Cache + Service Worker (the stale-page guarantee)");
+    }
+  }
+}
+
+/* ---------- 127. green publish means the APKs are live ---------- */
+{
+  const wfy = read(".github/workflows/android-apk.yml");
+  if (/published=0/.test(wfy) && /if \[ "\$published" != "1" \]/.test(wfy) && /exit 1/.test(wfy))
+    ok("the publish step fails the job when every attempt fails (no green job over stale APKs)");
+  else bad("the publish loop must track success and exit 1 on total failure - green jobs used to ship stale APKs under new notes");
+}
+
+/* ---------- 128. error bodies never poison the caches ---------- */
+{
+  const t = html.match(/function tmdb\(path\)\{[\s\S]*?\n\}/);
+  if (t && /if \(!r\.ok\) throw/.test(t[0])) ok("tmdb() throws on non-OK (error bodies never reach _mem/sessionStorage)");
+  else bad("tmdb() must reject non-OK responses before caching - error JSON used to poison rows for the whole TTL");
+  const f = html.match(/function feedFetchJson\(url\)\{[\s\S]*?\n\}/);
+  if (f && /if \(!r\.ok\) throw/.test(f[0])) ok("feedFetchJson() throws on non-OK (failures are never cached)");
+  else bad("feedFetchJson() must not cache failure bodies");
+}
+
+/* ---------- 129. metadata sinks ride escapeHtml ---------- */
+{
+  if (/\$\{escapeHtml\(x\.overview\|\|""\)\}/.test(html)) ok("the hero overview sink escapes (TMDB metadata is free text)");
+  else bad("the hero overview must ride escapeHtml");
+  if (/card-title text-xs mt-1\.5 font-bold truncate">\$\{escapeHtml\(titleOf\(x\)\)\}/.test(html)) ok("card titles escape");
+  else bad("card titles must ride escapeHtml");
+}
+
+/* ---------- 130. one auto-hop per title, everywhere ---------- */
+{
+  const fns = ["midPlayRescue", "armStuckWatchdogs", "anipmArmStartRetry", "boltArmStartRetry"];
+  let all = true;
+  for (const fn of fns) {
+    const m = html.match(new RegExp("function " + fn + "\\s*\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}"));
+    if (!m) { all = false; bad(fn + " missing"); continue; }
+    if (/setMirror\([^)]*, true\)/.test(m[0]) && !/window\._autoHopped = true/.test(m[0])) {
+      all = false;
+      bad(fn + " auto-hops without taking the heal-once budget (mirror ping-pong loops)");
+    }
+  }
+  if (all) ok("every auto-hop path takes the one-hop heal budget (no ping-pong)");
+}
+
+/* ---------- 131. service worker cache honesty ---------- */
+{
+  const puts = (sw.match(/c\.put\(/g) || []).length;
+  const guarded = (sw.match(/e\.waitUntil\(caches\.open\(CACHE\)\.then\(\(c\) => c\.put/g) || []).length;
+  if (/STATIC_OK/.test(sw) && puts === guarded && puts > 0)
+    ok("cache writes ride waitUntil and only shell statics are cached (no version.txt bloat)");
+  else bad("sw.js: every c.put must ride e.waitUntil and non-shell same-origin GETs must pass through uncached");
+}
+
+/* ---------- 132. one signing key for every build ---------- */
+{
+  let bg = "", haveKey = true;
+  try { bg = read("android/app/build.gradle"); } catch (e) { bg = ""; }
+  try { read("android/preview.keystore"); } catch (e) { haveKey = false; }
+  if (bg && /signingConfigs/.test(bg) && /preview\.keystore/.test(bg) && haveKey)
+    ok("every wrapper build signs with the committed preview keystore (updates install over)");
+  else bad("android/app/build.gradle must sign with android/preview.keystore - runner-minted debug keys re-signed every APK and updates never installed");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
