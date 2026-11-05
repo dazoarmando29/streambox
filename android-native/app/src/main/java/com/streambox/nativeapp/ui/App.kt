@@ -50,10 +50,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -239,22 +241,50 @@ fun StreamBoxApp() {
     // In-app updates (0.80): the rolling latest-native prerelease is the
     // update channel - one honest popup when a NEWER build is published and
     // one button that downloads and goes straight to the package installer.
-    // The APK file never piles up: leftovers are wiped here on every boot
-    // (the installer needs the file alive while it works and the install
-    // kills this process, so the NEXT launch is the first chance to clean).
+    // 0.84 fix: the offer appeared only ONCE per install - the check ran a
+    // single time per PROCESS (a TV launcher restart reuses the process),
+    // stamped the throttle clock even on FAILURE (slow Wi-Fi = silent miss),
+    // and Later destroyed the pending offer. Now the check runs on EVERY
+    // foreground through the lifecycle, retries through Wi-Fi wake-ups,
+    // stamps only on success, Later only silences for a few minutes, and a
+    // corner pill + version stamp keep the offer visible forever.
     var upd by remember { mutableStateOf<Updater.Release?>(null) }
+    var updOpen by remember { mutableStateOf(false) }
     val updState = remember { UpdateMem() }
     val updScope = rememberCoroutineScope()
+    val updShownAt = remember { mutableLongStateOf(0L) }
+    var verNote by remember { mutableStateOf("") }
+    suspend fun offerUpdate(force: Boolean) {
+        val now = System.currentTimeMillis()
+        // throttle is stamped on SUCCESS only - a failed lookup never hides
+        // the next attempt (the 0.84-before bug)
+        if (!force && now - Store.updateCheckAt(appCtx) < 60 * 1000L) return
+        val rel = withContext(Dispatchers.IO) { Updater.check(appCtx) }
+        if (rel != null) {
+            Store.setUpdateCheckAt(appCtx, System.currentTimeMillis())
+            upd = rel
+        }
+    }
     LaunchedEffect(Unit) {
         Updater.cleanLeftovers(appCtx)
-        // The release lookup is tiny but the self-hash fallback is not -
-        // at most one look per few minutes so a crash loop can never
-        // hammer the API (58 lookups an hour left for everyone else).
-        if (System.currentTimeMillis() - Store.updateCheckAt(appCtx) > 5 * 60 * 1000L) {
-            Store.setUpdateCheckAt(appCtx, System.currentTimeMillis())
-            val rel = withContext(Dispatchers.IO) { Updater.check(appCtx) }
-            if (rel != null) upd = rel
+    }
+    // every foreground (cold start AND launcher restarts): re-check with a
+    // short retry ladder for slow TV Wi-Fi, then the pill/dialog take over
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, ev ->
+            if (ev == androidx.lifecycle.Lifecycle.Event.ON_START) {
+                updScope.launch {
+                    for (attempt in 0..2) {
+                        offerUpdate(false)
+                        if (upd != null) break
+                        if (attempt < 2) delay(if (attempt == 0) 15_000L else 45_000L)
+                    }
+                }
+            }
         }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
     // 0.72 nav perf: warm every tab's feed behind the home screen so the
     // nav bar never opens a section cold (that first-visit fetch behind a
@@ -368,6 +398,52 @@ fun StreamBoxApp() {
                     }
                 }
             }
+            // Version stamp + update door (0.84): the corner says exactly
+            // what is installed (tap = check for updates now) and the accent
+            // pill is a permanent door to a pending update - the offer can
+            // never be lost again.
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 14.dp, bottom = if (AppEnv.isTv) 58.dp else 72.dp),
+                horizontalAlignment = Alignment.End,
+            ) {
+                if (upd != null) {
+                    Text(
+                        "UPDATE READY \u2192",
+                        color = Ink,
+                        fontWeight = FontWeight.Black,
+                        fontSize = if (AppEnv.isTv) 15.sp else 10.sp,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier
+                            .glow(RoundedCornerShape(50))
+                            .background(Accent, RoundedCornerShape(50))
+                            .clickable { updOpen = true }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+                Text(
+                    "v" + BuildConfig.VERSION_NAME,
+                    color = Dim,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (AppEnv.isTv) 14.sp else 10.sp,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.clickable {
+                        updScope.launch {
+                            verNote = "Checking for updates..."
+                            offerUpdate(true)
+                            verNote = if (upd != null) "Update available!" else "You are up to date"
+                            delay(2600)
+                            verNote = ""
+                        }
+                    },
+                )
+                if (verNote.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(verNote, color = Accent, fontSize = if (AppEnv.isTv) 13.sp else 10.sp)
+                }
+            }
             AnimatedVisibility(visible = !splashDone, exit = fadeOut(tween(420))) {
                 SplashScreen()
             }
@@ -375,13 +451,21 @@ fun StreamBoxApp() {
                 WhatsNewDialog(ver, bullets) { whatsNew = null }
             }
             // The What's New card owns the screen first; the update offer
-            // waits its turn so two dialogs never stack.
+            // waits its turn so two dialogs never stack. 0.84: the offer
+            // re-announces every 5 minutes and on every reopen - Later only
+            // silences it for a while and the corner pill keeps the door open.
             if (whatsNew == null) {
                 upd?.let { rel ->
+                    val autoShow = System.currentTimeMillis() - updShownAt.longValue > 5 * 60 * 1000L
+                    if (!updOpen && !autoShow) return@let
+                    LaunchedEffect(rel, updOpen) { updShownAt.longValue = System.currentTimeMillis() }
                     UpdateDialog(
                         rel = rel,
                         st = updState,
-                        onDismiss = { upd = null },
+                        onDismiss = {
+                            updOpen = false
+                            updShownAt.longValue = System.currentTimeMillis()
+                        },
                         onInstall = {
                             if (updState.progress < 0) {
                                 updState.error = ""
@@ -408,6 +492,7 @@ fun StreamBoxApp() {
                                         // The system installer owns the
                                         // screen now - stand down.
                                         upd = null
+                                        updOpen = false
                                     } else {
                                         updState.progress = -1
                                         updState.error = "The system installer did not open. Try again."

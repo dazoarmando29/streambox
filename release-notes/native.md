@@ -7,8 +7,10 @@ What is new
 - Invites open in-app through streambox://party/CODE and the room survives app switches, sleep and reconnects by itself (resume tokens restore your seat, even the host seat)
 - The room server runs on our own Cloudflare edge - no accounts, no ads, and no video ever passes through it
 - Update popup redesigned: a real what-is-new card with the version jump, size, date and verified-install cues
+- A version stamp sits in the bottom corner (tap it any time to check for updates) and an accent Update ready pill keeps a pending update one tap away
 
 Fixes
+- The update popup could appear only once per install and vanish forever on restart (a TV launcher restart reuses the app process, and failed lookups still silenced the next check) - it now re-offers on every reopen, retries through slow Wi-Fi wake-ups, Later only silences it for a few minutes, and the corner pill can always bring it back
 - Room joins, rejoin-after-sleep and kicked-user permanence hardened and live-tested against the edge server
 - Room playback state is authoritative on the server: stale or duplicate events can never affect the current episode, and late joiners sync to the party without resetting anyone
 - Non-hosts never double-advance episodes - the host drives the room, everyone follows
