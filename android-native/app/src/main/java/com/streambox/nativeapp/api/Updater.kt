@@ -191,6 +191,7 @@ object Updater {
             onProgress(100)
             out
         } catch (e: Exception) {
+            cleanLeftovers(ctx) // an interrupted download must never leave a partial APK behind
             null
         }
     }

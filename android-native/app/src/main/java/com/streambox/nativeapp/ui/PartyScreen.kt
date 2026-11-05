@@ -131,13 +131,14 @@ fun PartyScreen(initialCode: String?, onBack: () -> Unit) {
                 },
             )
         } else {
+            val roomCode = room!!.code // captured NOW: the kick/room-ended event can null `room` under the click
             Room(
                 big = big,
                 chatInput = chatInput, onChatInput = { chatInput = it },
                 onSend = { val t = chatInput; chatInput = ""; Party.sendChat(t) },
                 onQuick = { Party.sendChat(it) },
                 onCopyInvite = { clip.setText(AnnotatedString(Party.inviteUrl())) },
-                onCopyCode = { clip.setText(AnnotatedString(room!!.code)) },
+                onCopyCode = { clip.setText(AnnotatedString(roomCode)) },
                 onResync = { Party.resync() },
                 onLeave = { Party.leave(); onBack() },
                 onEnd = { Party.endRoom(); onBack() },
