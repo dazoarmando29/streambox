@@ -8841,6 +8841,9 @@ const PARTY = (() => {
         const u = localStorage.getItem("streambox_party_ws");
         if (u) return u;
       } catch(e){}
+      // local dev: the party-server's default port (zero-config testing)
+      if (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+        return "ws://localhost:8787/party";
       return (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/party-ws";
     },
     SYNC_NUDGE: 0.35,     // seconds of drift before a gentle rate nudge
