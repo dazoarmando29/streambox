@@ -3252,7 +3252,11 @@ async function browseMore(focusFirst){
       raw = raw.filter(x => feedYearHit(x.year));
       d = {
         results: raw.map(animeFeedCard),
-        total_pages: (w && Number(w.resolved) >= Number(w.requested)) ? next + 1 : next
+        // provider-reported hasNext wins (real paging); the old heuristic
+        // stays as the fallback for an older Worker
+        total_pages: (w && typeof w.hasNext === "boolean")
+          ? (w.hasNext ? next + 1 : next)
+          : ((w && Number(w.resolved) >= Number(w.requested)) ? next + 1 : next)
       };
     } else {
       let path;
