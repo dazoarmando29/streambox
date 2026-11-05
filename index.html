@@ -703,7 +703,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 213; // bump every release alongside version.txt
+  const BUILD_NUM = 214; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1608,8 +1608,15 @@ function tmdb(path){
     const raw = sessionStorage.getItem("sb:" + url);
     if (raw) { const c = JSON.parse(raw); if (now - c.t < TTL) { _mem.set(url, c); return Promise.resolve(c.d); } }
   } catch(e){}
-  return fetch(url).then(r => r.json()).then(d => {
+  return fetch(url).then(r => {
+    // never cache an error body: a transient 502 used to land in _mem AND
+    // sessionStorage as catalog data and poison rows for the whole TTL
+    if (!r.ok) throw new Error("http " + r.status);
+    return r.json();
+  }).then(d => {
     const c = { t: now, d };
+    // bounded cache: detail+credits payloads are 20-100KB - evict FIFO
+    if (_mem.size >= 48) { const k = _mem.keys().next().value; if (k !== undefined) _mem.delete(k); }
     _mem.set(url, c);
     try { sessionStorage.setItem("sb:" + url, JSON.stringify(c)); } catch(e){}
     return d;
@@ -1623,7 +1630,10 @@ function feedFetchJson(url){
   const now = Date.now();
   const hit = _feedMem.get(url);
   if (hit && now - hit.t < FEED_TTL_MS) return Promise.resolve(hit.d);
-  return fetch(url).then(r => (r.ok ? r.json() : {})).then(d => {
+  return fetch(url).then(r => {
+    if (!r.ok) throw new Error("http " + r.status); // failures are never cached
+    return r.json();
+  }).then(d => {
     if (_feedMem.size >= 48) { const k = _feedMem.keys().next().value; if (k !== undefined) _feedMem.delete(k); }
     _feedMem.set(url, { t: now, d });
     return d;
@@ -1676,6 +1686,8 @@ setTimeout(checkCinesrc, 2500);
 
 /* ---------- HOME ---------- */
 async function init(){
+  if (window._initRunning) return; // double-tap Retry interleaved row appends
+  window._initRunning = true;
   try { autoSwitchRestore(); } catch(e){} // manual hop mode persists across visits
   // NOTE: the watch session is intentionally NOT restored on a full page load
   // (Ctrl+Shift+R / fresh open). A reload lands on Home / the last browsed
@@ -1721,6 +1733,7 @@ async function init(){
       } catch(rowErr) { /* one row failing never kills the page */ }
     }
     paintAllRowArrows();
+    window._initRunning = false;
     return;
   } catch(err) {
     // never leave a dead empty page (offline / API down): offer retry
@@ -1731,6 +1744,7 @@ async function init(){
     </div>`;
     hideSplash();
     markReady();
+    window._initRunning = false;
     return;
   }
 }
@@ -1767,6 +1781,9 @@ function paintAllRowArrows(){ try { document.querySelectorAll(".sb-row .row-scro
 function posterTag(path, cls){
   const on = `onerror="this.onerror=null;this.style.display='none'"`;
   const fallback = `https://via.placeholder.com/500x750?text=No+Image`;
+  // paths ride into src/srcset attributes: strip quote/bracket characters so
+  // provider metadata can never break out of the attribute context
+  if (path) path = String(path).replace(/["'`<>\s]/g, "");
   if (!path) return `<img loading="lazy" decoding="async" src="${fallback}" ${on} class="${cls}">`;
   // absolute URLs (Kitsu/Worker anime feed posters) render as-is
   if (/^https?:\/\//i.test(path))
@@ -1808,7 +1825,7 @@ function makeTop10(items){
       <div class="w-40 h-56 rounded-xl overflow-hidden relative poster-frame shadow-lg">
         ${posterTag(x.poster_path, "w-full h-full object-cover transition-transform duration-500 group-hover:scale-105")}
         <div class="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/90 to-transparent">
-          <p class="text-xs font-bold truncate">${titleOf(x)}</p>
+          <p class="text-xs font-bold truncate">${escapeHtml(titleOf(x))}</p>
         </div>
       </div>`;
     item.onclick = activatable(() => openDetail(type, x.id));
@@ -1850,8 +1867,8 @@ function cardEl(x, type, variant){
         ${realVote ? `<span class="rate-badge">\u{2605} ${Number(x.vote_average).toFixed(1)}</span>` : ""}
         ${posterTag(x.poster_path, "w-full h-full object-cover transition-transform duration-500 group-hover:scale-105")}
         <div class="cap-scrim">
-          <p class="card-title text-sm font-bold truncate">${titleOf(x)}</p>
-          <p class="card-meta text-xs text-gray-400 truncate">${meta}</p>
+          <p class="card-title text-sm font-bold truncate">${escapeHtml(titleOf(x))}</p>
+          <p class="card-meta text-xs text-gray-400 truncate">${escapeHtml(meta)}</p>
         </div>
       </div>`;
   } else {
@@ -1860,7 +1877,7 @@ function cardEl(x, type, variant){
         ${realVote ? `<span class="rate-badge">\u{2605} ${Number(x.vote_average).toFixed(1)}</span>` : ""}
         ${posterTag(x.poster_path, "rounded-lg w-full aspect-[2/3] object-cover bg-white/5")}
       </div>
-      <p class="card-title text-xs mt-1.5 font-bold truncate">${titleOf(x)}</p>
+      <p class="card-title text-xs mt-1.5 font-bold truncate">${escapeHtml(titleOf(x))}</p>
       <p class="card-meta text-[10px] text-gray-400 truncate">${year} \u{00B7} ${typeLabel}</p>`;
   }
   d.onclick = activatable(() => openDetail(type, x.id));
@@ -1908,6 +1925,32 @@ function purgeRetiredCaches(){
       if (m && (CACHE_VERSIONS[m[1]] || 0) > parseInt(m[2], 10)) drop.push(k);
     }
     drop.forEach(k => { try { localStorage.removeItem(k); } catch(e){} });
+    // subtitle cue caches: bounded at boot as well (setSubs prunes live)
+    pruneSubCaches();
+    // per-title server memory (sb:srvgood / sb:srvbad) accumulates one or
+    // more entries per watched title forever: keep the newest 40
+    try {
+      const sk = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf("sb:srv") === 0) sk.push(k);
+      }
+      while (sk.length > 40) { const k = sk.shift(); try { localStorage.removeItem(k); } catch(e){} }
+    } catch(e){}
+    // expired sessionStorage response-cache entries never linger in a
+    // long-lived TV tab
+    try {
+      const sdrop = [], now = Date.now();
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const k = sessionStorage.key(i);
+        if (!k || k.indexOf("sb:") !== 0) continue;
+        try {
+          const c = JSON.parse(sessionStorage.getItem(k));
+          if (!c || typeof c.t !== "number" || now - c.t > 30 * 60 * 1000) sdrop.push(k);
+        } catch(e){ sdrop.push(k); }
+      }
+      sdrop.forEach(k => { try { sessionStorage.removeItem(k); } catch(e){} });
+    } catch(e){}
     [["streambox_continue", x => x && x.type && x.id != null],
      ["streambox_mylist", x => x && x.type && x.id != null]].forEach(([key, ok]) => {
       try {
@@ -2327,6 +2370,9 @@ function purgeRetiredCaches(){
         else if (top.id === "modal") closeModal();
         else if (top.id === "searchPanel") closeSearch();
         else if (top.id === "pinPad") pinCancel();
+        // resume dialog: Esc = the primary safe pick (Continue) like the APK
+        // Back handler - the old fallthrough left the dialog stuck open
+        else if (top.id === "resumeDlg") resumePick(true);
         else closePanels();
         e.preventDefault(); return;
       }
@@ -2406,15 +2452,16 @@ function purgeRetiredCaches(){
   setTimeout(() => paintAllRowArrows(), 2500);
 })();
 
-let heroIdx = 0, heroItems = [];
+let heroIdx = 0, heroItems = [], heroT = 0;
 function buildHero(items){
   heroItems = adultLocked() ? items.filter(x => !isAdult(x)) : items;
   if (!heroItems.length) heroItems = items; // never leave a blank billboard
   setHero(0);
+  clearInterval(heroT); // exactly one rotation timer ever (Retry/lock toggles re-run init)
   // calm boxes keep one static billboard: rotation rebuilds the whole hero
   // (big decode + layout) every 15s — a jank spike weak SoCs never stop paying
   if (document.body.classList.contains("calm")) return;
-  setInterval(()=>{
+  heroT = setInterval(()=>{
     if(!document.getElementById("homeView").classList.contains("hidden"))
       setHero((heroIdx+1)%heroItems.length);
   }, document.body.classList.contains("tv-mode") ? 15000 : 8000);
@@ -2429,7 +2476,7 @@ function heroListToggle(){
       toast("Removed from My List");
     } else {
       saveList([{ type, id: x.id, title: titleOf(x), poster: x.poster_path, rating: x.vote_average,
-        votes: x.vote_count || 0, year: (x.release_date || x.first_air_date || "").slice(0, 4), at: Date.now() }, ...getList()]);
+        votes: x.vote_count || 0, overview: x.overview || "", year: (x.release_date || x.first_air_date || "").slice(0, 4), at: Date.now() }, ...getList()]);
       toast("\u{2713} Saved to My List", toastSaveActions());
     }
     setHero(heroIdx); // repaint the bookmark state
@@ -2459,7 +2506,7 @@ function watchListToggle(){
       toast("Removed from My List");
     } else {
       saveList([{ type, id, title: titleOf(d), poster: d.poster_path, rating: d.vote_average,
-        votes: d.vote_count || 0, year: (d.release_date || d.first_air_date || "").slice(0, 4), at: Date.now() }, ...getList()]);
+        votes: d.vote_count || 0, overview: d.overview || "", year: (d.release_date || d.first_air_date || "").slice(0, 4), at: Date.now() }, ...getList()]);
       toast("\u{2713} Saved to My List", toastSaveActions());
     }
     paintWatchListBtn();
@@ -2487,18 +2534,18 @@ function setHero(i){
   const genres = genreNames(x, type);
   const saved = inList(type, x.id);
   document.getElementById("hero").innerHTML = `
-    ${bg ? `<img src="${bg}" fetchpriority="high" decoding="async" onerror="this.style.display='none'" class="absolute inset-0 w-full h-full object-cover">` : ""}
+    ${bg ? `<img src="${escapeHtml(bg)}" fetchpriority="high" decoding="async" onerror="this.style.display='none'" class="absolute inset-0 w-full h-full object-cover">` : ""}
     <div class="absolute inset-0 hero-gradient"></div>
     <div class="relative px-4 md:px-10 pb-16 max-w-2xl">
       <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-teal-400/20 border border-teal-400/60 text-teal-300 text-xs font-bold tracking-wider mb-4 uppercase shadow-lg backdrop-blur-md"><span class="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>#${i+1} Trending \u{00B7} ${type === "tv" ? "TV" : "Movie"}</span>
-      <h1 class="text-3xl md:text-6xl font-black mt-2 tracking-tight leading-tight drop-shadow-md">${titleOf(x)}</h1>
+      <h1 class="text-3xl md:text-6xl font-black mt-2 tracking-tight leading-tight drop-shadow-md">${escapeHtml(titleOf(x))}</h1>
       <div class="flex flex-wrap items-center gap-3 text-sm font-semibold text-gray-200 mt-4">
         <span class="flex items-center gap-1.5 text-teal-300 bg-teal-400/10 px-2 py-0.5 rounded border border-teal-400/30">\u{2605} ${Number(x.vote_average || 0).toFixed(1)}</span>
         <span class="text-gray-500">\u{00B7}</span><span>${year}</span>
         <span class="text-gray-500">\u{00B7}</span><span class="bg-white/10 px-2 py-0.5 rounded text-xs text-white">${type === "tv" ? "TV" : "Movie"}</span>
         ${genres ? `<span class="text-gray-500">\u{00B7}</span><span>${genres}</span>` : ""}
       </div>
-      <p class="text-sm text-gray-300 mt-4 line-clamp-3 leading-relaxed drop-shadow">${x.overview||""}</p>
+      <p class="text-sm text-gray-300 mt-4 line-clamp-3 leading-relaxed drop-shadow">${escapeHtml(x.overview||"")}</p>
       <div class="flex gap-3 mt-6 items-center">
         <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold text-base flex items-center gap-2.5 shadow-lg shadow-teal-400/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200">\u{25B6} Watch</button>
         <button onclick='openDetail("${type}",${x.id})' class="h-12 px-7 rounded-full glass-pill text-white hover:bg-white/15 font-semibold text-base flex items-center gap-2 border border-white/20 hover:border-white/40 transition-all">\u{24D8} Details</button>
@@ -2547,6 +2594,7 @@ function onOverlaySearch(q){
   overlayTimer = setTimeout(() => runOverlaySearch(q.trim()), 400);
 }
 async function runOverlaySearch(q){
+  clearTimeout(overlayTimer); // direct callers (recent chips) cancel any pending debounce run
   const grid = document.getElementById("searchResults");
   const hint = document.getElementById("searchHint");
   if (!q) { grid.innerHTML = ""; hint.textContent = "Type to search — use \u{2193} to jump into results, OK to open, Back to close."; return; }
@@ -3012,6 +3060,7 @@ async function setGenre(id){
   browse.genre = (typeof id === "string" && id !== "0" && id !== "") ? id : (Number(id) || 0);
   browse.page = 0;
   browse.totalPages = 1;
+  browse.loading = false; // a fresh filter session may load immediately
   document.getElementById("grid").innerHTML = "";
   paintChips();
   browseMore(true);
@@ -3068,6 +3117,7 @@ function setYear(y){
   browse.year = (typeof y === "string" && y !== "0") ? y : (Number(y) || 0);
   browse.page = 0;
   browse.totalPages = 1;
+  browse.loading = false; // a fresh filter session may load immediately
   document.getElementById("grid").innerHTML = "";
   paintYears();
   browseMore(true);
@@ -3091,6 +3141,7 @@ function cycleSort(){
   paintSort();
   browse.page = 0;
   browse.totalPages = 1;
+  browse.loading = false; // a fresh filter session may load immediately
   document.getElementById("grid").innerHTML = "";
   browseMore(true);
 }
@@ -3098,6 +3149,7 @@ function resetFilters(){
   browse.genre = 0; browse.year = 0; browse.studio = 0; browse.sort = 0;
   browse.page = 0;
   browse.totalPages = 1;
+  browse.loading = false; // a fresh filter session may load immediately
   document.getElementById("grid").innerHTML = "";
   paintChips(); paintYears(); paintStudios(); paintSort();
   browseMore(true);
@@ -3159,12 +3211,17 @@ function setStudio(id){
   browse.studio = Number(id) || 0;
   browse.page = 0;
   browse.totalPages = 1;
+  browse.loading = false; // a fresh filter session may load immediately
   document.getElementById("grid").innerHTML = "";
   paintStudioChips();
   browseMore(true);
 }
 async function browseMore(focusFirst){
   if (browse.loading || browse.page >= browse.totalPages) return;
+  // request token: every load bumps it, so a slow page from the PREVIOUS
+  // filters can never write page counters or cards into the new session
+  const my = (window._browseReq = (window._browseReq || 0) + 1);
+  const myBrowse = browse;
   browse.loading = true;
   const btn = document.getElementById("loadMoreBtn");
   btn.classList.add("hidden");
@@ -3216,6 +3273,7 @@ async function browseMore(focusFirst){
       }
       d = await tmdb(path);
     }
+    if (my !== window._browseReq) return; // stale: filters changed under us
     browse.page = next;
     browse.totalPages = d.total_pages || 1;
     try {
@@ -3228,9 +3286,22 @@ async function browseMore(focusFirst){
     const prevCount = grid.children.length;
     const bt = (browse.type === "anime" || browse.type === "ko") ? "tv" : browse.type;
     const lockedBr = adultLocked();
+    // id-dedupe against the cards already on screen: overlapping feed pages /
+    // drifted popularities used to stack duplicate posters
+    const seen = new Set([...grid.querySelectorAll("[data-cid]")].map(n => n.dataset.cid));
+    let appended = 0;
     (d.results || []).filter(x => x.poster_path && (!lockedBr || !isAdult(x))).forEach(x => {
-      grid.appendChild(cardEl({ ...x, media_type: bt, _label: browse.type === "ko" ? "K-DRAMA" : "" }, bt, "overlay"));
+      const cid = bt + ":" + x.id;
+      if (seen.has(cid)) return;
+      seen.add(cid);
+      const el = cardEl({ ...x, media_type: bt, _label: browse.type === "ko" ? "K-DRAMA" : "" }, bt, "overlay");
+      el.dataset.cid = cid;
+      grid.appendChild(el);
+      appended++;
     });
+    // a page that added nothing NEW is the end of the line (repeated feeds
+    // and fully filtered pages used to keep Load More alive forever)
+    if (next > 1 && appended === 0) browse.totalPages = next;
     if (browse.page < browse.totalPages) btn.classList.remove("hidden");
     if (focusFirst) {
       const first = grid.querySelector(".card");
@@ -3246,11 +3317,12 @@ async function browseMore(focusFirst){
       }
     }
   } catch(e){
+    if (my !== window._browseReq) return; // stale failure: not ours to paint
     const grid = document.getElementById("grid");
     if (!grid.children.length) grid.innerHTML = "<p class='text-gray-500'>Couldn't load titles. Check connection.</p>";
     else btn.classList.remove("hidden");
   }
-  browse.loading = false;
+  if (my === window._browseReq) myBrowse.loading = false;
 }
 /* ---------- DETAIL MODAL ---------- */
 let modalSeasons = [], modalSeasonIdx = 0, modalEpisodes = [], modalEpIdx = 0, lastOpener = null;
@@ -3259,7 +3331,7 @@ async function openDetail(type, id){
   const my = ++detailReq; // ignore stale responses if user already moved on
   let d;
   try {
-    d = await tmdb(`/${type}/${id}?append_to_response=credits`);
+    d = await withTimeout(tmdb(`/${type}/${id}?append_to_response=credits`), 15000, "detail");
   } catch(err) {
     toast("Couldn't load details — check connection and try again.");
     return;
@@ -3277,7 +3349,7 @@ async function openDetail(type, id){
     <span class="text-gray-400 font-medium">${(d.release_date || d.first_air_date || "").slice(0, 4)}</span>
     <span class="px-2 py-0.5 rounded border border-white/15 bg-white/5 text-[11px] font-semibold text-gray-300">${type === "tv" ? "TV" : "Movie"}</span>
     <span class="text-gray-500">\u{00B7}</span>
-    <span class="text-teal-300">${(d.genres || []).map(g => g.name).filter(Boolean).join(" \u{00B7} ") || "\u{2014}"}</span>`;
+    <span class="text-teal-300">${escapeHtml((d.genres || []).map(g => g.name).filter(Boolean).join(" \u{00B7} ") || "\u{2014}")}</span>`;
   document.getElementById("mOverview").textContent = d.overview || "No overview.";
   try {
     document.getElementById("mListBtn").textContent = inList(type, id) ? "\u{2713} In My List" : "+ My List";
@@ -3361,7 +3433,9 @@ function playModalEp(){
 }
 async function loadModalEpisodes(){
   const s = (modalSeasons[modalSeasonIdx]||{}).season_number || 1;
+  const my = window._modalEpReq = (window._modalEpReq || 0) + 1;
   const d = await tmdb(`/tv/${currentDetail.id}/season/${s}`);
+  if (my !== window._modalEpReq) return; // stale season never overwrites the picker
   modalEpisodes = d.episodes || [];
   modalEpIdx = 0;
   updateModalEpLabel();
@@ -3412,6 +3486,14 @@ function closeTvGuide(){
 
 /* ---------- WATCH ---------- */
 async function openWatch(type, id, s=1, e=1, t=0){
+  // normalize the id: a string id splits every strict-equality store
+  // (Continue / My List / server memory) into duplicate entries
+  if (typeof id === "string" && /^\d+$/.test(id)) id = Number(id);
+  // stale-load guard: every openWatch supersedes the previous one, and a
+  // Back out of the watch view kills any load still in flight
+  const owKey = window._owSeq = (window._owSeq || 0) + 1;
+  const stillMine = () => owKey === window._owSeq
+    && !document.getElementById("watchView").classList.contains("hidden");
   document.body.classList.add("watch-on");
   const anime = detectAnime(type, id);
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
@@ -3449,12 +3531,14 @@ async function openWatch(type, id, s=1, e=1, t=0){
   fetchTrailer(type, id); // non-blocking: trailer button appears when found
   let d;
   try {
-    d = await tmdb(`/${type}/${id}?append_to_response=credits`);
+    d = await withTimeout(tmdb(`/${type}/${id}?append_to_response=credits`), 15000, "detail");
   } catch(err) {
+    if (!stillMine()) return;
     document.getElementById("watchStatus").textContent = "Couldn't load details — check connection, then press Back and retry.";
     toast("Couldn't load details — check connection and try again.");
     return;
   }
+  if (!stillMine()) return; // stale: user left or opened something newer
   currentItem = d;
   // K-drama flag BEFORE any subtitle chain runs: Korean dramas ride VidBolt's
   // own English subs (Tagalog dub default), so the Wyzie chain must know first.
@@ -3529,6 +3613,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
     document.getElementById("epNav").classList.add("hidden");
     document.getElementById("epDrawerBtn").classList.add("hidden");
   }
+  if (!stillMine()) return;
   paintBarGroups();
   if (!maybeResumePrompt()) { loadPlayer(); saveContinue(); }
   paintTwinTip();
@@ -3591,7 +3676,9 @@ async function loadEpisodes(s){
   const sv = s || gridS;
   const { id } = watchState;
   const e = watchState.e;
+  const my = window._epReq = (window._epReq || 0) + 1;
   const d = await tmdb(`/tv/${id}/season/${sv}`);
+  if (my !== window._epReq) return; // stale season response never repaints the grid
   const grid = document.getElementById("epGrid"); grid.innerHTML = "";
   window._seasonArc = seasonDisplayName(d, seasonArc(titleOf(currentItem || {}), d.overview || "", sv));
   updateSeasonLabel();
@@ -4289,7 +4376,10 @@ function armStuckWatchdogs(){
       // manual mode just names the fallback and waits for you
       const fbA = stuckFallback("vidbolt");
       const nmA = stuckFallbackName(fbA);
-      if (!autoSwitchOn()) { stuckRecommend("AniPM isn't starting here", nmA); return; }
+      // heal-once: this hop shares the one-auto-hop budget with every other
+      // auto path, or AniPM<->VidBolt ping-pong loops forever on a dead title
+      if (!autoSwitchOn() || window._autoHopped) { stuckRecommend("AniPM isn't starting here", nmA); return; }
+      window._autoHopped = true;
       const wsa = document.getElementById("watchStatus");
       if (wsa) wsa.textContent = `AniPM isn't starting here — moved you to ${nmA}. \u{21C4} Source anytime to hop again`;
       setMirror(fbA, true);
@@ -4305,7 +4395,9 @@ function armStuckWatchdogs(){
       if (window._cinePlaying || mirror !== "vidrift") return;
       const fb3 = stuckFallback("yapgrid");
       const nm3 = stuckFallbackName(fb3);
-      if (!autoSwitchOn()) { stuckRecommend("VidRift is showing a check this remote can't complete", nm3); return; }
+      // heal-once (same shared budget): no VidRift<->YapGrid loops
+      if (!autoSwitchOn() || window._autoHopped) { stuckRecommend("VidRift is showing a check this remote can't complete", nm3); return; }
+      window._autoHopped = true;
       const ws3 = document.getElementById("watchStatus");
       if (ws3) ws3.textContent = `VidRift is showing a check this remote can't complete — moved you to ${nm3}. \u{21C4} Source anytime to hop again`;
       setMirror(fb3, true);
@@ -4644,6 +4736,12 @@ function goHome(ev){
   // may leak into the next one (stale auto-heals used to yank new titles
   // onto the previous title's fallback server)
   clearTimeout(window._watchdog); clearTimeout(window._watchdog2); clearTimeout(window._spinT);
+  // retry/kick/hello/quality clocks too: their callbacks only checked
+  // mirror+episode key (both unchanged after goHome) and reloaded the player
+  // inside the hidden view - background audio and phantom watchdogs
+  clearTimeout(window._qT); clearTimeout(window._playKickT); clearTimeout(window._boltRetryT);
+  clearTimeout(window._anipmRetryT); clearTimeout(window._anipmKickT); clearTimeout(window._anipmHelloTo);
+  clearTimeout(window._tapT); clearTimeout(window._tapMsgT); clearTimeout(window._anipmTapHintT);
   resumeAt = -1; window._cmdQ = []; window._qSeekD = 0; window._cinePlaying = false; window._stuckShown = false;
   try { document.getElementById("healthBar").classList.add("hidden"); } catch(e){}
   exitVideoFs();
@@ -4706,6 +4804,7 @@ function saveContinue(){
     const prev = arr.find(x=>x.type===watchState.type&&x.id===watchState.id&&(x.s||1)===watchState.s&&(x.e||1)===watchState.e);
     const item = { type: watchState.type, id: watchState.id, s: watchState.s, e: watchState.e,
       title: titleOf(currentItem||{}), poster: (currentItem||{}).poster_path,
+      overview: (currentItem||{}).overview || "",
       anime: !!watchState.anime,
       ko: !!watchState.ko,
       pos: prev ? (prev.pos || 0) : 0, dur: prev ? (prev.dur || 0) : 0, at: Date.now() };
@@ -4752,7 +4851,7 @@ function continueScopeItems(scope){
   // Movies = movies, TV = non-ko TV, Anime = anime, KDrama = lang ko
   let arr = [];
   try { arr = JSON.parse(localStorage.getItem("streambox_continue") || "[]"); } catch(e){ return []; }
-  if (adultLocked()) arr = arr.filter(x => !isAdult({ title: x.title }));
+  if (adultLocked()) arr = arr.filter(x => !isAdult({ title: x.title, overview: x.overview || "" }));
   if (scope === "movie") return arr.filter(x => x.type === "movie");
   if (scope === "tv") return arr.filter(x => x.type === "tv" && !x.anime && !x.ko);
   if (scope === "anime") return arr.filter(x => !!x.anime);
@@ -4786,9 +4885,9 @@ function paintContinueRow(row, grid, scope, active){
       d.tabIndex = 0;
       d.setAttribute("role", "button");
       d.setAttribute("data-focusable", "1");
-      d.setAttribute("aria-label", `${x.title||""} (${x.type})`);
+      d.setAttribute("aria-label", `${escapeHtml(x.title||"")} (${x.type})`);
       const pct = (x.dur > 60 && x.pos > 5) ? Math.min(99, Math.round(x.pos / x.dur * 100)) : 0;
-      d.innerHTML = `<div class="glass flex items-center gap-3 p-3"><img loading="lazy" decoding="async" src="${IMG(x.poster,"w185")}" onerror="this.onerror=null;this.style.display='none'" class="w-14 aspect-[2/3] object-cover rounded-lg shrink-0"><div class="flex-1 min-w-0"><p class="card-title text-sm font-bold truncate">${x.title||""}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p>${pct ? `<div class="h-1.5 rounded bg-white/15 mt-2 overflow-hidden"><div class="h-1.5 rounded bg-teal-400" style="width:${pct}%"></div></div><p class="text-[11px] text-teal-300 font-bold mt-1">${pct}% watched</p>` : `<p class="text-[11px] text-gray-600 mt-2">Not started</p>`}</div><button class="w-9 h-9 shrink-0 rounded-full bg-black/50 hover:bg-black/80 text-sm" aria-label="Remove">\u{2715}</button></div>`;
+      d.innerHTML = `<div class="glass flex items-center gap-3 p-3"><img loading="lazy" decoding="async" src="${escapeHtml(IMG(x.poster,"w185"))}" onerror="this.onerror=null;this.style.display='none'" class="w-14 aspect-[2/3] object-cover rounded-lg shrink-0"><div class="flex-1 min-w-0"><p class="card-title text-sm font-bold truncate">${escapeHtml(x.title||"")}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p>${pct ? `<div class="h-1.5 rounded bg-white/15 mt-2 overflow-hidden"><div class="h-1.5 rounded bg-teal-400" style="width:${pct}%"></div></div><p class="text-[11px] text-teal-300 font-bold mt-1">${pct}% watched</p>` : `<p class="text-[11px] text-gray-600 mt-2">Not started</p>`}</div><button class="w-9 h-9 shrink-0 rounded-full bg-black/50 hover:bg-black/80 text-sm" aria-label="Remove">\u{2715}</button></div>`;
       const resumeAt = (x.dur > 60 && x.pos > 10) ? x.pos : 0;
       d.onclick = activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt));
       // remote/keyboard: OK plays ONLY when the card itself has focus — the inner
@@ -4801,10 +4900,14 @@ function paintContinueRow(row, grid, scope, active){
   }catch(e){}
 }
 function removeContinue(type,id){
-  let arr = JSON.parse(localStorage.getItem("streambox_continue")||"[]");
-  arr = arr.filter(x=>!(x.type===type&&x.id===id));
-  localStorage.setItem("streambox_continue", JSON.stringify(arr));
-  renderContinue();
+  try {
+    let arr = JSON.parse(localStorage.getItem("streambox_continue")||"[]");
+    arr = arr.filter(x=>!(x.type===type&&x.id===id));
+    localStorage.setItem("streambox_continue", JSON.stringify(arr));
+    renderContinue();
+  } catch(e){ // corrupted store must never kill the remove button
+    try { localStorage.removeItem("streambox_continue"); renderContinue(); } catch(e2){}
+  }
 }
 /* ---------- My List (its own shelf — Continue Watching keeps progress) ---------- */
 function getList(){
@@ -4827,6 +4930,7 @@ function addToList(){
   } else {
     const item = { type: currentDetail.type, id: currentDetail.id, title: titleOf(d),
       poster: d.poster_path, rating: d.vote_average, votes: d.vote_count || 0,
+      overview: d.overview || "",
       year: (d.release_date || d.first_air_date || "").slice(0, 4), at: Date.now() };
     saveList([item, ...getList()]);
     if (btn) btn.textContent = "\u{2713} In My List";
@@ -4862,7 +4966,8 @@ function showList(ev){
   }
 }
 function renderList(){
-  const arr = getList();
+  // the 18+ gate hides adult titles everywhere - My List included
+  const arr = getList().filter(x => !(adultLocked() && isAdult({ title: x.title, overview: x.overview || "" })));
   const grid = document.getElementById("listGrid");
   const empty = document.getElementById("listEmpty");
   const count = document.getElementById("listCount");
@@ -5314,6 +5419,7 @@ function closePanels(){
       && document.getElementById("searchPanel").classList.contains("hidden")
       && document.getElementById("avSheet").classList.contains("hidden")
       && document.getElementById("vrSheet").classList.contains("hidden")
+      && document.getElementById("resumeDlg").classList.contains("hidden")
       && document.getElementById("tvGuide").classList.contains("hidden"))
     document.body.classList.remove("modal-open");
   if (panelOpener && panelOpener.tagName !== "IFRAME" && panelOpener.focus) { try { panelOpener.focus({ preventScroll: true }); } catch(e){} }
@@ -6208,6 +6314,9 @@ async function wyzDownload(url, it){
    Costs 2 key requests per new title — skipped when offline, over quota,
    or off the overlay mirrors (CineSrc + VidBolt). */
 async function wyzAutoSubs(){
+  // stale-guard: a slow search must never attach the previous episode's
+  // cues to the new episode (and persist them under its storage key)
+  const myKey = subStorageKey();
   try {
     if (subFile && subFile.cues && subFile.cues.length) return;
     if (isKDrama()) { koSubNote(); return; } // K-dramas ride VidBolt's own English subs
@@ -6248,6 +6357,7 @@ async function wyzAutoSubs(){
     if (!fr.ok) return;
     const cues = parseSubs(await fr.text());
     if (!cues.length) return;
+    if (subStorageKey() !== myKey) return; // episode changed mid-fetch
     setSubs({ name: (pick.fileName || "wyzie.srt"), lang: (pick.display || wyzLang.toUpperCase()), cues, url: pick.url, corsUrl: pick.url, src: "wyzie", code: wyzLang,
       pos: "bottom", offset: 0 });
     wyzQuotaClear();
@@ -6411,7 +6521,8 @@ async function bsDownload(sub){
 async function bsAuto(){
   // silent one-shot backup for auto-subs: same title won't retry this session
   try {
-    const k = subStorageKey() + "|bs";
+    const myKey = subStorageKey(); // stale-guard (same as wyzAutoSubs)
+    const k = myKey + "|bs";
     if (bsTriedKey === k) return;
     bsTriedKey = k;
     if (subFile && subFile.cues && subFile.cues.length) return;
@@ -6426,6 +6537,7 @@ async function bsAuto(){
     if (!fr.ok) return;
     const cues = parseSubs(await fr.text());
     if (!cues.length) return;
+    if (subStorageKey() !== myKey) return; // episode changed mid-fetch
     const gl = guessLang(pick.file);
     setSubs({ name: (pick.file || "backup.srt"), lang: gl !== "Custom" ? gl : (pick.language || wyzLang.toUpperCase()), cues, src: pick.tsdbUrl ? "tsdb" : "betaseries", corsUrl: (pick.tsdbUrl || ""), pos: "bottom", offset: 0 });
     const ws = document.getElementById("watchStatus");
@@ -6534,11 +6646,24 @@ function guessLang(name){
 function subStorageKey(){
   return `sb_sub_${watchState.type}_${watchState.id}_${watchState.s || 0}_${watchState.e || 0}`;
 }
+/* subtitle caches hold 100-300KB of cues per episode: keep the most recent 8
+   so a long binge can never silently blow the localStorage quota (an
+   over-quota store makes Continue/My List writes die silently too) */
+function pruneSubCaches(){
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf("sb_sub_") === 0) keys.push(k);
+    }
+    while (keys.length > 8) { const k = keys.shift(); try { localStorage.removeItem(k); } catch(e){} }
+  } catch(e){}
+}
 function setSubs(o, remember = true){
   subFile = o;
   subsOn = true;
   if (remember && o) {
-    try { localStorage.setItem(subStorageKey(), JSON.stringify(o)); }
+    try { localStorage.setItem(subStorageKey(), JSON.stringify(o)); pruneSubCaches(); }
     catch(e){ subStatus("Loaded, but too big to remember on this device."); }
   }
   paintSubsUI();
@@ -6748,8 +6873,11 @@ function paintSubsUI(){
     if (kn) kn.classList.toggle("hidden", !isKDrama());
   } catch(e){}
   const pl = document.getElementById("subPosLabel");
-  if (pl) pl.textContent = subFile
-    ? subFile.pos[0].toUpperCase() + subFile.pos.slice(1) : "Bottom";
+  if (pl) {
+    // legacy/hand-edited stored files may lack `pos` — never crash the panel
+    const pos = (subFile && subFile.pos) || "bottom";
+    pl.textContent = subFile ? pos[0].toUpperCase() + pos.slice(1) : "Bottom";
+  }
   const ol = document.getElementById("subOffLabel");
   if (ol) {
     const o = (subFile && subFile.offset) || 0;
@@ -6887,13 +7015,16 @@ async function renderEpDrawer(){
   if (!list) return;
   const q = (document.getElementById("epFilter").value || "").trim().toLowerCase();
   list.innerHTML = `<p class="text-sm text-gray-500">Loading…</p>`;
+  const my = window._epDrawerReq = (window._epDrawerReq || 0) + 1;
   let d;
   try {
     d = await tmdb(`/tv/${watchState.id}/season/${drawerS}`);
   } catch(err) {
+    if (my !== window._epDrawerReq) return;
     list.innerHTML = `<p class="text-sm text-gray-500">Couldn't load episodes. Check connection.</p>`;
     return;
   }
+  if (my !== window._epDrawerReq) return; // stale season/filter never repaints
   drawerEps = d.episodes || [];
   const arcD = seasonArc(titleOf(currentItem || {}), d.overview || "", drawerS);
   window._seasonArc = seasonDisplayName(d, arcD);
@@ -6950,10 +7081,10 @@ async function renderEpDrawer(){
       card.setAttribute("aria-label", `Episode ${ep.episode_number} airs ${epAirPretty(unaired)} (PH) — coming soon`);
       const still = ep.still_path ? IMG(ep.still_path, "w300") : "";
       card.innerHTML = `
-        ${still ? `<img loading="lazy" decoding="async" src="${still}" class="w-full aspect-video object-cover" onerror="this.style.display='none'">` : ""}
+        ${still ? `<img loading="lazy" decoding="async" src="${escapeHtml(still)}" class="w-full aspect-video object-cover" onerror="this.style.display='none'">` : ""}
         <div class="p-3">
           <div class="flex items-start gap-3">
-            <p class="font-bold text-sm text-gray-400 flex-1 min-w-0">E${ep.episode_number} — ${ep.name || ""}</p>
+            <p class="font-bold text-sm text-gray-400 flex-1 min-w-0">E${ep.episode_number} — ${escapeHtml(ep.name || "")}</p>
             ${statusHtml}
           </div>
           <p class="text-[11px] text-gray-500 mt-1">Available at 00:00 PH on air day</p>
@@ -6969,15 +7100,15 @@ async function renderEpDrawer(){
     card.setAttribute("aria-label", `Episode ${ep.episode_number}: ${ep.name}${isFin ? ", " + (_dLast ? "series finale" : "season finale") : ""}`);
     const still = ep.still_path ? IMG(ep.still_path, "w300") : "";
     card.innerHTML = `
-      ${still ? `<img loading="lazy" decoding="async" src="${still}" class="w-full aspect-video object-cover ${hidden ? "blur-md" : ""}" onerror="this.style.display='none'">` : ""}
+      ${still ? `<img loading="lazy" decoding="async" src="${escapeHtml(still)}" class="w-full aspect-video object-cover ${hidden ? "blur-md" : ""}" onerror="this.style.display='none'">` : ""}
       ${isCur ? `<span class="absolute top-2 right-2 text-[11px] font-bold bg-teal-500 px-2 py-0.5 rounded-full">WATCHING</span>`
         : isFin ? `<span class="absolute top-2 right-2 text-[11px] font-bold bg-white/10 text-gray-200 px-2 py-0.5 rounded-full">${finBadge}</span>` : ""}
       <div class="p-3">
         <div class="flex items-start gap-3">
-          <p class="font-bold text-sm flex-1 min-w-0">E${ep.episode_number} — ${ep.name || ""}${isFin && !isCur ? " \u{1F3C1}" : ""}</p>
+          <p class="font-bold text-sm flex-1 min-w-0">E${ep.episode_number} — ${escapeHtml(ep.name || "")}${isFin && !isCur ? " \u{1F3C1}" : ""}</p>
           ${statusHtml}
         </div>
-        <p class="text-xs text-gray-400 mt-1 ${hidden ? "blur-sm select-none" : ""}">${ep.overview || "No synopsis."}</p>
+        <p class="text-xs text-gray-400 mt-1 ${hidden ? "blur-sm select-none" : ""}">${escapeHtml(ep.overview || "No synopsis.")}</p>
         ${hidden ? `<button class="mt-2 text-xs font-bold bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full">Click to reveal</button>` : ""}
       </div>`;
     const play = activatable(() => {
@@ -7013,6 +7144,8 @@ async function fetchIntroRanges(){
     const r = await fetch(url);
     if (!r.ok) return;
     const d = await r.json();
+    if (key !== _introKey) return; // stale: episode changed mid-fetch (never
+    // let the previous episode's ranges label the new one's skip marks)
     _introRanges = (d.intro || []).map(x => ({ start: (x.start_ms || 0) / 1000, end: (x.end_ms || 0) / 1000 }))
       .filter(x => x.end > x.start && x.end - x.start > 3);
     // recaps ("previously on…") ride the same shapes — absent where the
@@ -7362,6 +7495,7 @@ window.addEventListener("message", (event)=>{
     hideSpin(); ctlPaint();
     if (d.duration > 0) saveProgress(d.currentTime, d.duration);
     autoSkipIntro();
+    try { sleepTick(); } catch(e){} // sleep timer runs on every drivable mirror
   }
   if (d.type === "vidrift:paused") { pState.paused = true; ctlPaint(); }
   if (d.type === "vidrift:unpaused") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
@@ -7442,6 +7576,7 @@ window.addEventListener("message", (event)=>{
     if (window._zenSeekQ != null) { const q = window._zenSeekQ; window._zenSeekQ = null; zenSend({ type: "seek", time: Math.floor(q) }); }
     if (dur > 0) saveProgress(cur, dur);
     autoSkipIntro();
+    try { sleepTick(); } catch(e){} // sleep timer runs on every drivable mirror
   }
   if (evn === "play" || evn === "playing" || evn === "unpaused") { pState.paused = false; window._cinePlaying = true; window._zenStarted = true; ctlPaint(); }
   if (evn === "pause" || evn === "paused") { pState.paused = true; ctlPaint(); }
@@ -7477,6 +7612,7 @@ function boltArmStartRetry(delay){
   clearTimeout(window._boltRetryT);
   window._boltRetryT = setTimeout(() => {
     window._boltRetryT = 0;
+    if (document.getElementById("watchView").classList.contains("hidden")) return; // left the player
     if (mirror !== "vidbolt" || window._boltProgress
         || [watchState.type, watchState.id, watchState.s, watchState.e].join(":") !== key) return;
     const used = window._boltRetryCount || 0;
@@ -7492,7 +7628,9 @@ function boltArmStartRetry(delay){
     }
     const fb = stuckFallback(watchState.anime ? "anipm" : isKDrama() ? "cinesrc" : "yapgrid");
     const nm = stuckFallbackName(fb);
-    if (!autoSwitchOn()) { stuckRecommend("VidBolt stayed loading after two retries", nm); return; }
+    // heal-once (shared budget): an auto hop must never chain into another
+    if (!autoSwitchOn() || window._autoHopped) { stuckRecommend("VidBolt stayed loading after two retries", nm); return; }
+    window._autoHopped = true;
     const ws = document.getElementById("watchStatus");
     if (ws) ws.textContent = `VidBolt stayed loading after two retries — moving to ${nm}.`;
     setMirror(fb, true);
@@ -7595,6 +7733,7 @@ window.addEventListener("message", (event)=>{
     if (window._boltSeekQ != null) { const q = window._boltSeekQ; window._boltSeekQ = null; boltSend({ type: "seek", time: Math.floor(q) }); }
     if ((pState.dur || 0) > 0) saveProgress(pState.cur, pState.dur);
     autoSkipIntro();
+    try { sleepTick(); } catch(e){} // sleep timer runs on every drivable mirror
     return;
   }
   if (d.type === "play" || d.type === "playing") { pState.paused = false; window._cinePlaying = true; window._boltStarted = true; ctlPaint(); }
@@ -7963,6 +8102,7 @@ function anipmArmStartRetry(delay){
   clearTimeout(window._anipmRetryT);
   window._anipmRetryT = setTimeout(() => {
     window._anipmRetryT = 0;
+    if (document.getElementById("watchView").classList.contains("hidden")) return; // left the player
     if (mirror !== "anipm" || window._anipmStarted
         || (window._anipmGestureBlocked && !document.body.classList.contains("tv-mode"))
         || [watchState.type, watchState.id, watchState.s, watchState.e].join(":") !== key) return;
@@ -7977,7 +8117,9 @@ function anipmArmStartRetry(delay){
     }
     const fb = stuckFallback("vidbolt");
     const nm = stuckFallbackName(fb);
-    if (!autoSwitchOn()) { stuckRecommend("AniPM stayed black after two retries", nm); return; }
+    // heal-once (shared budget): an auto hop must never chain into another
+    if (!autoSwitchOn() || window._autoHopped) { stuckRecommend("AniPM stayed black after two retries", nm); return; }
+    window._autoHopped = true;
     const retryStatus = document.getElementById("watchStatus");
     if (retryStatus) retryStatus.textContent = `AniPM stayed black after two retries — moving to ${nm}.`;
     setMirror(fb, true);
@@ -8438,6 +8580,7 @@ document.getElementById("player").addEventListener("load", ()=>{
 });
 window.addEventListener("message", (event)=>{
   if(event.origin !== "https://cinesrc.st") return;
+  if (mirror !== "cinesrc") return; // stale frame from a switched-away mirror
   const { type, ...data } = event.data || {};
   if(type === "cinesrc:ready" || type === "cinesrc:play" || type === "cinesrc:loadedmetadata" || type === "cinesrc:timeupdate" || type === "cinesrc:seeked") hideSpin();
   if(type === "cinesrc:ready") {
@@ -8575,7 +8718,11 @@ window.addEventListener("message", (event)=>{
   const q = new URLSearchParams(location.search);
   if(q.get("id")){
     const t = q.get("type")==="tv" ? "tv" : "movie";
-    openWatch(t, q.get("id"), Number(q.get("s")||1), Number(q.get("e")||1));
+    // ids must be NUMBERS: a string id splits every strict-equality store
+    // (Continue / My List / server memory) into duplicate entries
+    const raw = q.get("id"), id = /^\d+$/.test(raw) ? Number(raw) : raw;
+    init(); // the home catalog still builds so Back lands on a real Home
+    openWatch(t, id, Number(q.get("s")||1), Number(q.get("e")||1));
   } else init();
 })();
 </script>
