@@ -7,17 +7,36 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 
-/** Branded launch screen: shows the logo instantly, then hands off to the app. */
+/** Branded launch screen: shows the logo instantly, then hands off to the app.
+    Also the streambox://party/CODE deep-link entry (keeps MainActivity
+    exported=false): the code rides along as an intent extra. */
 public class SplashActivity extends Activity {
     private static final long DELAY_MS = 1400;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean handedOff;
+    private String partyCode;
+
+    private void readPartyIntent() {
+        try {
+            android.net.Uri d = getIntent() == null ? null : getIntent().getData();
+            if (d != null && "streambox".equals(d.getScheme()) && "party".equals(d.getHost())) {
+                String seg = d.getLastPathSegment();
+                if (seg != null) {
+                    String clean = seg.replaceAll("[^A-Za-z0-9]", "");
+                    if (!clean.isEmpty()) partyCode = clean.substring(0, Math.min(6, clean.length()));
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
     private final Runnable go = new Runnable() {
         @Override
         public void run() {
             if (isFinishing() || handedOff) return;
             handedOff = true;
-            startActivity(new Intent(SplashActivity.this, MainActivity.class));
+            Intent i = new Intent(SplashActivity.this, MainActivity.class);
+            if (partyCode != null && !partyCode.isEmpty()) i.putExtra("party", partyCode);
+            startActivity(i);
             finish();
         }
     };
@@ -43,8 +62,12 @@ public class SplashActivity extends Activity {
         super.onResume();
         // Start the countdown only while visible: a delayed start from a
         // backgrounded splash is a restricted background activity start on
-        // Android 10+ (dropped launch / dead task on return).
-        if (!handedOff) handler.postDelayed(go, DELAY_MS);
+        // Android 10+ (dropped launch / dead task on return). Invite taps go
+        // straight in - the party is waiting.
+        if (!handedOff) {
+            readPartyIntent();
+            handler.postDelayed(go, (partyCode != null && !partyCode.isEmpty()) ? 0 : DELAY_MS);
+        }
     }
 
     @Override

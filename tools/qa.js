@@ -172,7 +172,18 @@
    131 the service worker caches only shell statics, every cache write
        rides waitUntil, and cache-busted polls (version.txt) pass through
    132 every wrapper build signs with the SAME committed preview keystore
-       (updates install in place; runner-minted debug keys never return) */
+       (updates install in place; runner-minted debug keys never return)
+   133 Watch Party sync honesty: only CineSrc/AniPM/VidBolt/VidZen claim
+       full sync, VidRift is partial (seek + reporting, NO pause API), and
+       every other mirror is coordinated-start only - never fake sync
+   134 party chat renders through escapeHtml and messages are length-capped
+       (no HTML/JS injection through the chat pipeline)
+   135 party invite links carry the room code only - never a password
+   136 the party server enforces permissions server-side (host gates on
+       playback/content/kick/mute/settings) and rate-limits messages + codes
+   137 the party client reconnects with exponential backoff + jitter,
+       heartbeats for clock sync, and never opens a second connection
+   138 party-server sources parse (node --check) and its protocol tests exist */
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1470,6 +1481,88 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (bg && /signingConfigs/.test(bg) && /preview\.keystore/.test(bg) && haveKey)
     ok("every wrapper build signs with the committed preview keystore (updates install over)");
   else bad("android/app/build.gradle must sign with android/preview.keystore - runner-minted debug keys re-signed every APK and updates never installed");
+}
+
+/* ---------- 133. Watch Party sync honesty ---------- */
+{
+  const ad = html.match(/function adapter\(\)\{[\s\S]*?\n  \}/);
+  if (!ad) bad("PARTY adapter registry missing");
+  else {
+    const t = ad[0];
+    const full = (t.match(/cap: "full"/g) || []).length;
+    const partial = (t.match(/cap: "partial"/g) || []).length;
+    if (full === 4 && partial === 1 && /cap: "coordinated"/.test(t))
+      ok("adapters: 4 full-sync mirrors, VidRift partial, everything else coordinated-start");
+    else bad("adapter registry must claim full sync ONLY for cinesrc/anipm/vidbolt/vidzen, partial for vidrift, coordinated for the rest");
+    if (/NO play\/pause API/.test(t) || /no pause/i.test(t)) ok("VidRift's missing pause API is documented in the adapter");
+    else bad("the vidrift adapter must document that no play/pause API exists");
+    if (/CAP_TXT|FULL SYNC|COORDINATED START/.test(html)) ok("the UI labels the honest sync mode");
+    else bad("the party UI must show the real sync mode (FULL/PARTIAL/COORDINATED)");
+  }
+}
+
+/* ---------- 134. party chat injection safety ---------- */
+{
+  const cr = html.match(/function chatRow\(m\)\{[\s\S]*?\n  \}/);
+  if (cr && /escapeHtml\(m\.name/.test(cr[0]) && /escapeHtml\(m\.text/.test(cr[0]))
+    ok("chat rows escape name and text (no HTML/JS injection)");
+  else bad("chatRow must escape name and text via escapeHtml");
+  if (/CHAT_MAX: 300/.test(html)) ok("party messages are length-capped at 300");
+  else bad("party CHAT_MAX cap missing (server enforces 300 too)");
+}
+
+/* ---------- 135. invite links never carry secrets ---------- */
+{
+  const inv = html.match(/function inviteUrl\(\)\{[\s\S]*?\n  \}/);
+  if (inv && /\?party=/.test(inv[0]) && !/password/i.test(inv[0]))
+    ok("invite URLs carry the room code only (no password, no tokens)");
+  else bad("inviteUrl must build ?party=CODE only - passwords/tokens never ride in URLs");
+}
+
+/* ---------- 136. server-side permissions + rate limits ---------- */
+{
+  let rooms = "", proto = "";
+  try { rooms = read("party-server/rooms.js"); proto = read("party-server/protocol.js"); } catch (e) {}
+  if (!rooms) bad("party-server/rooms.js missing");
+  else {
+    const gates = (rooms.match(/room\.hostId !== participantId/g) || []).length;
+    if (gates >= 4 && /allowControl/.test(rooms))
+      ok("the party server enforces host gates on playback/content/kick/mute/settings (" + gates + " checks)");
+    else bad("rooms.js must permission-check every privileged command server-side");
+    if (/CODE_ATTEMPT_MAX/.test(proto) && /CHAT_RATE_MAX/.test(proto) && /MSG_MAX/.test(proto))
+      ok("rate limits are defined for code guessing, chat, and messages");
+    else bad("protocol.js must define code/chat/message rate limits");
+  }
+}
+
+/* ---------- 137. party client reconnect reliability ---------- */
+{
+  const boot = html.match(/function connect\(\)\{[\s\S]*?\n  \}/);
+  const retry = html.match(/function retry\(\)\{[\s\S]*?\n  \}/);
+  if (boot && /readyState === 0 \|\| S\.ws\.readyState === 1/.test(boot[0]))
+    ok("single-connection guard: connect() never opens a second socket");
+  else bad("party connect() must guard against duplicate connections");
+  if (retry && /Math\.pow/.test(retry[0]) && /Math\.random/.test(retry[0]))
+    ok("reconnect uses exponential backoff with jitter");
+  else bad("party retry() must back off exponentially with jitter");
+  if (/setInterval\(\(\) => send\(\{ t: "heartbeat"/.test(html))
+    ok("heartbeat clock sync runs on an interval");
+  else bad("party client must heartbeat (clock sync + liveness)");
+}
+
+/* ---------- 138. party-server parses + tests exist ---------- */
+{
+  const files = ["party-server/protocol.js", "party-server/rooms.js", "party-server/server.js"];
+  let allOk = true;
+  for (const f of files) {
+    const p = path.join(ROOT, f);
+    if (!fs.existsSync(p)) { allOk = false; bad(f + " missing"); continue; }
+    const r = cp.spawnSync(process.execPath, ["--check", p], { encoding: "utf8" });
+    if (r.status !== 0) { allOk = false; bad(f + " fails node --check: " + (r.stderr || "").split("\n")[0]); }
+  }
+  const tp = path.join(ROOT, "party-server/test/party.test.js");
+  if (!fs.existsSync(tp)) { allOk = false; bad("party-server/test/party.test.js missing"); }
+  if (allOk) ok("party-server sources parse and the protocol test suite exists");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

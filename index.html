@@ -664,6 +664,27 @@
   .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
     border-radius: 99px; background: #fff; transition: left .18s ease-out; }
   .switch:checked::after { left: 21px; }
+  /* Watch Party: same glass language, just chat bubbles + people chips */
+  #partyPeople .pp-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
+    border-radius: 99px; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+    font-size: 12px; font-weight: 600; }
+  #partyPeople .pp-chip .dot { width: 7px; height: 7px; border-radius: 99px; background: #00F0B5; }
+  #partyPeople .pp-chip.off { opacity: .55; } #partyPeople .pp-chip.off .dot { background: #7A8798; }
+  #partyPeople .pp-chip.host { border-color: rgba(0,240,181,.55); color: #7DF5DC; }
+  #partyPeople .pp-chip button { width: 22px; height: 22px; border-radius: 99px; background: rgba(255,255,255,.12);
+    font-size: 11px; line-height: 1; }
+  .pp-msg { max-width: 85%; } .pp-msg .who { font-size: 10px; font-weight: 800; color: #7DF5DC; letter-spacing: .04em; }
+  .pp-msg .txt { display: inline-block; margin-top: 2px; padding: 7px 12px; border-radius: 14px;
+    background: rgba(255,255,255,.08); font-size: 13px; line-height: 1.45; word-break: break-word; }
+  .pp-msg.me { margin-left: auto; text-align: right; } .pp-msg.me .who { color: #94a3b8; }
+  .pp-msg.me .txt { background: rgba(0,240,181,.16); }
+  .pp-sys { text-align: center; font-size: 10px; color: #7A8798; letter-spacing: .03em; }
+  #partyQuick button { padding: 8px 14px; border-radius: 99px; background: rgba(255,255,255,.08);
+    font-size: 12px; font-weight: 600; min-height: 40px; }
+  .tv-mode #partyPanel .glass, .tv-app #partyPanel .glass { max-width: 720px; }
+  .tv-mode #partyRoomCode, .tv-app #partyRoomCode { font-size: 2.2rem; letter-spacing: .5em; }
+  .tv-mode #partyQuick button, .tv-app #partyQuick button { min-height: 56px; font-size: 17px; }
+  .tv-mode #partyChatInput, .tv-app #partyChatInput { min-height: 56px; font-size: 17px; }
 </style>
 </head>
 <body>
@@ -1083,6 +1104,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <div class="flex flex-wrap gap-2 mt-4">
           <button id="wListBtn" onclick="watchListToggle()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">+ My List</button>
           <button onclick="shareTitle()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">Share</button>
+          <button id="wPartyBtn" onclick="partyOpen()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">Watch Party</button>
+          <button id="wPartyStatus" onclick="partyOpen()" class="hidden px-4 py-2 rounded-full text-sm font-semibold bg-teal-400/15 border border-teal-400/50 text-teal-300"></button>
         </div>
       </div>
       <div id="upNext" class="no-cinema hidden bg-white/5 border border-white/10 rounded-xl p-5 mt-4">
@@ -1122,6 +1145,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <div class="flex flex-wrap gap-3 mt-5 items-center">
         <button id="mWatch" class="h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold shadow-[0_0_35px_-5px_rgba(0,240,181,0.35)] hover:scale-[1.02] active:scale-[0.98] transition-all">&#x25B6; Watch Now</button>
         <button id="mListBtn" onclick="addToList()" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">+ My List</button>
+        <button id="mPartyBtn" onclick="partyOpen()" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">Watch Party</button>
       </div>
       <div id="mSeasons" class="mt-6 hidden">
         <div class="flex flex-wrap items-center gap-2">
@@ -1130,6 +1154,83 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         </div>
         <div id="mEpCards" class="flex gap-3 overflow-x-auto pb-2 mt-3"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Watch Party room: same modal language as the rest of StreamBox -->
+<div id="partyPanel" class="hidden fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-label="Watch Party">
+  <div class="glass rounded-2xl w-full max-w-lg max-h-[86vh] overflow-y-auto">
+    <div class="flex items-center gap-3 p-5 border-b border-white/10">
+      <p class="text-xs font-black tracking-[.2em] text-teal-300">WATCH PARTY</p>
+      <span id="partySyncPill" class="text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/10 text-gray-300"></span>
+      <button onclick="partyClose()" aria-label="Close" class="ml-auto w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-lg">&#x2715;</button>
+    </div>
+
+    <!-- LOBBY: create or join -->
+    <div id="partyLobby" class="p-5 space-y-4">
+      <div>
+        <p class="text-xs text-gray-400 font-bold mb-1.5">YOUR NAME</p>
+        <input id="partyName" maxlength="24" placeholder="Who's watching?" class="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-teal-400/60">
+      </div>
+      <div class="bg-white/[0.03] border border-white/10 rounded-xl p-4">
+        <p class="text-sm font-bold mb-2">Start a party</p>
+        <input id="partyRoomName" maxlength="40" placeholder="Room name (optional)" class="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-teal-400/60 mb-2">
+        <input id="partyRoomPw" type="password" maxlength="64" placeholder="Password (optional)" class="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-teal-400/60 mb-2">
+        <div class="flex items-center gap-2 text-xs text-gray-400 mb-3">
+          <label class="flex items-center gap-1.5"><input id="partyCtlAll" type="checkbox" class="accent-teal-400"> Guests can control playback</label>
+          <label class="flex items-center gap-1.5 ml-auto"><input id="partyChatOn" type="checkbox" checked class="accent-teal-400"> Chat</label>
+        </div>
+        <button onclick="partyCreate()" class="w-full bg-teal-500 hover:bg-teal-400 text-gray-950 font-bold px-5 py-2.5 rounded-full text-sm">Create Room</button>
+      </div>
+      <div class="bg-white/[0.03] border border-white/10 rounded-xl p-4">
+        <p class="text-sm font-bold mb-2">Join with a code</p>
+        <div class="flex gap-2">
+          <input id="partyCode" maxlength="6" placeholder="ABC234" class="flex-1 bg-white/[0.06] border border-white/10 rounded-xl px-4 py-2.5 text-sm uppercase tracking-[.3em] text-center outline-none focus:border-teal-400/60">
+          <button onclick="partyJoinCode()" class="bg-white/[0.08] hover:bg-white/[0.16] font-bold px-5 py-2.5 rounded-full text-sm">Join</button>
+        </div>
+        <input id="partyJoinPw" type="password" maxlength="64" placeholder="Room password (if set)" class="hidden w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-teal-400/60 mt-2">
+      </div>
+    </div>
+
+    <!-- ROOM: the live party -->
+    <div id="partyRoom" class="hidden">
+      <div class="p-5 pb-3">
+        <div class="flex items-start gap-3">
+          <div class="flex-1 min-w-0">
+            <p id="partyRoomTitle" class="font-bold truncate"></p>
+            <p id="partyRoomMeta" class="text-xs text-gray-400 truncate"></p>
+          </div>
+          <div class="text-right">
+            <p id="partyRoomCode" class="font-black text-xl tracking-[.35em] text-teal-300"></p>
+            <p class="text-[10px] text-gray-500">ROOM CODE</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 mt-3">
+          <button onclick="partyCopyInvite()" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">Copy Invite Link</button>
+          <button onclick="partyCopyCode()" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">Copy Code</button>
+          <button onclick="partyResync()" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">Resync</button>
+          <button onclick="partyLeave()" class="px-4 py-2 rounded-full text-xs font-semibold bg-white/10 hover:bg-white/20">Leave</button>
+          <button id="partyEndBtn" onclick="partyEndRoom()" class="hidden px-4 py-2 rounded-full text-xs font-semibold bg-red-400/20 hover:bg-red-400/30 text-red-200">End Party</button>
+        </div>
+      </div>
+      <div class="px-5 pb-3">
+        <p class="text-xs text-gray-400 font-bold mb-1.5">WATCHING (<span id="partyCount">0</span>)</p>
+        <div id="partyPeople" class="flex flex-wrap gap-2"></div>
+      </div>
+      <div id="partyHostRow" class="hidden px-5 pb-3 flex flex-wrap items-center gap-2 text-xs text-gray-300">
+        <label class="flex items-center gap-1.5"><input id="partyCtlToggle" type="checkbox" onchange="partyToggleCtl()" class="accent-teal-400"> Guests control playback</label>
+        <label class="flex items-center gap-1.5 ml-auto"><input id="partyChatToggle" type="checkbox" onchange="partyToggleChat()" class="accent-teal-400"> Chat</label>
+      </div>
+      <div id="partyChatWrap" class="border-t border-white/10">
+        <div id="partyChatLog" class="p-4 space-y-2 max-h-52 overflow-y-auto"></div>
+        <div id="partyQuick" class="px-4 pb-2 flex flex-wrap gap-2"></div>
+        <div class="flex gap-2 p-4 pt-0">
+          <input id="partyChatInput" maxlength="300" placeholder="Say something..." class="flex-1 bg-white/[0.06] border border-white/10 rounded-full px-4 py-2.5 text-sm outline-none focus:border-teal-400/60">
+          <button onclick="partySendChat()" class="bg-teal-500 hover:bg-teal-400 text-gray-950 font-bold px-5 rounded-full text-sm">Send</button>
+        </div>
+      </div>
+      <p id="partyNotice" class="px-5 pb-4 text-xs text-gray-400"></p>
     </div>
   </div>
 </div>
@@ -3931,6 +4032,9 @@ function adoptProviderEpisode(sIn, eIn){
   return true;
 }
 function advanceEpisode(){
+  // Watch Party: only the HOST auto-advances the room - participants are
+  // driven by the host's content event (no double-advance across devices)
+  try { if (PARTY.suppressAutoAdvance()) return; } catch(e){}
   // OUR canonical next-episode logic — the Next Episode button, the skip
   // pill credits and Auto-next all run through here. The target is captured
   // at CALL time; a season finale rolls to the next season E1 and we never
@@ -5381,6 +5485,7 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
     else if (mirror === "vidbolt") boltSeekTo(t);
     else if (mirror === "vidzen") zenSeekTo(t);
     else sendCmd("seek", [t]);
+    try { PARTY.onLocalSeek(t); } catch(e){}
   });
 })();
 
@@ -8717,9 +8822,675 @@ window.addEventListener("message", (event)=>{
   }
 });
 
+/* ===================== WATCH PARTY (cross-device rooms) =====================
+   One protocol for web + Android apps. The party-server is authoritative for
+   room + playback STATE; every device plays its own (legitimate) stream and
+   we sync play/pause/seek through the mirrors' own command bridges.
+   Sync honesty (Phase 4): CineSrc/AniPM/VidBolt/VidZen expose real
+   play/pause/seek + time events = FULL sync. VidRift reports time and takes
+   seeks but has NO pause API = PARTIAL. Every other mirror = COORDINATED
+   START ONLY (same episode at the same moment + manual Resync) - we never
+   claim remote control we do not have. */
+const PARTY = (() => {
+  const CFG = {
+    // deployment override: window.SB_PARTY_WS or localStorage.streambox_party_ws;
+    // default = same-origin /party-ws (works behind one reverse proxy / localhost)
+    wsUrl: () => {
+      try {
+        if (window.SB_PARTY_WS) return window.SB_PARTY_WS;
+        const u = localStorage.getItem("streambox_party_ws");
+        if (u) return u;
+      } catch(e){}
+      return (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/party-ws";
+    },
+    SYNC_NUDGE: 0.35,     // seconds of drift before a gentle rate nudge
+    SYNC_SEEK: 3.0,       // seconds of drift before a hard seek
+    SYNC_INTERVAL: 5000,  // drift check cadence
+    SYNC_MIN_GAP: 3000,   // min ms between corrections (no correction loops)
+    HEARTBEAT: 20000,     // clock sync + liveness
+    CHAT_MAX: 300,
+    QUICK: ["Hello!", "Ready!", "One sec", "LOL", "Brb", "Bye!"],
+  };
+  const S = {
+    ws: null, want: true, status: "idle", // idle | connecting | in-room | reconnecting
+    room: null, selfId: "", token: "", name: "",
+    lastSeq: 0, offset: 0, rtt: 0,
+    reconnects: 0, nextRetry: 0,
+    suppressUntil: 0, lastContentKey: "", lastCorrect: 0,
+    chat: [], unread: 0, panelOpen: false,
+    hbT: null, driftT: null,
+  };
+
+  /* ---- adapter registry: what each mirror can REALLY do (audit-verified) ---- */
+  function adapter(){
+    const m = (typeof mirror !== "undefined") ? mirror : "";
+    const pos = () => (typeof pState !== "undefined" ? (pState.cur || 0) : 0);
+    const dur = () => (typeof pState !== "undefined" ? (pState.dur || 0) : 0);
+    const paused = () => (typeof pState !== "undefined" ? !!pState.paused : true);
+    if (m === "cinesrc") return { id: m, cap: "full", pos, dur, paused,
+      play(){ sendCmd("play"); }, pause(){ sendCmd("pause"); }, seek(t){ sendCmd("seek", [Math.floor(t)]); },
+      rate(r){ try { sendCmd("setPlaybackRate", [r]); } catch(e){} } };
+    if (m === "anipm") return { id: m, cap: "full", pos, dur, paused,
+      play(){ anipmSend("play"); }, pause(){ anipmSend("pause"); }, seek(t){ anipmSend("seek", { time: Math.floor(t) }); },
+      rate(r){ try { anipmSend("setPlaybackRate", { rate: r }); } catch(e){} } };
+    if (m === "vidbolt") return { id: m, cap: "full", pos, dur, paused,
+      play(){ boltSend({ type: "play" }); }, pause(){ boltSend({ type: "pause" }); }, seek(t){ boltSeekTo(Math.floor(t)); }, rate:null };
+    if (m === "vidzen") return { id: m, cap: "full", pos, dur, paused,
+      play(){ zenSend({ type: "play" }); }, pause(){ zenSend({ type: "pause" }); }, seek(t){ zenSeekTo(Math.floor(t)); }, rate:null };
+    if (m === "vidrift") return { id: m, cap: "partial", pos, dur, paused,
+      play(){}, pause(){}, // NO play/pause API exists on this bridge (audit)
+      seek(t){ vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(t) }); }, rate:null };
+    return { id: m || "none", cap: "coordinated", pos, dur, paused, play(){}, pause(){}, seek(){}, rate:null };
+  }
+
+  /* ---- shared sync math (mirrors party-server/protocol.js expectedPosition) ---- */
+  function serverNow(){ return Date.now() + S.offset; }
+  function expectedPos(){
+    const pb = S.room && S.room.playback;
+    if (!pb) return 0;
+    const p = Number(pb.position) || 0;
+    if (pb.status !== "playing") return p;
+    return Math.max(0, p + ((serverNow() - (pb.updatedAt || serverNow())) / 1000) * (Number(pb.rate) || 1));
+  }
+
+  /* ---- transport: one connection, backoff + jitter, heartbeat ---- */
+  function send(obj){
+    if (S.ws && S.ws.readyState === 1) { try { S.ws.send(JSON.stringify(obj)); } catch(e){} }
+  }
+  function connect(){
+    if (S.ws && (S.ws.readyState === 0 || S.ws.readyState === 1)) return; // single-connection guard
+    let url;
+    try { url = CFG.wsUrl(); } catch(e){ return; }
+    if (!url) return;
+    S.status = S.room ? "reconnecting" : "connecting";
+    paint();
+    let ws;
+    try { ws = new WebSocket(url); } catch(e){ retry(); return; }
+    S.ws = ws;
+    ws.onopen = () => {
+      S.reconnects = 0;
+      send({ t: "hello", name: displayName() });
+      if (S.room) {
+        // rejoin with the resume token: same seat, same host role if host
+        send({ t: "join", name: displayName(), code: S.room.code, token: S.token, password: S.room._pw || "" });
+      }
+      clearInterval(S.hbT);
+      S.hbT = setInterval(() => send({ t: "heartbeat", clientTs: Date.now() }), CFG.HEARTBEAT);
+      send({ t: "heartbeat", clientTs: Date.now() });
+    };
+    ws.onmessage = (e) => {
+      let m;
+      try { m = JSON.parse(e.data); } catch(err){ return; }
+      try { handle(m); } catch(err){}
+    };
+    ws.onclose = () => {
+      clearInterval(S.hbT);
+      if (S.ws === ws) S.ws = null;
+      if (S.room && S.want) { S.status = "reconnecting"; retry(); }
+      else S.status = S.room ? "reconnecting" : "idle";
+      paint();
+    };
+    ws.onerror = () => {};
+  }
+  function retry(){
+    if (!S.want || !S.room) return;
+    S.reconnects += 1;
+    // exponential backoff with jitter: 0.5s -> 15s cap
+    const base = Math.min(15000, 500 * Math.pow(1.8, Math.min(S.reconnects, 8)));
+    const wait = Math.round(base * (0.7 + Math.random() * 0.6));
+    clearTimeout(S.nextRetry);
+    S.nextRetry = setTimeout(connect, wait);
+  }
+  function disconnect(){
+    S.want = false;
+    clearTimeout(S.nextRetry);
+    clearInterval(S.hbT);
+    try { if (S.ws) S.ws.close(); } catch(e){}
+    S.ws = null;
+    S.status = "idle";
+  }
+
+  /* ---- server events ---- */
+  function handle(m){
+    switch (m.t) {
+      case "welcome":
+        S.selfId = m.participantId || S.selfId;
+        S.token = m.token || S.token;
+        return;
+      case "heartbeat": {
+        // NTP-lite: one server stamp, symmetric-latency assumption (documented)
+        const t1 = Date.now();
+        const t0 = m.clientTs || t1;
+        const off = (m.serverTs || t1) - (t0 + t1) / 2;
+        S.offset = S.offset === 0 ? off : Math.round(S.offset * 0.7 + off * 0.3);
+        S.rtt = Math.max(0, t1 - t0);
+        return;
+      }
+      case "room": {
+        S.room = m.room;
+        S.token = m.token || S.token;
+        S.selfId = (m.room && m.room.selfId) || S.selfId;
+        S.status = "in-room";
+        S.lastSeq = (m.room.playback && m.room.playback.seq) || 0;
+        S.lastContentKey = contentKeyOf(m.room.content);
+        S.chat = (m.room.chat || []).slice();
+        S.unread = 0;
+        try { sessionStorage.setItem("sb_party", JSON.stringify({ code: m.room.code, roomId: m.room.roomId, token: S.token, name: displayName(), pw: (m.room && m.room._pw) || "" })); } catch(e){}
+        if (m.room.content) applyContent(m.room.content, true);
+        paint();
+        toast("Joined Watch Party \u{2713}");
+        return;
+      }
+      case "room_state": {
+        if (!S.room) return;
+        S.room.playback = m.room.playback;
+        S.room.participants = m.room.participants;
+        S.room.content = m.room.content;
+        S.room.chat = m.room.chat || S.chat;
+        paint();
+        return;
+      }
+      case "playback": {
+        if (!S.room) return;
+        if (m.seq && m.seq <= S.lastSeq) return; // stale
+        S.lastSeq = m.seq || S.lastSeq;
+        S.room.playback = { ...(S.room.playback || {}), ...(m.state || {}), seq: m.seq };
+        applyPlayback(m.action, m.state || {});
+        paint();
+        return;
+      }
+      case "content": {
+        if (!S.room) return;
+        if (m.seq && m.seq <= S.lastSeq) return;
+        S.lastSeq = m.seq || S.lastSeq;
+        S.room.playback = { ...(S.room.playback || {}), ...(m.state || {}), seq: m.seq };
+        S.room.content = m.content;
+        applyContent(m.content, false);
+        paint();
+        return;
+      }
+      case "chat": {
+        if (!m.msg) return;
+        if (S.chat.some((c) => c.id === m.msg.id)) return; // dedupe
+        S.chat.push(m.msg);
+        if (S.chat.length > 50) S.chat.shift();
+        if (!S.panelOpen) S.unread += 1;
+        paintChat(m.msg);
+        paint();
+        return;
+      }
+      case "peer_joined":
+        if (m.participant && S.room) {
+          const list = S.room.participants || (S.room.participants = []);
+          const i = list.findIndex((p) => p.id === m.participant.id);
+          if (i >= 0) list[i] = { ...list[i], ...m.participant };
+          else list.push(m.participant);
+          paint();
+        }
+        return;
+      case "peer_left":
+        if (S.room) {
+          S.room.participants = (S.room.participants || []).filter((p) => p.id !== m.participantId);
+          paint();
+          sysMsg((m.name || "Someone") + " left");
+        }
+        return;
+      case "host_changed":
+        if (S.room) {
+          S.room.hostId = m.hostId;
+          (S.room.participants || []).forEach((p) => { p.host = p.id === m.hostId; });
+          paint();
+          sysMsg(m.hostName ? (m.hostName + " is now hosting") : "Host changed");
+        }
+        return;
+      case "settings":
+        if (S.room) {
+          if (m.allowControl != null) S.room.allowControl = m.allowControl;
+          if (m.chatEnabled != null) S.room.chatEnabled = m.chatEnabled;
+          if (m.roomName) S.room.name = m.roomName;
+          paint();
+        }
+        return;
+      case "kicked":
+        teardownRoom();
+        paint();
+        toast("You were removed from the party");
+        return;
+      case "room_ended":
+        teardownRoom();
+        paint();
+        toast("The Watch Party ended");
+        return;
+      case "notice":
+        if (m.notice === "stale_playback") return; // silently ignored by design
+        if (m.notice === "rejoin" && S.room) {
+          // seat expired while we were away: reattach by resume token
+          send({ t: "join", name: displayName(), code: S.room.code, token: S.token, password: S.room._pw || "" });
+          return;
+        }
+        if (m.notice === "room_gone") {
+          teardownRoom();
+          paint();
+          toast("The Watch Party is no longer available");
+          return;
+        }
+        return;
+      case "error": {
+        const map = {
+          not_found: "Room not found (wrong code or it expired).",
+          wrong_password: "Wrong room password.",
+          full: "That room is full.",
+          rate_limited: "Too many attempts - try again in a few minutes.",
+          unauthorized: "Only the host can do that.",
+          conflict: "Already in a room - leave it first.",
+          closed: "That room is closed.",
+          bad_message: "Message not understood.",
+        };
+        if (m.for === "join") {
+          if (m.error === "wrong_password") showJoinPw(true);
+          toast(map[m.error] || m.error);
+        } else if (m.for === "chat") {
+          if (m.error === "rate_limited") sysMsg("Slow down - chat is rate limited");
+        } else {
+          toast(map[m.error] || ("Party: " + m.error));
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /* ---- local + remote playback application ---- */
+  function inRoom(){ return !!S.room && S.status === "in-room"; }
+  function isHost(){ return !!(S.room && S.room.hostId && S.room.hostId === S.selfId); }
+  function canControl(){ return isHost() || !!(S.room && S.room.allowControl); }
+  function suppressAutoAdvance(){ return inRoom() && !isHost(); } // host drives episodes
+  function suppressLocalEcho(){ return Date.now() < S.suppressUntil; }
+
+  function onLocalPlayPause(){
+    if (!inRoom() || !canControl() || suppressLocalEcho()) return;
+    send({ t: "playback", action: (typeof pState !== "undefined" && pState.paused) ? "pause" : "play",
+      position: (typeof pState !== "undefined" ? (pState.cur || 0) : 0), sessionVersion: S.room.playback.sessionVersion });
+  }
+  function onLocalSeek(t){
+    if (!inRoom() || !canControl() || suppressLocalEcho()) return;
+    send({ t: "playback", action: "seek", position: Math.max(0, Math.floor(t || 0)), sessionVersion: S.room.playback.sessionVersion });
+  }
+  function detectContentChange(){
+    if (!inRoom() || !isHost() || suppressLocalEcho()) return;
+    try {
+      const key = `${watchState.type}/${watchState.id}/${watchState.s || 1}/${watchState.e || 1}`;
+      if (key !== S.lastContentKey) {
+        S.lastContentKey = key;
+        send({ t: "content", type: watchState.type, tmdbId: watchState.id, season: watchState.s || 1, episode: watchState.e || 1 });
+      }
+    } catch(e){}
+  }
+  function contentKeyOf(c){ return c ? `${c.type}/${c.tmdbId}/${c.season}/${c.episode}` : ""; }
+
+  function applyContent(c, silent){
+    if (!c) return;
+    S.lastContentKey = contentKeyOf(c);
+    S.suppressUntil = Date.now() + 4000;
+    try {
+      const cur = `${watchState.type}/${watchState.id}/${watchState.s || 1}/${watchState.e || 1}`;
+      if (cur !== S.lastContentKey) {
+        openWatch(c.type, c.tmdbId, c.season || 1, c.episode || 1, 0);
+        if (!silent) sysMsg("Now watching: " + (c.type === "tv" ? `S${c.season} E${c.episode}` : "movie"));
+      }
+    } catch(e){}
+  }
+
+  function applyPlayback(action, st){
+    const a = adapter();
+    if (a.cap === "coordinated") {
+      // honest mode: we cannot drive this player - just tell the user
+      if (action === "seek" || action === "play") {
+        toast("Party: this source isn't remotely controllable - use Resync for guidance");
+      }
+      return;
+    }
+    S.suppressUntil = Date.now() + 1500;
+    const target = expectedPos();
+    try {
+      if (action === "play") {
+        if (a.paused() && a.play) a.play();
+        if (Math.abs(a.pos() - target) > CFG.SYNC_SEEK && a.seek) a.seek(target + 0.3);
+      } else if (action === "pause") {
+        if (!a.paused() && a.pause) a.pause();
+        if (Math.abs(a.pos() - target) > 1.5 && a.seek) a.seek(target);
+      } else if (action === "seek") {
+        if (a.seek) a.seek(target + 0.3);
+      }
+    } catch(e){}
+  }
+
+  /* drift correction: gentle nudge first, hard seek only when far off */
+  function driftTick(){
+    if (!inRoom()) return;
+    detectContentChange();
+    const a = adapter();
+    if (a.cap !== "full" || !a.seek) return;
+    const pb = S.room.playback;
+    if (!pb || pb.status !== "playing") return;
+    if (typeof pState !== "undefined" && pState.seeking) return;
+    const drift = a.pos() - expectedPos();
+    if (Math.abs(drift) < CFG.SYNC_NUDGE) return;
+    const now = Date.now();
+    if (now - S.lastCorrect < CFG.SYNC_MIN_GAP) return; // never a correction loop
+    S.lastCorrect = now;
+    try {
+      if (Math.abs(drift) >= CFG.SYNC_SEEK) {
+        a.seek(expectedPos() + 0.3);
+      } else if (a.rate) {
+        // gentle nudge then restore (0.92x / 1.08x for at most 6s)
+        a.rate(drift > 0 ? 0.92 : 1.08);
+        setTimeout(() => { try { const a2 = adapter(); if (a2.rate) a2.rate(1); } catch(e){} }, Math.min(6000, Math.abs(drift) / 0.08 * 1000));
+      } else {
+        a.seek(expectedPos() + 0.3); // no rate control: seek is the only tool
+      }
+    } catch(e){}
+  }
+
+  /* ---- room actions ---- */
+  function displayName(){
+    const box = document.getElementById("partyName");
+    const n = (box && box.value.trim()) || S.name || "";
+    return n.slice(0, 24) || "Guest";
+  }
+  function create(){
+    S.name = displayName();
+    S.want = true;
+    connect();
+    const go = () => send({ t: "create", name: S.name,
+      roomName: (document.getElementById("partyRoomName").value || "").slice(0, 40),
+      password: document.getElementById("partyRoomPw").value || "",
+      maxParticipants: 8,
+      allowControl: document.getElementById("partyCtlAll").checked,
+      chatEnabled: document.getElementById("partyChatOn").checked });
+    if (S.ws && S.ws.readyState === 1) go();
+    else setTimeout(go, 350);
+  }
+  function join(code, password){
+    S.name = displayName();
+    S.want = true;
+    connect();
+    const c = (code || document.getElementById("partyCode").value || "").trim().toUpperCase();
+    const pw = password != null ? password : (document.getElementById("partyJoinPw").value || "");
+    const go = () => send({ t: "join", name: S.name, code: c, password: pw, token: S.token });
+    if (S.ws && S.ws.readyState === 1) go();
+    else setTimeout(go, 350);
+  }
+  function leave(){
+    send({ t: "leave" });
+    teardownRoom();
+    paint();
+    toast("Left the Watch Party");
+  }
+  function endRoom(){
+    if (!isHost()) return;
+    if (!confirm("End the party for everyone?")) return;
+    send({ t: "end" });
+    teardownRoom();
+    paint();
+  }
+  function teardownRoom(){
+    try { sessionStorage.removeItem("sb_party"); } catch(e){}
+    S.room = null;
+    S.status = "idle";
+    S.chat = [];
+    S.unread = 0;
+    S.lastContentKey = "";
+  }
+
+  /* ---- UI ---- */
+  function el(id){ return document.getElementById(id); }
+  function paint(){
+    try {
+      const pill = el("partySyncPill");
+      const a = adapter();
+      const capTxt = { full: "FULL SYNC", partial: "PARTIAL SYNC", coordinated: "COORDINATED START" }[a.cap] || "";
+      pill.textContent = inRoom() ? capTxt : (S.status === "connecting" || S.status === "reconnecting" ? "CONNECTING" : "");
+      const wps = el("wPartyStatus");
+      if (wps) {
+        if (inRoom()) {
+          wps.classList.remove("hidden");
+          wps.textContent = "\u{1F4E1} Party \u{00B7} " + (S.room.code || "") + (S.unread ? " \u{00B7} " + S.unread + " new" : "");
+        } else wps.classList.add("hidden");
+      }
+      if (!S.panelOpen) return;
+      const room = S.room;
+      el("partyLobby").classList.toggle("hidden", !!room);
+      el("partyRoom").classList.toggle("hidden", !room);
+      if (!room) return;
+      el("partyRoomTitle").textContent = room.name || "Watch Party";
+      const c = room.content;
+      el("partyRoomMeta").textContent = (c ? (c.type === "tv" ? `S${c.season} E${c.episode}` : "Movie") + " \u{00B7} " : "")
+        + (room.playback ? room.playback.status : "") + (isHost() ? " \u{00B7} you are the host" : "");
+      el("partyRoomCode").textContent = room.code || "";
+      el("partyCount").textContent = String((room.participants || []).length);
+      el("partyEndBtn").classList.toggle("hidden", !isHost());
+      el("partyHostRow").classList.toggle("hidden", !isHost());
+      if (isHost()) {
+        el("partyCtlToggle").checked = !!room.allowControl;
+        el("partyChatToggle").checked = room.chatEnabled !== false;
+      }
+      el("partyChatWrap").classList.toggle("hidden", room.chatEnabled === false);
+      el("partyNotice").textContent = a.cap === "coordinated"
+        ? "This source can't be driven remotely - you'll see room updates and episode changes here. Play/pause/seek stay manual; Resync shows where the party is."
+        : a.cap === "partial"
+          ? "Partial sync on this source: seeks and play follow the party, but pausing must be done in the player itself."
+          : "";
+      paintPeople();
+      paintChat(null);
+    } catch(e){}
+  }
+  function paintPeople(){
+    const box = el("partyPeople");
+    if (!box || !S.room) return;
+    box.innerHTML = "";
+    (S.room.participants || []).forEach((p) => {
+      const chip = document.createElement("span");
+      chip.className = "pp-chip focusable" + (p.connected ? "" : " off") + (p.id === S.room.hostId ? " host" : "");
+      chip.setAttribute("data-focusable", "1");
+      chip.tabIndex = 0;
+      const nm = escapeHtml(p.name || "Guest");
+      chip.innerHTML = `<span class="dot"></span>${nm}${p.id === S.room.hostId ? " \u{2605}" : ""}${p.id === S.selfId ? " (you)" : ""}${p.muted ? " \u{1F507}" : ""}`;
+      if (isHost() && p.id !== S.selfId) {
+        const kb = document.createElement("button");
+        kb.textContent = "\u{2715}";
+        kb.title = "Remove " + (p.name || "guest");
+        kb.onclick = () => { send({ t: "kick", targetId: p.id }); };
+        chip.appendChild(kb);
+      }
+      box.appendChild(chip);
+    });
+  }
+  function paintChat(msg){
+    const log = el("partyChatLog");
+    if (!log) return;
+    if (msg) {
+      if (log.querySelector('[data-mid="' + msg.id + '"]')) return; // dedupe
+      const near = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+      log.appendChild(chatRow(msg));
+      if (near) log.scrollTop = log.scrollHeight;
+      return;
+    }
+    const keep = log.scrollTop;
+    log.innerHTML = "";
+    (S.chat || []).forEach((mm) => log.appendChild(chatRow(mm)));
+    log.scrollTop = S.panelOpen ? log.scrollHeight : keep;
+  }
+  function chatRow(m){
+    const d = document.createElement("div");
+    const mine = m.from === S.selfId;
+    d.className = "pp-msg" + (mine ? " me" : "");
+    d.dataset.mid = m.id;
+    const t = new Date(m.ts || Date.now());
+    const hh = String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
+    d.innerHTML = `<div class="who">${escapeHtml(m.name || "?")} \u{00B7} ${hh}</div><div class="txt">${escapeHtml(m.text || "")}</div>`;
+    return d;
+  }
+  function sysMsg(text){
+    if (!S.panelOpen) return;
+    const log = el("partyChatLog");
+    if (!log) return;
+    const d = document.createElement("div");
+    d.className = "pp-sys";
+    d.textContent = text;
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+  }
+  function sendChat(text){
+    const input = el("partyChatInput");
+    const t = (text != null ? text : (input ? input.value : "")).slice(0, CFG.CHAT_MAX).trim();
+    if (!t || !inRoom()) return;
+    send({ t: "chat", text: t });
+    if (input) input.value = "";
+  }
+  function showJoinPw(show){
+    const p = el("partyJoinPw");
+    if (p) p.classList.toggle("hidden", !show);
+  }
+
+  function openPanel(){
+    S.panelOpen = true;
+    S.unread = 0;
+    el("partyPanel").classList.remove("hidden");
+    document.body.classList.add("modal-open");
+    paint();
+    const quick = el("partyQuick");
+    if (quick && !quick.dataset.built) {
+      quick.dataset.built = "1";
+      CFG.QUICK.forEach((q) => {
+        const b = document.createElement("button");
+        b.className = "focusable";
+        b.setAttribute("data-focusable", "1");
+        b.textContent = q;
+        b.onclick = () => sendChat(q);
+        quick.appendChild(b);
+      });
+    }
+    const nameBox = el("partyName");
+    if (nameBox && !nameBox.value && S.name) nameBox.value = S.name;
+    setTimeout(() => {
+      const f = el("partyName") || el("partyCode");
+      if (f) try { f.focus({ preventScroll: true }); } catch(e){}
+    }, 60);
+  }
+  function closePanel(){
+    S.panelOpen = false;
+    el("partyPanel").classList.add("hidden");
+    if (document.getElementById("modal").classList.contains("hidden")
+        && document.getElementById("searchPanel").classList.contains("hidden")
+        && document.getElementById("tvGuide").classList.contains("hidden")
+        && document.getElementById("resumeDlg").classList.contains("hidden")) {
+      document.body.classList.remove("modal-open");
+    }
+    // focus back to the party button if it is on screen
+    const b = el("wPartyBtn") || el("mPartyBtn");
+    if (b && !b.closest(".hidden")) { try { b.focus({ preventScroll: true }); } catch(e){} }
+  }
+  function copy(text, label){
+    const done = () => toast(label + " copied \u{2713}");
+    try {
+      if (navigator.clipboard) { navigator.clipboard.writeText(text).then(done).catch(() => toast(text)); return; }
+    } catch(e){}
+    toast(text);
+  }
+  function inviteUrl(){
+    return location.origin + location.pathname + "?party=" + (S.room ? S.room.code : "");
+  }
+
+  /* ---- timers + boot ---- */
+  function boot(){
+    S.driftT = setInterval(driftTick, CFG.SYNC_INTERVAL);
+    // session restore: an accidental refresh lands back in the same room
+    try {
+      const raw = sessionStorage.getItem("sb_party");
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s && s.code) {
+          S.token = s.token || "";
+          S.name = s.name || S.name;
+          connect();
+          const go = () => send({ t: "join", name: displayName(), code: s.code, token: S.token, password: s.pw || "" });
+          setTimeout(go, 400);
+        }
+      }
+    } catch(e){}
+    // visibility / app-resume: liveness ping, never a second connection
+    try {
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden && inRoom()) send({ t: "heartbeat", clientTs: Date.now() });
+      }, { passive: true });
+    } catch(e){}
+  }
+
+  return {
+    boot, handle, connect,
+    open(code){
+      openPanel();
+      if (code && !inRoom()) {
+        const c = el("partyCode");
+        if (c) c.value = String(code).slice(0, 6).toUpperCase();
+        showJoinPw(false);
+      }
+    },
+    close: closePanel,
+    create, join, leave, endRoom,
+    sendChat,
+    resync(){
+      if (!inRoom()) return;
+      send({ t: "resync" });
+      const a = adapter();
+      if (a.cap === "coordinated") {
+        toast("Party is at " + fmtT(Math.floor(expectedPos())) + " - jump there in this player (or switch to a synced source: CineSrc/AniPM/VidBolt/VidZen)");
+      } else {
+        try { a.seek(expectedPos() + 0.3); } catch(e){}
+        toast("Resynced to the party \u{2713}");
+      }
+    },
+    copyInvite(){ if (S.room) copy(inviteUrl(), "Invite link"); },
+    copyCode(){ if (S.room) copy(S.room.code, "Room code"); },
+    toggleCtl(){ if (isHost()) send({ t: "settings", allowControl: el("partyCtlToggle").checked }); },
+    toggleChat(){ if (isHost()) send({ t: "settings", chatEnabled: el("partyChatToggle").checked }); },
+    inRoom, isHost, suppressAutoAdvance, onLocalPlayPause, onLocalSeek, detectContentChange,
+    state: S,
+  };
+})();
+
+/* inline-handler surface (kept tiny and QA-visible) */
+function partyOpen(){ try { PARTY.open(new URLSearchParams(location.search).get("party")); } catch(e){} }
+function partyClose(){ PARTY.close(); }
+function partyCreate(){ PARTY.create(); }
+function partyJoinCode(){ PARTY.join(); }
+function partyCopyInvite(){ PARTY.copyInvite(); }
+function partyCopyCode(){ PARTY.copyCode(); }
+function partyResync(){ PARTY.resync(); }
+function partyLeave(){ PARTY.leave(); }
+function partyEndRoom(){ PARTY.endRoom(); }
+function partyToggleCtl(){ PARTY.toggleCtl(); }
+function partyToggleChat(){ PARTY.toggleChat(); }
+function partySendChat(){ PARTY.sendChat(); }
+
+/* playback hooks: wrap the two local entry points (function reassignment keeps
+   every existing inline handler working) and gate the episode auto-advance */
+const _partyCtlToggle = ctlToggle;
+ctlToggle = function(){ const r = _partyCtlToggle.apply(this, arguments); try { PARTY.onLocalPlayPause(); } catch(e){} return r; };
+const _partySeekRel = ctlSeekRel;
+ctlSeekRel = function(d){ const r = _partySeekRel.apply(this, arguments); try { PARTY.onLocalSeek(Math.max(0, (pState.cur || 0) + (d || 0))); } catch(e){} return r; };
+// mirrorSeek is the single absolute-seek dispatch (skip pills, outro, remote
+// resync guidance): wrapping it catches every local seek path
+const _partyMirrorSeek = mirrorSeek;
+mirrorSeek = function(t){ const r = _partyMirrorSeek.apply(this, arguments); try { PARTY.onLocalSeek(t); } catch(e){} return r; };
+PARTY.boot();
+
 // deep-link support: watch.html style ?type=tv&id=1396&s=1&e=1
 (function(){
   const q = new URLSearchParams(location.search);
+  const partyCode = q.get("party");
   if(q.get("id")){
     const t = q.get("type")==="tv" ? "tv" : "movie";
     // ids must be NUMBERS: a string id splits every strict-equality store
@@ -8728,6 +9499,7 @@ window.addEventListener("message", (event)=>{
     init(); // the home catalog still builds so Back lands on a real Home
     openWatch(t, id, Number(q.get("s")||1), Number(q.get("e")||1));
   } else init();
+  if (partyCode) { setTimeout(() => { try { PARTY.open(partyCode); } catch(e){} }, 600); }
 })();
 </script>
 <script>

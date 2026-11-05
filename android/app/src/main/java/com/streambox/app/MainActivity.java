@@ -23,6 +23,7 @@ public class MainActivity extends Activity {
     private View fullscreenView;
     private WebChromeClient.CustomViewCallback fullscreenCallback;
     private boolean webviewCrashed;
+    private String partyCode;
 
     private static boolean isHostOrSubdomain(String host, String domain) {
         return host.equals(domain) || host.endsWith("." + domain);
@@ -55,7 +56,8 @@ public class MainActivity extends Activity {
     }
 
     /** HOME_URL carries the flavor params (?tv=1 / ?tv=1&calm=1); rebuild them
-        per-device so phones never inherit the TV layout. */
+        per-device so phones never inherit the TV layout. Watch Party invites
+        (streambox://party/CODE forwarded by SplashActivity) ride along. */
     private String startUrl() {
         String base = HOME;
         try {
@@ -64,13 +66,51 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {}
         boolean calm = false;
         try { calm = HOME.contains("calm=1") || isLowRamDevice(); } catch (Exception ignored) {}
-        if (isTvDevice()) return base + (calm ? "?tv=1&calm=1" : "?tv=1");
-        return base + (calm ? "?calm=1" : "");
+        String url = isTvDevice() ? base + (calm ? "?tv=1&calm=1" : "?tv=1")
+                                  : base + (calm ? "?calm=1" : "");
+        if (partyCode != null && !partyCode.isEmpty()) {
+            url += (url.contains("?") ? "&" : "?") + "party="
+                    + android.net.Uri.encode(partyCode);
+        }
+        return url;
+    }
+
+    /** streambox://party/CODE deep link (custom scheme: no https hijacking). */
+    private void readPartyIntent() {
+        try {
+            android.content.Intent in = getIntent();
+            if (in == null) return;
+            String raw = in.getStringExtra("party");
+            if (raw == null || raw.isEmpty()) {
+                android.net.Uri d = in.getData();
+                if (d != null && "streambox".equals(d.getScheme()) && "party".equals(d.getHost())) {
+                    raw = d.getLastPathSegment();
+                }
+            }
+            if (raw != null && !raw.isEmpty()) {
+                String clean = raw.replaceAll("[^A-Za-z0-9]", "");
+                if (!clean.isEmpty()) partyCode = clean.substring(0, Math.min(6, clean.length()));
+            }
+        } catch (Exception ignored) {}
+    }
+
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        // singleTask relaunch (invite tapped while the app runs): NEVER open a
+        // second WebView/connection - route the code into the live page instead
+        setIntent(intent);
+        readPartyIntent();
+        if (web != null && partyCode != null && !partyCode.isEmpty()) {
+            web.evaluateJavascript(
+                "try{PARTY.open('" + partyCode.replaceAll("[^A-Za-z0-9]", "") + "');}catch(e){}", null);
+        }
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        readPartyIntent();
         // Fresh-start guarantee: once per app version, wipe the WebView's
         // CACHE layers + service worker BEFORE creating the WebView, so the
         // first launch after every update can never serve stale pages. User
