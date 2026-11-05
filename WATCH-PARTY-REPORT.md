@@ -103,7 +103,7 @@ Put TLS in front (nginx/Caddy/load balancer) and proxy `wss://<host>/party-ws` �
 
 ## 12. Remaining Limitations
 
-1. **Native Compose app (`android-native/`)** has no party screen yet — the shipping phone/TV apps (WebView full/lite) are fully covered; the preview Compose track needs its own room UI (protocol is ready for it).
+1. ~~**Native Compose app (`android-native/`)** has no party screen yet~~ — **RESOLVED**: `PartyScreen` + the `party/Party.kt` engine now ship on branch `feature/watch-party-native` (0.82): create/join/room/chat with D-pad quick messages, real play/pause/seek sync through the player's `window.__sb` bridge, `streambox://party/CODE` deep links via singleTask, honest sync labels. Verified: native QA 85/85, `app-debug.apk` builds with the filter confirmed via aapt. Not yet device-tested.
 2. **Real-device cross-matrix** (website↔phone↔TV, 3+ devices, sleep/wake, network switches) was verified at protocol level with simulated clients only — no devices/emulators were available. Field validation needed.
 3. **Drift constants** are principled but untuned on real embeds; tune `CFG.SYNC_*` after real-world observation.
 4. **VidRift / coordinated-only mirrors** can't give full sync (no APIs) — by design, clearly labeled; recommending synced sources in the Resync hint.
