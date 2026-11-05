@@ -264,11 +264,29 @@ fun StreamBoxApp() {
         val rel = withContext(Dispatchers.IO) { Updater.check(appCtx) }
         if (rel != null) {
             Store.setUpdateCheckAt(appCtx, System.currentTimeMillis())
+            withContext(Dispatchers.IO) { Updater.savePending(appCtx, rel) }
             upd = rel
+        } else if (Updater.lastCheckFailed) {
+            // could not reach the update server - NEVER claim "up to date"
+            // (0.84-0.86 showed that lie and the update looked missing)
+            aboutStatus = "Could not reach the update server - will retry"
+        } else {
+            // a REAL up to date from the live channel: clear stale offers
+            Store.setUpdateCheckAt(appCtx, System.currentTimeMillis())
+            withContext(Dispatchers.IO) { Updater.savePending(appCtx, null) }
+            upd = null
+            aboutStatus = "You are up to date"
         }
     }
     LaunchedEffect(Unit) {
         Updater.cleanLeftovers(appCtx)
+        // 0.87: the remembered offer shows INSTANTLY - even offline - so the
+        // popup can never be lost to one flaky check or a rate-limited API
+        val pend = withContext(Dispatchers.IO) { Updater.loadPending(appCtx) }
+        if (pend != null && upd == null) {
+            upd = pend
+            updAutoShown = false
+        }
     }
     // every foreground (cold start AND launcher restarts): re-check with a
     // short retry ladder for slow TV Wi-Fi, then the pill/dialog take over
@@ -418,11 +436,7 @@ fun StreamBoxApp() {
                             aboutBusy = true
                             aboutStatus = "Checking for updates..."
                             offerUpdate(true)
-                            aboutStatus = if (upd != null) {
-                                "Update available: v" + (upd?.version ?: "")
-                            } else {
-                                "You are up to date"
-                            }
+                            if (upd != null) aboutStatus = "Update available: v" + (upd?.version ?: "")
                             aboutBusy = false
                         }
                     },
@@ -852,7 +866,9 @@ private fun AboutDialog(
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
                     status,
-                    color = if (updateAvailable) Accent else Soft,
+                    color = if (updateAvailable) Accent
+                        else if (status.startsWith("Could not")) Amber
+                        else Soft,
                     fontFamily = BodyFont,
                     fontSize = if (big) 15.sp else 13.sp,
                     modifier = Modifier.fillMaxWidth(),

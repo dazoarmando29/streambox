@@ -14,6 +14,7 @@ What is new
 - Watch Party and About now live in the LEFT NAV BAR beside Browse, and the rail is compact so every button fits a TV screen
 
 Fixes
+- Updates can no longer be missed: the check now rides our own edge-cached channel (the GitHub API's 60-requests/hour limit could silence every check and the app wrongly said "You are up to date"), a found update is REMEMBERED so the popup appears instantly even offline or on a bad connection, and "You are up to date" only shows when we really reached the update server (failures now say "Could not reach the update server - will retry")
 - The update offer can no longer be missed: it re-appears on every reopen while an update is pending (Later only buys quiet for the session), it queues behind the What's New card instead of being swallowed by it, and the remote lands directly on the dialog buttons
 - Fixed TV remote navigation: the corner version stamp was focusable and trapped the D-pad on the detail screens - the version now lives beside the builder name and About carries the checker
 - Continue Watching opens the DETAILS first: the resume bar is right there and Play continues from where you left

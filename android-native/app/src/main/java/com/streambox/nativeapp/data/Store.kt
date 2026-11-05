@@ -48,6 +48,7 @@ object Store {
     private const val K_SUB_STYLE = "sub_style"
     private const val K_AUTO_NEXT = "auto_next_v2"
     private const val K_PARTY = "party_session_v1"
+    private const val K_PENDING_UPDATE = "pending_update_v1"
     private const val K_FEED = "feed_cache"
     private const val K_UPD_CHECK = "upd_checked_at"
 
@@ -280,6 +281,15 @@ object Store {
             prefs(ctx).edit().putString(K_PARTY, o.toString()).apply()
         } catch (e: Exception) {
         }
+    }
+
+    /** Remembered update offer (raw Updater.Release JSON): survives restarts
+        and failed checks so the popup shows instantly, even offline. */
+    fun pendingUpdate(ctx: Context): String? =
+        try { prefs(ctx).getString(K_PENDING_UPDATE, null) } catch (e: Exception) { null }
+
+    fun savePendingUpdate(ctx: Context, raw: String) {
+        try { prefs(ctx).edit().putString(K_PENDING_UPDATE, raw).apply() } catch (e: Exception) {}
     }
 
     fun subStyle(ctx: Context): SubStyle {

@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.core.content.FileProvider
 import com.streambox.nativeapp.BuildConfig
+import com.streambox.nativeapp.data.Store
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
@@ -31,6 +32,11 @@ import java.security.MessageDigest
 object Updater {
     private const val API =
         "https://api.github.com/repos/dazoarmando29/streambox/releases/tags/latest-native"
+    /** Rate-limit-proof mirror: our own Worker caches the release for 10 min,
+        so a home full of devices can never burn the GitHub API quota (60/hr
+        per IP) and silently miss updates. The direct API stays as fallback. */
+    private val API_MIRROR: String =
+        com.streambox.nativeapp.BuildConfig.API_BASE + "/api/native-latest"
     private const val ASSET = "streambox-native.apk"
     private const val DIR = "updates"
     private val HOSTS = setOf(
@@ -38,6 +44,11 @@ object Updater {
         "objects.githubusercontent.com",
         "release-assets.githubusercontent.com",
     )
+
+    /** True when the LAST check could not reach the update server - the
+        difference between "you are up to date" and "we could not look". */
+    @Volatile
+    var lastCheckFailed = false
 
     data class Release(
         val version: String,
@@ -56,8 +67,9 @@ object Updater {
         identity: different bytes = different build = offer. */
     fun check(ctx: Context): Release? {
         return try {
-            val o = JSONObject(http(API))
-            val assets = o.optJSONArray("assets") ?: return null
+            val o = JSONObject(httpAny(API_MIRROR, API))
+            val assets = o.optJSONArray("assets")
+            if (assets == null) { lastCheckFailed = true; return null }
             var a: JSONObject? = null
             for (i in 0 until assets.length()) {
                 val c = assets.optJSONObject(i) ?: continue
@@ -66,10 +78,13 @@ object Updater {
                     break
                 }
             }
-            if (a == null) return null
+            if (a == null) { lastCheckFailed = true; return null }
             val digest = a.optString("digest", "")
             val url = a.optString("browser_download_url", "")
-            if (!digest.startsWith("sha256:") || url.isEmpty() || !allowed(url)) return null
+            if (!digest.startsWith("sha256:") || url.isEmpty() || !allowed(url)) {
+                lastCheckFailed = true
+                return null
+            }
             val rel = Release(
                 version = Regex("versionName:\\s*([0-9]+(?:\\.[0-9]+)*)")
                     .find(o.optString("body"))?.groupValues?.get(1) ?: "",
@@ -79,6 +94,7 @@ object Updater {
                 publishedAt = o.optString("published_at", ""),
                 notes = o.optString("body", ""),
             )
+            lastCheckFailed = false
             if (rel.version.isNotEmpty()) {
                 if (compareVersions(rel.version, BuildConfig.VERSION_NAME) > 0) rel else null
             } else {
@@ -86,7 +102,47 @@ object Updater {
                 if (rel.digest != self) rel else null
             }
         } catch (e: Exception) {
+            lastCheckFailed = true
             null
+        }
+    }
+
+    /** A remembered offer survives failed checks AND app restarts: the
+        popup shows instantly (even offline) instead of waiting on a good
+        network - the 0.84-0.86 bug where one failed check meant silence. */
+    fun loadPending(ctx: Context): Release? {
+        return try {
+            val raw = Store.pendingUpdate(ctx) ?: return null
+            val o = JSONObject(raw)
+            val rel = Release(
+                version = o.optString("version", ""),
+                digest = o.optString("digest", ""),
+                size = o.optLong("size"),
+                url = o.optString("url", ""),
+                publishedAt = o.optString("publishedAt", ""),
+                notes = o.optString("notes", ""),
+            )
+            if (rel.version.isNotEmpty() &&
+                compareVersions(rel.version, BuildConfig.VERSION_NAME) > 0 &&
+                rel.digest.startsWith("sha256:") && rel.url.isNotEmpty() && allowed(rel.url)
+            ) rel else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun savePending(ctx: Context, rel: Release?) {
+        try {
+            if (rel == null) {
+                Store.savePendingUpdate(ctx, "")
+                return
+            }
+            val o = JSONObject()
+                .put("version", rel.version).put("digest", rel.digest)
+                .put("size", rel.size).put("url", rel.url)
+                .put("publishedAt", rel.publishedAt).put("notes", rel.notes)
+            Store.savePendingUpdate(ctx, o.toString())
+        } catch (e: Exception) {
         }
     }
 
@@ -237,6 +293,15 @@ object Updater {
         u.protocol == "https" && HOSTS.contains(u.host.lowercase())
     } catch (e: Exception) {
         false
+    }
+
+    /** Mirror first (edge-cached, no rate limit), direct GitHub API second. */
+    private fun httpAny(primary: String, fallback: String): String {
+        try {
+            return http(primary)
+        } catch (e: Exception) {
+            return http(fallback)
+        }
     }
 
     private fun http(url: String): String {
