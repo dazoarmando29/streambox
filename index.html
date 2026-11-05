@@ -8844,7 +8844,10 @@ const PARTY = (() => {
       // local dev: the party-server's default port (zero-config testing)
       if (location.hostname === "localhost" || location.hostname === "127.0.0.1")
         return "ws://localhost:8787/party";
-      return (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/party-ws";
+      // production: the party hub rides the streambox-api Worker (Durable
+      // Object) - override with window.SB_PARTY_WS / localStorage if hosted
+      // elsewhere (self-hosted party-server works identically)
+      return "wss://streambox-api.dazoarmando.workers.dev/party";
     },
     SYNC_NUDGE: 0.35,     // seconds of drift before a gentle rate nudge
     SYNC_SEEK: 3.0,       // seconds of drift before a hard seek
