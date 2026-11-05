@@ -48,10 +48,17 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/full/debug/app-full-debug.apk streambox.apk
           cp android/app/build/outputs/apk/lite/debug/app-lite-debug.apk streambox-lite.apk
+          VN=$(sed -n "s/.*versionName '\([0-9.]*\)'.*/\1/p" android/app/build.gradle | head -n1)
+          SHA1=$(sha256sum streambox.apk | cut -d' ' -f1)
+          SHA2=$(sha256sum streambox-lite.apk | cut -d' ' -f1)
+          NOTES="$(cat release-notes/android.md)
+
+          Auto-built from main (${{ github.sha }}).
+          sha256 streambox.apk: $SHA1
+          sha256 streambox-lite.apk: $SHA2"
           # create-or-update: NEVER delete first (a flake between delete and
           # create used to leave the rolling release missing entirely). Assets
           # replace in place with --clobber; the tag survives every publish.
-          NOTES="Auto-built from main (${{ github.sha }}). Two flavors, install one or both side-by-side: streambox.apk = full motion, streambox-lite.apk = calm (max smoothness + battery). Signed with the stable preview key: updates install over the old app in place (one-time: builds from before this key need a manual uninstall first)."
           published=0
           for i in 1 2 3 4 5; do
             if gh release view latest >/dev/null 2>&1; then
@@ -74,5 +81,20 @@ jobs:
           if [ "$published" != "1" ]; then
             echo "release publish failed after 5 attempts" >&2
             exit 1
+          fi
+          # versioned rollback release: one permanent tag per version so any
+          # older build stays downloadable (created once per versionName)
+          if [ -z "$VN" ]; then
+            echo "::error::no versionName parsed from android/app/build.gradle"
+            exit 1
+          fi
+          TAG="apk-v$VN"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "rollback release $TAG already exists - keeping it untouched"
+          else
+            gh release create "$TAG" --target "${{ github.sha }}" \
+              --title "StreamBox $VN (full + lite)" \
+              --notes "$NOTES" \
+              streambox.apk streambox-lite.apk
           fi
           gh release view latest --json tagName,publishedAt,url
