@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -224,6 +225,8 @@ fun BrowseScreen(
     onOpen: (Title) -> Unit,
     onPlay: (Title) -> Unit,
     onResume: (Progress) -> Unit,
+    onParty: () -> Unit = {},
+    onAbout: () -> Unit = {},
     // Search state is HOISTED (0.50, StreamBoxApp): it survives opening a
     // detail so Back lands in your search results, and the app clears it on
     // tab switches and player exits. Never keep it here.
@@ -452,7 +455,7 @@ fun BrowseScreen(
                     },
                 )
                 Column(modifier = Modifier.weight(1f).fillMaxSize()) {
-                    TvStatusBar()
+                    TvStatusBar(onParty = onParty, onAbout = onAbout)
                     body()
                     TvLegend()
                 }
@@ -463,6 +466,8 @@ fun BrowseScreen(
                 onSection = onSection,
                 searchMode = searchMode,
                 onSearchToggle = onSearchToggle,
+                onParty = onParty,
+                onAbout = onAbout,
                 adultOpen = adultOpen,
                 onAdultToggle = {
                     adultOpen = !adultOpen
@@ -485,6 +490,8 @@ private fun TopBar(
     onSearchToggle: () -> Unit,
     adultOpen: Boolean,
     onAdultToggle: () -> Unit,
+    onParty: () -> Unit = {},
+    onAbout: () -> Unit = {},
 ) {
     val big = AppEnv.isTv
     Row(
@@ -537,6 +544,10 @@ private fun TopBar(
                 modifier = Modifier.size(18.dp),
             )
         }
+        Spacer(modifier = Modifier.width(10.dp))
+        StatusPill(Icons.Filled.People, "Party", onClick = onParty)
+        Spacer(modifier = Modifier.width(8.dp))
+        StatusPill(Icons.Filled.Info, "About", onClick = onAbout)
     }
 }
 
@@ -620,6 +631,8 @@ private fun Feed(
     onOpen: (Title) -> Unit,
     onPlay: (Title) -> Unit,
     onResume: (Progress) -> Unit,
+    onParty: () -> Unit = {},
+    onAbout: () -> Unit = {},
     onRemoveCont: (Progress) -> Unit,
 ) {
     val hero = rows.firstOrNull()?.second?.firstOrNull { !it.adult || adultOpen }
@@ -1884,9 +1897,32 @@ private fun RailBtn(
     }
 }
 
+/** Compact focusable pill for the status strip / top bar: the Watch Party
+    and About doors live outside the detail screens so both are always one
+    click away (and the rail column never overflows a 540dp TV). */
+@Composable
+private fun StatusPill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .height(38.dp)
+            .focusRing(RoundedCornerShape(50), pop = false)
+            .background(Pill, RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+    ) {
+        Icon(icon, contentDescription = label, tint = Accent, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(label, color = Soft, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+    }
+}
+
 /** TV status strip (design pack: device line + clock pill). */
 @Composable
-private fun TvStatusBar() {
+private fun TvStatusBar(
+    onParty: () -> Unit = {},
+    onAbout: () -> Unit = {},
+) {
     var clock by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {
         val fmt = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.US)
@@ -1912,6 +1948,10 @@ private fun TvStatusBar() {
             letterSpacing = 2.sp,
         )
         Spacer(modifier = Modifier.weight(1f))
+        StatusPill(Icons.Filled.People, "Party", onClick = onParty)
+        Spacer(modifier = Modifier.width(8.dp))
+        StatusPill(Icons.Filled.Info, "About", onClick = onAbout)
+        Spacer(modifier = Modifier.width(8.dp))
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -1951,6 +1991,14 @@ private fun TvLegend() {
             letterSpacing = 1.5.sp,
         )
         Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            "v" + com.streambox.nativeapp.BuildConfig.VERSION_NAME,
+            color = Color(0xFF3B4A63),
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp,
+            letterSpacing = 1.5.sp,
+        )
+        Spacer(modifier = Modifier.width(10.dp))
         // Finishing touch (0.64): the builder's nickname, bottom right.
         Text(
             "dazzo",

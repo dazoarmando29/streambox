@@ -8,8 +8,13 @@ What is new
 - The room server runs on our own Cloudflare edge - no accounts, no ads, and no video ever passes through it
 - Update popup redesigned: a real what-is-new card with the version jump, size, date and verified-install cues
 - A version stamp sits in the bottom corner (tap it any time to check for updates) and an accent Update ready pill keeps a pending update one tap away
+- About page (Party/About doors live in the TV status strip and the phone top bar): builder, the exact installed version, and an honest update checker (Checking / You are up to date / Update available)
+- Watch Party join door OUTSIDE the details screens - enter a room code and jump straight into the movie your friends are watching
+- The version number sits beside the builder name at the bottom of every screen
 
 Fixes
+- Fixed TV remote navigation: the corner version stamp was focusable and trapped the D-pad on the detail screens - the version now lives beside the builder name and About carries the checker
+- Continue Watching opens the DETAILS first: the resume bar is right there and Play continues from where you left
 - The update popup could appear only once per install and vanish forever on restart (a TV launcher restart reuses the app process, and failed lookups still silenced the next check) - it now re-offers on every reopen, retries through slow Wi-Fi wake-ups, Later only silences it for a few minutes, and the corner pill can always bring it back
 - Room joins, rejoin-after-sleep and kicked-user permanence hardened and live-tested against the edge server
 - Room playback state is authoritative on the server: stale or duplicate events can never affect the current episode, and late joiners sync to the party without resetting anyone

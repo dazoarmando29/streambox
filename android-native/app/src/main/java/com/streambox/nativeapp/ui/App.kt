@@ -253,7 +253,9 @@ fun StreamBoxApp() {
     val updState = remember { UpdateMem() }
     val updScope = rememberCoroutineScope()
     val updShownAt = remember { mutableLongStateOf(0L) }
-    var verNote by remember { mutableStateOf("") }
+    var aboutOpen by remember { mutableStateOf(false) }
+    var aboutStatus by remember { mutableStateOf("") }
+    var aboutBusy by remember { mutableStateOf(false) }
     suspend fun offerUpdate(force: Boolean) {
         val now = System.currentTimeMillis()
         // throttle is stamped on SUCCESS only - a failed lookup never hides
@@ -327,14 +329,17 @@ fun StreamBoxApp() {
                                 else screen = Screen.Detail(t)
                             },
                             onResume = { p ->
-                                play(
+                                // details first (0.85): the detail page shows
+                                // the resume bar and Play continues from there
+                                screen = Screen.Detail(
                                     Title(p.id, p.type, p.name, p.poster, null, 0, "", 0.0, lang = p.lang),
-                                    p.season, p.episode, p.mal, p.ani,
                                 )
                             },
                             searchMode = searchMode,
                             searchInput = searchInput,
                             searchSubmitted = searchSubmitted,
+                            onParty = { openParty(null) },
+                            onAbout = { aboutOpen = true },
                             onSearchToggle = {
                                 searchMode = !searchMode
                                 searchInput = ""
@@ -398,54 +403,30 @@ fun StreamBoxApp() {
                     }
                 }
             }
-            // Version stamp + update door (0.84): the corner says exactly
-            // what is installed (tap = check for updates now) and the accent
-            // pill is a permanent door to a pending update - the offer can
-            // never be lost again.
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 14.dp, bottom = if (AppEnv.isTv) 58.dp else 72.dp),
-                horizontalAlignment = Alignment.End,
-            ) {
-                if (upd != null) {
-                    Text(
-                        "UPDATE READY \u2192",
-                        color = Ink,
-                        fontWeight = FontWeight.Black,
-                        fontSize = if (AppEnv.isTv) 15.sp else 10.sp,
-                        letterSpacing = 1.sp,
-                        modifier = Modifier
-                            .glow(RoundedCornerShape(50))
-                            .background(Accent, RoundedCornerShape(50))
-                            .clickable { updOpen = true }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                }
-                Text(
-                    "v" + BuildConfig.VERSION_NAME,
-                    color = Dim,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = if (AppEnv.isTv) 14.sp else 10.sp,
-                    letterSpacing = 1.sp,
-                    modifier = Modifier.clickable {
-                        updScope.launch {
-                            verNote = "Checking for updates..."
-                            offerUpdate(true)
-                            verNote = if (upd != null) "Update available!" else "You are up to date"
-                            delay(2600)
-                            verNote = ""
-                        }
-                    },
-                )
-                if (verNote.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(verNote, color = Accent, fontSize = if (AppEnv.isTv) 13.sp else 10.sp)
-                }
-            }
             AnimatedVisibility(visible = !splashDone, exit = fadeOut(tween(420))) {
                 SplashScreen()
+            }
+            if (aboutOpen) {
+                AboutDialog(
+                    onDismiss = { aboutOpen = false },
+                    status = aboutStatus,
+                    busy = aboutBusy,
+                    updateAvailable = upd != null,
+                    onCheck = {
+                        updScope.launch {
+                            aboutBusy = true
+                            aboutStatus = "Checking for updates..."
+                            offerUpdate(true)
+                            aboutStatus = if (upd != null) {
+                                "Update available: v" + (upd?.version ?: "")
+                            } else {
+                                "You are up to date"
+                            }
+                            aboutBusy = false
+                        }
+                    },
+                    onShowUpdate = { aboutOpen = false; updOpen = true },
+                )
             }
             whatsNew?.let { (ver, bullets) ->
                 WhatsNewDialog(ver, bullets) { whatsNew = null }
@@ -803,6 +784,87 @@ private class UpdateMem {
     var progress by mutableIntStateOf(-1)
     var error by mutableStateOf("")
     var needsPermission by mutableStateOf(false)
+}
+
+/** About card (0.85): who built it, exactly what is installed (so an
+    update is visible the moment it lands), and an honest update checker. */
+@Composable
+private fun AboutDialog(
+    onDismiss: () -> Unit,
+    onCheck: () -> Unit,
+    status: String,
+    busy: Boolean,
+    updateAvailable: Boolean,
+    onShowUpdate: () -> Unit,
+) {
+    val big = AppEnv.isTv
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = if (big) 640.dp else 420.dp)
+                .background(Card, RoundedCornerShape(24.dp))
+                .padding(if (big) 28.dp else 20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(if (big) 48.dp else 40.dp)
+                        .glow(RoundedCornerShape(12.dp))
+                        .background(Accent, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Star, contentDescription = null, tint = Ink, modifier = Modifier.size(if (big) 26.dp else 22.dp))
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text("About StreamBox", color = Color.White, fontWeight = FontWeight.Black, fontSize = if (big) 26.sp else 21.sp)
+                    Text("BUILT BY DAZZO", color = Dim, fontWeight = FontWeight.Bold, fontSize = if (big) 12.sp else 10.sp, letterSpacing = 2.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            AboutRow("Version", "v" + com.streambox.nativeapp.BuildConfig.VERSION_NAME, big)
+            AboutRow("Builder", "dazzo", big)
+            AboutRow("Catalog", "TMDB", big)
+            AboutRow("Playback", "CineSrc + mirrors", big)
+            Spacer(modifier = Modifier.height(14.dp))
+            if (updateAvailable) {
+                PillButton("Show Update", big, accent = true, icon = Icons.Filled.Download, modifier = Modifier.fillMaxWidth()) { onShowUpdate() }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+            PillButton(
+                if (busy) "Checking..." else "Check for Updates",
+                big,
+                accent = !updateAvailable,
+                outline = updateAvailable,
+                modifier = Modifier.fillMaxWidth(),
+            ) { onCheck() }
+            if (status.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    status,
+                    color = if (updateAvailable) Accent else Soft,
+                    fontFamily = BodyFont,
+                    fontSize = if (big) 15.sp else 13.sp,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            PillButton("Close", big, outline = true, modifier = Modifier.fillMaxWidth()) { onDismiss() }
+        }
+    }
+}
+
+@Composable
+private fun AboutRow(label: String, value: String, big: Boolean) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+    ) {
+        Text(label, color = Dim, fontWeight = FontWeight.Bold, fontSize = if (big) 14.sp else 12.sp)
+        Spacer(modifier = Modifier.weight(1f))
+        Text(value, color = Soft, fontWeight = FontWeight.Bold, fontSize = if (big) 15.sp else 13.sp)
+    }
 }
 
 /** Notes parser for the update dialog: the release body carries a summary
