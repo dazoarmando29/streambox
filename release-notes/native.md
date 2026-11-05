@@ -1,0 +1,15 @@
+Watch Party arrives on Android TV and phones: create a room from any title, share the link, and watch movies and episodes together with synced playback, live participants and chat - remote-friendly from the couch. Plus a redesigned update experience.
+
+What is new
+- Watch Party rooms from every title page: room codes, invite links, live participants, host controls (guest playback permission, chat toggle, kick) and real-time chat
+- Synced play/pause/seek through the player's own controls on the paired sources (CineSrc/AniPM/VidBolt/VidZen = full sync), honest partial/coordinated labels everywhere else
+- Chat with D-pad quick messages on TV - typing is never required on the remote
+- Invites open in-app through streambox://party/CODE and the room survives app switches, sleep and reconnects by itself (resume tokens restore your seat, even the host seat)
+- The room server runs on our own Cloudflare edge - no accounts, no ads, and no video ever passes through it
+- Update popup redesigned: a real what-is-new card with the version jump, size, date and verified-install cues
+
+Fixes
+- Room joins, rejoin-after-sleep and kicked-user permanence hardened and live-tested against the edge server
+- Room playback state is authoritative on the server: stale or duplicate events can never affect the current episode, and late joiners sync to the party without resetting anyone
+- Non-hosts never double-advance episodes - the host drives the room, everyone follows
+- Previous episodes can no longer leak skip marks or subtitle files into the next one

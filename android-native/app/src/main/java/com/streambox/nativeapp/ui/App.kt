@@ -15,6 +15,9 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -717,11 +720,55 @@ private class UpdateMem {
     var needsPermission by mutableStateOf(false)
 }
 
-/** The update offer (design pack glass). Download & Install is the ONE
-    action: it downloads, the sha256 must match the published digest, and
-    the system installer opens straight away - the app updates in place
-    (frozen versionCode, one preview key) with no uninstall step. Both
-    pills are real TV focus targets; Back = Later while idle. */
+/** Notes parser for the update dialog: the release body carries a summary
+    line, then "What is new" / "Fixes" sections with "- " bullets. */
+private data class UpdateNotes(val intro: String, val sections: List<Pair<String, List<String>>>)
+
+private fun parseUpdateNotes(body: String): UpdateNotes {
+    val intro = StringBuilder()
+    val sections = ArrayList<Pair<String, List<String>>>()
+    var title = ""
+    val bullets = ArrayList<String>()
+    fun flush() {
+        if (bullets.isNotEmpty()) {
+            sections.add((title.ifBlank { "What is new" }) to bullets.toList())
+            bullets.clear()
+        }
+        title = ""
+    }
+    for (raw in body.lines()) {
+        val l = raw.trim()
+        when {
+            l.isEmpty() -> {}
+            l.startsWith("versionName:") -> {
+                // the header line carries the summary after the version tag
+                val rest = l.replaceFirst(Regex("^versionName:\\s*[0-9.]+\\.?\\s*"), "")
+                if (rest.isNotBlank() && intro.isEmpty() && bullets.isEmpty()) intro.append(rest)
+            }
+            l.startsWith("- ") || l.startsWith("\u2022 ") ->
+                bullets.add(l.removePrefix("- ").removePrefix("\u2022 ").trim())
+            l.length <= 26 && !l.contains(":") && l == l.replaceFirstChar { c -> c.uppercaseChar() } -> {
+                // a short title line (What is new / Fixes / ...)
+                flush()
+                title = l
+            }
+            bullets.isEmpty() && sections.isEmpty() -> {
+                if (intro.isNotEmpty()) intro.append(' ')
+                intro.append(l)
+            }
+        }
+    }
+    flush()
+    return UpdateNotes(intro.toString(), sections)
+}
+
+/** The update offer (design pack glass, 0.84 redesign): a real "what is
+    new" card from the release notes, an upgrade line (you are here -> new),
+    progress + trust cues. Download & Install is the ONE action: it
+    downloads, the sha256 must match the published digest, and the system
+    installer opens straight away - the app updates in place (frozen
+    versionCode, one preview key) with no uninstall step. Both pills are
+    real TV focus targets; Back = Later while idle. */
 @Composable
 private fun UpdateDialog(
     rel: Updater.Release,
@@ -730,82 +777,177 @@ private fun UpdateDialog(
     onInstall: () -> Unit,
 ) {
     val big = AppEnv.isTv
+    val notes = remember(rel.notes) { parseUpdateNotes(rel.notes) }
     Dialog(onDismissRequest = { if (st.progress < 0) onDismiss() }) {
         Column(
             modifier = Modifier
-                .widthIn(max = if (big) 640.dp else 420.dp)
-                .background(Card, RoundedCornerShape(24.dp))
-                .padding(if (big) 28.dp else 20.dp),
+                .widthIn(max = if (big) 680.dp else 440.dp)
+                .background(Card, RoundedCornerShape(24.dp)),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .glow(RoundedCornerShape(12.dp))
-                        .background(Accent, RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.Download, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text("Update available", color = Color.White, fontWeight = FontWeight.Black, fontSize = if (big) 26.sp else 21.sp)
-                    Text(
-                        "VERSION " + rel.version + "  \u00B7  " + Updater.prettyDate(rel.publishedAt),
-                        color = Dim,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = if (big) 12.sp else 10.sp,
-                        letterSpacing = 2.sp,
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(14.dp))
-            Text(
-                "A new build of StreamBox is ready. Download and install it in place - no uninstall needed and everything stays.",
-                color = Soft,
-                fontFamily = BodyFont,
-                fontSize = if (big) 15.sp else 13.sp,
+            // accent top edge: the card announces itself before it is read
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(Accent, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)),
             )
-            if (st.progress >= 0) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .background(Color(0x22FFFFFF), RoundedCornerShape(3.dp)),
-                ) {
+            Column(modifier = Modifier.padding(if (big) 28.dp else 20.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(fraction = (st.progress / 100f).coerceIn(0.02f, 1f))
-                            .height(6.dp)
-                            .background(Accent, RoundedCornerShape(3.dp)),
+                            .size(if (big) 52.dp else 44.dp)
+                            .glow(RoundedCornerShape(14.dp))
+                            .background(Accent, RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.AutoAwesome,
+                            contentDescription = null,
+                            tint = Ink,
+                            modifier = Modifier.size(if (big) 28.dp else 24.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            "UPDATE READY",
+                            color = Accent,
+                            fontWeight = FontWeight.Black,
+                            fontSize = if (big) 12.sp else 10.sp,
+                            letterSpacing = 2.sp,
+                        )
+                        Text(
+                            "StreamBox " + rel.version,
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            fontSize = if (big) 28.sp else 22.sp,
+                        )
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        com.streambox.nativeapp.BuildConfig.VERSION_NAME + " \u2192 " + rel.version,
+                        color = Soft,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (big) 13.sp else 11.sp,
+                        modifier = Modifier
+                            .background(Glass, RoundedCornerShape(50))
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
                     )
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    "Downloading " + st.progress + "%",
-                    color = Dim,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = if (big) 13.sp else 11.sp,
-                    letterSpacing = 1.sp,
-                )
-            }
-            if (st.error.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(st.error, color = Amber, fontFamily = BodyFont, fontSize = if (big) 14.sp else 12.sp)
-            }
-            if (st.progress < 0) {
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = if (big) 380.dp else 280.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    if (notes.intro.isNotBlank()) {
+                        Text(
+                            notes.intro,
+                            color = Soft,
+                            fontFamily = BodyFont,
+                            fontSize = if (big) 15.sp else 13.sp,
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                    notes.sections.forEach { (title, list) ->
+                        Text(
+                            title.uppercase(),
+                            color = Dim,
+                            fontWeight = FontWeight.Black,
+                            fontSize = if (big) 12.sp else 10.sp,
+                            letterSpacing = 2.sp,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        list.forEach { b ->
+                            Row(verticalAlignment = Alignment.Top) {
+                                Box(modifier = Modifier.padding(top = 6.dp).size(7.dp).background(Accent, CircleShape))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(b, color = Soft, fontFamily = BodyFont, fontSize = if (big) 15.sp else 13.sp)
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                // meta + trust row
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    PillButton(
-                        if (st.needsPermission) "Allow Installs, Then Tap Again" else "Download & Install",
-                        big,
-                        accent = true,
-                        icon = Icons.Filled.Download,
-                        modifier = Modifier.weight(1f),
-                    ) { onInstall() }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    PillButton("Later", big, outline = true, modifier = Modifier.weight(1f)) { onDismiss() }
+                    Text(
+                        String.format("%.1f MB", rel.size / 1048576.0),
+                        color = Dim, fontWeight = FontWeight.Bold, fontSize = if (big) 12.sp else 10.sp,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.background(Glass, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        Updater.prettyDate(rel.publishedAt),
+                        color = Dim, fontWeight = FontWeight.Bold, fontSize = if (big) 12.sp else 10.sp,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.background(Glass, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "SHA-256 VERIFIED",
+                        color = Accent, fontWeight = FontWeight.Black, fontSize = if (big) 12.sp else 10.sp,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.background(Glass, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                }
+                if (st.needsPermission && st.progress < 0) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        "Android needs one permission to install updates. Allow installs for StreamBox, then tap again.",
+                        color = Amber, fontFamily = BodyFont, fontSize = if (big) 14.sp else 12.sp,
+                    )
+                }
+                if (st.progress >= 0) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .background(Color(0x22FFFFFF), RoundedCornerShape(4.dp)),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(fraction = (st.progress / 100f).coerceIn(0.02f, 1f))
+                                .height(8.dp)
+                                .background(Accent, RoundedCornerShape(4.dp)),
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Downloading " + st.progress + "% \u00B7 verified before install",
+                        color = Dim,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (big) 13.sp else 11.sp,
+                        letterSpacing = 1.sp,
+                    )
+                }
+                if (st.error.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(st.error, color = Amber, fontFamily = BodyFont, fontSize = if (big) 14.sp else 12.sp)
+                }
+                if (st.progress < 0) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        PillButton(
+                            if (st.needsPermission) "Allow Installs, Then Tap Again" else "Download & Install",
+                            big,
+                            accent = true,
+                            icon = Icons.Filled.Download,
+                            modifier = Modifier.weight(1f),
+                        ) { onInstall() }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        PillButton("Later", big, outline = true, modifier = Modifier.weight(1f)) { onDismiss() }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        "Installs in place over this app \u00B7 your settings and history stay",
+                        color = Dim, fontSize = if (big) 12.sp else 10.sp,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
                 }
             }
         }

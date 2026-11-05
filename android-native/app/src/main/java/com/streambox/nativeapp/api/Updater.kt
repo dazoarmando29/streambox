@@ -45,6 +45,8 @@ object Updater {
         val size: Long,
         val url: String,
         val publishedAt: String,
+        /** The release body (What is new / Fixes) - the update dialog renders it. */
+        val notes: String = "",
     )
 
     /** The published build when it is a REAL update for this install.
@@ -75,6 +77,7 @@ object Updater {
                 size = a.optLong("size"),
                 url = url,
                 publishedAt = o.optString("published_at", ""),
+                notes = o.optString("body", ""),
             )
             if (rel.version.isNotEmpty()) {
                 if (compareVersions(rel.version, BuildConfig.VERSION_NAME) > 0) rel else null

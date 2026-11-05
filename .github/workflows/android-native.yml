@@ -52,6 +52,10 @@ jobs:
             echo "::error::no versionName parsed from android-native/app/build.gradle.kts"
             exit 1
           fi
+          SHA=$(sha256sum streambox-native.apk | cut -d' ' -f1)
+          NOTES_BODY="$(cat release-notes/native.md)
+
+          sha256: $SHA"
           # separate channel from the WebView app: latest-native never touches
           # the rolling 'latest' tag that carries streambox.apk/lite.
           # create-or-update: NEVER delete first (delete-then-create lost the
@@ -62,14 +66,14 @@ jobs:
             if gh release view latest-native >/dev/null 2>&1; then
               if gh release edit latest-native \
                 --title "StreamBox native app (preview)" \
-                --notes "versionName: $VN. Auto-built from native branch (${{ github.sha }}). Native Compose preview (phone + Android TV), package com.streambox.nativeapp - installs alongside the WebView app. Catalog via the streambox-api Worker; the player screen hosts the provider embeds. Preview build: expect gaps while the native UX grows." && \
+                --notes "versionName: $VN. $NOTES_BODY" && \
                 gh release upload latest-native streambox-native.apk --clobber; then
                 published=1; break
               fi
             else
               if gh release create latest-native --prerelease --target "${{ github.sha }}" \
                 --title "StreamBox native app (preview)" \
-                --notes "versionName: $VN. Auto-built from native branch (${{ github.sha }}). Native Compose preview (phone + Android TV), package com.streambox.nativeapp - installs alongside the WebView app. Catalog via the streambox-api Worker; the player screen hosts the provider embeds. Preview build: expect gaps while the native UX grows." \
+                --notes "versionName: $VN. $NOTES_BODY" \
                 streambox-native.apk; then
                 published=1; break
               fi
@@ -82,5 +86,16 @@ jobs:
           if [ "$published" != "1" ]; then
             echo "release publish failed after 5 attempts" >&2
             exit 1
+          fi
+          # versioned rollback release: one permanent tag per version so any
+          # older build stays downloadable (created once per versionName)
+          TAG="native-v$VN"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "rollback release $TAG already exists - keeping it untouched"
+          else
+            gh release create "$TAG" --target "${{ github.sha }}" \
+              --title "StreamBox Native $VN" \
+              --notes "versionName: $VN. $NOTES_BODY" \
+              streambox-native.apk
           fi
           gh release view latest-native --json tagName,publishedAt,url
