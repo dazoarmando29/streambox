@@ -11,8 +11,10 @@ What is new
 - About page (Party/About doors live in the TV status strip and the phone top bar): builder, the exact installed version, and an honest update checker (Checking / You are up to date / Update available)
 - Watch Party join door OUTSIDE the details screens - enter a room code and jump straight into the movie your friends are watching
 - The version number sits beside the builder name at the bottom of every screen
+- Watch Party and About now live in the LEFT NAV BAR beside Browse, and the rail is compact so every button fits a TV screen
 
 Fixes
+- The update offer can no longer be missed: it re-appears on every reopen while an update is pending (Later only buys quiet for the session), it queues behind the What's New card instead of being swallowed by it, and the remote lands directly on the dialog buttons
 - Fixed TV remote navigation: the corner version stamp was focusable and trapped the D-pad on the detail screens - the version now lives beside the builder name and About carries the checker
 - Continue Watching opens the DETAILS first: the resume bar is right there and Play continues from where you left
 - The update popup could appear only once per install and vanish forever on restart (a TV launcher restart reuses the app process, and failed lookups still silenced the next check) - it now re-offers on every reopen, retries through slow Wi-Fi wake-ups, Later only silences it for a few minutes, and the corner pill can always bring it back

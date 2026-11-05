@@ -252,7 +252,7 @@ fun StreamBoxApp() {
     var updOpen by remember { mutableStateOf(false) }
     val updState = remember { UpdateMem() }
     val updScope = rememberCoroutineScope()
-    val updShownAt = remember { mutableLongStateOf(0L) }
+    var updAutoShown by remember { mutableStateOf(false) }
     var aboutOpen by remember { mutableStateOf(false) }
     var aboutStatus by remember { mutableStateOf("") }
     var aboutBusy by remember { mutableStateOf(false) }
@@ -276,6 +276,7 @@ fun StreamBoxApp() {
     DisposableEffect(lifecycleOwner) {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, ev ->
             if (ev == androidx.lifecycle.Lifecycle.Event.ON_START) {
+                updAutoShown = false // a fresh foreground always re-offers
                 updScope.launch {
                     for (attempt in 0..2) {
                         offerUpdate(false)
@@ -429,7 +430,11 @@ fun StreamBoxApp() {
                 )
             }
             whatsNew?.let { (ver, bullets) ->
-                WhatsNewDialog(ver, bullets) { whatsNew = null }
+                WhatsNewDialog(ver, bullets) {
+                    whatsNew = null
+                    // the update offer was queued behind the What's New card
+                    if (upd != null) updOpen = true
+                }
             }
             // The What's New card owns the screen first; the update offer
             // waits its turn so two dialogs never stack. 0.84: the offer
@@ -437,15 +442,16 @@ fun StreamBoxApp() {
             // silences it for a while and the corner pill keeps the door open.
             if (whatsNew == null) {
                 upd?.let { rel ->
-                    val autoShow = System.currentTimeMillis() - updShownAt.longValue > 5 * 60 * 1000L
-                    if (!updOpen && !autoShow) return@let
-                    LaunchedEffect(rel, updOpen) { updShownAt.longValue = System.currentTimeMillis() }
+                    // 0.86: the offer re-appears on EVERY foreground while
+                    // an update is pending - Later only silences this session
+                    if (!updOpen && updAutoShown) return@let
+                    updAutoShown = true
                     UpdateDialog(
                         rel = rel,
                         st = updState,
                         onDismiss = {
                             updOpen = false
-                            updShownAt.longValue = System.currentTimeMillis()
+                            updAutoShown = true
                         },
                         onInstall = {
                             if (updState.progress < 0) {
@@ -731,6 +737,8 @@ private fun SplashScreen() {
 @Composable
 private fun WhatsNewDialog(version: String, bullets: List<String>, onDone: () -> Unit) {
     val big = AppEnv.isTv
+    val ctaFr = remember { FocusRequester() }
+    LaunchedEffect(Unit) { try { ctaFr.requestFocus() } catch (e: Exception) {} }
     Dialog(onDismissRequest = onDone) {
         Column(
             modifier = Modifier
@@ -772,7 +780,7 @@ private fun WhatsNewDialog(version: String, bullets: List<String>, onDone: () ->
             Spacer(modifier = Modifier.height(10.dp))
             PillButton(
                 "Start Watching", big, accent = true, icon = Icons.Filled.PlayArrow,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().focusRequester(ctaFr),
             ) { onDone() }
         }
     }
@@ -798,6 +806,8 @@ private fun AboutDialog(
     onShowUpdate: () -> Unit,
 ) {
     val big = AppEnv.isTv
+    val ctaFr = remember { FocusRequester() }
+    LaunchedEffect(Unit) { try { ctaFr.requestFocus() } catch (e: Exception) {} }
     Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -836,7 +846,7 @@ private fun AboutDialog(
                 big,
                 accent = !updateAvailable,
                 outline = updateAvailable,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().focusRequester(ctaFr),
             ) { onCheck() }
             if (status.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(10.dp))
@@ -925,6 +935,8 @@ private fun UpdateDialog(
 ) {
     val big = AppEnv.isTv
     val notes = remember(rel.notes) { parseUpdateNotes(rel.notes) }
+    val ctaFr = remember { FocusRequester() }
+    LaunchedEffect(Unit) { try { ctaFr.requestFocus() } catch (e: Exception) {} }
     Dialog(onDismissRequest = { if (st.progress < 0) onDismiss() }) {
         Column(
             modifier = Modifier
@@ -1083,7 +1095,7 @@ private fun UpdateDialog(
                             big,
                             accent = true,
                             icon = Icons.Filled.Download,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).focusRequester(ctaFr),
                         ) { onInstall() }
                         Spacer(modifier = Modifier.width(10.dp))
                         PillButton("Later", big, outline = true, modifier = Modifier.weight(1f)) { onDismiss() }

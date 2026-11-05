@@ -453,6 +453,8 @@ fun BrowseScreen(
                         adultOpen = !adultOpen
                         Store.setAdultOpen(ctx, adultOpen)
                     },
+                    onParty = onParty,
+                    onAbout = onAbout,
                 )
                 Column(modifier = Modifier.weight(1f).fillMaxSize()) {
                     TvStatusBar(onParty = onParty, onAbout = onAbout)
@@ -1791,6 +1793,8 @@ private fun TvRail(
     adultOpen: Boolean,
     activeFR: FocusRequester,
     onAdultToggle: () -> Unit,
+    onParty: () -> Unit = {},
+    onAbout: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var expanded by remember { mutableStateOf(false) }
@@ -1808,7 +1812,7 @@ private fun TvRail(
             .background(Color(0xFF0E1524))
             // Compact rail (0.58): seven sections must fit a 540dp TV or
             // the last tabs (Browse / Adults-Only) fall off the column.
-            .padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 10.dp),
+            .padding(start = 14.dp, top = 6.dp, bottom = 6.dp, end = 10.dp),
     ) {
         Box(
             modifier = Modifier
@@ -1818,7 +1822,7 @@ private fun TvRail(
         ) {
             Icon(Icons.Filled.PlayArrow, contentDescription = "StreamBox", tint = Ink, modifier = Modifier.size(22.dp))
         }
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         val onRailFocus: (Boolean) -> Unit = { focused ->
             foldJob?.cancel()
             if (focused) {
@@ -1831,7 +1835,7 @@ private fun TvRail(
             }
         }
         RailBtn(Icons.Filled.Search, "Search", on = false, expanded = expanded, onFocus = onRailFocus, onClick = onSearchToggle)
-        Spacer(modifier = Modifier.height(5.dp))
+        Spacer(modifier = Modifier.height(2.dp))
         Section.values().forEach { s ->
             RailBtn(
                 s.icon,
@@ -1845,8 +1849,12 @@ private fun TvRail(
                 // The active tab is the Left-escape landing pad (0.64).
                 fr = if (s == section) activeFR else null,
             ) { onSection(s) }
-            Spacer(modifier = Modifier.height(5.dp))
+            Spacer(modifier = Modifier.height(2.dp))
         }
+        RailBtn(Icons.Filled.People, "Watch Party", on = false, expanded = expanded, onFocus = onRailFocus) { onParty() }
+        Spacer(modifier = Modifier.height(2.dp))
+        RailBtn(Icons.Filled.Info, "About", on = false, expanded = expanded, onFocus = onRailFocus) { onAbout() }
+        Spacer(modifier = Modifier.height(2.dp))
         Spacer(modifier = Modifier.weight(1f))
         RailBtn(
             Icons.Filled.Lock,
@@ -1874,7 +1882,7 @@ private fun RailBtn(
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
-                .size(46.dp)
+                .size(40.dp)
                 .then(if (fr != null) Modifier.focusRequester(fr) else Modifier)
                 .onFocusChanged { onFocus(it.isFocused) }
                 .focusRingCircle(pop = false)
@@ -1948,10 +1956,6 @@ private fun TvStatusBar(
             letterSpacing = 2.sp,
         )
         Spacer(modifier = Modifier.weight(1f))
-        StatusPill(Icons.Filled.People, "Party", onClick = onParty)
-        Spacer(modifier = Modifier.width(8.dp))
-        StatusPill(Icons.Filled.Info, "About", onClick = onAbout)
-        Spacer(modifier = Modifier.width(8.dp))
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier

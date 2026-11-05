@@ -937,12 +937,15 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   const hsA = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"))
     ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/HomeScreen.kt"), "utf8") : "";
   if (!hsA) bad("HomeScreen.kt missing - rail/chip rules cannot be verified");
+  // 0.86: the rail gains Watch Party + About doors (user request), so the
+  // circles compact 46dp -> 40dp and the gaps tighten - 11 rows + logo must
+  // still fit a 540dp TV or Browse/About fall off the column.
   else if (!/listOf\("kdrama" to "All"\)/.test(hsA) &&
-           /\.size\(46\.dp\)/.test(hsA) &&
+           /\.size\(40\.dp\)/.test(hsA) &&
            /Section\.values\(\)\.forEach/.test(hsA)) {
-    ok("one All chip per genre strip and a compact rail every section fits on");
+    ok("one All chip per genre strip and a compact rail every section + the Party/About doors fit on");
   } else {
-    bad("KDrama must not add a second All chip (GenreBar prepends one) and RailBtn must stay compact so Browse stays visible");
+    bad("KDrama must not add a second All chip (GenreBar prepends one) and RailBtn must stay compact (40dp circles) so every row incl. Party/About stays visible");
   }
 }
 
