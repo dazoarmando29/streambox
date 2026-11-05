@@ -724,7 +724,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 216; // bump every release alongside version.txt
+  const BUILD_NUM = 217; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1258,6 +1258,15 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     </div>
     <button id="aboutCheckBtn" onclick="aboutCheckUpdate()" class="w-full mt-5 bg-teal-500 hover:bg-teal-400 text-gray-950 font-bold px-5 py-3 rounded-full text-sm">Check for Updates</button>
     <p id="aboutStatus" class="text-center text-xs text-gray-400 mt-2.5 min-h-[16px]"></p>
+    <div class="mt-4 pt-4 border-t border-white/10">
+      <p class="text-xs text-gray-400 font-bold mb-2" style="letter-spacing:.12em">ANDROID APPS</p>
+      <div class="flex flex-wrap gap-2">
+        <a href="https://github.com/dazoarmando29/streambox/releases/download/latest-native/streambox-native.apk" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">Native app (TV &amp; phone)</a>
+        <a href="https://github.com/dazoarmando29/streambox/releases/download/latest/streambox.apk" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">WebView app</a>
+        <a href="https://github.com/dazoarmando29/streambox/releases/download/latest/streambox-lite.apk" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">Lite app</a>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-2">Direct downloads - use these if the in-app update popup is missing on your TV.</p>
+    </div>
   </div>
 </div>
 
