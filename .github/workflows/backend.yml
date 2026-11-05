@@ -8,6 +8,7 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # both jobs only read the repo - no write scope for GITHUB_TOKEN
     permissions:
       contents: read
@@ -22,12 +23,21 @@ jobs:
       - name: Syntax check worker
         run: node --check backend/src/index.js
 
+      - name: Syntax check party hub
+        run: node --check backend/src/party.js
+
       - name: Site QA gate (branch carries the site too)
         run: node tools/qa.js
 
   deploy:
     needs: check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # serialize deploys: two quick pushes used to be able to finish out of
+    # order and silently roll the worker back to the OLDER commit
+    concurrency:
+      group: worker-deploy
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
