@@ -22,6 +22,9 @@ export default {
   }
 };
 
+// Watch Party room hub (Durable Object) - see party.js
+export { PartyHub } from "./party.js";
+
 const ALLOWED = [
   "https://dazoarmando29.github.io",
   "http://localhost:8788",
@@ -62,6 +65,14 @@ async function route(request, env, ctx) {
 
   const url = new URL(request.url);
   if (url.pathname === "/healthz") return json({ ok: true, name: "streambox-api" }, 200, origin);
+  // Watch Party rooms: WebSocket upgrades ride the PartyHub Durable Object
+  // (same protocol as the self-host party-server; no media ever crosses it)
+  if (url.pathname === "/party") {
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return json({ error: "upgrade_required", hint: "this endpoint speaks WebSocket" }, 426, origin);
+    }
+    return env.PARTY_HUB.get(env.PARTY_HUB.idFromName("hub")).fetch(request);
+  }
   if (url.pathname === "/api/anime-map") return animeMap(url, env, origin, ctx);
   if (url.pathname === "/api/anime/genres") {
     return json({ data: ANIME_GENRES.map((g) => ({ id: g, name: g })) }, 200, origin);

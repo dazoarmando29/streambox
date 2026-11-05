@@ -23,10 +23,10 @@ android {
         // Backend: Cloudflare Worker (catalog proxy + anime mapping).
         // Provider keys live in the Worker as Wrangler secrets - never here.
         buildConfigField("String", "API_BASE", "\"https://streambox-api.dazoarmando.workers.dev\"")
-        // Watch Party transport: set -PPARTY_WS=wss://host/party-ws at build
-        // time; empty disables the feature cleanly (no hosts hardcoded in
-        // Kotlin). The invite base is the real site origin by default.
-        buildConfigField("String", "PARTY_WS", "\"" + (project.findProperty("PARTY_WS") ?: "") + "\"")
+        // Watch Party transport: the party hub rides the streambox-api
+        // Worker (Durable Object at /party). Override with -PPARTY_WS=...
+        // (e.g. a self-hosted party-server); no other hosts are hardcoded.
+        buildConfigField("String", "PARTY_WS", "\"" + (project.findProperty("PARTY_WS") ?: "wss://streambox-api.dazoarmando.workers.dev/party") + "\"")
         buildConfigField("String", "PARTY_INVITE_BASE", "\"" + (project.findProperty("PARTY_INVITE_BASE") ?: "https://dazoarmando29.github.io/streambox/") + "\"")
     }
 

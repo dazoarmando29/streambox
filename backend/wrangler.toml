@@ -8,3 +8,13 @@ compatibility_date = "2026-10-01"
 
 [observability]
 enabled = true
+
+# Watch Party: room hub Durable Object (free-plan SQLite backend). The
+# /party WebSocket route lands here; see src/party.js.
+[[durable_objects.bindings]]
+name = "PARTY_HUB"
+class_name = "PartyHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PartyHub"]
