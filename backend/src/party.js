@@ -117,9 +117,18 @@ export class PartyHub {
 
   /* ---------- inbound ---------- */
 
-  async webMessage(ws, raw) {
+  async webSocketMessage(ws, raw) {
+    try {
+      await this.dispatch(ws, raw);
+    } catch (e) {
+      console.error("party-dispatch-error", (e && e.stack) || String(e));
+      try { this.send(ws, { t: "error", error: "bad_message" }); } catch (e2) {}
+    }
+  }
+
+  async dispatch(ws, raw) {
     const m0 = this.meta(ws);
-    if (!m0) return;
+    if (!m0) { console.error("party: message from a socket without meta"); return; }
     if (typeof raw !== "string" || raw.length > LIMITS.MAX_MSG_BYTES) { this.send(ws, { t: "error", error: "bad_message" }); return; }
     const lim = this.limFor(m0.id);
     if (!lim.msg.allow(m0.id, Date.now())) { this.send(ws, { t: "error", error: "rate_limited" }); return; }
@@ -148,7 +157,7 @@ export class PartyHub {
         if (m0.roomId) return this.send(ws, { t: "error", error: "conflict" });
         m0.name = cleanName(m.name);
         const room = this.createRoom(m0, m);
-        m0.roomId = room.roomId;
+        m0.roomId = room.id;
         ws.serializeAttachment(m0);
         this.send(ws, { t: "room", room: this.snapshot(room, m0.id), token: m0.token });
         this.armAlarm();
@@ -162,7 +171,7 @@ export class PartyHub {
         const r = this.joinRoom(m0, code, typeof m.password === "string" ? m.password : "",
           typeof m.token === "string" ? m.token : "");
         if (r.error) return this.send(ws, { t: "error", error: r.error, for: "join" });
-        m0.roomId = r.room.roomId;
+        m0.roomId = r.room.id;
         if (r.reattached) m0.id = r.reattached;
         ws.serializeAttachment(m0);
         this.send(ws, { t: "room", room: this.snapshot(this.rooms.get(m0.roomId), m0.id), token: m0.token, reattached: !!r.reattached });
@@ -312,7 +321,7 @@ export class PartyHub {
     }
   }
 
-  async webClose(ws) {
+  async webSocketClose(ws) {
     const m = this.meta(ws);
     if (!m || !m.roomId) return;
     const room = this.rooms.get(m.roomId);
@@ -325,7 +334,7 @@ export class PartyHub {
     this.armAlarm();
   }
 
-  async webError(ws) { await this.webClose(ws); }
+  async webSocketError(ws) { await this.webSocketClose(ws); }
 
   /* ---------- rooms ---------- */
 
