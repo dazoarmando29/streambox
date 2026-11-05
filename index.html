@@ -724,7 +724,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 215; // bump every release alongside version.txt
+  const BUILD_NUM = 216; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -765,6 +765,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   <div class="ml-auto flex items-center gap-2 w-full md:w-auto justify-end">
     <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-4 md:w-56 lg:w-64 md:justify-start rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm text-gray-400 flex items-center gap-2"><span class="text-teal-300">&#x1F50D;</span><span>Search...</span></button>
     <button id="adultLockNav" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" aria-label="Adults-only gate" class="shrink-0 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-gray-300">&#x1F512;</button>
+    <button onclick="partyOpen()" title="Join or start a Watch Party" class="shrink-0 h-10 px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x1F4E1;</span>Party</button>
+    <button onclick="aboutOpen()" title="About StreamBox and updates" class="shrink-0 h-10 px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2139;</span>About</button>
     <button id="installBtn" onclick="installPWA()" class="hidden shrink-0 h-10 px-4 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2B07;</span>Install</button>
   </div>
 </nav>
@@ -881,10 +883,12 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   </main>
   <!-- FOOTER: brand + credits (text-only, never enters remote tab order) -->
   <footer class="px-4 md:px-10 pb-10 pt-2 text-[11px] text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-1" style="padding-right: 88px">
-    <span class="font-black text-sm text-gray-400">Stream<span class="text-teal-400">Box</span> <span id="footVer"></span></span>
+    <span class="font-black text-sm text-gray-400">Stream<span class="text-teal-400">Box</span></span>
     <span>•</span><span>Catalog: TMDB</span><span>•</span><span>Playback: CineSrc + mirrors</span><span>•</span><span>Subs: Wyzie</span>
     <span class="flex-1"></span>
     <span class="text-[10px] font-bold text-gray-500" style="letter-spacing:.15em">STREAMBOX 10-FOOT UI</span>
+    <span class="text-gray-500 font-bold text-xs"><span id="footVer"></span></span>
+    <span class="text-gray-600">•</span>
     <span class="text-teal-400 font-black text-xs" style="letter-spacing:.15em">dazzo</span>
   </footer>
 </div>
@@ -1235,6 +1239,28 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   </div>
 </div>
 
+<!-- ABOUT: version + builder + honest update checker -->
+<div id="aboutPanel" class="hidden fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-label="About StreamBox">
+  <div class="glass rounded-2xl w-full max-w-md p-6">
+    <div class="flex items-center gap-3">
+      <div class="w-11 h-11 rounded-xl bg-teal-400 flex items-center justify-center text-[#0B111E] text-xl font-black">S</div>
+      <div>
+        <p class="font-black text-lg">StreamBox</p>
+        <p class="text-xs text-gray-400">built by <b class="text-teal-300" style="letter-spacing:.12em">dazzo</b></p>
+      </div>
+      <button onclick="aboutClose()" aria-label="Close" class="ml-auto w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-lg">&#x2715;</button>
+    </div>
+    <div class="mt-4 space-y-1.5 text-sm">
+      <p class="flex justify-between gap-3"><span class="text-gray-500">Version</span><b id="aboutVer" class="text-right"></b></p>
+      <p class="flex justify-between gap-3"><span class="text-gray-500">Builder</span><b class="text-right">dazzo</b></p>
+      <p class="flex justify-between gap-3"><span class="text-gray-500">Catalog</span><b class="text-right">TMDB</b></p>
+      <p class="flex justify-between gap-3"><span class="text-gray-500">Playback</span><b class="text-right">CineSrc + mirrors</b></p>
+    </div>
+    <button id="aboutCheckBtn" onclick="aboutCheckUpdate()" class="w-full mt-5 bg-teal-500 hover:bg-teal-400 text-gray-950 font-bold px-5 py-3 rounded-full text-sm">Check for Updates</button>
+    <p id="aboutStatus" class="text-center text-xs text-gray-400 mt-2.5 min-h-[16px]"></p>
+  </div>
+</div>
+
 <!-- TV SETUP GUIDE -->
 <div id="tvGuide" class="hidden fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-4" onclick="if(event.target===this)closeTvGuide()">
   <div class="bg-[#131B2C] max-w-2xl w-full rounded-2xl overflow-hidden border border-white/10 max-h-[90vh] overflow-y-auto p-6 md:p-8 relative">
@@ -1528,7 +1554,7 @@ function restoreFocus(el){
 }
 function topPopup(){
   // topmost visible popup wins (search sits above drawers, guide above all)
-  const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal,#pinPad,#avSheet,#vrSheet,#resumeDlg")].filter(p => !p.classList.contains("hidden"));
+  const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal,#pinPad,#avSheet,#vrSheet,#resumeDlg,#partyPanel,#aboutPanel")].filter(p => !p.classList.contains("hidden"));
   return ps.length ? ps[ps.length - 1] : null;
 }
 function navEscapeFocus(){
@@ -2103,7 +2129,7 @@ function purgeRetiredCaches(){
   } catch(e){}
   try {
     const fv = document.getElementById("footVer");
-    if (fv) fv.textContent = "· build " + BUILD_NUM;
+    if (fv) fv.textContent = "build " + BUILD_NUM;
     const ts = document.getElementById("optTvSafe");
     if (ts) ts.checked = tvSafeOnly();
     const nav = document.querySelector("nav");
@@ -2474,6 +2500,8 @@ function purgeRetiredCaches(){
         // resume dialog: Esc = the primary safe pick (Continue) like the APK
         // Back handler - the old fallthrough left the dialog stuck open
         else if (top.id === "resumeDlg") resumePick(true);
+        else if (top.id === "aboutPanel") aboutClose();
+        else if (top.id === "partyPanel") partyClose();
         else closePanels();
         e.preventDefault(); return;
       }
@@ -4997,10 +5025,10 @@ function paintContinueRow(row, grid, scope, active){
       const pct = (x.dur > 60 && x.pos > 5) ? Math.min(99, Math.round(x.pos / x.dur * 100)) : 0;
       d.innerHTML = `<div class="glass flex items-center gap-3 p-3"><img loading="lazy" decoding="async" src="${escapeHtml(IMG(x.poster,"w185"))}" onerror="this.onerror=null;this.style.display='none'" class="w-14 aspect-[2/3] object-cover rounded-lg shrink-0"><div class="flex-1 min-w-0"><p class="card-title text-sm font-bold truncate">${escapeHtml(x.title||"")}</p><p class="text-[11px] text-gray-500">${x.type.toUpperCase()}${x.type==="tv"?` S${x.s} E${x.e}`:""}</p>${pct ? `<div class="h-1.5 rounded bg-white/15 mt-2 overflow-hidden"><div class="h-1.5 rounded bg-teal-400" style="width:${pct}%"></div></div><p class="text-[11px] text-teal-300 font-bold mt-1">${pct}% watched</p>` : `<p class="text-[11px] text-gray-600 mt-2">Not started</p>`}</div><button class="w-9 h-9 shrink-0 rounded-full bg-black/50 hover:bg-black/80 text-sm" aria-label="Remove">\u{2715}</button></div>`;
       const resumeAt = (x.dur > 60 && x.pos > 10) ? x.pos : 0;
-      d.onclick = activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt));
+      d.onclick = activatable(()=>openDetail(x.type, x.id));
       // remote/keyboard: OK plays ONLY when the card itself has focus — the inner
       // \u{2715} button handles its own keypress, otherwise Back/OK on \u{2715} replays the title
-      d.onkeydown = (ev)=>{ if (ev.target !== d) return; if(okPressed(ev)){ ev.preventDefault(); activatable(()=>openWatch(x.type, x.id, x.s||1, x.e||1, resumeAt))(); } };
+      d.onkeydown = (ev)=>{ if (ev.target !== d) return; if(okPressed(ev)){ ev.preventDefault(); activatable(()=>openDetail(x.type, x.id))(); } };
       d.querySelector("button").onclick = (ev)=>{ ev.stopPropagation(); removeContinue(x.type,x.id); };
       grid.appendChild(d);
     });
@@ -9468,6 +9496,55 @@ const PARTY = (() => {
 })();
 
 /* inline-handler surface (kept tiny and QA-visible) */
+/* inline-handler surface (kept tiny and QA-visible) */
+function aboutOpen(){
+  try {
+    document.getElementById("aboutVer").textContent = "build " + BUILD_NUM;
+    document.getElementById("aboutStatus").textContent = "";
+    const b = document.getElementById("aboutCheckBtn");
+    if (b) { b.disabled = false; b.textContent = "Check for Updates"; b.onclick = () => aboutCheckUpdate(); }
+    document.getElementById("aboutPanel").classList.remove("hidden");
+    document.body.classList.add("modal-open");
+    setTimeout(() => { const c = document.querySelector("#aboutPanel button"); if (c) try { c.focus({ preventScroll: true }); } catch(e){} }, 60);
+  } catch(e){}
+}
+function aboutClose(){
+  try {
+    document.getElementById("aboutPanel").classList.add("hidden");
+    if (document.getElementById("modal").classList.contains("hidden")
+        && document.getElementById("searchPanel").classList.contains("hidden")
+        && document.getElementById("partyPanel").classList.contains("hidden")
+        && document.getElementById("tvGuide").classList.contains("hidden")
+        && document.getElementById("resumeDlg").classList.contains("hidden")) {
+      document.body.classList.remove("modal-open");
+    }
+  } catch(e){}
+}
+async function aboutCheckUpdate(){
+  const s = document.getElementById("aboutStatus");
+  const b = document.getElementById("aboutCheckBtn");
+  try {
+    if (s) s.textContent = "Checking for updates...";
+    if (b) b.disabled = true;
+    const r = await fetch("version.txt?_=" + Date.now(), { cache: "no-store" });
+    const n = r.ok ? parseInt((await r.text()).trim(), 10) : 0;
+    if (n > BUILD_NUM) {
+      if (s) s.textContent = "Update available: build " + n + " (you have " + BUILD_NUM + ")";
+      if (b) { b.disabled = false; b.textContent = "Refresh to Update"; b.onclick = () => location.reload(); }
+      const ub = document.getElementById("updateBar");
+      if (ub) ub.classList.remove("hidden");
+    } else if (!r.ok) {
+      if (s) s.textContent = "Could not reach the update server - try again.";
+      if (b) b.disabled = false;
+    } else {
+      if (s) s.textContent = "You are up to date (build " + BUILD_NUM + ")";
+      if (b) b.disabled = false;
+    }
+  } catch(e){
+    if (s) s.textContent = "Could not reach the update server - try again.";
+    if (b) b.disabled = false;
+  }
+}
 function partyOpen(){ try { PARTY.open(new URLSearchParams(location.search).get("party")); } catch(e){} }
 function partyClose(){ PARTY.close(); }
 function partyCreate(){ PARTY.create(); }

@@ -1565,5 +1565,27 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (allOk) ok("party-server sources parse and the protocol test suite exists");
 }
 
+/* ---------- 139. Continue Watching opens details first ---------- */
+{
+  const row = html.match(/function paintContinueRow\([\s\S]*?\n\}/);
+  if (row && /openDetail\(x\.type, x\.id\)/.test(row[0]) && !/openWatch\(/.test(row[0]))
+    ok("Continue Watching cards open the details page first (resume happens from there)");
+  else bad("paintContinueRow must open openDetail(x.type, x.id) - never the player directly");
+}
+
+/* ---------- 140. About page + party door outside the details screens ---------- */
+{
+  if (/id="aboutPanel"/.test(html) && /function aboutCheckUpdate\(\)/.test(html) && /function aboutOpen\(\)/.test(html))
+    ok("About page exists with an honest update checker (checking / up to date / update available)");
+  else bad("an About panel with aboutOpen()/aboutCheckUpdate() is required");
+  const nav = html.match(/justify-end">\s*<button onclick="openSearch[\s\S]{0,1600}/);
+  if (nav && /partyOpen\(\)/.test(nav[0]) && /aboutOpen\(\)/.test(nav[0]))
+    ok("the header carries Party + About doors OUTSIDE the detail screens");
+  else bad("the header must carry partyOpen() and aboutOpen() entries");
+  if (/"build " \+ BUILD_NUM/.test(html) && /id="footVer"/.test(html))
+    ok("the build number sits beside the builder name in the footer");
+  else bad("the footer must show the build number beside dazzo (never floating)");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

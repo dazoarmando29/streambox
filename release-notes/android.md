@@ -5,6 +5,12 @@ What is new
 - Room codes and invite links, live participant list, host controls, and real-time chat with remote-friendly quick messages on Android TV
 - The room server runs on our own Cloudflare edge (streambox-api) - no accounts, and no video ever passes through it
 - streambox://party/CODE invites open straight into the app on phones and TVs
+- Watch Party join door in the header (outside the details screens): enter a room code and jump straight into the movie your friends are watching
+- About page in the header: builder, the exact build number, and an honest update checker (Checking / You are up to date / Update available)
+
+Fixes
+- The build number now sits beside the builder name in the footer (no floating labels)
+- Continue Watching opens the details page first - the resume point is there and Watch continues from where you left
 
 Fixes
 - App updates no longer erase Continue Watching, My List, your PIN or settings - the fresh-start wipe now clears caches only
