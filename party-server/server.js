@@ -116,7 +116,10 @@ function createPartyServer(opts = {}) {
           break;
         }
         case "join": {
-          if (p.roomId) { send(ws, { t: "error", error: "conflict" }); return; }
+          // a connection that already HAS a seat cannot double-join; one whose
+          // seat expired (long background) may rejoin via its resume token
+          const already = p.roomId && rooms.rooms.get(p.roomId) && rooms.rooms.get(p.roomId).participants.has(p.id);
+          if (already) { send(ws, { t: "error", error: "conflict" }); return; }
           p.name = m.name;
           const r = rooms.join(p, { ...m, remoteIp });
           if (r.error) { send(ws, { t: "error", error: r.error, for: "join" }); return; }
@@ -190,6 +193,11 @@ function createPartyServer(opts = {}) {
         }
         case "heartbeat": {
           send(ws, rooms.heartbeat(p.id, m.clientTs));
+          // room gone underneath us (server restart / room expired): tell the
+          // client to clean up instead of silently going deaf. Seat reattach
+          // is handled by the client's reconnect-join (resume token).
+          const room = p.roomId ? rooms.rooms.get(p.roomId) : null;
+          if (p.roomId && !room) send(ws, { t: "notice", notice: "room_gone" });
           break;
         }
         case "sync_report": {

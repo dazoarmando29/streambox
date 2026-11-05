@@ -119,6 +119,22 @@ class RoomManager {
           return { room: this.snapshot(room, id), reattached: id };
         }
       }
+      // seat already expired (long background): a remembered seat restores
+      // identity AND the host role if the host is who returns. Kicked
+      // participants are NEVER restorable (a kick is permanent).
+      const saved = room.recentSeats && room.recentSeats.get(token);
+      if (saved && !saved.kicked) {
+        room.recentSeats.delete(token);
+        const part = this._mkParticipant(p, now, false);
+        part.id = saved.id;
+        part.token = token;
+        part.name = saved.name || part.name;
+        room.participants.set(saved.id, part);
+        p.id = saved.id;
+        if (saved.wasHost) { room.hostId = saved.id; room.hostDisconnectedAt = 0; }
+        room.lastActivityAt = now;
+        return { room: this.snapshot(room, saved.id), reattached: saved.id };
+      }
     }
     if (room.passwordHash && hashPassword(password || "", room.passwordSalt) !== room.passwordHash) {
       return { error: "wrong_password" };
@@ -345,6 +361,12 @@ class RoomManager {
           if (r.events && r.events.length) out.push({ roomId: room.id, events: r.events });
         }
       }
+      // remembered seats expire too (identity is restorable for 5 minutes)
+      if (room.recentSeats) {
+        for (const [tok, s] of [...room.recentSeats]) {
+          if (now - s.removedAt > 5 * 60 * 1000) room.recentSeats.delete(tok);
+        }
+      }
       // host grace: state preserved, host seat restored if the host returns
       const host = room.participants.get(room.hostId);
       if (!host || !host.connected) {
@@ -387,6 +409,12 @@ class RoomManager {
     const part = room.participants.get(participantId);
     if (!part) return { events: [] };
     room.participants.delete(participantId);
+    // remember the seat briefly so a resume token can restore identity/host
+    if (!room.recentSeats) room.recentSeats = new Map();
+    room.recentSeats.set(part.token, {
+      id: part.id, name: part.name, wasHost: room.hostId === participantId,
+      removedAt: Date.now(), kicked: reason === "kicked",
+    });
     room.lastActivityAt = Date.now();
     const events = [{ t: "peer_left", room: room.id, participantId, name: part.name, reason }];
     if (room.hostId === participantId && !room.ended) {

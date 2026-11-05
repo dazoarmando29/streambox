@@ -350,6 +350,62 @@ test("host expiry transfers hosting to the longest-standing participant", async 
   assert.strictEqual(ev.hostId, room2.selfId);
 });
 
+test("seat expiry while away: token restores identity AND the host seat", async (t) => {
+  const { app, url } = await startServer(t, { ttl: { participantTtl: 60, hostGrace: 5000, emptyRoomTtl: 5000, maxRoomAge: 60000 } });
+  const a = await connect(url);
+  a.send({ t: "create", name: "Ana" });
+  const m1 = await a.waitType("room");
+  const b = await connect(url);
+  b.send({ t: "join", name: "Bo", code: m1.room.code });
+  await b.waitType("room");
+  // host's phone sleeps: socket drops, the seat expires past the TTL
+  a.close();
+  await b.waitType("peer_joined");
+  await new Promise((r) => setTimeout(r, 90));
+  app.rooms.sweep(); // seat removed, remembered for 5 minutes
+  // the phone wakes and rejoins by resume token
+  const a2 = await connect(url);
+  a2.send({ t: "join", name: "Ana", code: m1.room.code, token: m1.token });
+  const r = await a2.next((m) => m.t === "room" || m.t === "error");
+  assert.strictEqual(r.t, "room");
+  assert.strictEqual(r.reattached, true);
+  assert.strictEqual(r.room.hostId, m1.room.hostId, "the returning host gets the host seat back");
+});
+
+test("a kicked participant can never come back on the old token", async (t) => {
+  const { app, url } = await startServer(t, { ttl: { participantTtl: 60, hostGrace: 60000, emptyRoomTtl: 5000, maxRoomAge: 60000 } });
+  const a = await connect(url);
+  const b = await connect(url);
+  a.send({ t: "create", name: "Ana" });
+  const m1 = await a.waitType("room");
+  b.send({ t: "join", name: "Bo", code: m1.room.code });
+  const m2 = await b.waitType("room");
+  a.send({ t: "kick", targetId: m2.room.selfId });
+  await b.waitType("kicked");
+  const b2 = await connect(url);
+  b2.send({ t: "join", name: "Bo", code: m1.room.code, token: m2.token || "stale-token-1234" });
+  const r = await b2.next((m) => m.t === "room" || m.t === "error");
+  // a fresh seat is allowed (kicking is not a ban) but the OLD identity/host
+  // state must never be restored - token reattach must be refused
+  assert.strictEqual(r.t, "room");
+  assert.ok(!r.reattached, "kicked token must not reattach");
+  void app;
+});
+
+test("heartbeat after the room expires reports room_gone", async (t) => {
+  const { app, url } = await startServer(t, { ttl: { maxRoomAge: 50, participantTtl: 5000, emptyRoomTtl: 5000, hostGrace: 5000 } });
+  const a = await connect(url);
+  a.send({ t: "create", name: "Ana" });
+  await a.waitType("room");
+  await new Promise((r) => setTimeout(r, 80));
+  app.rooms.sweep(); // room ages out
+  a.drain();
+  a.send({ t: "heartbeat", clientTs: Date.now() });
+  await a.waitType("heartbeat");
+  const notice = await a.waitType("notice");
+  assert.strictEqual(notice.notice, "room_gone");
+});
+
 /* ---------- chat ---------- */
 
 test("chat broadcasts with id + name; rate limited; muted users blocked", async (t) => {
