@@ -77,6 +77,11 @@ async function route(request, env, ctx) {
   if (url.pathname === "/api/anime/genres") {
     return json({ data: ANIME_GENRES.map((g) => ({ id: g, name: g })) }, 200, origin);
   }
+  // Native app update channel: mirrors the GitHub latest-native release with
+  // an EDGE CACHE so TV clients never burn the GitHub API rate limit (60/hr
+  // per home IP made every check fail and the app said "up to date"). One
+  // upstream fetch per 10 minutes serves every device behind that colo.
+  if (url.pathname === "/api/native-latest") return nativeLatest(env, ctx, origin);
   if (url.pathname === "/api/anime/browse") return animeBrowse(url, env, origin, ctx);
   if (url.pathname === "/api/wyz/search") return wyzSearch(url, env, origin);
   if (url.pathname === "/api/bs-subs") return bsSubs(url, env, origin);
@@ -142,10 +147,12 @@ async function animeBrowse(url, env, origin, ctx) {
   // Dedupe by TMDB id: season-split entries (Code Geass + R2) can resolve
   // to the same TMDB show - one card per title, never doubles.
   const seen = new Set();
+  let resolveErrored = false;
   const rows = (
     await Promise.all(
       media.slice(0, 20).map(async (m) => {
         const tmdbId = await tmdbTvResolve(m.name, m.year, env);
+        if (tmdbId === undefined) { resolveErrored = true; return null; }
         if (!tmdbId) return null;
         return {
           id: tmdbId,
@@ -167,7 +174,10 @@ async function animeBrowse(url, env, origin, ctx) {
     .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
 
   const out = { data: rows, requested: media.length, resolved: rows.length, source, page, hasNext };
-  cachePut(key, out, 3600, ctx);
+  // A failed TMDB sweep must never be cached as "this browse is empty" for the
+  // full hour (the Anime area looked empty for every user behind the colo).
+  // Genuine empty results still cache; errors get a short retry window.
+  cachePut(key, out, resolveErrored ? 60 : 3600, ctx);
   return json(out, 200, origin);
 }
 
@@ -289,7 +299,7 @@ async function tmdbTvResolve(name, year, env) {
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) throw new Error("tmdb " + res.status); // outage != "no match"
     const data = await res.json();
     const results = (data && data.results) || [];
     if (!results.length) return null;
@@ -305,7 +315,7 @@ async function tmdbTvResolve(name, year, env) {
   try {
     return (await tryFind(true)) || (await tryFind(false));
   } catch (e) {
-    return null;
+    return undefined; // FETCH ERROR (not "no match"): callers must not cache it
   }
 }
 
@@ -636,6 +646,56 @@ async function bsSubs(url, env, origin) {
     return json({ data: rows }, 200, origin);
   } catch (e) {
     return json({ error: "bs_failed", detail: String((e && e.message) || e) }, 502, origin);
+  }
+}
+
+/* ---------- native update channel (edge-cached GitHub mirror) ---------- */
+async function nativeLatest(env, ctx, origin) {
+  const freshKey = new Request("https://sb-cache.internal/v2/native-latest");
+  const staleKey = new Request("https://sb-cache.internal/v2/native-latest-stable");
+  const out = (body, status, cacheTag) =>
+    new Response(body, {
+      status,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "x-sb-cache": cacheTag,
+        ...corsHeaders(origin),
+      },
+    });
+  try {
+    const hit = await caches.default.match(freshKey);
+    if (hit) return out(await hit.text(), 200, "hit");
+  } catch (e) {}
+  try {
+    const res = await fetch(
+      "https://api.github.com/repos/dazoarmando29/streambox/releases/tags/latest-native",
+      {
+        headers: { accept: "application/vnd.github+json", "user-agent": UA },
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    const body = await res.text();
+    if (res.ok) {
+      // fresh copy (10 min) + a long-lived "last known good" for stale-on-error
+      const mk = (max) =>
+        new Response(body, {
+          headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=" + max },
+        });
+      if (ctx && ctx.waitUntil) {
+        ctx.waitUntil(Promise.all([caches.default.put(freshKey, mk(600)), caches.default.put(staleKey, mk(86400))]));
+      }
+      return out(body, 200, "miss");
+    }
+    // upstream said no (rate limit / outage): serve the last known GOOD copy
+    // so the channel keeps working long after any single failure
+    const stale = await caches.default.match(staleKey);
+    if (stale) return out(await stale.text(), 200, "stale");
+    return json({ error: "upstream_unavailable" }, 503, origin);
+  } catch (e) {
+    const stale = await caches.default.match(staleKey);
+    if (stale) return out(await stale.text(), 200, "stale");
+    return json({ error: "upstream_unavailable" }, 503, origin);
   }
 }
 

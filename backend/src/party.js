@@ -28,6 +28,9 @@ const LIMITS = {
   MAX_ROOM_AGE_MS: 24 * 60 * 60 * 1000,
   RECENT_SEAT_MS: 5 * 60 * 1000,
   CHAT_HISTORY: 50,
+  MAX_ROOMS: 200,
+  CREATE_WINDOW_MS: 60 * 60 * 1000,
+  CREATE_MAX: 3,
 };
 
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -73,6 +76,7 @@ export class PartyHub {
     this.rooms = new Map();   // roomId -> room
     this.byCode = new Map();  // code -> roomId
     this.codeTries = new Lim(LIMITS.CODE_ATTEMPT_WINDOW_MS, LIMITS.CODE_ATTEMPT_MAX);
+    this.createLim = new Lim(LIMITS.CREATE_WINDOW_MS, LIMITS.CREATE_MAX);
     this.msgLim = new Map();  // participantId -> { msg, chat }
   }
 
@@ -129,7 +133,12 @@ export class PartyHub {
   async dispatch(ws, raw) {
     const m0 = this.meta(ws);
     if (!m0) { console.error("party: message from a socket without meta"); return; }
-    if (typeof raw !== "string" || raw.length > LIMITS.MAX_MSG_BYTES) { this.send(ws, { t: "error", error: "bad_message" }); return; }
+    // BYTES, not UTF-16 code units: raw.length let ~4x the budget through
+    // (8k emoji ≈ 32KiB of UTF-8 before the gate fired)
+    if (typeof raw !== "string" || new TextEncoder().encode(raw).length > LIMITS.MAX_MSG_BYTES) {
+      this.send(ws, { t: "error", error: "bad_message" });
+      return;
+    }
     const lim = this.limFor(m0.id);
     if (!lim.msg.allow(m0.id, Date.now())) { this.send(ws, { t: "error", error: "rate_limited" }); return; }
 
@@ -155,6 +164,10 @@ export class PartyHub {
       }
       case "create": {
         if (m0.roomId) return this.send(ws, { t: "error", error: "conflict" });
+        // per-IP create budget + a global room cap: unbounded creates let one
+        // attacker fill the hub's memory and evict EVERY legit party
+        if (!this.createLim.allow(m0.ip || m0.id)) return this.send(ws, { t: "error", error: "rate_limited" });
+        if (this.rooms.size >= LIMITS.MAX_ROOMS) return this.send(ws, { t: "error", error: "full" });
         m0.name = cleanName(m.name);
         const room = this.createRoom(m0, m);
         m0.roomId = room.id;
@@ -323,7 +336,13 @@ export class PartyHub {
 
   async webSocketClose(ws) {
     const m = this.meta(ws);
-    if (!m || !m.roomId) return;
+    if (!m) return;
+    if (!m.roomId) {
+      // a socket that never joined still owns a rate-limit entry - drop it
+      // here since no room drop will ever sweep it
+      this.msgLim.delete(m.id);
+      return;
+    }
     const room = this.rooms.get(m.roomId);
     const part = room && room.participants.get(m.id);
     if (!part) return;
@@ -522,6 +541,17 @@ export class PartyHub {
       }
     }
     this.codeTries.sweep(now);
+    this.createLim.sweep(now);
+    // msgLim entries for ids that are no longer anywhere (never joined a room,
+    // or their room was dropped) used to accumulate forever under reconnect
+    // storms - the sweep in dropRoom only ran when a room happened to die.
+    for (const id of [...this.msgLim.keys()]) {
+      let alive = false;
+      for (const room of this.rooms.values()) {
+        if (room.participants.has(id)) { alive = true; break; }
+      }
+      if (!alive) this.msgLim.delete(id);
+    }
     if (this.rooms.size > 0) this.armAlarm();
   }
 }
