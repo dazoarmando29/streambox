@@ -90,16 +90,16 @@ The UI labels the mode honestly at all times (QA lock 133). No cross-origin rest
 
 ## 11. Deployment Instructions
 
-**Server** (any host/VM; Node ≥ 18):
+**LIVE (done):** the party hub runs on the existing Cloudflare Worker `streambox-api` as a **PartyHub Durable Object** at `wss://streambox-api.dazoarmando.workers.dev/party` (free-plan SQLite-backed class, deployed via `npx wrangler deploy` from `backend/`; the native-branch `backend.yml` redeploys it on push when the `CLOUDFLARE_API_TOKEN` secret is set). The website and native app default to this endpoint; verified live with `party-server/test/edge-smoke.js` (create → join → playback sync → chat over real TLS sockets).
+
+**Self-host alternative** (any host/VM, Node ≥ 18):
 ```bash
 cd party-server && npm install && npm start        # PORT=8787 by default
 # restrict origins: PARTY_ALLOWED_ORIGINS="https://dazoarmando29.github.io" npm start
 ```
-Put TLS in front (nginx/Caddy/load balancer) and proxy `wss://<host>/party-ws` → `127.0.0.1:8787/party`. Health check: `GET /healthz`.
+Put TLS in front and point the clients at it — `window.SB_PARTY_WS = "wss://your-host/party"` on the site (or `localStorage.streambox_party_ws`), `-PPARTY_WS=...` for the native app. On `localhost` the clients auto-discover `ws://localhost:8787/party` (zero-config dev).
 
-**Website:** set the endpoint once (top of the PARTY module) — `window.SB_PARTY_WS = "wss://your-host/party-ws"` (or `localStorage.streambox_party_ws`), or serve the site behind the same proxy so the same-origin default works. Then deploy `index.html` as usual (Pages).
-
-**Android:** rebuild `android/` (full + lite) via the existing `android-apk.yml` (QA gate runs first). Invites open in-app through `streambox://party/CODE`; https `?party=` links land in the site as before.
+**Website:** ships via GitHub Pages on push to `main`. **Android:** rebuild `android/` (full + lite) via `android-apk.yml`; invites open in-app through `streambox://party/CODE`.
 
 ## 12. Remaining Limitations
 
