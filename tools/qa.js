@@ -1587,5 +1587,53 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("the footer must show the build number beside dazzo (never floating)");
 }
 
+/* ---------- 141. one-shot resume carriers (no leak into the next episode) ---------- */
+{
+  // resumePick sets BOTH carriers (the two consumer families read different
+  // ones) - every consumer must zero BOTH or the leftover rides into the next
+  // episode's first load (confirmed bug 0.88: Continue started E2 at E1's spot)
+  const a = (html.match(/resumeAt = -1; watchState\.t = 0;/g) || []).length;
+  const b = (html.match(/watchState\.t = 0; resumeAt = -1;/g) || []).length;
+  const rp = html.match(/function resumePick[\s\S]*?\n\}/);
+  if (rp && a >= 3 && b >= 3)
+    ok("resume position is one-shot: every consumer zeroes BOTH carriers, nothing leaks into a later episode");
+  else bad("a resume carrier must be zeroed by EVERY consumer (resumeAt + watchState.t) - the leftover used to start the next episode at the previous episode's position");
+}
+
+/* ---------- 142. sleep stops every mirror, sleep-on-end gates auto-next ---------- */
+{
+  const st = html.match(/function sleepTick\(\)\{[\s\S]*?\n\}/);
+  const eo = html.match(/function applySleepOnEnd[\s\S]*?\n\}/);
+  const gates = (html.match(/if \(sleepOnEnd\) applySleepOnEnd\(\);/g) || []).length;
+  if (st && eo && gates >= 4 && /zenSend\(\{ type: "pause" \}\)/.test(st[0]) && /boltSend\(\{ type: "pause" \}\)/.test(st[0])
+      && /vidrift/.test(st[0]) && /Sleep when video ends/.test(eo[0]))
+    ok("sleep timer pauses the real mirror (VidRift says so honestly) and sleep-on-end stops the binge on every ended path");
+  else bad("sleepTick must dispatch pause per mirror (anipm/zen/bolt - VidRift must SAY it cannot pause) and all four ended handlers must gate maybeUpNext behind applySleepOnEnd()");
+}
+
+/* ---------- 143. episode loaders survive a failed fetch ---------- */
+{
+  const le = html.match(/async function loadEpisodes\([\s\S]*?\n\}/);
+  const lm = html.match(/async function loadModalEpisodes\([\s\S]*?\n\}/);
+  if (le && lm && /catch/.test(le[0]) && /catch/.test(lm[0]) && /Couldn't load episodes|Episodes unavailable/.test(le[0] + lm[0]))
+    ok("loadEpisodes/loadModalEpisodes paint an honest error and never throw - openWatch and openDetail always continue");
+  else bad("loadEpisodes and loadModalEpisodes must catch their fetch failures (they used to strand the player spinner forever / swallow the detail modal)");
+}
+
+/* ---------- 144. no call to a function that does not exist ---------- */
+{
+  if (!/vidriftVolHint/.test(html)) ok("the VidRift volume hint calls a function that exists (volFlash)");
+  else bad("vidriftVolHint() was called but never defined - the desktop Up/Down key crashed the handler (call volFlash)");
+}
+
+/* ---------- 145. party actions survive a slow handshake ---------- */
+{
+  const so = html.match(/function sendOrPark[\s\S]*?\n {2}\}/);
+  const flush = html.match(/ws\.onopen = \(\) => \{[\s\S]*?\};/);
+  if (so && flush && /S\.pending/.test(so[0]) && /S\.pending/.test(flush[0]) && !/setTimeout\(go, 350\)/.test(html) && !/setTimeout\(go, 400\)/.test(html))
+    ok("party create/join/restore park until the socket opens - a slow TV handshake no longer drops the click");
+  else bad("party actions must be parked and flushed on ws.onopen (the blind setTimeout(go, 350) dropped every click on a handshake slower than 350ms)");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);
