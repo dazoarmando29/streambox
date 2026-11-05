@@ -211,6 +211,12 @@ fun StreamBoxApp() {
             com.streambox.nativeapp.party.Party.restoreSession()
         }
     }
+    // Unregister the party hook on teardown (0.88): the static lambda captured
+    // this composition's scope/play() and outlived it across recreation - a
+    // content event in the gap launched on a dead scope and vanished.
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { com.streambox.nativeapp.party.PartyPlayer.open = null }
+    }
     // runtime invites (streambox://party/CODE via onNewIntent) open the room
     // screen in the live session - no second connection ever
     androidx.compose.runtime.LaunchedEffect(AppEnv.partyCode.value) {

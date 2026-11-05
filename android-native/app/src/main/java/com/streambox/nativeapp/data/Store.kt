@@ -345,8 +345,9 @@ object Store {
             while (keys.hasNext() && n < 40) {
                 val k = keys.next()
                 if (k != key) {
-                    next.put(k, root.getJSONObject(k))
-                    n++
+                    // one corrupt row must never abort the whole write (and
+                    // silently drop the user's new pick) - skip it instead
+                    root.optJSONObject(k)?.let { next.put(k, it); n++ }
                 }
             }
             prefs(ctx).edit().putString(K_SUBS_PREF, next.toString()).apply()
@@ -382,8 +383,9 @@ object Store {
             while (keys.hasNext() && n < 60) {
                 val k = keys.next()
                 if (k != key) {
-                    next.put(k, root.getJSONObject(k))
-                    n++
+                    // same resilience as saveSubsPref: a corrupt row is
+                    // skipped, never allowed to abort the write
+                    root.optJSONObject(k)?.let { next.put(k, it); n++ }
                 }
             }
             prefs(ctx).edit().putString(K_SUB_PICK, next.toString()).apply()

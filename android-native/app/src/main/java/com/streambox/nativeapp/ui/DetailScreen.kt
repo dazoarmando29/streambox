@@ -175,21 +175,21 @@ fun DetailScreen(
             val s = async(Dispatchers.IO) {
                 runCatching { Api.similar(title.type, title.id) }.getOrDefault(listOf())
             }
+            // Second wave (cert + trailer/extras) also starts NOW, but its
+            // result merges only AFTER the core write below - as a separate
+            // effect it raced the core write and a slow detail fetch silently
+            // dropped cert/videos (0.88).
+            val cv = async(Dispatchers.IO) {
+                runCatching { Api.cert(title.type, title.id) }.getOrDefault("") to
+                    runCatching { Api.videos(title.type, title.id) }.getOrDefault(listOf())
+            }
             det = d.await()
             cast = c.await()
             crewList = w.await()
             similar = s.await()
+            val pair = cv.await()
+            det = det.copy(cert = pair.first, videos = pair.second)
         }
-    }
-
-    // Second wave: certification + trailer/extras ride in behind the core
-    // (they only feed chips and rails, never blocking the page).
-    LaunchedEffect(title.id, title.type) {
-        val pair = withContext(Dispatchers.IO) {
-            runCatching { Api.cert(title.type, title.id) }.getOrDefault("") to
-                runCatching { Api.videos(title.type, title.id) }.getOrDefault(listOf())
-        }
-        det = det.copy(cert = pair.first, videos = pair.second)
     }
 
     // Remote/gesture Back works everywhere - no hunting for a button on TV.

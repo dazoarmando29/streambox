@@ -1391,10 +1391,10 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
            /"ended" -> \{[\s\S]{0,2200}?\!endedHandled && pastSyncGrace\(\)/.test(psA) &&
            /endedHandled = true/.test(psA) &&
            /"ended" -> \{[\s\S]{0,2200}?val more = nextEpisodeAvailable\(\)/.test(psA) &&
-           /if \(pastSyncGrace\(\)\) goNext\(\)/.test(psA) &&
+           /!endedHandled && pastSyncGrace\(\)\) \{[\s\S]{0,120}?goNext\(\)/.test(psA) &&
            /fun pastSyncGrace\(\): Boolean/.test(psA) &&
            /endedHandled = false/.test(psA)) {
-    ok("auto-next is ours: provider switches re-open through load(), ended is one-per-load (endedHandled + pastSyncGrace) and walks the shared next guards, nextup rides goNext()");
+    ok("auto-next is ours: provider switches re-open through load(), ended/nextup are one-per-load (endedHandled + pastSyncGrace) and walk the shared next guards through goNext()");
   } else {
     bad("auto-next must never ride the embed's own Up Next - adopted switches reload through load(), ended runs once per load (endedHandled + pastSyncGrace) through advanceEpisode/finish, and nextup is grace-guarded through goNext()");
   }
@@ -1900,6 +1900,50 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     ok("in-app updates: a startup offer for a strictly newer build, sha256-verified download straight to the package installer (FileProvider content URI), GitHub release hosts only over TLS, leftovers wiped on boot");
   } else {
     bad("the in-app update flow (0.80) must offer only a genuinely NEWER build (release-notes versionName, byte identity as fallback), verify the downloaded APK against the published sha256 BEFORE the installer opens, contact only the GitHub release hosts over TLS, hand off via FileProvider (never a file URI), throttle the lookups, and delete the APK file on the next boot and before every download");
+  }
+}
+
+/* ---------- 86. finished titles never boot at their credits ---------- */
+{
+  const psF86 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
+  const stF86 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt")) : "";
+  if (!psF86 || !stF86) bad("PlayerScreen/Store missing - the finished-title resume rules cannot be verified");
+  else if (/val resumeAt = run \{/.test(psF86) &&
+           /!sp\.done/.test(psF86) &&
+           /sp\.cur >= sp\.dur \* 0\.95f/.test(psF86) &&
+           /keepDone/.test(psF86) &&
+           /it\.cur >= it\.dur \* 0\.95f/.test(psF86)) {
+    ok("finished titles stay finished: boot resume honors done + the 95% tail, and tail saves preserve the DONE flag (no 99% comebacks in Continue Watching)");
+  } else {
+    bad("resume must exclude done/finished records (the 95% tail guard the Episodes sheet uses) and bookkeeping saves in the tail must PRESERVE a DONE flag - only a real rewatch may downgrade it (0.88)");
+  }
+}
+
+/* ---------- 87. the timeline scrub seeks where the slider stopped ---------- */
+{
+  const psS87 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
+  if (!psS87) bad("PlayerScreen.kt missing - the scrub rules cannot be verified");
+  else if (/onValueChangeFinished = \{ onScrubDone\(\) \}/.test(psS87) &&
+           /val s2 = scrub/.test(psS87) &&
+           !/onScrubDone\(scrub\)/.test(psS87)) {
+    ok("D-pad scrub seeks to the live slider position (the finish callback reads state at invocation, never a stale parameter)");
+  } else {
+    bad("onValueChangeFinished must read the LIVE scrub at invocation (pass () -> Unit, not the stale scrub parameter) - the old call sought one step behind or skipped the seek entirely on TV (0.88)");
+  }
+}
+
+/* ---------- 88. the Episodes sheet browses on its own season ---------- */
+{
+  const psE88 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
+  if (!psE88) bad("PlayerScreen.kt missing - the episode sheet rules cannot be verified");
+  else if (/var sheetSeason by mutableIntStateOf\(season\)/.test(psE88) &&
+           /var sheetEps by mutableStateOf/.test(psE88) &&
+           /sheetSeason = \(sheetSeason - 1\)/.test(psE88) &&
+           /epSeason = sheetSeason/.test(psE88)) {
+    ok("the Episodes sheet browses on its own season + list - a card tap is the only commit into playback (saves never land on the wrong episode)");
+  } else {
+    bad("the Episodes-sheet S-/S+ stepper must move a BROWSE season (sheetSeason/sheetEps), never epSeason - mutating the playing season with no load wrote every save onto the wrong episode (0.88)");
   }
 }
 

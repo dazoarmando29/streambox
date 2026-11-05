@@ -93,8 +93,21 @@ import kotlinx.coroutines.withContext
     instantly while a background revalidate keeps them fresh (build 0.13 -
     refetching five sequential catalogs made the TV feel endless). */
 private object BrowseCache {
-    val rows = HashMap<String, List<Pair<String, List<Title>>>>()
-    val searches = HashMap<String, List<Title>>()
+    val rows = LinkedHashMap<String, List<Pair<String, List<Title>>>>()
+    val searches = LinkedHashMap<String, List<Title>>()
+    // Bounded (0.88): a long TV session used to grow both maps forever - one
+    // entry per section x genre pick and per distinct query string, each
+    // holding full title lists. Evict the oldest past the cap.
+    private const val MAX_ROWS = 6
+    private const val MAX_SEARCHES = 6
+    fun putRows(k: String, v: List<Pair<String, List<Title>>>) {
+        if (rows.size >= MAX_ROWS && !rows.containsKey(k)) rows.remove(rows.keys.firstOrNull())
+        rows[k] = v
+    }
+    fun putSearch(k: String, v: List<Title>) {
+        if (searches.size >= MAX_SEARCHES && !searches.containsKey(k)) searches.remove(searches.keys.firstOrNull())
+        searches[k] = v
+    }
 }
 
 /** The canonical row plan per section - shared by the loader and the
@@ -209,7 +222,7 @@ suspend fun warmFeedCaches(ctx: android.content.Context, paused: () -> Boolean) 
             if (BrowseCache.rows[key] == null) {
                 val rows = fetchRows(s, null, "") { }
                 if (rows.isNotEmpty()) {
-                    BrowseCache.rows[key] = rows
+                    BrowseCache.putRows(key, rows)
                     runCatching { Store.saveFeedCache(ctx, key, rows) }
                 }
             }
@@ -354,7 +367,7 @@ fun BrowseScreen(
                 }
                 results = fresh
                 rows = listOf()
-                BrowseCache.searches[key] = fresh
+                BrowseCache.putSearch(key, fresh)
             } else {
                 // Rows paint as they land - hero first, rest stream in.
                 // Over a cached paint we revalidate silently (no flicker
@@ -363,7 +376,7 @@ fun BrowseScreen(
                     if (hitRows == null && !diskPainted) rows = partial
                 }
                 results = listOf()
-                BrowseCache.rows[key] = rows
+                BrowseCache.putRows(key, rows)
                 withContext(Dispatchers.IO) { Store.saveFeedCache(ctx, key, rows) }
             }
             loadedKey = key
@@ -1216,17 +1229,24 @@ private fun BrowseAllView(big: Boolean, onOpen: (Title) -> Unit) {
         if (!busy && hasMore) {
             busy = true
             val next = page + 1
+            // Capture the QUERY the page belongs to: a filter change mid-flight
+            // resets `results` and the stale page must never be appended to the
+            // new filter's grid (nor move its cursor).
+            val q = Triple(kind, genreSel, yearSel)
             scope.launch {
                 val more = withContext(Dispatchers.IO) {
                     runCatching { Api.browsePage(kind, genreSel, yearSel, next) }
                         .getOrDefault(listOf<Title>() to false)
                 }
-                if (more.first.isNotEmpty()) {
-                    results = results + more.first
-                    page = next
+                if (Triple(kind, genreSel, yearSel) == q) {
+                    if (more.first.isNotEmpty()) {
+                        results = results + more.first
+                        page = next
+                    }
+                    hasMore = more.second
+                    busy = false
                 }
-                hasMore = more.second
-                busy = false
+                // superseded: the filter-reset effect owns `busy` now
             }
         }
     }

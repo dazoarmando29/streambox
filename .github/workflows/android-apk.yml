@@ -8,6 +8,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # serialize publishes: concurrent runs interleaving delete/create/upload
+    # on the shared rolling release can leave it missing or mixed-asset
+    concurrency:
+      group: rolling-release
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:

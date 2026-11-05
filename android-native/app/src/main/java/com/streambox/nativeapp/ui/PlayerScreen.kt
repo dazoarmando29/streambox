@@ -1343,6 +1343,9 @@ private class PlayerMem(
     var resolvedSeason by mutableIntStateOf(-1)
     var pendingLoadAt by mutableFloatStateOf(-1f)
     var lastLoadAtMs by mutableStateOf(0L)
+    // Next-episode button debounce (0.88): a double OK press on the pill used
+    // to fire goNext() twice and land on E+2. One advance per 600ms.
+    var lastAdvanceAtMs by mutableStateOf(0L)
     // Load GENERATION (0.78): bumps on every load() so the post-load
     // re-asserts (mute state, Crisp level, play nudges) re-arm after EVERY
     // reopen - a heal reload used to land silent on TV and stay paused.
@@ -1358,6 +1361,14 @@ private class PlayerMem(
     var stallKick by mutableIntStateOf(0)
     var epsList by mutableStateOf(listOf<Ep>())
     var epsBusy by mutableStateOf(false)
+    // Episodes-sheet BROWSE cursor (0.88): the S-/S+ stepper used to mutate
+    // epSeason (the PLAYING season) with no load - every progress save then
+    // persisted (S2, E5) with S1E5's position and Continue Watching pointed at
+    // the wrong episode. The sheet browses on its own season + list; a card
+    // tap is the only thing that commits epSeason.
+    var sheetSeason by mutableIntStateOf(season)
+    var sheetEps by mutableStateOf(listOf<Ep>())
+    var sheetBusy by mutableStateOf(false)
     var thanksSimilar by mutableStateOf(listOf<Title>())
     var cert by mutableStateOf("")
     var clock by mutableStateOf("")
@@ -1465,8 +1476,12 @@ fun PlayerScreen(
     // fresh; anime rides the same seam (anipm carries start= in its URL).
     val resumeAt = run {
         val sp = Store.progressList(ctx).firstOrNull { it.type == title.type && it.id == title.id }
-        if (sp != null && sp.cur > 5f &&
-            (title.type == "movie" || (sp.season == season && sp.episode == episode))
+        // a finished title must never boot at its credits: the same guard the
+        // Episodes sheet uses (done flag + the 95% tail) - without it Play on a
+        // watched episode opened on the last seconds and froze / auto-advanced
+        if (sp != null && !sp.done && sp.cur > 5f &&
+            (title.type == "movie" || (sp.season == season && sp.episode == episode)) &&
+            !(sp.dur > 0 && sp.cur >= sp.dur * 0.95f)
         ) sp.cur else 0f
     }
 
@@ -1610,6 +1625,16 @@ fun PlayerScreen(
     fun save(c: Float, d: Float, done: Boolean = false) {
         if (pm.showThanks && !done) return
         try {
+            // A DONE record must survive the bookkeeping saves that land in the
+            // tail (Back/onDispose at cur≈dur, a stray timeupdate after the
+            // episode ended) - those used to rewrite it with done=false and the
+            // finished title popped back into Continue Watching at 99%. Only a
+            // real REWATCH (position back below the tail) may downgrade it.
+            val keepDone = !done && d > 0 && c >= d * 0.95f &&
+                Store.progressList(ctx).firstOrNull {
+                    it.type == title.type && it.id == title.id &&
+                        it.season == pm.epSeason && it.episode == pm.epNumber
+                }?.done == true
             Store.saveProgress(
                 ctx,
                 Progress(
@@ -1617,7 +1642,7 @@ fun PlayerScreen(
                     // The ROUTED entry ids (0.77): the record then speaks the
                     // season's own MAL entry, which the drop-gate needs.
                     c, d, System.currentTimeMillis(), pm.routeMal ?: mal, pm.routeAni ?: ani,
-                    pm.contentLang, done,
+                    pm.contentLang, done || keepDone,
                 ),
             )
         } catch (e: Exception) {
@@ -2189,7 +2214,14 @@ fun PlayerScreen(
             return nxt != null && nxt.count > 0 && (nxt.air.isBlank() || nxt.air.take(10) <= todayIso())
         }
         val next = pm.epsList.firstOrNull { it.n == pm.epNumber + 1 }
-        return next == null || next.aired
+        if (next != null) return next.aired
+        // MISSING DATA IS A NO, never a "no limit": the list is prefetched at
+        // load, so at ended time an empty list is a real fetch failure (it used
+        // to read as "nothing in the way" and auto-next walked into an episode
+        // that does not exist / never aired). A loaded list without E(n+1)
+        // means the season - or the anime drop gate - really ends here, and
+        // advanceEpisode's +1 stays unreachable.
+        return false
     }
 
     /** Next episode (0.60): never step past the season's real end (the
@@ -2228,6 +2260,12 @@ fun PlayerScreen(
         provider Up Next - and when nothing playable is left it finishes
         the season instead of dying silently. */
     fun goNext() {
+        // Debounce (0.88): two quick OK presses on Next Episode (loose remotes,
+        // key-repeat) used to double-step. Provider paths still fire freely -
+        // they are already latched per load.
+        val now = System.currentTimeMillis()
+        if (now - pm.lastAdvanceAtMs < 600) return
+        pm.lastAdvanceAtMs = now
         if (!advanceEpisode()) finishSeason()
     }
 
@@ -2282,6 +2320,20 @@ fun PlayerScreen(
                 runCatching { Api.gateAnimeEpisodes(title, pm.epSeason, raw) }.getOrDefault(raw)
             }
             pm.epsBusy = false
+        }
+    }
+
+    // Episodes-sheet BROWSE list (0.88): fetched for the sheet's own season
+    // cursor - it must never touch the PLAYING season's list (next-episode
+    // math reads that) or the save key.
+    LaunchedEffect(pm.sheetSeason, pm.epSeason, title.id) {
+        if (title.type != "movie" && pm.sheetSeason != pm.epSeason) {
+            pm.sheetBusy = true
+            pm.sheetEps = withContext(Dispatchers.IO) {
+                val raw = runCatching { Api.season(title.id, pm.sheetSeason) }.getOrDefault(listOf())
+                runCatching { Api.gateAnimeEpisodes(title, pm.sheetSeason, raw) }.getOrDefault(raw)
+            }
+            pm.sheetBusy = false
         }
     }
 
@@ -2624,6 +2676,11 @@ fun PlayerScreen(
         // must hand focus back to the active layer - never leave zero focus.
         LaunchedEffect(Unit) {
             if (big) runCatching { pm.keySinkFR.requestFocus() }
+        }
+        LaunchedEffect(pm.showEps) {
+            // Opening the sheet re-anchors the browse cursor on the PLAYING
+            // season (a walk away from it is only ever session-local).
+            if (pm.showEps) pm.sheetSeason = pm.epSeason
         }
         LaunchedEffect(pm.showEps, pm.showSubs) {
             if (big && !pm.showEps && !pm.showSubs) {
@@ -3173,7 +3230,14 @@ fun PlayerScreen(
                                         // 0.73: goNext() - nothing left opens
                                         // the Thank You screen, never a dead
                                         // end.
-                                        if (pastSyncGrace()) goNext()
+                                        // Same one-per-load latch as "ended":
+                                        // without it a late nextup from the
+                                        // outgoing page (a deferred load can
+                                        // outlive the 8s grace) double-steps.
+                                        if (!pm.endedHandled && pastSyncGrace()) {
+                                            pm.endedHandled = true
+                                            goNext()
+                                        }
                                     }
                                     else -> {}
                                 }
@@ -3490,7 +3554,11 @@ fun PlayerScreen(
                 marks = pm.skips,
                 sliderFR = pm.sliderFR,
                 onScrub = { pm.scrub = it },
-                onScrubDone = { s2 ->
+                onScrubDone = {
+                    // read the LIVE scrub here: the Slider finishes before the
+                    // recomposition carrying its newest value lands (the stale
+                    // parameter used to seek to n-1 or skip the seek entirely)
+                    val s2 = pm.scrub
                     if (s2 >= 0) {
                         seekTo(s2)
                         pm.scrub = -1f
@@ -3640,6 +3708,13 @@ fun PlayerScreen(
         // the fold and focus escaped to the player behind the sheet).
         val epsLayer: @Composable BoxScope.() -> Unit = {
         if (pm.showEps) {
+            // The sheet browses on its OWN season cursor (0.88): when it walks
+            // away from the playing season the separate browse list serves it -
+            // the playing season's list (next-episode math) and the save key
+            // never move until a card is tapped.
+            val onPlayingSeason = pm.sheetSeason == pm.epSeason
+            val sheetList = if (onPlayingSeason) pm.epsList else pm.sheetEps
+            val sheetBusy = if (onPlayingSeason) pm.epsBusy else pm.sheetBusy
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -3684,8 +3759,8 @@ fun PlayerScreen(
                             )
                             Text(
                                 title.name +
-                                    (if (title.type != "movie") "  \u2022  Season " + pm.epSeason +
-                                        (if (pm.epsList.isNotEmpty()) "  \u2022  " + pm.epsList.size + " Total Episodes" else "") else ""),
+                                    (if (title.type != "movie") "  \u2022  Season " + pm.sheetSeason +
+                                        (if (sheetList.isNotEmpty()) "  \u2022  " + sheetList.size + " Total Episodes" else "") else ""),
                                 color = Dim,
                                 fontFamily = BodyFont,
                                 fontSize = 11.sp,
@@ -3703,16 +3778,16 @@ fun PlayerScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            BarPill("S  -", big) { pm.epSeason = (pm.epSeason - 1).coerceAtLeast(1) }
+                            BarPill("S  -", big) { pm.sheetSeason = (pm.sheetSeason - 1).coerceAtLeast(1) }
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                "Season " + pm.epSeason,
+                                "Season " + pm.sheetSeason,
                                 color = Color.White,
                                 fontWeight = FontWeight.Black,
                                 fontSize = if (big) 17.sp else 15.sp,
                             )
                             Spacer(modifier = Modifier.width(10.dp))
-                            BarPill("S  +", big) { pm.epSeason += 1 }
+                            BarPill("S  +", big) { pm.sheetSeason += 1 }
                             Spacer(modifier = Modifier.weight(1f))
                             Text(
                                 "Auto-play Next",
@@ -3730,19 +3805,19 @@ fun PlayerScreen(
                         // Quick-select (design pack): range chips ("Episodes
                         // 1-10", "11-20"...) drive a 10-card window - the
                         // sheet stays smooth on 1,400-episode seasons.
-                        val total = pm.epsList.size
+                        val total = sheetList.size
                         val rangeSize = 10
-                        var rangeStart by remember(pm.epSeason) { mutableIntStateOf(-1) }
+                        var rangeStart by remember(pm.sheetSeason) { mutableIntStateOf(-1) }
                         val winStart = when {
                             total <= rangeSize -> 0
                             rangeStart >= 0 -> rangeStart.coerceIn(0, (total - 1).coerceAtLeast(0))
                             else -> {
-                                val idx = pm.epsList.indexOfFirst { it.n == pm.epNumber }.let { if (it < 0) 0 else it }
+                                val idx = sheetList.indexOfFirst { it.n == pm.epNumber && onPlayingSeason }.let { if (it < 0) 0 else it }
                                 (idx / rangeSize) * rangeSize
                             }
                         }
-                        val win = if (total <= rangeSize) pm.epsList else {
-                            pm.epsList.subList(winStart, minOf(winStart + rangeSize, total))
+                        val win = if (total <= rangeSize) sheetList else {
+                            sheetList.subList(winStart, minOf(winStart + rangeSize, total))
                         }
                         // Saved progress for THIS title: the one slot the
                         // Store keeps - cards read resume/off it honestly.
@@ -3788,7 +3863,7 @@ fun PlayerScreen(
                             Spacer(modifier = Modifier.weight(1f))
                             Text(
                                 if (total > 0) "Showing " + (win.firstOrNull()?.n ?: 0) + "-" + (win.lastOrNull()?.n ?: 0) + " of " + total
-                                else if (pm.epsBusy) "Loading..." else "No episode data",
+                                else if (sheetBusy) "Loading..." else "No episode data",
                                 color = Dim,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp,
@@ -3802,7 +3877,7 @@ fun PlayerScreen(
                                 .heightIn(max = if (big) 360.dp else 300.dp)
                                 .verticalScroll(rememberScrollState()),
                         ) {
-                            if (pm.epsBusy && pm.epsList.isEmpty()) {
+                            if (sheetBusy && sheetList.isEmpty()) {
                                 CircularProgressIndicator(
                                     color = Accent,
                                     modifier = Modifier.padding(16.dp).size(if (big) 36.dp else 26.dp),
@@ -3813,26 +3888,29 @@ fun PlayerScreen(
                             // starts INSIDE the cards - never on something
                             // below the fold (0.38 focus-escape fix).
                             val cols = if (big) 5 else 2
-                            val entryN = if (win.any { it.n == pm.epNumber }) pm.epNumber
+                            val entryN = if (onPlayingSeason && win.any { it.n == pm.epNumber }) pm.epNumber
                                 else win.firstOrNull()?.n ?: -1
                             win.chunked(cols).forEach { rowEps ->
                                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     rowEps.forEach { ep ->
                                         val resumeEp = savedProg?.takeIf {
-                                            it.season == pm.epSeason && it.episode == ep.n && it.cur > 5f &&
+                                            it.season == pm.sheetSeason && it.episode == ep.n && it.cur > 5f &&
                                                 !(it.dur > 0 && it.cur >= it.dur * 0.95f)
                                         }
                                         QuickEpCard(
                                             ep = ep,
                                             big = big,
-                                            selected = ep.n == pm.epNumber,
-                                            upNext = ep.n == pm.epNumber + 1 && ep.aired,
+                                            selected = onPlayingSeason && ep.n == pm.epNumber,
+                                            upNext = onPlayingSeason && ep.n == pm.epNumber + 1 && ep.aired,
                                             resume = resumeEp,
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .then(if (ep.n == entryN) Modifier.focusRequester(pm.epsFirstFR) else Modifier),
                                         ) {
                                             val at = resumeEp?.cur ?: 0f
+                                            // card tap is the ONLY commit of
+                                            // the browse season into playback
+                                            pm.epSeason = pm.sheetSeason
                                             pm.epNumber = ep.n
                                             pm.showEps = false
                                             save(0f, pm.dur)
@@ -4488,7 +4566,7 @@ private fun BarTimeline(
     marks: IntroDb.Skips,
     sliderFR: FocusRequester,
     onScrub: (Float) -> Unit,
-    onScrubDone: (Float) -> Unit,
+    onScrubDone: () -> Unit,
 ) {
     val legend = remember(marks) {
         fun part(name: String, r: IntroDb.TRange): String {
@@ -4524,7 +4602,7 @@ private fun BarTimeline(
                 Slider(
                     value = if (scrub >= 0) scrub else cur,
                     onValueChange = { onScrub(it) },
-                    onValueChangeFinished = { onScrubDone(scrub) },
+                    onValueChangeFinished = { onScrubDone() },
                     valueRange = 0f..(if (dur > 0) dur else 1f),
                     modifier = Modifier
                         .fillMaxWidth()
