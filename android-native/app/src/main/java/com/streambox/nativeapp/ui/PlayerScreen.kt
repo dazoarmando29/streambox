@@ -1835,6 +1835,7 @@ fun PlayerScreen(
     }
 
     fun sendSeekNow(target: Float) {
+        try { com.streambox.nativeapp.party.Party.onLocalSeek(target) } catch (e: Exception) {}
         if (pm.mirror == "vidcore" || pm.mirror.startsWith("vidsrc")) {
             // VidCore/VidSrc publish events only (no seek command) - their
             // one documented seek is startAt, so the remote's L/R reopens at
@@ -2011,12 +2012,38 @@ fun PlayerScreen(
     fun togglePlay() {
         pokeChrome()
         pm.playing = !pm.playing
+        try { com.streambox.nativeapp.party.Party.onLocalPlayPause(!pm.playing) } catch (e: Exception) {}
         val hp = pm.hlsPlayer
         if (pm.mirror == "hls" && hp != null) {
             if (pm.playing) hp.play() else hp.pause()
             return
         }
         cmd(if (pm.playing) "window.__sb && window.__sb.play()" else "window.__sb && window.__sb.pause()")
+    }
+
+    // Watch Party bridge: while this player is on screen the party engine
+    // drives REAL play/pause/seek through the same command path the remote
+    // uses. Sync honesty: VidCore/VidSrc have no seek command (coordinated),
+    // VidRift has no pause command (partial) - labeled, never faked.
+    androidx.compose.runtime.DisposableEffect(title.id, title.type, season, episode) {
+        com.streambox.nativeapp.party.PartyPlayer.ops = object : com.streambox.nativeapp.party.PartyOps {
+            override fun play() { pm.playing = true; cmd("window.__sb && window.__sb.play()") }
+            override fun pause() { pm.playing = false; cmd("window.__sb && window.__sb.pause()") }
+            override fun seek(seconds: Float) { seekTo(seconds) }
+            override fun position(): Float = pm.cur
+            override fun duration(): Float = pm.dur
+            override fun isPaused(): Boolean = !pm.playing
+            override fun session(): com.streambox.nativeapp.party.PartyContent? =
+                if (title.type == "movie") com.streambox.nativeapp.party.PartyContent("movie", title.id, 1, 1)
+                else com.streambox.nativeapp.party.PartyContent("tv", title.id, pm.epSeason, pm.epNumber)
+            override fun syncCap(): String = when {
+                pm.mirror == "hls" -> "full"
+                pm.mirror == "vidcore" || pm.mirror.startsWith("vidsrc") -> "coordinated"
+                pm.mirror == "vidrift" -> "partial"
+                else -> "full"
+            }
+        }
+        onDispose { com.streambox.nativeapp.party.PartyPlayer.ops = null }
     }
 
     // Anime season routing (0.60): split franchises carry one ENTRY PER

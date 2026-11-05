@@ -19,10 +19,15 @@ android {
         // fresh debug key AND versionCode only moved up, so 'update' errored
         // and older builds could never be reinstalled.)
         versionCode = 50
-        versionName = "0.81"
+        versionName = "0.82"
         // Backend: Cloudflare Worker (catalog proxy + anime mapping).
         // Provider keys live in the Worker as Wrangler secrets - never here.
         buildConfigField("String", "API_BASE", "\"https://streambox-api.dazoarmando.workers.dev\"")
+        // Watch Party transport: set -PPARTY_WS=wss://host/party-ws at build
+        // time; empty disables the feature cleanly (no hosts hardcoded in
+        // Kotlin). The invite base is the real site origin by default.
+        buildConfigField("String", "PARTY_WS", "\"" + (project.findProperty("PARTY_WS") ?: "") + "\"")
+        buildConfigField("String", "PARTY_INVITE_BASE", "\"" + (project.findProperty("PARTY_INVITE_BASE") ?: "https://dazoarmando29.github.io/streambox/") + "\"")
     }
 
     buildFeatures {
@@ -79,6 +84,10 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("io.coil-kt:coil-compose:2.6.0")
+    // WebSocket transport for Watch Party (already on the classpath via
+    // Coil 2.x - declared explicitly because Party.kt uses it directly;
+    // pinned to the same line Coil resolves).
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Direct HLS slot (pre-build for a future authorized source): native
     // hardware-decoded HLS. Pinned to 1.4.1 - the Java-era line matching
     // this toolchain (AGP 8.5.2 / Kotlin 2.0.20 / compileSdk 34); newer

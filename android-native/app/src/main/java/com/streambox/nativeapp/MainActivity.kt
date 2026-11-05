@@ -27,7 +27,33 @@ class MainActivity : ComponentActivity() {
             AppEnv.hlsTest = true
             AppEnv.hlsTestUrl = if (hls == "1" || hls.equals("true", true)) HLS_TEST_URL else hls
         }
+        // Watch Party invite: streambox://party/CODE (custom scheme). The code
+        // rides into StreamBoxApp which opens the room screen.
+        readPartyIntent()
         setContent { StreamBoxApp() }
+    }
+
+    /** singleTask relaunch (invite tapped while the app runs): route the code
+        into the LIVE session - never a second activity/connection. */
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        readPartyIntent()
+    }
+
+    private fun readPartyIntent() {
+        try {
+            var raw: String? = intent?.getStringExtra("party")
+            if (raw.isNullOrBlank()) {
+                val d = intent?.data
+                if (d != null && d.scheme == "streambox" && d.host == "party") raw = d.lastPathSegment
+            }
+            if (!raw.isNullOrBlank()) {
+                val clean = raw.replace(Regex("[^A-Za-z0-9]"), "").take(6)
+                if (clean.isNotEmpty()) AppEnv.partyCode.value = clean
+            }
+        } catch (e: Exception) {
+        }
     }
 
     private fun isTvDevice(): Boolean {
@@ -62,4 +88,7 @@ object AppEnv {
         can be verified before an authorized source exists. */
     var hlsTest: Boolean = false
     var hlsTestUrl: String = ""
+    /** Watch Party invite code from streambox://party/CODE (Compose-observed;
+        consumed once by StreamBoxApp which opens the room screen). */
+    val partyCode = androidx.compose.runtime.mutableStateOf<String?>(null)
 }

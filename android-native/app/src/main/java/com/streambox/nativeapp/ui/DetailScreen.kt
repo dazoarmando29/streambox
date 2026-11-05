@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
@@ -87,6 +88,7 @@ fun DetailScreen(
     onBack: () -> Unit,
     onPlay: (season: Int, episode: Int, mal: Int?, ani: Int?, lang: String?) -> Unit,
     onOpen: (Title) -> Unit,
+    onParty: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val big = AppEnv.isTv
@@ -454,6 +456,9 @@ fun DetailScreen(
                         ) {
                             Store.toggleList(ctx, title)
                             inList = Store.inList(ctx, title.type, title.id)
+                        }
+                        PillButton("Watch Party", big, icon = Icons.Filled.People, modifier = Modifier.weight(1f)) {
+                            onParty()
                         }
                         if (trailer != null) {
                             PillButton("Trailer", big, icon = Icons.Filled.PlayArrow, modifier = Modifier.weight(1f)) {

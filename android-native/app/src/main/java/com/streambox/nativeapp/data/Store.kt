@@ -47,6 +47,7 @@ object Store {
     private const val K_SUB_PICK = "sub_pick"
     private const val K_SUB_STYLE = "sub_style"
     private const val K_AUTO_NEXT = "auto_next_v2"
+    private const val K_PARTY = "party_session_v1"
     private const val K_FEED = "feed_cache"
     private const val K_UPD_CHECK = "upd_checked_at"
 
@@ -253,6 +254,32 @@ object Store {
 
     fun setAutoSkip(ctx: Context, on: Boolean) {
         prefs(ctx).edit().putBoolean(K_AUTO_NEXT, on).apply()
+    }
+
+    /** Watch Party session (rejoin after app restart). App-private prefs only;
+        the invite link itself never carries the password or token. */
+    data class PartySession(val code: String, val token: String, val name: String, val password: String)
+
+    fun party(ctx: Context): PartySession? {
+        return try {
+            val raw = prefs(ctx).getString(K_PARTY, null) ?: return null
+            val o = JSONObject(raw)
+            val s = PartySession(o.optString("code", ""), o.optString("token", ""),
+                o.optString("name", ""), o.optString("password", ""))
+            if (s.code.isBlank()) null else s
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun saveParty(ctx: Context, code: String, token: String, name: String, password: String) {
+        try {
+            val o = JSONObject()
+                .put("code", code).put("token", token)
+                .put("name", name).put("password", password)
+            prefs(ctx).edit().putString(K_PARTY, o.toString()).apply()
+        } catch (e: Exception) {
+        }
     }
 
     fun subStyle(ctx: Context): SubStyle {

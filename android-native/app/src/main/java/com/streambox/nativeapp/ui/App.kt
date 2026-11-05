@@ -103,6 +103,7 @@ enum class Section(val label: String, val icon: ImageVector) {
 sealed class Screen {
     data class Browse(val section: Section) : Screen()
     data class Detail(val title: Title) : Screen()
+    data class Party(val code: String? = null) : Screen()
     data class Player(
         val title: Title,
         val season: Int,
@@ -160,6 +161,57 @@ fun StreamBoxApp() {
 
     fun play(t: Title, season: Int, episode: Int, mal: Int?, ani: Int?, lang: String? = null) {
         screen = Screen.Player(t, season, episode, mal, ani, lang)
+    }
+
+    fun openParty(code: String? = null) {
+        screen = Screen.Party(code)
+    }
+
+    // Watch Party: the room's content events open THIS app's player through
+    // the same canonical play() path (host drives episodes - no double
+    // advance), and a fresh session rejoins by resume token.
+    val partyScope = androidx.compose.runtime.rememberCoroutineScope()
+    val partyCtx = LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        com.streambox.nativeapp.party.Party.init(partyCtx)
+        com.streambox.nativeapp.party.PartyPlayer.open = open@{ c ->
+            partyScope.launch {
+                val title = withContext(Dispatchers.IO) {
+                    try {
+                        val d = com.streambox.nativeapp.api.Api.details(c.type, c.tmdbId)
+                        val ja = c.type != "movie" && d.originalLanguage == "ja"
+                        Title(
+                            id = c.tmdbId,
+                            type = if (ja) "anime" else c.type,
+                            name = d.name.ifBlank { "Watch Party" },
+                            poster = null,
+                            backdrop = null,
+                            year = d.year,
+                            overview = "",
+                            vote = 0.0,
+                            genreIds = if (ja) listOf(16) else listOf(),
+                            lang = d.originalLanguage,
+                        )
+                    } catch (e: Exception) {
+                        Title(
+                            id = c.tmdbId, type = c.type, name = "Watch Party",
+                            poster = null, backdrop = null, year = 0, overview = "", vote = 0.0,
+                        )
+                    }
+                }
+                play(title, c.season, c.episode, null, null)
+            }
+        }
+        if (AppEnv.partyCode.value.isNullOrBlank()) {
+            com.streambox.nativeapp.party.Party.restoreSession()
+        }
+    }
+    // runtime invites (streambox://party/CODE via onNewIntent) open the room
+    // screen in the live session - no second connection ever
+    androidx.compose.runtime.LaunchedEffect(AppEnv.partyCode.value) {
+        val pc = AppEnv.partyCode.value ?: return@LaunchedEffect
+        AppEnv.partyCode.value = null
+        screen = Screen.Party(pc)
     }
 
     // Boot splash + What's New (0.51): a cinematic start over the warm-up,
@@ -278,6 +330,14 @@ fun StreamBoxApp() {
                             onBack = { screen = Screen.Browse(section) },
                             onPlay = { season, episode, mal, ani, lang -> play(s.title, season, episode, mal, ani, lang) },
                             onOpen = { screen = Screen.Detail(it) },
+                            onParty = { openParty(null) },
+                        )
+                    }
+
+                    is Screen.Party -> key(s.code ?: "") {
+                        PartyScreen(
+                            initialCode = s.code,
+                            onBack = { screen = Screen.Browse(section) },
                         )
                     }
 
