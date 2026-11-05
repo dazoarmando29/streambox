@@ -8,6 +8,9 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # both jobs only read the repo - no write scope for GITHUB_TOKEN
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -25,6 +28,8 @@ jobs:
   deploy:
     needs: check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -41,6 +46,7 @@ jobs:
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
             echo "CLOUDFLARE_API_TOKEN secret not configured yet - deploy skipped."
             echo "Add it under repo Settings > Secrets > Variables > Actions to enable."
+            echo "::warning::worker not deployed (CLOUDFLARE_API_TOKEN missing)"
             exit 0
           fi
           npx wrangler@3 deploy

@@ -8,6 +8,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # serialize publishes: parallel runs racing the same rolling release can
+    # interleave edits and leave mixed-asset releases
+    concurrency:
+      group: rolling-native-release
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -43,18 +48,39 @@ jobs:
         run: |
           cp android-native/app/build/outputs/apk/debug/app-debug.apk streambox-native.apk
           VN=$(sed -n 's/.*versionName = "\([0-9.]*\)".*/\1/p' android-native/app/build.gradle.kts | head -n1)
+          if [ -z "$VN" ]; then
+            echo "::error::no versionName parsed from android-native/app/build.gradle.kts"
+            exit 1
+          fi
           # separate channel from the WebView app: latest-native never touches
-          # the rolling 'latest' tag that carries streambox.apk/lite
+          # the rolling 'latest' tag that carries streambox.apk/lite.
+          # create-or-update: NEVER delete first (delete-then-create lost the
+          # whole rolling release once when the create flaked after the delete)
+          # - assets replace in place with --clobber; the tag survives.
+          published=0
           for i in 1 2 3 4 5; do
-            gh release delete latest-native --cleanup-tag -y >/dev/null 2>&1 || true
-            sleep 3
-            if gh release create latest-native --prerelease \
-              --title "StreamBox native app (preview)" \
-              --notes "versionName: $VN. Auto-built from native branch (${{ github.sha }}). Native Compose preview (phone + Android TV), package com.streambox.nativeapp - installs alongside the WebView app. Catalog via the streambox-api Worker; the player screen hosts the provider embeds. Preview build: expect gaps while the native UX grows." \
-              streambox-native.apk; then
-              break
+            if gh release view latest-native >/dev/null 2>&1; then
+              if gh release edit latest-native \
+                --title "StreamBox native app (preview)" \
+                --notes "versionName: $VN. Auto-built from native branch (${{ github.sha }}). Native Compose preview (phone + Android TV), package com.streambox.nativeapp - installs alongside the WebView app. Catalog via the streambox-api Worker; the player screen hosts the provider embeds. Preview build: expect gaps while the native UX grows." && \
+                gh release upload latest-native streambox-native.apk --clobber; then
+                published=1; break
+              fi
+            else
+              if gh release create latest-native --prerelease --target "${{ github.sha }}" \
+                --title "StreamBox native app (preview)" \
+                --notes "versionName: $VN. Auto-built from native branch (${{ github.sha }}). Native Compose preview (phone + Android TV), package com.streambox.nativeapp - installs alongside the WebView app. Catalog via the streambox-api Worker; the player screen hosts the provider embeds. Preview build: expect gaps while the native UX grows." \
+                streambox-native.apk; then
+                published=1; break
+              fi
             fi
             echo "release publish attempt $i failed, retrying..."
             sleep 10
           done
+          # a green job must MEAN the new APK is live (notes claiming this sha
+          # over a stale asset are a lying release)
+          if [ "$published" != "1" ]; then
+            echo "release publish failed after 5 attempts" >&2
+            exit 1
+          fi
           gh release view latest-native --json tagName,publishedAt,url

@@ -13,9 +13,11 @@
 export default {
   async fetch(request, env, ctx) {
     try {
-      return await route(request, env);
+      return await route(request, env, ctx);
     } catch (e) {
-      return json({ error: "worker_error", detail: String((e && e.message) || e) }, 502);
+      // keep the caller's origin on error paths too (a mismatched
+      // access-control-allow-origin made 502s opaque to the dev origin)
+      return json({ error: "worker_error", detail: String((e && e.message) || e) }, 502, request.headers.get("origin") || "");
     }
   }
 };
@@ -51,7 +53,7 @@ function json(body, status, origin) {
   });
 }
 
-async function route(request, env) {
+async function route(request, env, ctx) {
   const origin = request.headers.get("origin") || "";
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders(origin) });
@@ -60,14 +62,14 @@ async function route(request, env) {
 
   const url = new URL(request.url);
   if (url.pathname === "/healthz") return json({ ok: true, name: "streambox-api" }, 200, origin);
-  if (url.pathname === "/api/anime-map") return animeMap(url, env, origin);
+  if (url.pathname === "/api/anime-map") return animeMap(url, env, origin, ctx);
   if (url.pathname === "/api/anime/genres") {
     return json({ data: ANIME_GENRES.map((g) => ({ id: g, name: g })) }, 200, origin);
   }
-  if (url.pathname === "/api/anime/browse") return animeBrowse(url, env, origin);
+  if (url.pathname === "/api/anime/browse") return animeBrowse(url, env, origin, ctx);
   if (url.pathname === "/api/wyz/search") return wyzSearch(url, env, origin);
   if (url.pathname === "/api/bs-subs") return bsSubs(url, env, origin);
-  if (url.pathname.startsWith("/api/tmdb/")) return tmdbProxy(url, env, request, origin);
+  if (url.pathname.startsWith("/api/tmdb/")) return tmdbProxy(url, env, request, origin, ctx);
   return json({ error: "not_found" }, 404, origin);
 }
 
@@ -84,12 +86,15 @@ const ANIME_GENRES = [
   "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller",
 ];
 
-async function animeBrowse(url, env, origin) {
+async function animeBrowse(url, env, origin, ctx) {
   const genre = (url.searchParams.get("genre") || "").trim();
   const top = url.searchParams.get("top") === "1";
+  // the web client paginates on `page` - every page used to return the SAME
+  // first 20 rows (Load More walked in place). Page rides the cache key too.
+  const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1);
   if (!ANIME_GENRES.includes(genre)) return json({ error: "bad_genre" }, 400, origin);
 
-  const key = cacheKey("anime-browse", { genre, top: top ? "1" : "0" });
+  const key = cacheKey("anime-browse", { genre, top: top ? "1" : "0", page: String(page) });
   const cached = await cacheGet(key);
   if (cached) return json({ ...cached, cached: true }, 200, origin);
 
@@ -98,13 +103,18 @@ async function animeBrowse(url, env, origin) {
   // slugs mirror the AniList taxonomy exactly, so the chips never change).
   let media = [];
   let source = "anilist";
+  let hasNext = true;
   try {
-    media = await anilistGenreBrowse(genre, top);
+    const r = await anilistGenreBrowse(genre, top, page);
+    media = r.media;
+    hasNext = r.hasNext;
     if (!media.length) throw new Error("empty");
   } catch (e) {
     source = "kitsu";
     try {
-      media = await kitsuGenreBrowse(genre, top);
+      const r = await kitsuGenreBrowse(genre, top, page);
+      media = r.media;
+      hasNext = r.hasNext;
     } catch (e2) {
       return json(
         {
@@ -145,15 +155,17 @@ async function animeBrowse(url, env, origin) {
     .filter(Boolean)
     .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
 
-  const out = { data: rows, requested: media.length, resolved: rows.length, source };
-  cachePut(key, out, 3600);
+  const out = { data: rows, requested: media.length, resolved: rows.length, source, page, hasNext };
+  cachePut(key, out, 3600, ctx);
   return json(out, 200, origin);
 }
 
 /* AniList GraphQL genre browse (primary carrier). */
-async function anilistGenreBrowse(genre, top) {
-  const query = `query ($g: String, $s: [MediaSort]) {
-    Page(page: 1, perPage: 20) {
+async function anilistGenreBrowse(genre, top, page) {
+  const p = Math.max(1, parseInt(page, 10) || 1);
+  const query = `query ($g: String, $s: [MediaSort], $p: Int) {
+    Page(page: $p, perPage: 20) {
+      pageInfo { hasNextPage }
       media(type: ANIME, genre_in: [$g], sort: $s, isAdult: false) {
         id
         title { romaji english }
@@ -173,21 +185,26 @@ async function anilistGenreBrowse(genre, top) {
       variables: {
         g: genre,
         s: top ? ["SCORE_DESC", "POPULARITY_DESC"] : ["POPULARITY_DESC"],
+        p,
       },
     }),
     signal: AbortSignal.timeout(10000),
   });
   if (!res.ok) throw new Error("anilist_http_" + res.status);
   const data = await res.json();
-  const media = (((data || {}).data || {}).Page || {}).media || [];
-  return media.map((m) => ({
-    name: ((m.title && (m.title.english || m.title.romaji)) || "").trim(),
-    year: (m.startDate && m.startDate.year) || 0,
-    poster: (m.coverImage && (m.coverImage.extraLarge || m.coverImage.large)) || null,
-    backdrop: m.bannerImage || null,
-    overview: stripTags(m.description || ""),
-    vote: m.averageScore ? Math.round(m.averageScore) / 10 : 0,
-  }));
+  const pg = (((data || {}).data || {}).Page || {});
+  const media = pg.media || [];
+  return {
+    media: media.map((m) => ({
+      name: ((m.title && (m.title.english || m.title.romaji)) || "").trim(),
+      year: (m.startDate && m.startDate.year) || 0,
+      poster: (m.coverImage && (m.coverImage.extraLarge || m.coverImage.large)) || null,
+      backdrop: m.bannerImage || null,
+      overview: stripTags(m.description || ""),
+      vote: m.averageScore ? Math.round(m.averageScore) / 10 : 0,
+    })),
+    hasNext: !!(pg.pageInfo && pg.pageInfo.hasNextPage),
+  };
 }
 
 /* Kitsu fallback: genre slugs mirror AniList's taxonomy 1:1 (sci-fi,
@@ -195,14 +212,16 @@ async function anilistGenreBrowse(genre, top) {
    AniList 403s the Workers fetch signature. Kitsu has no nsfw filter
    param (it 400s) - R-rated rows are marked adult and ride the app's
    adult gate instead. */
-async function kitsuGenreBrowse(genre, top) {
+async function kitsuGenreBrowse(genre, top, page) {
   const slug = genre.toLowerCase().replace(/\s+/g, "-");
+  const p = Math.max(1, parseInt(page, 10) || 1);
   const q = new URLSearchParams({
     "filter[genres]": slug,
     // popularityRank is a RANKING POSITION (lower = more popular), so the
     // popular sort is ascending; -averageRating is a plain score.
     sort: top ? "-averageRating" : "popularityRank",
     "page[limit]": "20",
+    "page[offset]": String((p - 1) * 20),
   });
   const res = await fetch("https://kitsu.io/api/edge/anime?" + q.toString(), {
     headers: { accept: "application/vnd.api+json", "user-agent": UA },
@@ -210,22 +229,27 @@ async function kitsuGenreBrowse(genre, top) {
   });
   if (!res.ok) throw new Error("kitsu_http_" + res.status);
   const data = await res.json();
-  return (data.data || [])
-    .filter((x) => x && x.attributes)
-    .map((x) => ({
-      name: String(
-        x.attributes.canonicalTitle ||
-          (x.attributes.titles && (x.attributes.titles.en_jp || x.attributes.titles.en)) ||
-          ""
-      ).trim(),
-      year: (x.attributes.startDate && parseInt(String(x.attributes.startDate).slice(0, 4), 10)) || 0,
-      poster: (x.attributes.posterImage && (x.attributes.posterImage.large || x.attributes.posterImage.medium)) || null,
-      backdrop: (x.attributes.coverImage && (x.attributes.coverImage.large || x.attributes.coverImage.original)) || null,
-      overview: stripTags(x.attributes.synopsis || ""),
-      vote: x.attributes.averageRating ? Math.round(parseFloat(x.attributes.averageRating)) / 10 : 0,
-      adult: String(x.attributes.ageRating || "") === "R",
-    }))
-    .filter((x) => x.name);
+  return {
+    media: (data.data || [])
+      .filter((x) => x && x.attributes)
+      .map((x) => ({
+        name: String(
+          x.attributes.canonicalTitle ||
+            (x.attributes.titles && (x.attributes.titles.en_jp || x.attributes.titles.en)) ||
+            ""
+        ).trim(),
+        year: (x.attributes.startDate && parseInt(String(x.attributes.startDate).slice(0, 4), 10)) || 0,
+        poster: (x.attributes.posterImage && (x.attributes.posterImage.large || x.attributes.posterImage.medium)) || null,
+        backdrop: (x.attributes.coverImage && (x.attributes.coverImage.large || x.attributes.coverImage.original)) || null,
+        overview: stripTags(x.attributes.synopsis || ""),
+        vote: x.attributes.averageRating ? Math.round(parseFloat(x.attributes.averageRating)) / 10 : 0,
+        adult: String(x.attributes.ageRating || "") === "R",
+      }))
+      .filter((x) => x.name),
+    // links.next is Kitsu's own page cursor; a full 20-row page is the
+    // fallback signal when the payload omits links
+    hasNext: !!(data.links && data.links.next) || (data.data || []).length === 20,
+  };
 }
 
 /* Browser-ish headers for AniList: the Workers fetch signature gets 403d
@@ -313,13 +337,17 @@ function cachePut(key, body, ttlSeconds, ctx) {
 }
 
 /* ---------- anime mapping: Jikan -> AniList (server-side) ---------- */
-async function animeMap(url, env, origin) {
+async function animeMap(url, env, origin, ctx) {
   const title = (url.searchParams.get("title") || "").trim();
   const year = parseInt(url.searchParams.get("year") || "", 10) || 0;
+  // tmdb is echoed into the response body - validate it and keep it in the
+  // cache key, or every caller with the same title/year was served the FIRST
+  // requester's tmdb value for 24h (field-level cache poisoning)
   const tmdb = (url.searchParams.get("tmdb") || "").trim();
+  if (!/^\d*$/.test(tmdb)) return json({ error: "bad_tmdb" }, 400, origin);
   if (!title) return json({ error: "title_required" }, 400, origin);
 
-  const key = cacheKey("anime-map", { title: title.toLowerCase(), year: String(year) });
+  const key = cacheKey("anime-map", { title: title.toLowerCase(), year: String(year), tmdb: tmdb || "-" });
   const cached = await cacheGet(key);
   if (cached) return json({ ...cached, cached: true }, 200, origin);
 
@@ -362,7 +390,7 @@ async function animeMap(url, env, origin) {
     year: best.year || null,
     source,
   };
-  cachePut(key, out, 86400);
+  cachePut(key, out, 86400, ctx);
   return json(out, 200, origin);
 }
 
@@ -601,7 +629,7 @@ async function bsSubs(url, env, origin) {
 }
 
 /* ---------- TMDB proxy: key stays in a Wrangler secret ---------- */
-async function tmdbProxy(url, env, request, origin) {
+async function tmdbProxy(url, env, request, origin, ctx) {
   const rel = url.pathname.slice("/api/tmdb/".length);
   if (!/^[\w./-]+$/.test(rel)) return json({ error: "bad_path" }, 400, origin);
   const key = env && env.TMDB_API_KEY;
@@ -614,7 +642,9 @@ async function tmdbProxy(url, env, request, origin) {
   params.delete("api_key");
 
   const cacheable = !params.has("append_to_response");
-  const keyCache = cacheKey("tmdb", { rel, q: params.toString() });
+  // sorted params: ?a=1&b=2 and ?b=2&a=1 are ONE cache entry, not two
+  const sorted = new URLSearchParams([...params.entries()].sort());
+  const keyCache = cacheKey("tmdb", { rel, q: sorted.toString() });
   if (cacheable) {
     const hit = await cacheGet(keyCache);
     if (hit) return json({ ...hit, cached: true }, 200, origin);
@@ -629,7 +659,7 @@ async function tmdbProxy(url, env, request, origin) {
     let parsed = null;
     try { parsed = JSON.parse(body); } catch (e) {}
     if (parsed) {
-      cachePut(keyCache, parsed, 3600);
+      cachePut(keyCache, parsed, 3600, ctx);
       return json(parsed, 200, origin);
     }
   }
