@@ -745,7 +745,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 220; // bump every release alongside version.txt
+  const BUILD_NUM = 221; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -6794,27 +6794,68 @@ async function bsAuto(){
 /* my subtitles: external .srt/.vtt files with position + sync control */
 let subFile = null;
 let subsOn = true;
+// "ours" = OUR overlay (styled, floats with the bar like CineSrc); "theirs" =
+// the mirror's own picked track (rendered in its frame). The A/V sheet is the
+// switchboard - pick either any time (0.92: VidBolt/AniPM behave like CineSrc)
+let subSource = "ours";
+function ourSubsActive(){
+  return !!(subsOn && subFile && subFile.cues && subFile.cues.length && subSource === "ours");
+}
+function applySubSource(){
+  // never double-render: our overlay on => the mirror's own captions stand down
+  try {
+    if (mirror === "vidbolt") {
+      boltMobileOption("subtitles", ourSubsActive() ? "-1" : (window._boltSubsVal != null ? window._boltSubsVal : "-1"));
+    } else if (mirror === "anipm") {
+      if (ourSubsActive()) {
+        window._anipmSubs = false;
+        anipmSend("setSubtitles", { enabled: false });
+      }
+    }
+  } catch(e){}
+}
+function ourSubsPill(subsBox){
+  if (!subFile || !subFile.cues || !subFile.cues.length || !subsBox) return;
+  const on = ourSubsActive();
+  subsBox.appendChild(avPill((on ? "\u{25CF} " : "") + "StreamBox: " + String(subFile.name || "loaded subs").slice(0, 26), on, () => {
+    subSource = "ours";
+    subsOn = true;
+    try { localStorage.setItem("streambox_subs_on", "1"); } catch(e){}
+    applySubSource();
+    paintSubsBtn();
+    paintCaps(true);
+    paintAV();
+  }));
+}
 try { subsOn = localStorage.getItem("streambox_subs_on") !== "0"; } catch(e){}
 function ctlSubsToggle(){
-  // bar CC button: captions on/off. Nothing loaded yet? Open Subs settings instead.
-  // AniPM carries its own sub tracks — toggle those, not our overlay.
+  // bar CC button: OUR captions on/off wherever our overlay runs (CineSrc,
+  // VidBolt and AniPM alike - they float with the bar). Provider tracks are
+  // switched in the A/V sheet ("Audio & Subtitles") any time.
+  if (subFile && subFile.cues && subFile.cues.length) {
+    subsOn = !subsOn;
+    if (subsOn) subSource = "ours";
+    try { localStorage.setItem("streambox_subs_on", subsOn ? "1" : "0"); } catch(e){}
+    try { applySubSource(); } catch(e){}
+    paintSubsBtn();
+    paintCaps(true);
+    return;
+  }
+  // nothing of ours loaded: AniPM's own tracks still toggle from the button
   if (mirror === "anipm") {
     window._anipmSubs = window._anipmSubs === false;
+    subSource = window._anipmSubs === false ? "theirs" : "theirs";
     anipmSend("setSubtitles", { enabled: !!window._anipmSubs });
     paintSubsBtn();
     return;
   }
-  if (!subFile || !subFile.cues || !subFile.cues.length) { openSettings(); setTab("subs"); return; }
-  subsOn = !subsOn;
-  try { localStorage.setItem("streambox_subs_on", subsOn ? "1" : "0"); } catch(e){}
-  paintSubsBtn();
-  paintCaps(true);
+  openSettings(); setTab("subs");
 }
 function paintSubsBtn(){
   const b = document.getElementById("ctlSubs");
   if (!b) return;
-  if (mirror === "anipm") {
-    // AniPM's own tracks (default on) — our overlay file stays out of it
+  if (mirror === "anipm" && !(subFile && subFile.cues && subFile.cues.length)) {
+    // no file of ours: the button drives AniPM's own tracks (default on)
     const on = window._anipmSubs !== false;
     b.dataset.s = on ? "1" : "0";
     b.textContent = on ? "CC \u{2713}" : "CC";
@@ -6905,6 +6946,8 @@ function pruneSubCaches(){
 function setSubs(o, remember = true){
   subFile = o;
   subsOn = true;
+  subSource = "ours"; // our file shows through OUR overlay (floats with the bar)
+  try { applySubSource(); } catch(e){}
   if (remember && o) {
     try { localStorage.setItem(subStorageKey(), JSON.stringify(o)); pruneSubCaches(); }
     catch(e){ subStatus("Loaded, but too big to remember on this device."); }
@@ -7134,7 +7177,7 @@ function paintCaps(force){
   let html = "";
   if (subsOn && subFile && subFile.cues && subFile.cues.length
       && !document.getElementById("watchView").classList.contains("hidden")
-      && (mirror === "cinesrc" || mirror === "vidbolt")) {
+      && (mirror === "cinesrc" || mirror === "vidbolt" || mirror === "anipm")) {
     const t = (pState.cur || 0) + (subFile.offset || 0);
     for (let i = 0; i < subFile.cues.length; i++) {
       const c = subFile.cues[i];
@@ -8679,6 +8722,7 @@ function paintBoltAV(){
       n.textContent = window._koAudioNote;
       box.appendChild(n);
     }
+    if (id === "avSubs") ourSubsPill(box); // our loaded subtitles ride first
     if (!list.length) {
       const p = document.createElement("p");
       p.className = "text-xs text-gray-500";
@@ -8695,10 +8739,15 @@ function paintBoltAV(){
         // optimistic selected mark (their bundle answers picks with no event)
         try { opts.forEach(x => { if (x.option === o.option) x.selected = (x === o); }); } catch(e){}
         window._koAuto = false; // a manual pick stands the K-drama auto down
-        if (o.option === "subtitles" && String(o.value) !== "-1") {
-          // native track on: our overlay would double it — stand it down
-          try { subsOn = false; localStorage.setItem("streambox_subs_on", "0"); } catch(e){}
-          paintSubsBtn(); paintCaps(true);
+        if (o.option === "subtitles") {
+          // their track pick: remember the value + hand the screen to them
+          // (their captions render in their frame; ours would double it)
+          try { window._boltSubsVal = String(o.value); } catch(e){}
+          if (String(o.value) !== "-1") {
+            subSource = "theirs";
+            try { subsOn = false; localStorage.setItem("streambox_subs_on", "0"); } catch(e){}
+            paintSubsBtn(); paintCaps(true);
+          }
         }
         paintAV();
       }));
@@ -8739,10 +8788,12 @@ function paintAV(){
     });
   }
   const subs = document.getElementById("avSubs"); subs.innerHTML = "";
+  ourSubsPill(subs); // our loaded subtitles ride the same switchboard
   const sel = window._anipmSubs;
   const off = sel === false;
   subs.appendChild(avPill((off ? "\u{25CF} " : "") + "Off", off, () => {
-    window._anipmSubs = false; anipmSend("setSubtitles", { enabled: false }); paintAV(); paintSubsBtn();
+    window._anipmSubs = false; subSource = "theirs";
+    anipmSend("setSubtitles", { enabled: false }); paintAV(); paintSubsBtn(); paintCaps(true);
   }));
   const tracks = Array.isArray(T.subTracks) ? T.subTracks : null;
   if (tracks && tracks.length) {
@@ -8753,6 +8804,7 @@ function paintAV(){
       else seen[label] = 1;
       const isOn = !off && (sel === true || sel === label);
       subs.appendChild(avPill((isOn && sel === label ? "\u{25CF} " : "") + label, sel === label, () => {
+        subSource = "theirs"; // their track shows in their frame (no float)
         window._anipmSubs = label;
         const m = { enabled: true };
         if (t && t.language) m.language = t.language;
@@ -8762,7 +8814,8 @@ function paintAV(){
     });
   } else {
     subs.appendChild(avPill((!off ? "\u{25CF} " : "") + "On", !off, () => {
-      window._anipmSubs = true; anipmSend("setSubtitles", { enabled: true }); paintAV(); paintSubsBtn();
+      window._anipmSubs = true; subSource = "theirs";
+      anipmSend("setSubtitles", { enabled: true }); paintAV(); paintSubsBtn(); paintCaps(true);
     }));
   }
   const qual = document.getElementById("avQuality"); qual.innerHTML = "";

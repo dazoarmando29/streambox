@@ -1,6 +1,8 @@
 Watch Party sync rebuilt for the WebView apps too: shared scheduled episode starts, reliable late-join sync, smooth drift correction, and cleaner party doors - plus broader built-in ad protection.
 
 What is new
+- Subtitles now behave like CineSrc on VidBolt and AniPM too: our styled captions float UP when the player bar shows and settle back down when it hides
+- The Audio & Subtitles panel is now the full switchboard: your loaded StreamBox subtitles AND every track VidBolt/AniPM actually provide (their real subtitle + audio lists) - switch between them any time without leaving our player
 - Servers that are down are now detected and avoided: the app probes every streaming server through our own edge service (the browser cannot see a 502 inside a frame) and hops to a healthy mirror immediately with a clear message - no more staring at a dead error page
 - VidBolt picture quality fixed: your quality choice is now actually SENT to the player (it never was - their Auto picked a low rendition while the label said 1080p), the label now shows the quality the player ACTUALLY reports, and the smooth-playback auto-drop is real, visible and undoable
 - Episode changes start TOGETHER on a shared server-clock gate (no more different start times per device, no one left on the previous episode)
