@@ -1335,6 +1335,9 @@ private class PlayerMem(
     val epsFirstFR = FocusRequester()
     val serverFirstFR = FocusRequester()
     var showThanks by mutableStateOf(false)
+    // "ours" = OUR styled captions (float with the bar + pill); a provider
+    // track pick stands ours down so two caption layers never stack (0.92)
+    var subsOwn by mutableStateOf(true)
     var seasonList by mutableStateOf(listOf<SeasonInfo>())
     var seasonEps by mutableIntStateOf(0)
     var routeMal by mutableStateOf(mal)
@@ -1569,6 +1572,7 @@ fun PlayerScreen(
         }
         // Sorted once here so the caption lookup can binary-search (0.72).
         pm.subs = SubFile(name, lang, cues.sortedBy { it.s })
+        pm.subsOwn = true // our file shows through OUR overlay (floats + pill)
         pm.subMsg = "Loaded " + cues.size + " lines."
         // A manual file on a K-drama stands the VidBolt auto-pick down (the
         // clear of the provider captions rides the subs watcher below -
@@ -2477,7 +2481,7 @@ fun PlayerScreen(
                 return@LaunchedEffect
             }
         }
-        if (title.type == "anime" || pm.subs != null) return@LaunchedEffect
+        if (pm.subs != null) return@LaunchedEffect
         val first = fetchSubChain().second.firstOrNull() ?: return@LaunchedEffect
         val text = withContext(Dispatchers.IO) {
             runCatching { Wyz.fetchFile(first.url) }.getOrNull()
@@ -2497,10 +2501,15 @@ fun PlayerScreen(
     // K-drama + a manual file: clear the provider captions so two caption
     // layers never stack. Watches vbSubSel too - a track republish that
     // re-selects English gets cleared again (0.64).
-    LaunchedEffect(pm.subs, pm.contentLang, pm.mirror, pm.vbSubSel) {
+    LaunchedEffect(pm.subs, pm.contentLang, pm.mirror, pm.vbSubSel, pm.anipmSubIdx, pm.subsOwn) {
         if (pm.contentLang == "ko" && pm.subs != null && pm.mirror == "vidbolt" && pm.vbSubSel != "-1") {
             pm.vbSubSel = "-1"
             cmd("window.__sb && window.__sb.vbsub(-1)")
+        }
+        // OUR captions active -> the player's own stand down (no doubles);
+        // the overlay floats with the bar and wears the styled pill
+        if (pm.subs != null && pm.subsOwn && pm.mirror == "anipm" && pm.anipmSubIdx < 0) {
+            cmd("window.__sb && window.__sb.subs(false)")
         }
     }
 
@@ -3452,7 +3461,7 @@ fun PlayerScreen(
         // while the bar is showing (TV bar is taller, so higher there) and
         // sink toward the bottom when it minimizes (Netflix feel).
         val captionLayer: @Composable BoxScope.() -> Unit = {
-        if (capCue != null && !pm.showEps && !pm.showSubs) {
+        if (capCue != null && pm.subsOwn && !pm.showEps && !pm.showSubs) {
             val bottomPad by animateDpAsState(
                 targetValue = if (pm.chromeVisible) (if (big) 156.dp else 112.dp) else (if (big) 38.dp else 30.dp),
                 label = "capBottom",
@@ -4283,6 +4292,7 @@ fun PlayerScreen(
                                     big = big,
                                 ) {
                                     pm.anipmSubIdx = -1
+                                    pm.subsOwn = true // player captions off - ours shows again
                                     cmd("window.__sb && window.__sb.subs(false)")
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
@@ -4295,6 +4305,7 @@ fun PlayerScreen(
                                         big = big,
                                     ) {
                                         pm.anipmSubIdx = i
+                                        pm.subsOwn = false // their track renders in-frame
                                         cmd("window.__sb && window.__sb.subs(true, '" + lbl.replace("'", "") + "')")
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
@@ -4316,6 +4327,7 @@ fun PlayerScreen(
                                 ) {
                                     pm.koManual = true
                                     pm.vbSubSel = "-1"
+                                    pm.subsOwn = true // player captions off - ours shows again
                                     cmd("window.__sb && window.__sb.vbsub(-1)")
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
@@ -4330,6 +4342,7 @@ fun PlayerScreen(
                                     ) {
                                         pm.koManual = true
                                         pm.vbSubSel = value
+                                        pm.subsOwn = false // their track renders in-frame
                                         cmd("window.__sb && window.__sb.vbsub('" + value.replace("'", "") + "')")
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))

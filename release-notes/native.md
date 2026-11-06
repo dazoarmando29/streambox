@@ -7,6 +7,7 @@ What is new
 - Sync diagnostics on the party status pill: live latency and drift so you can see the room is together
 
 Fixes
+- AniPM captions finally look like CineSrc: the subtitle chain serves anime too (it used to skip anime entirely so only the player's own in-frame text showed - no floating, no background); our styled captions now load for anime, float UP when the control bar shows and settle when it hides, and wear the semi-transparent pill; picking one of AniPM's/VidBolt's own tracks switches cleanly (no double captions) and Off hands the screen back to ours
 - The Thank You screen is fully remote-drivable again: the invisible full-screen key sink used to steal focus while the card was up (a screen-sized focusable sits in every direction - the D-pad could never leave it); the sink now stands down while the card shows and the remote walks Replay / Back to Browse / More Like This freely
 - More Like This labels are honest again: rows now type themselves from their own content, so TV shows and movies are no longer stamped ANIME just because you finished an anime
 - The update dialog (and What's New) can no longer trap you: the WHOLE card scrolls within the screen now, so Download & Install and Start Watching are always reachable with the remote (long notes used to push the buttons off a TV screen and leave the remote dead - the reason some TVs stayed on 0.87)
