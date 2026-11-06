@@ -1341,6 +1341,14 @@ private class PlayerMem(
     // "ours" = OUR styled captions (float with the bar + pill); a provider
     // track pick stands ours down so two caption layers never stack (0.92)
     var subsOwn by mutableStateOf(true)
+    // which episode the loaded subtitle file belongs to (0.94: a new episode
+    // must never inherit the previous episode's file)
+    var subsFor by mutableStateOf("")
+    // wall clock of the last timeupdate (bridge thins to ~4Hz; the caption
+    // lookup extrapolates between updates so text never lands late)
+    var curAt by mutableStateOf(0L)
+    // the caption repaint clock (120ms) - on PlayerMem per the 0.76 rule
+    var capTick by mutableStateOf(0L)
     var seasonList by mutableStateOf(listOf<SeasonInfo>())
     var seasonEps by mutableIntStateOf(0)
     var routeMal by mutableStateOf(mal)
@@ -1576,6 +1584,7 @@ fun PlayerScreen(
         // Sorted once here so the caption lookup can binary-search (0.72).
         pm.subs = SubFile(name, lang, cues.sortedBy { it.s })
         pm.subsOwn = true // our file shows through OUR overlay (floats + pill)
+        pm.subsFor = "${pm.epSeason}/${pm.epNumber}"
         pm.subMsg = "Loaded " + cues.size + " lines."
         // A manual file on a K-drama stands the VidBolt auto-pick down (the
         // clear of the provider captions rides the subs watcher below -
@@ -1601,10 +1610,13 @@ fun PlayerScreen(
     // exact player text/timing, our styled pill, floating with the bar -
     // the "use the anipm subtitles" request (0.93).
     fun loadProviderIntoOurs(label: String, url: String) {
+        val forEp = "${pm.epSeason}/${pm.epNumber}"
         scope.launch {
             val text = withContext(Dispatchers.IO) {
                 runCatching { Wyz.fetchFile(url) }.getOrNull()
             }
+            // a newer episode started meanwhile: ITS subs win, never this file
+            if ("${pm.epSeason}/${pm.epNumber}" != forEp) return@launch
             if (text != null) {
                 val cues = Subs.parse(text)
                 if (cues.isNotEmpty()) {
@@ -1902,6 +1914,7 @@ fun PlayerScreen(
     fun seekTo(t: Float) {
         val target = t.coerceAtLeast(0f)
         pm.cur = target
+    pm.curAt = System.currentTimeMillis()
         val hp = pm.hlsPlayer
         if (pm.mirror == "hls" && hp != null) {
             // Native seek - the HLS slot owns its playback clock.
@@ -2490,6 +2503,11 @@ fun PlayerScreen(
     // its embed's own captioning (a Faulconer dub has no business carrying
     // forced English text).
     LaunchedEffect(title.id, pm.epSeason, pm.epNumber) {
+        // a NEW episode must never inherit the previous episode's file (0.94)
+        if (pm.subsFor != "${pm.epSeason}/${pm.epNumber}") {
+            pm.subs = null
+            pm.subsOwn = true
+        }
         // K-dramas ride the provider's own English subtitles (0.64): our
         // chain never auto-loads or restores over them.
         if (pm.contentLang == "ko") return@LaunchedEffect
@@ -2537,9 +2555,17 @@ fun PlayerScreen(
         }
     }
 
-    val capCue = remember(pm.cur, pm.subs, pm.subOffset) {
+    // Captions ride a fine clock (0.94): provider timeupdates are thinned to
+    // ~4Hz (the 0.74 weak-box rule) which made text land a beat late - the
+    // lookup now extrapolates between updates and repaints every 120ms.
+    LaunchedEffect(Unit) {
+        while (true) { pm.capTick = System.currentTimeMillis(); delay(120) }
+    }
+    val capCue = remember(pm.cur, pm.subs, pm.subOffset, pm.capTick) {
         val f = pm.subs ?: return@remember null
-        val t = pm.cur + pm.subOffset
+        val extra = if (pm.playing && pm.curAt > 0L)
+            ((pm.capTick - pm.curAt) / 1000f).coerceIn(0f, 2f) else 0f
+        val t = pm.cur + pm.subOffset + extra
         cueAt(f.cues, t)
     }
 
@@ -2627,7 +2653,7 @@ fun PlayerScreen(
         while (true) {
             val d = p.duration
             if (d > 0) {
-                pm.cur = p.currentPosition / 1000f
+                pm.cur = p.currentPosition / 1000f; pm.curAt = System.currentTimeMillis()
                 pm.dur = d / 1000f
                 val now = System.currentTimeMillis()
                 if (now - pm.lastSave > 5000) {
@@ -3017,7 +3043,7 @@ fun PlayerScreen(
                                         }
                                     }
                                     "timeupdate" -> {
-                                        pm.cur = o.optDouble("currentTime", 0.0).toFloat()
+                                        pm.cur = o.optDouble("currentTime", 0.0).toFloat(); pm.curAt = System.currentTimeMillis()
                                         // PROVIDER-reported position - the
                                         // stall watchdog's pulse (0.74);
                                         // seekTo() writes cur directly and
