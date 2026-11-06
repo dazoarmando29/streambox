@@ -82,6 +82,11 @@ async function route(request, env, ctx) {
   // per home IP made every check fail and the app said "up to date"). One
   // upstream fetch per 10 minutes serves every device behind that colo.
   if (url.pathname === "/api/native-latest") return nativeLatest(env, ctx, origin);
+  // Mirror health: which streaming servers are actually answering right now
+  // (the browser cannot read cross-origin status codes - a 502 page looks
+  // like any other frame - so the client asks here and auto-switches to a
+  // healthy mirror with an honest message). Edge-cached 5 minutes.
+  if (url.pathname === "/api/mirror-health") return mirrorHealth(ctx, origin);
   if (url.pathname === "/api/anime/browse") return animeBrowse(url, env, origin, ctx);
   if (url.pathname === "/api/wyz/search") return wyzSearch(url, env, origin);
   if (url.pathname === "/api/bs-subs") return bsSubs(url, env, origin);
@@ -697,6 +702,59 @@ async function nativeLatest(env, ctx, origin) {
     if (stale) return out(await stale.text(), 200, "stale");
     return json({ error: "upstream_unavailable" }, 503, origin);
   }
+}
+
+/* ---------- mirror health (which servers are alive right now) ---------- */
+const MIRROR_HEALTH_URLS = {
+  cinesrc: "https://cinesrc.st/embed/movie/550",
+  vidlink: "https://vidlink.pro/movie/550",
+  vidfast: "https://vidfast.vc/movie/550?autoPlay=true",
+  vidsrcto: "https://vidsrc.to/embed/movie/550",
+  vsembed: "https://vsembed.su/embed/movie/550",
+  yapgrid: "https://yapgrid.com/embed/movie/550?autoplay=1&lang=en",
+  vidapi: "https://vaplayer.ru/embed/movie/550?autoplay=1&ds_lang=en",
+  vidcore: "https://vidcore.org/embed/movie/550?autoplay=1&lang=en",
+  vidrift: "https://embed.vidrift.net/embed/movie/550?mobileSheets=true",
+  vidbolt: "https://vidbolt.pro/movie/550?autoPlay=true&mobileSheets=true",
+  vidzen: "https://vidzen.fun/movie/550?autoPlay=true",
+  autoembed: "https://autoembed.co/movie/tmdb/550",
+  twoembed: "https://www.2embed.cc/embed/550",
+  anipm: "https://ani.pm/",
+};
+async function mirrorHealth(ctx, origin) {
+  const cacheKey = new Request("https://sb-cache.internal/v2/mirror-health");
+  try {
+    const hit = await caches.default.match(cacheKey);
+    if (hit) return new Response(await hit.text(), {
+      status: 200,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-sb-cache": "hit", ...corsHeaders(origin) },
+    });
+  } catch (e) {}
+  const out = {};
+  await Promise.all(Object.entries(MIRROR_HEALTH_URLS).map(async ([id, u]) => {
+    const t0 = Date.now();
+    try {
+      const res = await fetch(u, {
+        method: "GET",
+        redirect: "follow",
+        headers: { "user-agent": UA, accept: "text/html,*/*" },
+        signal: AbortSignal.timeout(8000),
+      });
+      out[id] = { status: res.status, ok: res.ok, ms: Date.now() - t0 };
+    } catch (e) {
+      out[id] = { status: 0, ok: false, ms: Date.now() - t0 };
+    }
+  }));
+  const body = JSON.stringify({ checked: Date.now(), mirrors: out });
+  if (ctx && ctx.waitUntil) {
+    ctx.waitUntil(caches.default.put(cacheKey, new Response(body, {
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=300" },
+    })));
+  }
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...corsHeaders(origin) },
+  });
 }
 
 /* ---------- TMDB proxy: key stays in a Wrangler secret ---------- */
