@@ -203,7 +203,15 @@ public class MainActivity extends Activity {
                     "adsterra.com", "adsterra.net", "histats.com", "hotjar.com", "facebook.net",
                     "amazon-adsystem.com", "scorecardresearch.com", "outbrain.com", "taboola.com",
                     "trafficjunky.net", "trafficjunky.com", "a-ads.com", "ads-mrg.com", "onclickmax.com",
-                    "adblokkster.com", "bc.vc", "bc-ads.com", "tsyndicate.com", "syndicat-france.com"));
+                    "adblokkster.com", "bc.vc", "bc-ads.com", "tsyndicate.com", "syndicat-france.com",
+                    // 2.16: curated ad-tech / popunder / tracker hosts (pure
+                    // advertising infrastructure - never media delivery)
+                    "adform.net", "smartadserver.com", "rubiconproject.com", "pubmatic.com",
+                    "criteo.com", "criteo.net", "casalemedia.com", "openx.net", "openx.com",
+                    "bidswitch.net", "sharethrough.com", "moatads.com", "doubleverify.com",
+                    "bluekai.com", "demdex.net", "krxd.net", "rlcdn.com", "agkn.com",
+                    "teads.tv", "yieldmo.com", "revcontent.com", "mgid.com", "content-ad.net",
+                    "ad-maven.com", "onclicka.com", "ads.yahoo.com", "adtech.de", "adition.com"));
 
             private static boolean isAdHost(String host) {
                 if (host == null || host.isEmpty()) return false;

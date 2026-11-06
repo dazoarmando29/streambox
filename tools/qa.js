@@ -1579,7 +1579,7 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
     ok("About page exists with an honest update checker (checking / up to date / update available)");
   else bad("an About panel with aboutOpen()/aboutCheckUpdate() is required");
   const nav = html.match(/justify-end">\s*<button onclick="openSearch[\s\S]{0,1600}/);
-  if (nav && /partyOpen\(\)/.test(nav[0]) && /aboutOpen\(\)/.test(nav[0]))
+  if (nav && /partyOpen\(/.test(nav[0]) && /aboutOpen\(\)/.test(nav[0]))
     ok("the header carries Party + About doors OUTSIDE the detail screens");
   else bad("the header must carry partyOpen() and aboutOpen() entries");
   if (/"build " \+ BUILD_NUM/.test(html) && /id="footVer"/.test(html))

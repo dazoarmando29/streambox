@@ -745,7 +745,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 218; // bump every release alongside version.txt
+  const BUILD_NUM = 219; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -786,7 +786,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   <div class="ml-auto flex items-center gap-2 w-full md:w-auto justify-end">
     <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-4 md:w-56 lg:w-64 md:justify-start rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm text-gray-400 flex items-center gap-2"><span class="text-teal-300">&#x1F50D;</span><span>Search...</span></button>
     <button id="adultLockNav" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" aria-label="Adults-only gate" class="shrink-0 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-gray-300">&#x1F512;</button>
-    <button onclick="partyOpen()" title="Join or start a Watch Party" class="shrink-0 h-10 px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x1F4E1;</span>Party</button>
+    <button onclick="partyOpen('join')" title="Join a Watch Party" class="shrink-0 h-10 px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x1F4E1;</span>Party</button>
     <button onclick="aboutOpen()" title="About StreamBox and updates" class="shrink-0 h-10 px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2139;</span>About</button>
     <button id="installBtn" onclick="installPWA()" class="hidden shrink-0 h-10 px-4 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2B07;</span>Install</button>
   </div>
@@ -1129,8 +1129,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <div class="flex flex-wrap gap-2 mt-4">
           <button id="wListBtn" onclick="watchListToggle()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">+ My List</button>
           <button onclick="shareTitle()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">Share</button>
-          <button id="wPartyBtn" onclick="partyOpen()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">Watch Party</button>
-          <button id="wPartyStatus" onclick="partyOpen()" class="hidden px-4 py-2 rounded-full text-sm font-semibold bg-teal-400/15 border border-teal-400/50 text-teal-300"></button>
+          <button id="wPartyBtn" onclick="partyOpen('create')" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">Watch Party</button>
+          <button id="wPartyStatus" onclick="partyOpen('create')" class="hidden px-4 py-2 rounded-full text-sm font-semibold bg-teal-400/15 border border-teal-400/50 text-teal-300"></button>
         </div>
       </div>
       <div id="upNext" class="no-cinema hidden bg-white/5 border border-white/10 rounded-xl p-5 mt-4">
@@ -1170,7 +1170,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <div class="flex flex-wrap gap-3 mt-5 items-center">
         <button id="mWatch" class="h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold shadow-[0_0_35px_-5px_rgba(0,240,181,0.35)] hover:scale-[1.02] active:scale-[0.98] transition-all">&#x25B6; Watch Now</button>
         <button id="mListBtn" onclick="addToList()" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">+ My List</button>
-        <button id="mPartyBtn" onclick="partyOpen()" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">Watch Party</button>
+        <button id="mPartyBtn" onclick="partyOpen('create')" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">Watch Party</button>
       </div>
       <div id="mSeasons" class="mt-6 hidden">
         <div class="flex flex-wrap items-center gap-2">
@@ -1198,7 +1198,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <p class="text-xs text-gray-400 font-bold mb-1.5">YOUR NAME</p>
         <input id="partyName" maxlength="24" placeholder="Who's watching?" class="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-teal-400/60">
       </div>
-      <div class="bg-white/[0.03] border border-white/10 rounded-xl p-4">
+      <div id="partyCreateBox" class="bg-white/[0.03] border border-white/10 rounded-xl p-4">
         <p class="text-sm font-bold mb-2">Start a party</p>
         <input id="partyRoomName" maxlength="40" placeholder="Room name (optional)" class="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-teal-400/60 mb-2">
         <input id="partyRoomPw" type="password" maxlength="64" placeholder="Password (optional)" class="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-teal-400/60 mb-2">
@@ -3624,6 +3624,9 @@ async function openWatch(type, id, s=1, e=1, t=0){
   // normalize the id: a string id splits every strict-equality store
   // (Continue / My List / server memory) into duplicate entries
   if (typeof id === "string" && /^\d+$/.test(id)) id = Number(id);
+  // Watch Party: report the episode/room change the MOMENT navigation
+  // happens (the 5s poll is only a backstop) - host-driven, never echoes
+  try { PARTY.onLocalOpenWatch(type, id, s, e); } catch(e){}
   // stale-load guard: every openWatch supersedes the previous one, and a
   // Back out of the watch view kills any load still in flight
   const owKey = window._owSeq = (window._owSeq || 0) + 1;
@@ -8913,10 +8916,10 @@ const PARTY = (() => {
       // elsewhere (self-hosted party-server works identically)
       return "wss://streambox-api.dazoarmando.workers.dev/party";
     },
-    SYNC_NUDGE: 0.35,     // seconds of drift before a gentle rate nudge
-    SYNC_SEEK: 3.0,       // seconds of drift before a hard seek
+    SYNC_NUDGE: 0.25,     // seconds of drift before a gentle rate nudge
+    SYNC_SEEK: 2.0,       // seconds of drift before a hard seek
     SYNC_INTERVAL: 5000,  // drift check cadence
-    SYNC_MIN_GAP: 3000,   // min ms between corrections (no correction loops)
+    SYNC_MIN_GAP: 4000,   // min ms between corrections (no correction loops)
     HEARTBEAT: 20000,     // clock sync + liveness
     CHAT_MAX: 300,
     QUICK: ["Hello!", "Ready!", "One sec", "LOL", "Brb", "Bye!"],
@@ -8925,7 +8928,7 @@ const PARTY = (() => {
     ws: null, want: true, status: "idle", // idle | connecting | in-room | reconnecting
     room: null, selfId: "", token: "", name: "",
     lastSeq: 0, offset: 0, rtt: 0,
-    reconnects: 0, nextRetry: 0,
+    reconnects: 0, nextRetry: 0, bestRtt: null, lastDrift: 0,
     suppressUntil: 0, lastContentKey: "", lastCorrect: 0,
     chat: [], unread: 0, panelOpen: false,
     hbT: null, driftT: null,
@@ -9042,8 +9045,15 @@ const PARTY = (() => {
         const t1 = Date.now();
         const t0 = m.clientTs || t1;
         const off = (m.serverTs || t1) - (t0 + t1) / 2;
-        S.offset = S.offset === 0 ? off : Math.round(S.offset * 0.7 + off * 0.3);
-        S.rtt = Math.max(0, t1 - t0);
+        // the lowest-RTT samples anchor the clock (asymmetric routes skew a
+        // single stamp); the rest smooth toward it - keeps the expected
+        // position honest so drift correction is not chasing bad math
+        const rtt = Math.max(0, t1 - t0);
+        S.rtt = rtt;
+        if (S.bestRtt == null || rtt <= S.bestRtt + 25) {
+          S.bestRtt = S.bestRtt == null ? rtt : Math.min(rtt, S.bestRtt);
+          S.offset = S.offset === 0 ? off : Math.round(S.offset * 0.6 + off * 0.4);
+        }
         return;
       }
       case "room": {
@@ -9200,12 +9210,18 @@ const PARTY = (() => {
   function detectContentChange(){
     if (!inRoom() || !isHost() || suppressLocalEcho()) return;
     try {
-      const key = `${watchState.type}/${watchState.id}/${watchState.s || 1}/${watchState.e || 1}`;
-      if (key !== S.lastContentKey) {
-        S.lastContentKey = key;
-        send({ t: "content", type: watchState.type, tmdbId: watchState.id, season: watchState.s || 1, episode: watchState.e || 1 });
-      }
+      onLocalOpenWatch(watchState.type, watchState.id, watchState.s || 1, watchState.e || 1);
     } catch(e){}
+  }
+  /* fast path: openWatch() itself reports the change the moment it happens
+     (the 5s poll above is only a backstop) */
+  function onLocalOpenWatch(type, id, sn, en){
+    if (!inRoom() || !isHost() || suppressLocalEcho()) return;
+    const key = `${type}/${id}/${sn || 1}/${en || 1}`;
+    if (key !== S.lastContentKey) {
+      S.lastContentKey = key;
+      send({ t: "content", type, tmdbId: id, season: sn || 1, episode: en || 1 });
+    }
   }
   function contentKeyOf(c){ return c ? `${c.type}/${c.tmdbId}/${c.season}/${c.episode}` : ""; }
 
@@ -9220,10 +9236,65 @@ const PARTY = (() => {
         if (!silent) sysMsg("Now watching: " + (c.type === "tv" ? `S${c.season} E${c.episode}` : "movie"));
       }
     } catch(e){}
+    // land on the room timeline once THIS player is actually ready (joiners
+    // used to open the video and stay at 00:00 until some later event)
+    setTimeout(() => { try { syncToRoom(); } catch(e){} }, 800);
+  }
+
+  let _gateT = 0;
+  function scheduleGate(){
+    const pb = S.room && S.room.playback;
+    if (!pb) return;
+    clearTimeout(_gateT);
+    _gateT = setTimeout(() => { try { syncToRoom(); } catch(e){} }, Math.max(0, (pb.updatedAt || 0) - serverNow()) + 250);
+  }
+
+  /* Bring THIS player onto the room timeline - used right after a join, an
+     episode change and the scheduled-start gate. Waits for the player to be
+     really ready first; never starts late-joiners at 00:00. */
+  function syncToRoom(tries){
+    if (!inRoom()) return;
+    const a = adapter();
+    const pb = S.room.playback;
+    if (a.cap === "coordinated") {
+      if ((tries || 0) < 1) {
+        toast("Party is at " + fmtT(Math.floor(expectedPos())) + " - jump there in this player (or switch to a synced source)");
+      }
+      return;
+    }
+    const ready = (typeof pState !== "undefined") && ((pState.dur || 0) > 0 || (a.pos() || 0) > 0);
+    if (!ready && (tries || 0) < 24) {
+      setTimeout(() => syncToRoom((tries || 0) + 1), 500); // player still loading
+      return;
+    }
+    const gateAt = pb && pb.updatedAt ? pb.updatedAt : 0;
+    if (pb && pb.status === "playing" && gateAt > serverNow()) {
+      // scheduled start: hold until the gate, then everyone plays together
+      try { if (!a.paused() && a.pause) a.pause(); } catch(e){}
+      scheduleGate();
+      return;
+    }
+    S.suppressUntil = Date.now() + 1500;
+    const target = expectedPos();
+    try {
+      if (pb.status === "playing") {
+        if (a.paused() && a.play) a.play();
+        if (a.seek) a.seek(target + 0.25);
+      } else {
+        if (!a.paused() && a.pause) a.pause();
+        if (a.seek && Math.abs(a.pos() - target) > 0.6) a.seek(target);
+      }
+    } catch(e){}
   }
 
   function applyPlayback(action, st){
     const a = adapter();
+    const pb = S.room && S.room.playback;
+    const gateAt = pb && pb.updatedAt ? pb.updatedAt : 0;
+    if (pb && pb.status === "playing" && gateAt > serverNow() + 300) {
+      scheduleGate(); // scheduled start - hold everyone at the gate
+      return;
+    }
     if (a.cap === "coordinated") {
       // honest mode: we cannot drive this player - just tell the user
       if (action === "seek" || action === "play") {
@@ -9236,39 +9307,46 @@ const PARTY = (() => {
     try {
       if (action === "play") {
         if (a.paused() && a.play) a.play();
-        if (Math.abs(a.pos() - target) > CFG.SYNC_SEEK && a.seek) a.seek(target + 0.3);
+        if (Math.abs(a.pos() - target) > 0.6 && a.seek) a.seek(target + 0.25);
       } else if (action === "pause") {
         if (!a.paused() && a.pause) a.pause();
-        if (Math.abs(a.pos() - target) > 1.5 && a.seek) a.seek(target);
+        if (Math.abs(a.pos() - target) > 0.6 && a.seek) a.seek(target);
       } else if (action === "seek") {
-        if (a.seek) a.seek(target + 0.3);
+        if (a.seek) a.seek(target + 0.25);
       }
     } catch(e){}
   }
 
-  /* drift correction: gentle nudge first, hard seek only when far off */
+  /* Drift correction: subtle 4% rate nudges for small drift, one clean seek
+     only for big drift - and NEVER before the scheduled-start gate opens.
+     Seek-only bridges (no rate control) correct rarely and gently instead of
+     seeking every tick (the old "constant seeking" bug). */
   function driftTick(){
     if (!inRoom()) return;
     detectContentChange();
     const a = adapter();
-    if (a.cap !== "full" || !a.seek) return;
+    if (a.cap === "coordinated" || !a.seek) return;
     const pb = S.room.playback;
     if (!pb || pb.status !== "playing") return;
+    const nowS = serverNow();
+    if ((pb.updatedAt || 0) > nowS) return; // scheduled start: hold the gate
     if (typeof pState !== "undefined" && pState.seeking) return;
     const drift = a.pos() - expectedPos();
-    if (Math.abs(drift) < CFG.SYNC_NUDGE) return;
+    S.lastDrift = Math.round(drift * 1000);
+    const mag = Math.abs(drift);
+    if (mag < CFG.SYNC_NUDGE) return;
     const now = Date.now();
     if (now - S.lastCorrect < CFG.SYNC_MIN_GAP) return; // never a correction loop
     S.lastCorrect = now;
     try {
-      if (Math.abs(drift) >= CFG.SYNC_SEEK) {
-        a.seek(expectedPos() + 0.3);
+      if (mag >= CFG.SYNC_SEEK) {
+        a.seek(expectedPos() + 0.25); // big drift: one clean seek
       } else if (a.rate) {
-        // gentle nudge then restore (0.92x / 1.08x for at most 6s)
-        a.rate(drift > 0 ? 0.92 : 1.08);
-        setTimeout(() => { try { const a2 = adapter(); if (a2.rate) a2.rate(1); } catch(e){} }, Math.min(6000, Math.abs(drift) / 0.08 * 1000));
-      } else {
-        a.seek(expectedPos() + 0.3); // no rate control: seek is the only tool
+        // subtle nudge in the right direction, then restore the rate
+        a.rate(drift > 0 ? 0.96 : 1.04);
+        setTimeout(() => { try { const a2 = adapter(); if (a2.rate) a2.rate(1); } catch(e){} }, Math.min(8000, Math.round(mag / 0.04 * 1000)));
+      } else if (mag > 1.2) {
+        a.seek(expectedPos() + 0.25); // no rate control: correct gently, rarely
       }
     } catch(e){}
   }
@@ -9328,7 +9406,9 @@ const PARTY = (() => {
       const pill = el("partySyncPill");
       const a = adapter();
       const capTxt = { full: "FULL SYNC", partial: "PARTIAL SYNC", coordinated: "COORDINATED START" }[a.cap] || "";
-      pill.textContent = inRoom() ? capTxt : (S.status === "connecting" || S.status === "reconnecting" ? "CONNECTING" : "");
+      pill.textContent = inRoom()
+        ? capTxt + (S.rtt ? " \u{00B7} " + S.rtt + "ms" : "") + (S.lastDrift ? " \u{00B7} " + (S.lastDrift >= 0 ? "+" : "") + S.lastDrift + "ms" : "")
+        : (S.status === "connecting" || S.status === "reconnecting" ? "CONNECTING" : "");
       const wps = el("wPartyStatus");
       if (wps) {
         if (inRoom()) {
@@ -9514,6 +9594,26 @@ const PARTY = (() => {
         showJoinPw(false);
       }
     },
+    /* join-only from the home/header door; create lives in the player and
+       attaches the current movie/episode to the new room automatically */
+    openMode(mode){
+      const box = el("partyCreateBox");
+      let isPlayer = false;
+      try { isPlayer = !document.getElementById("watchView").classList.contains("hidden"); } catch(e){}
+      const m = mode || (isPlayer ? "create" : "join");
+      if (box) box.classList.toggle("hidden", m !== "create");
+      if (m === "create") {
+        const rn = el("partyRoomName");
+        if (rn && !rn.value) {
+          try {
+            rn.value = (typeof watchState !== "undefined" && watchState.id)
+              ? titleOf(currentItem || {}) + (watchState.type === "tv" ? ` S${watchState.s}E${watchState.e}` : "")
+              : "";
+          } catch(e){}
+        }
+      }
+      open();
+    },
     close: closePanel,
     create, join, leave, endRoom,
     sendChat,
@@ -9587,7 +9687,7 @@ async function aboutCheckUpdate(){
     if (b) b.disabled = false;
   }
 }
-function partyOpen(){ try { PARTY.open(new URLSearchParams(location.search).get("party")); } catch(e){} }
+function partyOpen(mode){ try { PARTY.openMode(mode); } catch(e){} }
 function partyClose(){ PARTY.close(); }
 function partyCreate(){ PARTY.create(); }
 function partyJoinCode(){ PARTY.join(); }

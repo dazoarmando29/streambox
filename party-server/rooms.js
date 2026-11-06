@@ -10,6 +10,7 @@ const {
   cleanText, cleanName, expectedPosition,
 } = require("./protocol");
 
+const START_DELAY_MS = 8000; // episode changes start together on the server clock
 let idCounter = 0;
 function makeId(prefix) {
   idCounter += 1;
@@ -246,9 +247,12 @@ class RoomManager {
     if (room.hostId !== participantId) return { error: "unauthorized" }; // episode change is host-only
     const now = Date.now();
     room.content = { type: msg.type, tmdbId: msg.tmdbId, season: msg.season, episode: msg.episode };
-    // new playback session: previous events are stale from here on
+    // new playback session: previous events are stale from here on.
+    // Scheduled start: everyone begins this episode at startAt on the SERVER
+    // clock (updatedAt lands in the future; expectedPosition clamps to 0
+    // until then) - no more different start times per device.
     room.playback = {
-      status: "loading", position: 0, rate: 1, updatedAt: now,
+      status: "playing", position: 0, rate: 1, updatedAt: now + START_DELAY_MS,
       sessionVersion: room.playback.sessionVersion + 1,
       seq: room.playback.seq + 1,
     };
@@ -434,7 +438,8 @@ class RoomManager {
       status: room.playback.status,
       position: expectedPosition(room.playback, now),
       rate: room.playback.rate,
-      updatedAt: now,
+      // future stamps are the scheduled-start gate and must survive
+      updatedAt: room.playback.updatedAt > now ? room.playback.updatedAt : now,
       sessionVersion: room.playback.sessionVersion,
     };
   }

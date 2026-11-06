@@ -483,6 +483,24 @@ test("origin allowlist rejects foreign origins at upgrade", async (t) => {
   assert.ok(room.room.code, "allowed/origin-less clients still connect");
 });
 
+test("episode changes schedule a shared start on the server clock", async (t) => {
+  const { url } = await startServer(t);
+  const a = await connect(url);
+  a.send({ t: "create", name: "Ana" });
+  const room = (await a.waitType("room")).room;
+  a.drain();
+  a.send({ t: "content", type: "tv", tmdbId: 99, season: 1, episode: 2 });
+  const ev = await a.waitType("content");
+  // the gate lands in the future and everyone is pinned at 00:00 until then
+  assert.ok(ev.state.updatedAt > Date.now() - 500, "scheduled start is in the future");
+  assert.strictEqual(ev.state.position, 0, "no one runs ahead before the gate");
+  // the room state seen by a late joiner carries the same future gate
+  a.send({ t: "resync" });
+  const st = await a.waitType("room_state");
+  assert.strictEqual(st.room.playback.updatedAt, ev.state.updatedAt, "the gate survives state snapshots");
+  assert.strictEqual(st.room.playback.status, "playing");
+});
+
 test("simulated multi-device party: 3 clients converge on one state", async (t) => {
   const { url } = await startServer(t);
   const host = await connect(url);
