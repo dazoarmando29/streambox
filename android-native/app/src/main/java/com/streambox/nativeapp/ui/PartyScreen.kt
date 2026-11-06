@@ -60,7 +60,7 @@ private fun Panel(modifier: Modifier = Modifier, content: @Composable androidx.c
 }
 
 @Composable
-fun PartyScreen(initialCode: String?, onBack: () -> Unit) {
+fun PartyScreen(initialCode: String?, joinOnly: Boolean = false, onBack: () -> Unit) {
     val big = AppEnv.isTv
     val room by Party.room
     val status by Party.status
@@ -153,6 +153,7 @@ fun PartyScreen(initialCode: String?, onBack: () -> Unit) {
 @Composable
 private fun Lobby(
     big: Boolean,
+    showCreate: Boolean = true,
     name: String, onName: (String) -> Unit,
     roomName: String, onRoomName: (String) -> Unit,
     pw: String, onPw: (String) -> Unit,
@@ -170,7 +171,7 @@ private fun Lobby(
         item {
             Field(big, "YOUR NAME", name, onName, "Who's watching?")
         }
-        item {
+        if (showCreate) item {
             Panel(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(if (big) 22.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Start a party", color = Soft, fontWeight = FontWeight.Bold, fontSize = if (big) 19.sp else 15.sp)

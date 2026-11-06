@@ -73,6 +73,8 @@ interface PartyOps {
     fun session(): PartyContent?
     /** Honest sync class for the ACTIVE mirror: "full" | "partial" | "coordinated". */
     fun syncCap(): String = "full"
+    /** Subtle drift nudges where the bridge supports playback rate. */
+    fun rate(r: Float) {}
 }
 
 object PartyPlayer {
@@ -82,10 +84,10 @@ object PartyPlayer {
 
 object Party {
     // ---- tunables (mirror the website CFG) ----
-    private const val SYNC_NUDGE = 0.35f
-    private const val SYNC_SEEK = 3.0f
-    private const val SYNC_INTERVAL = 5000L
-    private const val SYNC_MIN_GAP = 3000L
+    private const val SYNC_NUDGE = 0.25f
+    private const val SYNC_SEEK = 2.0f
+    private const val SYNC_INTERVAL = 2000L
+    private const val SYNC_MIN_GAP = 4000L
     private const val HEARTBEAT = 20000L
     private const val CHAT_MAX = 300
 
@@ -329,6 +331,9 @@ object Party {
     fun suppressAutoAdvance(): Boolean = room.value != null && status.value == "in-room" && room.value?.isHost != true
 
     // ---------- sync math (mirrors party-server protocol.js) ----------
+    /** Room clock: local time corrected by the heartbeat offset estimate. */
+    fun serverNow(): Long = System.currentTimeMillis() + offsetMs
+
     fun expectedPos(nowMs: Long = System.currentTimeMillis()): Float {
         val r = room.value ?: return 0f
         val p = r.position
@@ -343,17 +348,26 @@ object Party {
         val ops = PartyPlayer.ops ?: return
         val r = room.value ?: return
         if (r.status != "playing") return
+        val nowS = serverNow()
+        if (r.updatedAt > nowS) return // scheduled start: hold the gate
         val drift = ops.position() - expectedPos()
-        if (abs(drift) < SYNC_NUDGE) return
+        val mag = abs(drift)
+        if (mag < SYNC_NUDGE) return
         val now = System.currentTimeMillis()
         if (now - lastCorrect < SYNC_MIN_GAP) return // never a correction loop
         lastCorrect = now
         suppressUntil = now + 1500
         try {
-            if (abs(drift) >= SYNC_SEEK) ops.seek(expectedPos() + 0.3f)
-            else ops.seek(expectedPos() + 0.3f) // gentle rate nudges need a
-            // provider rate API only CineSrc-style bridges expose; on the
-            // native shell a light seek is the reliable correction
+            if (mag >= SYNC_SEEK) {
+                ops.seek(expectedPos() + 0.25f) // big drift: one clean seek
+            } else {
+                // subtle 4% nudge in the right direction - the old code
+                // hard-SEEKED both branches and the player stuttered on
+                // every drift over 0.35s (the reported constant seeking)
+                ops.rate(if (drift > 0) 0.96f else 1.04f)
+                main.postDelayed({ try { PartyPlayer.ops?.rate(1f) } catch (e: Exception) {} },
+                    min(8000L, (mag / 0.04f * 1000).toLong()))
+            }
         } catch (e: Exception) {}
     }
 
@@ -381,7 +395,12 @@ object Party {
                     if (m.has("token")) token = m.optString("token")
                     saveSession()
                     val c = rm.content
-                    if (c != null) openContent(c)
+                    if (c != null) {
+                        openContent(c)
+                    } else if (rm.isHost) {
+                        // a room created around the player carries its content
+                        detectContentChange()
+                    }
                 }
             }
             "room_state" -> {
@@ -515,19 +534,61 @@ object Party {
         )
     }
 
+    private var gateRunnable: Runnable? = null
+    private fun scheduleGate() {
+        val pb = room.value ?: return
+        val wait = max(0L, pb.updatedAt - serverNow()) + 250L
+        gateRunnable?.let { main.removeCallbacks(it) }
+        val r = Runnable { try { syncToRoom(0) } catch (e: Exception) {} }
+        gateRunnable = r
+        main.postDelayed(r, wait)
+    }
+
+    /** Bring THIS player onto the room timeline (join, episode change, gate).
+        Waits for real player readiness; never starts late-joiners at 00:00. */
+    private fun syncToRoom(tries: Int) {
+        if (room.value == null) return
+        val ops = PartyPlayer.ops ?: run {
+            if (tries < 24) main.postDelayed({ syncToRoom(tries + 1) }, 500) // player still opening
+            return
+        }
+        val r = room.value ?: return
+        if (r.status == "playing" && r.updatedAt > serverNow()) {
+            try { if (!ops.isPaused()) ops.pause() } catch (e: Exception) {}
+            scheduleGate()
+            return
+        }
+        suppressUntil = System.currentTimeMillis() + 1500
+        val target = expectedPos()
+        try {
+            if (r.status == "playing") {
+                if (ops.isPaused()) ops.play()
+                ops.seek(target + 0.25f)
+            } else {
+                if (!ops.isPaused()) ops.pause()
+                if (abs(ops.position() - target) > 0.6f) ops.seek(target)
+            }
+        } catch (e: Exception) {}
+    }
+
     private fun applyPlayback(action: String) {
         val ops = PartyPlayer.ops ?: return
+        val pb = room.value ?: return
+        if (pb.status == "playing" && pb.updatedAt > serverNow() + 300) {
+            scheduleGate() // scheduled start - hold everyone at the gate
+            return
+        }
         suppressUntil = System.currentTimeMillis() + 1500
         try {
-            val target = expectedPos() + 0.3f
+            val target = expectedPos() + 0.25f
             when (action) {
                 "play" -> {
                     if (ops.isPaused()) ops.play()
-                    if (abs(ops.position() - expectedPos()) > SYNC_SEEK) ops.seek(target)
+                    if (abs(ops.position() - expectedPos()) > 0.6f) ops.seek(target)
                 }
                 "pause" -> {
                     if (!ops.isPaused()) ops.pause()
-                    if (abs(ops.position() - expectedPos()) > 1.5f) ops.seek(expectedPos())
+                    if (abs(ops.position() - expectedPos()) > 0.6f) ops.seek(expectedPos())
                 }
                 "seek" -> ops.seek(target)
             }
@@ -538,6 +599,9 @@ object Party {
         lastContentKey = c.key
         suppressUntil = System.currentTimeMillis() + 4000
         try { main.post { PartyPlayer.open?.invoke(c) } } catch (e: Exception) {}
+        // joiners used to open the video and sit at 00:00 - sync to the room
+        // timeline the moment THIS player reports ready
+        main.postDelayed({ try { syncToRoom(0) } catch (e: Exception) {} }, 800)
     }
 
     // ---------- session persistence (rejoin after app restart) ----------

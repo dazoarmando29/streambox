@@ -108,7 +108,7 @@ enum class Section(val label: String, val icon: ImageVector) {
 sealed class Screen {
     data class Browse(val section: Section) : Screen()
     data class Detail(val title: Title) : Screen()
-    data class Party(val code: String? = null) : Screen()
+    data class Party(val code: String? = null, val joinOnly: Boolean = false) : Screen()
     data class Player(
         val title: Title,
         val season: Int,
@@ -168,8 +168,8 @@ fun StreamBoxApp() {
         screen = Screen.Player(t, season, episode, mal, ani, lang)
     }
 
-    fun openParty(code: String? = null) {
-        screen = Screen.Party(code)
+    fun openParty(code: String? = null, joinOnly: Boolean = false) {
+        screen = Screen.Party(code, joinOnly)
     }
 
     // Watch Party: the room's content events open THIS app's player through
@@ -363,7 +363,7 @@ fun StreamBoxApp() {
                             searchMode = searchMode,
                             searchInput = searchInput,
                             searchSubmitted = searchSubmitted,
-                            onParty = { openParty(null) },
+                            onParty = { openParty(null, true) }, // home door = JOIN only
                             onAbout = { aboutOpen = true },
                             onSearchToggle = {
                                 searchMode = !searchMode
@@ -393,13 +393,14 @@ fun StreamBoxApp() {
                             onBack = { screen = Screen.Browse(section) },
                             onPlay = { season, episode, mal, ani, lang -> play(s.title, season, episode, mal, ani, lang) },
                             onOpen = { screen = Screen.Detail(it) },
-                            onParty = { openParty(null) },
+                            onParty = { openParty(null, false) }, // detail door = CREATE for this title
                         )
                     }
 
                     is Screen.Party -> key(s.code ?: "") {
                         PartyScreen(
                             initialCode = s.code,
+                            joinOnly = s.joinOnly,
                             onBack = { screen = Screen.Browse(section) },
                         )
                     }

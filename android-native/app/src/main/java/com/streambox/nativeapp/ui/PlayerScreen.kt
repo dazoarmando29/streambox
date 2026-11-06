@@ -2055,6 +2055,7 @@ fun PlayerScreen(
             override fun play() { pm.playing = true; cmd("window.__sb && window.__sb.play()") }
             override fun pause() { pm.playing = false; cmd("window.__sb && window.__sb.pause()") }
             override fun seek(seconds: Float) { seekTo(seconds) }
+            override fun rate(r: Float) { cmd("window.__sb && window.__sb.rate(" + r + ")") }
             override fun position(): Float = pm.cur
             override fun duration(): Float = pm.dur
             override fun isPaused(): Boolean = !pm.playing

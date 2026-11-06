@@ -33,6 +33,7 @@ const LIMITS = {
   CREATE_MAX: 3,
 };
 
+const START_DELAY_MS = 8000; // episode changes start together on the server clock
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/;
 
@@ -256,7 +257,10 @@ export class PartyHub {
         if (!Number.isFinite(id) || id <= 0) return this.send(ws, { t: "error", error: "bad_message" });
         const now = Date.now();
         room.content = { type, tmdbId: id, season: Math.max(1, parseInt(m.season, 10) || 1), episode: Math.max(1, parseInt(m.episode, 10) || 1) };
-        room.playback = { status: "loading", position: 0, rate: 1, updatedAt: now, sessionVersion: room.playback.sessionVersion + 1, seq: room.playback.seq + 1 };
+        // Scheduled start: everyone begins at startAt on the SERVER clock
+        // (updatedAt lands in the future; expectedPosition clamps to 0 until
+        // then) - no more different start times per device.
+        room.playback = { status: "playing", position: 0, rate: 1, updatedAt: now + START_DELAY_MS, sessionVersion: room.playback.sessionVersion + 1, seq: room.playback.seq + 1 };
         this.broadcast(m0.roomId, [{
           t: "content", seq: room.playback.seq, sessionVersion: room.playback.sessionVersion,
           actor: (room.participants.get(m0.id) || {}).name || "", content: room.content, state: this.pbState(room, now),
@@ -471,7 +475,8 @@ export class PartyHub {
       status: room.playback.status,
       position: expectedPosition(room.playback, now),
       rate: room.playback.rate,
-      updatedAt: now,
+      // future stamps are the scheduled-start gate and must survive
+      updatedAt: room.playback.updatedAt > now ? room.playback.updatedAt : now,
       sessionVersion: room.playback.sessionVersion,
     };
   }
