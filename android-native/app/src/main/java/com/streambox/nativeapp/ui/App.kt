@@ -765,7 +765,11 @@ private fun WhatsNewDialog(version: String, bullets: List<String>, onDone: () ->
             modifier = Modifier
                 .widthIn(max = if (big) 640.dp else 420.dp)
                 .background(Card, RoundedCornerShape(24.dp))
-                .padding(if (big) 28.dp else 20.dp),
+                .padding(if (big) 28.dp else 20.dp)
+                // 0.90: the whole card scrolls within the screen - the
+                // Start Watching button can never end up unreachable
+                .heightIn(max = if (big) 460.dp else 620.dp)
+                .verticalScroll(rememberScrollState()),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -973,7 +977,13 @@ private fun UpdateDialog(
                     .height(4.dp)
                     .background(Accent, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)),
             )
-            Column(modifier = Modifier.padding(if (big) 28.dp else 20.dp)) {
+            Column(modifier = Modifier
+                .padding(if (big) 28.dp else 20.dp)
+                // everything (including the buttons) scrolls as one block
+                // within a screen-safe height - the remote can always reach
+                // Download & Install and the scroll follows focus
+                .heightIn(max = if (big) 460.dp else 620.dp)
+                .verticalScroll(rememberScrollState())) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
@@ -1017,11 +1027,7 @@ private fun UpdateDialog(
                     )
                 }
                 Spacer(modifier = Modifier.height(14.dp))
-                Column(
-                    modifier = Modifier
-                        .heightIn(max = if (big) 380.dp else 280.dp)
-                        .verticalScroll(rememberScrollState()),
-                ) {
+                Column {
                     if (notes.intro.isNotBlank()) {
                         Text(
                             notes.intro,

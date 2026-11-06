@@ -7,6 +7,7 @@ What is new
 - Sync diagnostics on the party status pill: live latency and drift so you can see the room is together
 
 Fixes
+- The update dialog (and What's New) can no longer trap you: the WHOLE card scrolls within the screen now, so Download & Install and Start Watching are always reachable with the remote (long notes used to push the buttons off a TV screen and leave the remote dead - the reason some TVs stayed on 0.87)
 - Drift no longer causes constant seeking: small differences are corrected with subtle 4% speed nudges, and only real drift over 2 seconds seeks (the old code seeked for every 0.35s wobble and stuttered)
 - Clock estimates use the cleanest network samples (lowest-latency heartbeats anchor the room clock) so correction chases the true timeline
 - Pause/resume/seek land tighter on every participant (corrections trigger at 0.6s instead of 3s) and commands stay ordered through the room's sequence numbers
