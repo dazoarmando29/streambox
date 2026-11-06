@@ -2670,7 +2670,10 @@ fun PlayerScreen(
             Modifier
                 .matchParentSize()
                 .focusRequester(pm.keySinkFR)
-                .focusable(),
+                // disabled while the Thank You card owns the surface: a
+                // screen-sized focusable sits in EVERY direction and the
+                // remote could never leave it (0.91 bug)
+                .focusable(enabled = !pm.showThanks),
         )
 
         // TV: keys must work from the very first press, and closing a panel
@@ -2683,8 +2686,10 @@ fun PlayerScreen(
             // season (a walk away from it is only ever session-local).
             if (pm.showEps) pm.sheetSeason = pm.epSeason
         }
-        LaunchedEffect(pm.showEps, pm.showSubs) {
-            if (big && !pm.showEps && !pm.showSubs) {
+        LaunchedEffect(pm.showEps, pm.showSubs, pm.showThanks) {
+            // never steal focus INTO the sink while the Thank You card is up,
+            // and restore the layer anchor the moment it closes
+            if (big && !pm.showEps && !pm.showSubs && !pm.showThanks) {
                 runCatching {
                     when (pm.layer) {
                         LAYER_SKIP -> pm.skipFR.requestFocus()

@@ -757,7 +757,10 @@ object Api {
         val kind = if (type == "movie") "movie" else "tv"
         val arr = get("/api/tmdb/3/" + kind + "/" + id + "/similar").optJSONArray("results")
             ?: return listOf()
-        return titlesFrom(arr, if (type == "movie") "movie" else if (type == "anime") "anime" else null)
+        // rows type THEMSELVES from their own content (0.91 fix): the old
+        // "anime" override stamped EVERY similar title ANIME - the Thank You
+        // screen's More Like This showed TV shows and movies all labeled Anime
+        return titlesFrom(arr, if (type == "movie") "movie" else null)
             .filter { it.poster != null }
     }
 
