@@ -1311,6 +1311,9 @@ private class PlayerMem(
         )
     var anipmSubLabels by mutableStateOf(listOf<String>())
     var anipmSubIdx by mutableIntStateOf(-1)
+    // provider subtitle FILE urls by label (raw inner-player tracks - the
+    // shell's own snapshot strips these, our shim forwards them) - 0.93
+    var anipmSubUrls by mutableStateOf(mapOf<String, String>())
     var vbAudios by mutableStateOf(listOf<Pair<String, String>>())
     var vbSubs by mutableStateOf(listOf<Pair<String, String>>())
     var vbAudioSel by mutableStateOf("")
@@ -1594,6 +1597,27 @@ fun PlayerScreen(
     }
 
     val scope = rememberCoroutineScope()
+    // The provider's OWN subtitle file rendered through OUR overlay: the
+    // exact player text/timing, our styled pill, floating with the bar -
+    // the "use the anipm subtitles" request (0.93).
+    fun loadProviderIntoOurs(label: String, url: String) {
+        scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching { Wyz.fetchFile(url) }.getOrNull()
+            }
+            if (text != null) {
+                val cues = Subs.parse(text)
+                if (cues.isNotEmpty()) {
+                    setSub(label.ifEmpty { "Provider track" }, pm.anipmLang.uppercase(), cues)
+                    return@launch
+                }
+            }
+            // no readable file: fall back to their in-frame captions
+            pm.subsOwn = false
+            pm.subMsg = "Provider track shows inside the player (no file to style)."
+        }
+    }
+
     fun loadFrom(item: WyzItem) {
         scope.launch {
             val text = withContext(Dispatchers.IO) {
@@ -3053,6 +3077,7 @@ fun PlayerScreen(
                                     "anipm:subtitles" -> {
                                         val arr = o.optJSONArray("tracks")
                                         val labels = mutableListOf<String>()
+                                        val urls = mutableMapOf<String, String>()
                                         if (arr != null) {
                                             for (i in 0 until arr.length()) {
                                                 val it = arr.opt(i)
@@ -3063,10 +3088,31 @@ fun PlayerScreen(
                                                             .ifEmpty { it.optString("language") }
                                                     else -> it?.toString() ?: ""
                                                 }
+                                                if (it is org.json.JSONObject) {
+                                                    // raw tracks can carry the FILE url (the shell
+                                                    // strips it before its own state - we keep it)
+                                                    val u = it.optString("url")
+                                                        .ifEmpty { it.optString("file") }
+                                                        .ifEmpty { it.optString("src") }
+                                                        .ifEmpty { it.optString("link") }
+                                                    if (u.startsWith("http") && label.isNotBlank()) urls[label] = u
+                                                }
                                                 if (label.isNotBlank()) labels.add(label)
                                             }
                                         }
                                         pm.anipmSubLabels = labels.distinct()
+                                        if (urls.isNotEmpty()) pm.anipmSubUrls = urls
+                                        // THE anime subtitles, our style: the provider's own
+                                        // English track becomes the default caption when we have
+                                        // nothing loaded (matches the anime exactly)
+                                        if (pm.subs == null && pm.subsOwn) {
+                                            val eng = urls.entries.firstOrNull {
+                                                Regex("eng|english", RegexOption.IGNORE_CASE).containsMatchIn(it.key)
+                                            } ?: urls.entries.firstOrNull()
+                                            if (eng != null && eng.value.startsWith("http")) {
+                                                loadProviderIntoOurs(eng.key, eng.value)
+                                            }
+                                        }
                                     }
                                     "anipm:lang" -> {
                                         val l = o.optString("lang").lowercase()
@@ -4305,8 +4351,16 @@ fun PlayerScreen(
                                         big = big,
                                     ) {
                                         pm.anipmSubIdx = i
-                                        pm.subsOwn = false // their track renders in-frame
-                                        cmd("window.__sb && window.__sb.subs(true, '" + lbl.replace("'", "") + "')")
+                                        val pu = pm.anipmSubUrls[lbl]
+                                        if (pu != null && pu.startsWith("http")) {
+                                            // their exact subtitle file, OUR styled overlay
+                                            pm.subsOwn = true
+                                            cmd("window.__sb && window.__sb.subs(false)")
+                                            loadProviderIntoOurs(lbl, pu)
+                                        } else {
+                                            pm.subsOwn = false // no file url: their in-frame text
+                                            cmd("window.__sb && window.__sb.subs(true, '" + lbl.replace("'", "") + "')")
+                                        }
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
                                 }
