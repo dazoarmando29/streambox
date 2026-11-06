@@ -11,6 +11,8 @@ What is new
 - The party panel shows live sync diagnostics (latency + drift) so you can see the room is together
 
 Fixes
+- AniPM captions now float with the bar like CineSrc: the subtitle chain serves anime too (styled captions, up when the bar shows, down when it hides), and a provider track that carries a file URL is rendered through our overlay so it floats as well - the Audio & Subtitles panel says which kind you are watching
+- The Audio & Subtitles panel no longer shows null/blank rows: labels are null-proof, provider track lists (including plain string lists) are ingested correctly, and every row shows a real name (Track N / Sub / Dub / the provider's label)
 - Quality labels are honest again on VidBolt - the chip shows what is really playing, and struggling playback lightens quality with a clear notice (one tap to restore) instead of silently
 - Drift correction rebuilt: subtle 4% speed nudges for small differences, one clean seek only past 2 seconds (the old logic seeked constantly and stuttered), and no corrections at all before a scheduled start opens
 - Clock estimates anchor on the lowest-latency heartbeats so corrections follow the true timeline instead of network noise

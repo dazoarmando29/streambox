@@ -745,7 +745,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 221; // bump every release alongside version.txt
+  const BUILD_NUM = 222; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -3727,8 +3727,8 @@ async function openWatch(type, id, s=1, e=1, t=0){
     ).join("");
   } catch(e){}
   try {
-    document.getElementById("wAudio").textContent = (window._anipmTracks && window._anipmTracks.lang)
-      ? (String(window._anipmTracks.lang).toUpperCase() + " track") : "Default";
+    document.getElementById("wAudio").textContent = (window._anipmTracks && safeLabel(window._anipmTracks.lang, ""))
+      ? (safeLabel(window._anipmTracks.lang, "").toUpperCase() + " track") : "Default";
     document.getElementById("wQual").textContent = (QLEVELS[qIdx] || {}).l || "Auto";
     document.getElementById("wEngine").textContent = ((MIRRORS.find(x => x.id === mirror) || {}).name || mirror) + " \u{00B7} "
       + (document.getElementById("player").hasAttribute("sandbox") ? "Sandboxed" : "Raw");
@@ -6562,7 +6562,7 @@ async function wyzAutoSubs(){
   try {
     if (subFile && subFile.cues && subFile.cues.length) return;
     if (isKDrama()) { koSubNote(); return; } // K-dramas ride VidBolt's own English subs
-    if (mirror !== "cinesrc" && mirror !== "vidbolt") return;
+    if (mirror !== "cinesrc" && mirror !== "vidbolt" && mirror !== "anipm") return;
     if (wyzQuota && Date.now() - wyzQuota.at < 3600000) {
       wyzCapNote(); // capped: one calm switch-note per session, then silence
       bsAuto(); // capped: silent backup attempt, once per title (movies via TSDB)
@@ -6814,10 +6814,35 @@ function applySubSource(){
     }
   } catch(e){}
 }
+/* Labels must never render the strings "null"/"undefined" - provider track
+   objects carry every field missing sometimes (0.92 TV bug report). */
+function safeLabel(x, fb){
+  const v = x == null ? "" : String(x).trim();
+  if (!v || v === "null" || v === "undefined") return fb;
+  return v;
+}
+/* A provider subtitle track that carries a file URL can ride OUR overlay -
+    styled + floating with the bar like CineSrc. No URL = their in-frame
+    captions show instead (cross-origin text cannot be restyled). */
+function loadProviderTrack(t, fallbackName){
+  try {
+    const u = t && (t.url || t.file || t.src || t.link || (t.file && t.file.url) || null);
+    if (!u || !/^https?:\/\//i.test(String(u))) return false;
+    fetch(String(u)).then(r => r.text()).then(txt => {
+      const cues = parseSubs(txt);
+      if (cues && cues.length) {
+        setSubs({ name: safeLabel(fallbackName, "provider track"), lang: "", cues,
+          url: String(u), corsUrl: String(u), src: "provider", code: "", pos: "bottom", offset: 0 });
+        toast("Provider captions loaded into StreamBox - they float with the bar \u{2713}");
+      }
+    }).catch(() => {});
+    return true;
+  } catch(e){ return false; }
+}
 function ourSubsPill(subsBox){
   if (!subFile || !subFile.cues || !subFile.cues.length || !subsBox) return;
   const on = ourSubsActive();
-  subsBox.appendChild(avPill((on ? "\u{25CF} " : "") + "StreamBox: " + String(subFile.name || "loaded subs").slice(0, 26), on, () => {
+  subsBox.appendChild(avPill((on ? "\u{25CF} " : "") + "StreamBox: " + safeLabel(subFile.name, "loaded subs").slice(0, 26), on, () => {
     subSource = "ours";
     subsOn = true;
     try { localStorage.setItem("streambox_subs_on", "1"); } catch(e){}
@@ -8104,7 +8129,8 @@ window._anipmTracks = { qualities: [1080, 720, 480], quality: "Auto", subTracks:
    them from every field it might use, numbered when duplicated */
 function anipmTrackLabel(t, i){
   const raw = t && (t.label || t.name || t.language || t.srclang || t.lang || t.code || t.id);
-  if (raw && String(raw).length <= 24) return String(raw);
+  const v = safeLabel(raw, "");
+  if (v && v.length <= 24) return v;
   return "Track " + (i + 1);
 }
 function anipmQInfo(h){
@@ -8541,13 +8567,19 @@ window.addEventListener("message", (event)=>{
     const dd = m.data || {};
     Object.keys(dd).forEach(k => {
       const v = dd[k];
-      if (Array.isArray(v) && v.length && typeof v[0] === "object") {
-        const hasH = v.some(x => x && (x.height || x.value));
-        if (hasH) return; // qualities handled by qualitychange
+      if (Array.isArray(v) && v.length) {
+        // normalize: [null,...] arrays must not masquerade as object lists
+        // (typeof null === "object" - the 0.92 "null" rows bug) and plain
+        // string arrays (["English", ...]) count as tracks too
+        const objs = v.filter(x => x != null && typeof x === "object");
+        const strs = v.filter(x => typeof x === "string" && x.trim());
+        if (objs.length && objs.some(x => x.height || x.value)) return; // qualities
         const looksAudio = /audio|lang/i.test(k);
         const T = window._anipmTracks;
-        if (looksAudio) T.audioTracks = v;
-        else if (!T.subTracks) T.subTracks = v;
+        const list = objs.length ? objs : strs.map(x => ({ label: x }));
+        if (!list.length) return;
+        if (looksAudio) T.audioTracks = list;
+        else if (!T.subTracks) T.subTracks = list;
       }
     });
   } catch(e){}
@@ -8733,7 +8765,7 @@ function paintBoltAV(){
       return;
     }
     list.forEach(o => {
-      const lbl = (o.label != null && String(o.label) !== "") ? String(o.label) : String(o.value);
+      const lbl = (o.label != null && String(o.label) !== "" && String(o.label) !== "null") ? String(o.label) : safeLabel(o.value, "Option");
       box.appendChild(avPill((o.selected ? "\u{25CF} " : "") + lbl, !!o.selected, () => {
         try { boltMobileOption(o.option, o.value); } catch(e){}
         // optimistic selected mark (their bundle answers picks with no event)
@@ -8778,7 +8810,7 @@ function paintAV(){
   // every reported dub variant by name (Faulconer cut vs others, when listed)
   if (Array.isArray(T.audioTracks)) {
     T.audioTracks.slice(0, 6).forEach(t => {
-      const label = (t && (t.label || t.language || t.name)) || null;
+      const label = safeLabel(t && (t.label || t.language || t.name), "");
       if (!label || /^(sub|dub)$/i.test(label)) return;
       const isCur = lang === String(label).toLowerCase();
       audio.appendChild(avPill((isCur ? "\u{25CF} " : "") + label, isCur, () => {
@@ -8789,6 +8821,12 @@ function paintAV(){
   }
   const subs = document.getElementById("avSubs"); subs.innerHTML = "";
   ourSubsPill(subs); // our loaded subtitles ride the same switchboard
+  {
+    const hint = document.createElement("p");
+    hint.className = "text-[10px] text-gray-500 px-1";
+    hint.textContent = "StreamBox captions float with the bar; provider tracks show inside their own player.";
+    subs.appendChild(hint);
+  }
   const sel = window._anipmSubs;
   const off = sel === false;
   subs.appendChild(avPill((off ? "\u{25CF} " : "") + "Off", off, () => {
@@ -8804,12 +8842,15 @@ function paintAV(){
       else seen[label] = 1;
       const isOn = !off && (sel === true || sel === label);
       subs.appendChild(avPill((isOn && sel === label ? "\u{25CF} " : "") + label, sel === label, () => {
-        subSource = "theirs"; // their track shows in their frame (no float)
         window._anipmSubs = label;
         const m = { enabled: true };
         if (t && t.language) m.language = t.language;
         else if (t && (t.label || t.name)) m.label = t.label || t.name;
-        anipmSend("setSubtitles", m); paintAV(); paintSubsBtn();
+        anipmSend("setSubtitles", m);
+        // their track carries a file we can render? ride OUR overlay so it
+        // floats with the bar like CineSrc; otherwise their in-frame text
+        if (!loadProviderTrack(t, label)) subSource = "theirs";
+        paintAV(); paintSubsBtn(); paintCaps(true);
       }));
     });
   } else {
