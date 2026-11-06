@@ -745,7 +745,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 222; // bump every release alongside version.txt
+  const BUILD_NUM = 223; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -7043,7 +7043,7 @@ function subStatus(msg){
    with live preview): ONE state shared by the Settings Subs tab and the A/V
    sheet STYLING & SYNC column. Size is sp (TV renders 1.35x so the 12-26
    ladder reads right from the couch). */
-let capStyle = { size: 18, color: "white", bg: "none" };
+let capStyle = { size: 18, color: "white", bg: "semi" };
 try {
   const cs = JSON.parse(localStorage.getItem("streambox_cap_style") || "{}");
   if (cs && typeof cs === "object") {
@@ -7200,7 +7200,7 @@ function paintCaps(force){
   const ov = document.getElementById("capOverlay");
   if (!ov) return;
   let html = "";
-  if (subsOn && subFile && subFile.cues && subFile.cues.length
+  if (ourSubsActive()
       && !document.getElementById("watchView").classList.contains("hidden")
       && (mirror === "cinesrc" || mirror === "vidbolt" || mirror === "anipm")) {
     const t = (pState.cur || 0) + (subFile.offset || 0);

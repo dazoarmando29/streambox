@@ -11,6 +11,7 @@ What is new
 - The party panel shows live sync diagnostics (latency + drift) so you can see the room is together
 
 Fixes
+- Captions on AniPM (and everywhere) now wear the semi-transparent pill by DEFAULT (the background used to default to transparent), float up when the player bar shows and settle when it hides, and never double-render against a player's own tracks
 - AniPM captions now float with the bar like CineSrc: the subtitle chain serves anime too (styled captions, up when the bar shows, down when it hides), and a provider track that carries a file URL is rendered through our overlay so it floats as well - the Audio & Subtitles panel says which kind you are watching
 - The Audio & Subtitles panel no longer shows null/blank rows: labels are null-proof, provider track lists (including plain string lists) are ingested correctly, and every row shows a real name (Track N / Sub / Dub / the provider's label)
 - Quality labels are honest again on VidBolt - the chip shows what is really playing, and struggling playback lightens quality with a clear notice (one tap to restore) instead of silently
