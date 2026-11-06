@@ -138,7 +138,7 @@
      works on every server, no toggle, good-looking every time. This is the
      honest upscaler-feel (contrast/saturation lift, GPU cheap); real
      resolution stays whatever the source carries. */
-  #playerBox #player { filter: contrast(1.08) saturate(1.08) brightness(0.99); }
+  #playerBox #player { filter: contrast(1.14) saturate(1.14) brightness(1.0); }
   /* Top 10 rank numerals (design pack): giant outline digits behind posters */
   .rank-number {
     font-family: "Space Grotesk", sans-serif;
@@ -745,7 +745,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 219; // bump every release alongside version.txt
+  const BUILD_NUM = 220; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1840,6 +1840,7 @@ async function checkCinesrc(){
   }
 }
 setTimeout(checkCinesrc, 2500);
+setTimeout(() => { try { mirrorHealth(); } catch(e){} }, 2600); // warm server health
 
 /* ---------- HOME ---------- */
 async function init(){
@@ -3738,7 +3739,10 @@ async function openWatch(type, id, s=1, e=1, t=0){
       (type === "movie" ? "Movies" : watchState.anime ? "Anime" : watchState.ko ? "KDrama" : "TV Shows")
       + " \u{2F} " + titleOf(d) + (type === "tv" ? " \u{2F} Season " + watchState.s : "");
     const spn = document.getElementById("serverPillName");
-    if (spn) spn.textContent = ((MIRRORS.find(x => x.id === mirror) || {}).name || "Server") + " \u{00B7} Ready";
+    if (spn) {
+      const nm = (MIRRORS.find(x => x.id === mirror) || {}).name || "Server";
+      spn.textContent = nm + (mirrorLooksDown(mirror) ? " \u{00B7} Down (server error)" : " \u{00B7} Ready");
+    }
   } catch(e){}
   // TV episode UI
   if(type==="tv"){
@@ -4184,7 +4188,11 @@ function streamHas4k(){
   return false;
 }
 function paintQuality(){
-  const t = (QLEVELS[qIdx].v === "" && streamHas4k()) ? "4K" : QLEVELS[qIdx].l;
+  // honest chip (0.91): on VidBolt show the quality its player actually
+  // SELECTED (its panel rows carry selected flags) - the chip used to show
+  // the REQUESTED level, so users saw "1080p" over a 480p picture
+  let t = (QLEVELS[qIdx].v === "" && streamHas4k()) ? "4K" : QLEVELS[qIdx].l;
+  if (mirror === "vidbolt" && window._boltActualQ) t = window._boltActualQ;
   ["srvQLabel", "ctlQ"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = t;
@@ -4338,6 +4346,15 @@ function qDropAuto(){
     // so the viewer's chosen quality returns on the next load
     qIdx = Math.max(0, QLEVELS.findIndex(x => x.v === nxt));
     paintQuality();
+    // make the drop REAL on VidBolt (the chip used to lie while the player
+    // kept struggling on the old rung) and TELL the viewer - session only,
+    // their chosen quality returns on the next load (house rule)
+    try {
+      if (mirror === "vidbolt") boltMobileOption("quality", nxt === "" ? "auto" : nxt);
+    } catch(e){}
+    try {
+      toast("Playback is struggling - quality lightened to " + QLEVELS[qIdx].l + " for smoothness. Tap Quality to restore.");
+    } catch(e){}
     return true;
   } catch(e){ return false; }
 }
@@ -4417,6 +4434,62 @@ function clearStuckTip(){
    over static guesses (CineSrc-first assumptions die on networks where only
    VidBolt answers). Always TV-safe, anime-aware, never the stuck mirror, and
    never the trailer. Callers pass their old static pick as the fallback. */
+/* Mirror health: the browser cannot read a cross-origin 502 (a dead error
+   page looks like any other frame), so our Worker probes every server and
+   reports the real status. Consulted before/while loading so a confirmed-dead
+   mirror hops IMMEDIATELY with an honest message instead of sitting on a
+   dead page while the watchdog counts down. */
+const _mirrorHealth = { at: 0, map: null, busy: null };
+function mirrorHealth(){
+  const now = Date.now();
+  if (_mirrorHealth.map && now - _mirrorHealth.at < 5 * 60 * 1000) return Promise.resolve(_mirrorHealth.map);
+  if (_mirrorHealth.busy) return _mirrorHealth.busy;
+  _mirrorHealth.busy = fetch(TMDB_BASE.replace(/\/api\/tmdb\/3$/, "/api/mirror-health") + "?_=" + now, { cache: "no-store" })
+    .then(r => r.ok ? r.json() : null)
+    .then(j => {
+      _mirrorHealth.busy = null;
+      if (j && j.mirrors) { _mirrorHealth.map = j.mirrors; _mirrorHealth.at = now; }
+      return _mirrorHealth.map;
+    })
+    .catch(() => { _mirrorHealth.busy = null; return _mirrorHealth.map; });
+  return _mirrorHealth.busy;
+}
+function mirrorLooksDown(id){
+  try {
+    const h = _mirrorHealth.map && _mirrorHealth.map[id];
+    // 0 = unreachable, >=500 = upstream error. A 403 is a bot wall and
+    // usually still plays inside a real player - only hard failures count.
+    return !!h && (h.status === 0 || h.status >= 500);
+  } catch(e){ return false; }
+}
+/* If the current server is confirmed down, hop once to a healthy one with an
+   honest message; if none are healthy, say so instead of staying silent. */
+function guardMirrorHealth(){
+  const run = () => {
+    try {
+      if (document.getElementById("watchView").classList.contains("hidden")) return;
+      if (mirror === "trailer" || mirror === "hls") return;
+      if (!mirrorLooksDown(mirror)) return;
+      const order = [stuckFallback(watchState.anime ? "anipm" : isKDrama() ? "cinesrc" : "vidbolt"),
+        "vidbolt", "vidzen", "vidapi", "vidcore", "vidlink", "vidfast", "autoembed", "twoembed", "vidsrcto", "vsembed"];
+      const pick = order.find(x => x && x !== mirror && mirrorAllowed(x) && !mirrorLooksDown(x));
+      if (pick) {
+        toast(stuckFallbackName(mirror) + " is having server trouble right now (502/down) - moved you to " + stuckFallbackName(pick) + ".");
+        mirror = pick;
+        updateMirrorUI();
+        paintMirrors();
+        loadPlayer();
+      } else {
+        const spn = document.getElementById("serverPillName");
+        if (spn) spn.textContent = stuckFallbackName(mirror) + " \u{00B7} Down (server error)";
+        toast(stuckFallbackName(mirror) + " appears to be down (server error) - tap Switch Server or wait for auto-switch.");
+      }
+    } catch(e){}
+  };
+  if (_mirrorHealth.map) run();
+  else mirrorHealth().then(run).catch(() => {});
+}
+
 function stuckFallback(staticFb){
   try {
     const g = window._lastGood;
@@ -4652,6 +4725,8 @@ function loadPlayer(){
   window._boltProgress = false;
   clearTapHint(); // fresh video, fresh tap verdict
   if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
+  // confirmed-dead server? hop NOW with an honest message (see mirrorHealth)
+  try { guardMirrorHealth(); } catch(e){}
   ctlReset();
   window._stuckShown = false; // fresh video, fresh verdict (no stale hop advice)
   try { document.getElementById("volToast").classList.add("hidden"); } catch(e){}
@@ -7866,6 +7941,15 @@ window.addEventListener("message", (event)=>{
       if (Array.isArray(d.options) && d.options.length) {
         const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
         window._boltPanels[bk] = d.options;
+        // the rows carry their own selected flags = the REAL running quality
+        try {
+          const sel = d.options.find(o => o && String(o.option) === "quality" && (o.selected === true || o.selected === "true"));
+          if (sel) {
+            const qm = /(\d{3,4})/.exec(String(sel.value != null ? sel.value : sel.label || ""));
+            window._boltActualQ = qm ? qm[1] + "p" : String(sel.value != null ? sel.value : "");
+            if (window._boltActualQ) paintQuality();
+          }
+        } catch(e){}
         try { paintQuality(); } catch(e){}
         try { koAutoPick(); } catch(e){} // K-drama defaults: Tagalog dub + VidBolt own English subs
         try { koTagalogSweep(); } catch(e){} // no Tagalog here? sweep their servers for it
@@ -7879,6 +7963,15 @@ window.addEventListener("message", (event)=>{
     hideSpin(); ctlPaint();
     showTitleCard();
     koBootAsk(); // K-dramas: ask for the Tagalog dub at boot (no-op when absent)
+    // push the viewer's chosen quality INTO VidBolt - before 0.91 it was
+    // never sent and their Auto picked the rendition while our chip claimed
+    // 1080p ("it says 1080 but looks 480"). Their reported selection then
+    // repaints the chip honestly via the mobile-panel handler above.
+    try {
+      const qv = QLEVELS[qIdx].v;
+      if (qv) boltMobileOption("quality", qv);
+      else window._boltActualQ = ""; // Auto: trust their pick, label it as it lands
+    } catch(e){}
     if (document.body.classList.contains("tv-mode")) {
       boltSend({ type: "play" });
       boltArmStartRetry(15000);
