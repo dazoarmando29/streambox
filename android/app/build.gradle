@@ -10,8 +10,8 @@ android {
         applicationId 'com.streambox.app'
         minSdk 24
         targetSdk 34
-        versionCode 23
-        versionName '2.21'
+        versionCode 24
+        versionName '2.22'
     }
 
     buildFeatures {
@@ -19,7 +19,9 @@ android {
     }
     flavorDimensions "edition"
     productFlavors {
-        // Full motion site (?tv=1 keeps TV layout + D-pad on every box)
+        // Full motion site (startUrl() re-derives ?tv=1 per DEVICE: TV boxes
+        // get the remote layout, phones the touch UI - the flavor URL param
+        // is only the calm default)
         full {
             dimension "edition"
             applicationId "com.streambox.app"

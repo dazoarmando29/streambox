@@ -18,11 +18,16 @@ import android.widget.FrameLayout;
 /** StreamBox: fullscreen WebView wrapper for phone + Android TV. */
 public class MainActivity extends Activity {
     private static final String HOME = BuildConfig.HOME_URL;
+    private static final String APP_PREFIX = "https://dazoarmando29.github.io/streambox/";
     private WebView web;
     private WebChromeClient chromeClient;
     private View fullscreenView;
     private WebChromeClient.CustomViewCallback fullscreenCallback;
-    private boolean webviewCrashed;
+    // static: recreate() builds a NEW activity instance - an instance flag
+    // would read false there and restoreState could resurrect the crash page
+    private static boolean webviewCrashed;
+    private static long rendererCrashAt;
+    private static int rendererCrashBurst;
     private String partyCode;
 
     private static boolean isHostOrSubdomain(String host, String domain) {
@@ -135,7 +140,10 @@ public class MainActivity extends Activity {
         s.setBuiltInZoomControls(false);
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
-        s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        // NEVER_ALLOW: the default cleartext block (targetSdk 34, no NSC)
+        // already stops http subresources, so compat-mode's looseness bought
+        // nothing but surface. Defense in depth.
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setTextZoom(100);
         // TV remotes + keyboards navigate page focus; keep default UA so site tv-mode detection works
@@ -276,6 +284,9 @@ public class MainActivity extends Activity {
                 // hit this under memory pressure). The default handler kills
                 // the whole app - instead destroy the dead shell and rebuild,
                 // so playback recovers with one reload instead of a crash.
+                // Circuit breaker: a DETERMINISTIC crash must not loop
+                // recreate->crash forever - after 2 rebuilds in a minute let
+                // the system end the app so the user starts clean.
                 try {
                     if (web != null) {
                         web.destroy();
@@ -283,6 +294,11 @@ public class MainActivity extends Activity {
                     }
                 } catch (Exception ignored) {}
                 hideFullscreen();
+                long now = System.currentTimeMillis();
+                if (now - rendererCrashAt > 60000) rendererCrashBurst = 0;
+                rendererCrashAt = now;
+                rendererCrashBurst++;
+                if (rendererCrashBurst > 2) return false; // give up: no crash loop
                 webviewCrashed = true;
                 recreate();
                 return true;
@@ -321,7 +337,9 @@ public class MainActivity extends Activity {
         };
         web.setWebChromeClient(chromeClient);
 
-        if (!webviewCrashed && savedInstanceState != null && web.restoreState(savedInstanceState) != null) {
+        boolean crashed = webviewCrashed;
+        webviewCrashed = false; // one-shot: the next recreate restores normally
+        if (!crashed && savedInstanceState != null && web.restoreState(savedInstanceState) != null) {
             // state restored after process death
         } else {
             // restoreState failed, fresh launch, or rebuild after a renderer
@@ -376,21 +394,47 @@ public class MainActivity extends Activity {
         decor.removeView(fullscreenView);
         decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
         fullscreenView = null;
+        WebChromeClient.CustomViewCallback cb = fullscreenCallback;
         fullscreenCallback = null;
-        if (web != null) web.setVisibility(View.VISIBLE);
+        if (web != null) {
+            web.setVisibility(View.VISIBLE);
+            // refocus the page so remote/keyboard input lands in it again
+            web.requestFocus();
+        }
+        // The WebChromeClient contract requires onCustomViewHidden() on EVERY
+        // exit path. The page-initiated path (video end -> exitFullscreen)
+        // used to skip it and the next fullscreen request never fired.
+        if (cb != null) {
+            try { cb.onCustomViewHidden(); } catch (Exception ignored) {}
+        }
+    }
+
+    /** Media transport keys from remotes/headsets -> the site's player. */
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        if (event.getAction() == android.view.KeyEvent.ACTION_UP && web != null) {
+            int code = event.getKeyCode();
+            String js = null;
+            if (code == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
+                js = "try{ctlToggle();}catch(e){}";
+            } else if (code == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
+                js = "try{if(pState.paused)ctlToggle();}catch(e){}";
+            } else if (code == android.view.KeyEvent.KEYCODE_MEDIA_PAUSE) {
+                js = "try{if(!pState.paused)ctlToggle();}catch(e){}";
+            }
+            if (js != null) {
+                web.evaluateJavascript(js, null);
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     @Override
     public void onBackPressed() {
         if (fullscreenView != null) {
-            // App-initiated dismissal: the WebChromeClient contract requires
-            // onCustomViewHidden() so the media element leaves its fullscreen
-            // state (without it the next fullscreen request never fires).
-            WebChromeClient.CustomViewCallback cb = fullscreenCallback;
+            // contract-correct dismissal (the callback fires inside hideFullscreen)
             hideFullscreen();
-            if (cb != null) {
-                try { cb.onCustomViewHidden(); } catch (Exception ignored) {}
-            }
             return;
         }
         if (web == null) { super.onBackPressed(); return; }
@@ -429,6 +473,17 @@ public class MainActivity extends Activity {
                 // missing value must NEVER swallow the Back press — exit.
                 String v = value == null ? "" : value.replace("\"", "");
                 if ("exit".equals(v) || "null".equals(v) || v.isEmpty()) {
+                    // On an allowlisted NON-SPA page (a mirror navigated the
+                    // main frame) the SPA cascade knows nothing - consult the
+                    // WebView history before killing the app (one Back on a
+                    // mirror page used to close the whole app on TV).
+                    try {
+                        String cur = web != null && web.getUrl() != null ? web.getUrl() : "";
+                        if (web != null && web.canGoBack() && !cur.startsWith(APP_PREFIX)) {
+                            web.goBack();
+                            return;
+                        }
+                    } catch (Exception ignored) {}
                     MainActivity.super.onBackPressed();
                 }
             });

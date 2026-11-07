@@ -524,3 +524,115 @@ test("simulated multi-device party: 3 clients converge on one state", async (t) 
   assert.strictEqual(c2.sessionVersion, c3.sessionVersion);
   assert.deepStrictEqual(c2.content, c3.content);
 });
+
+/* ---------- regressions: kick fan-out, token rotation, clock poison, host restore ---------- */
+
+test("kick reaches ONLY the target - the room never hears 'kicked'", async (t) => {
+  const { url } = await startServer(t);
+  const a = await connect(url); // host
+  const b = await connect(url); // target
+  const c = await connect(url); // bystander
+  a.send({ t: "create", name: "Ana" });
+  const room = (await a.waitType("room")).room;
+  const ids = {};
+  for (const [cl, name] of [[b, "Bo"], [c, "Cy"]]) {
+    cl.send({ t: "join", name, code: room.code });
+    const r = await cl.waitType("room");
+    ids[name] = r.room.selfId;
+    await a.waitType("peer_joined");
+  }
+  a.drain(); c.drain();
+  a.send({ t: "kick", targetId: ids.Bo });
+  const kicked = await b.waitType("kicked");
+  assert.strictEqual(kicked.targetId, ids.Bo);
+  const leftC = await c.waitType("peer_left");
+  assert.strictEqual(leftC.reason, "kicked");
+  const ghostHost = await a.next((m) => m.t === "kicked", 250).catch(() => null);
+  assert.strictEqual(ghostHost, null, "the HOST must never be told it was kicked");
+  const ghostBystander = await c.next((m) => m.t === "kicked", 250).catch(() => null);
+  assert.strictEqual(ghostBystander, null, "a bystander must never be told it was kicked");
+});
+
+test("the room response returns the SEAT token - reattach survives repeated reconnects", async (t) => {
+  const { app, url } = await startServer(t, { ttl: { participantTtl: 5000, hostGrace: 5000, emptyRoomTtl: 5000, maxRoomAge: 60000 } });
+  const a = await connect(url);
+  a.send({ t: "create", name: "Ana" });
+  const m1 = await a.waitType("room");
+  const seatToken = m1.token;
+  assert.ok(seatToken, "create hands back a resume token");
+  a.close();
+  await new Promise((r) => setTimeout(r, 100)); // let the close land
+  // reconnect #1: the client adopts whatever token the server returns
+  const a2 = await connect(url);
+  a2.send({ t: "join", name: "Ana", code: m1.room.code, token: seatToken });
+  const r2 = await a2.next((m) => m.t === "room" || m.t === "error");
+  assert.strictEqual(r2.t, "room");
+  assert.strictEqual(r2.reattached, true);
+  assert.strictEqual(r2.token, seatToken, "reattach must echo the SEAT token - never rotate it");
+  a2.close();
+  await new Promise((r) => setTimeout(r, 100));
+  // reconnect #2 with the server-returned (unchanged) token must find the same seat
+  const a3 = await connect(url);
+  a3.send({ t: "join", name: "Ana", code: m1.room.code, token: r2.token });
+  const r3 = await a3.next((m) => m.t === "room" || m.t === "error");
+  assert.strictEqual(r3.t, "room");
+  assert.strictEqual(r3.reattached, true, "the second reconnect reattaches - it must not spawn a ghost seat");
+  assert.strictEqual(r3.room.participants.length, 1, "no duplicate seats accumulate");
+  assert.strictEqual(r3.room.selfId, m1.room.selfId, "same identity across every reconnect");
+  void app;
+});
+
+test("hello never poisons the clock: no clientTs:0 heartbeat echo", async (t) => {
+  const { url } = await startServer(t);
+  const a = await connect(url);
+  a.send({ t: "hello", name: "Ana" });
+  const hb = await a.next((m) => m.t === "heartbeat", 250).catch(() => null);
+  assert.strictEqual(hb, null, "hello must not answer with a synthetic heartbeat (clientTs:0 pinned bestRtt=0)");
+  const t0 = Date.now();
+  a.send({ t: "heartbeat", clientTs: t0 });
+  const echo = await a.waitType("heartbeat");
+  assert.strictEqual(echo.clientTs, t0, "a real heartbeat echoes the client's own stamp");
+  assert.ok(echo.serverTs >= t0 - 5);
+});
+
+test("host restore after seat expiry tells the room (host_changed)", async (t) => {
+  const { app, url } = await startServer(t, { ttl: { participantTtl: 60, hostGrace: 60, emptyRoomTtl: 5000, maxRoomAge: 60000 } });
+  const a = await connect(url);
+  const b = await connect(url);
+  a.send({ t: "create", name: "Ana" });
+  const m1 = await a.waitType("room");
+  b.send({ t: "join", name: "Bo", code: m1.room.code });
+  const m2 = await b.waitType("room");
+  // the host sleeps: seat expires and hosting migrates to Bo
+  a.close();
+  await b.waitType("peer_joined");
+  await new Promise((r) => setTimeout(r, 120));
+  app.rooms.sweep();
+  const snap = app.rooms.rooms.get(m1.room.roomId);
+  assert.strictEqual(snap.hostId, m2.room.selfId, "hosting migrated while the host was gone");
+  b.drain();
+  // the host wakes and reclaims the seat by resume token
+  const a2 = await connect(url);
+  a2.send({ t: "join", name: "Ana", code: m1.room.code, token: m1.token });
+  const r = await a2.next((m) => m.t === "room" || m.t === "error");
+  assert.strictEqual(r.t, "room");
+  assert.strictEqual(r.reattached, true);
+  assert.strictEqual(r.room.hostId, m1.room.hostId, "the returning host gets the host seat back");
+  const hc = await b.waitType("host_changed");
+  assert.strictEqual(hc.hostId, m1.room.hostId, "the room hears who is hosting now");
+  assert.strictEqual(hc.hostName, "Ana");
+});
+
+test("room creation is rate limited per address", async (t) => {
+  const { url } = await startServer(t, { maxCreatesPerMin: 2 });
+  for (let i = 0; i < 2; i++) {
+    const c = await connect(url);
+    c.send({ t: "create", name: "Bot" });
+    const room = await c.waitType("room");
+    assert.ok(room.room.code);
+  }
+  const bot = await connect(url);
+  bot.send({ t: "create", name: "Bot" });
+  const err = await bot.next((m) => m.t === "error" && m.error === "rate_limited");
+  assert.strictEqual(err.for, "create");
+});

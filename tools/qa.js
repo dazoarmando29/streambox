@@ -467,7 +467,7 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const ne = html.match(/function nextEpisode\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
   if (ne && /advanceEpisode\(\)/.test(ne[0])) ok("nextEpisode(1) delegates to advanceEpisode");
   else bad("nextEpisode must delegate forward steps to advanceEpisode");
-  if (/vidrift:nextup-play[\s\S]{0,400}advanceEpisode\(\)/.test(html)) ok("provider nextup events run through our own advanceEpisode");
+  if (/vidrift:nextup-play[\s\S]{0,600}advanceEpisode\(\)/.test(html)) ok("provider nextup events run through our own advanceEpisode");
   else bad("vidrift:nextup-play must run through advanceEpisode -- never trust raw provider numbers");
 }
 
@@ -504,6 +504,8 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
     const t = seg[0];
     if (/pastSyncGrace\(\)/.test(t) && /advanceEpisode\(\)/.test(t)) ok("nextup events are grace-gated into our advanceEpisode");
     else bad("vidrift:nextup-play must gate advanceEpisode behind pastSyncGrace");
+    if (/_endedHandled/.test(t)) ok("nextup events take the one-advance latch (no double-advance on late duplicates)");
+    else bad("vidrift:nextup-play must take the _endedHandled latch -- a late nextup/ended pair double-advanced and skipped an episode");
     if (!/watchState\.(e|s)\s*=/.test(t)) ok("nextup events never write raw episode state");
     else bad("vidrift:nextup-play writes watchState directly -- route through advanceEpisode only");
   }
@@ -1451,7 +1453,8 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
 
 /* ---------- 130. one auto-hop per title, everywhere ---------- */
 {
-  const fns = ["midPlayRescue", "armStuckWatchdogs", "anipmArmStartRetry", "boltArmStartRetry"];
+  const fns = ["midPlayRescue", "armStuckWatchdogs", "anipmArmStartRetry", "boltArmStartRetry",
+    "loadAnipmPlayer", "loadVidboltAnime", "loadPlayer"];
   let all = true;
   for (const fn of fns) {
     const m = html.match(new RegExp("function " + fn + "\\s*\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}"));
@@ -1460,6 +1463,19 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
       all = false;
       bad(fn + " auto-hops without taking the heal-once budget (mirror ping-pong loops)");
     }
+  }
+  // the health-hop path (guardMirrorHealth) bypasses setMirror entirely - it
+  // needs its own bounded budget or it bounces load to load forever
+  const gh = html.match(/function guardMirrorHealth\(\)\{[\s\S]*?\n\}/);
+  if (!gh || !/window\._healthHopped = true/.test(gh[0]) || !/if \(window\._healthHopped\)/.test(gh[0])) {
+    all = false;
+    bad("guardMirrorHealth must take a one-hop-per-title health budget (window._healthHopped)");
+  }
+  if (/window\._healthHopped = false/.test(html) && /window\._autoHopped = false/.test(html)) {
+    // both budgets reset together per title
+  } else {
+    all = false;
+    bad("the auto-hop and health-hop budgets must reset per title in openWatch");
   }
   if (all) ok("every auto-hop path takes the one-hop heal budget (no ping-pong)");
 }
@@ -1633,6 +1649,30 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (so && flush && /S\.pending/.test(so[0]) && /S\.pending/.test(flush[0]) && !/setTimeout\(go, 350\)/.test(html) && !/setTimeout\(go, 400\)/.test(html))
     ok("party create/join/restore park until the socket opens - a slow TV handshake no longer drops the click");
   else bad("party actions must be parked and flushed on ws.onopen (the blind setTimeout(go, 350) dropped every click on a handshake slower than 350ms)");
+}
+
+/* ---------- 146. party client: kick targeting, clock honesty, seat tokens ---------- */
+{
+  const kicked = html.match(/case "kicked":[\s\S]{0,300}/);
+  if (kicked && /m\.targetId !== S\.selfId/.test(kicked[0]))
+    ok("kicked events only tear down THEIR named target (broadcast 'kicked' evicted everyone)");
+  else bad('the "kicked" handler must check m.targetId === S.selfId before teardown');
+  const hb = html.match(/case "heartbeat": \{[\s\S]{0,1200}/);
+  if (hb && /if \(!m\.clientTs\) return/.test(hb[0]) && /S\.rttMiss/.test(hb[0]))
+    ok("clock sync ignores synthetic echoes (clientTs 0) and ages the bestRtt anchor");
+  else bad("the heartbeat handler must ignore clientTs <= 0 and re-anchor bestRtt after network changes");
+  const welcome = html.match(/case "welcome":[\s\S]{0,600}/);
+  if (welcome && /if \(!S\.token\) S\.token = m\.token/.test(welcome[0]))
+    ok("welcome never rotates the stored resume token (per-connection tokens broke reattach)");
+  else bad("the welcome handler must never overwrite an existing S.token");
+  const room = html.match(/case "room": \{[\s\S]{0,1200}/);
+  if (room && /S\.pw \|\| ""/.test(room[0]) && /if \(!m\.reattached\) toast/.test(room[0]))
+    ok("room snapshots persist the typed room password and reconnects stay toast-silent");
+  else bad("the room handler must store S.pw for rejoin and toast only on fresh joins");
+  const rs = html.match(/case "room_state": \{[\s\S]{0,500}/);
+  if (rs && /S\.chat = \(m\.room\.chat/.test(rs[0]) && /S\.lastSeq = \(m\.room\.playback/.test(rs[0]))
+    ok("resync (room_state) adopts the missed chat AND the newest seq (no rollback window)");
+  else bad("room_state must adopt S.chat and S.lastSeq from the snapshot");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

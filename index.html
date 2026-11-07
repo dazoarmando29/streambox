@@ -745,7 +745,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 223; // bump every release alongside version.txt
+  const BUILD_NUM = 224; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1560,13 +1560,45 @@ function preconnectCinesrc(){
 }
 
 /* ---------- Hardening: focus + activation guards (TV remotes repeat keys) ---------- */
+function focusVisible(el){
+  // offsetParent alone wrongly rejects fixed-position targets (#cursorBtn -
+  // it could never be reached by D-pad) and wrongly ACCEPTS opacity-hidden
+  // toast buttons (they kept catching arrows after the toast faded out)
+  if (!el || el.disabled) return false;
+  try {
+    if (el.getClientRects().length === 0) return false;             // display:none
+    if (el.closest && el.closest("#toast:not(.show)")) return false; // faded toast
+    return true;
+  } catch(e){ return false; }
+}
 function safeFocus(el){
   if (!el) return false;
   try {
-    if (el.offsetParent === null || el.disabled) return false;
+    if (!focusVisible(el)) return false;
     el.focus({ preventScroll: true });
     return document.activeElement === el;
   } catch(e){ return false; }
+}
+function refocusAfterRerender(container, wasInside, preferredSelector){
+  // a repaint (innerHTML = "") destroys the focused element - TV/keyboard
+  // focus silently dropped to <body> after every remove / list repaint.
+  // ONLY rescues when the victim focus was inside the repainted container
+  // (never hijacks screens where body-focus is the designed state, like the
+  // cinema player where OK = play/pause). preferredSelector re-seats the
+  // SAME logical item (e.g. the just-revealed episode) when it survives.
+  try {
+    if (!wasInside) return;
+    if (!(document.body.classList.contains("tv-mode") || window._kbNav)) return;
+    let first = null;
+    if (preferredSelector && container && container.querySelector) {
+      try { first = container.querySelector(preferredSelector); } catch(e){}
+    }
+    if (!first && container && container.querySelector) {
+      first = container.querySelector("button:not([disabled]), .card, [tabindex='0']");
+    }
+    if (first) safeFocus(first);
+    else navEscapeFocus();
+  } catch(e){}
 }
 function restoreFocus(el){
   // never strand focus inside the video frame: fall back to our own controls
@@ -1583,9 +1615,18 @@ function restoreFocus(el){
   } catch(err){}
 }
 function topPopup(){
-  // topmost visible popup wins (search sits above drawers, guide above all)
+  // topmost visible popup wins - by Z-INDEX, not DOM order: Back must close
+  // what the user SEES on top (a DOM-order pick could close an occluded
+  // popup first and leave the visible one stranded)
   const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal,#pinPad,#avSheet,#vrSheet,#resumeDlg,#partyPanel,#aboutPanel")].filter(p => !p.classList.contains("hidden"));
-  return ps.length ? ps[ps.length - 1] : null;
+  if (!ps.length) return null;
+  let best = ps[0], bestZ = -Infinity;
+  for (const p of ps) {
+    let z = 0;
+    try { const zv = parseInt(getComputedStyle(p).zIndex, 10); if (Number.isFinite(zv)) z = zv; } catch(e){}
+    if (z >= bestZ) { bestZ = z; best = p; } // ties: later in the DOM wins
+  }
+  return best;
 }
 function navEscapeFocus(){
   // Left-escape (0.64 parity): Left out of any row/grid lands on the nav
@@ -2191,7 +2232,7 @@ function purgeRetiredCaches(){
         if (!c.raf) c.raf = requestAnimationFrame(cursorLoop);
         return;
       }
-      if (okPressed(e)) { e.preventDefault(); cursorClick(); return; }
+      if (okPressed(e)) { e.preventDefault(); if (!e.repeat) cursorClick(); return; }
       if (e.key === "Escape" || e.keyCode === 27) { cursorToggle(); return; }
     }
     // keyboard-focus mode: arrows/Tab/OK earn the glow ring; any pointer
@@ -2202,7 +2243,7 @@ function purgeRetiredCaches(){
     // deliberately NOT walkable-to in the focus ring, so this is how you tune
     // them. (The player's own seek bar keeps its bigger YouTube scheme.)
     const foc = document.activeElement;
-    if (dir && foc && foc.tagName === "INPUT" && foc.type === "range" && foc.id !== "seek") {
+    if (dir && foc && foc.tagName === "INPUT" && foc.type === "range" && foc.id !== "ctlSeek") {
       e.preventDefault();
       const step = (dir === "right" || dir === "up") ? 1 : -1;
       foc.value = Math.max(parseInt(foc.min, 10) || 0, Math.min(parseInt(foc.max, 10) || 100, (parseInt(foc.value, 10) || 0) + step));
@@ -2210,16 +2251,32 @@ function purgeRetiredCaches(){
       return;
     }
     if (/INPUT|SELECT|TEXTAREA/.test(tag)) {
-      if (e.key === "Escape" || e.keyCode === 27) { document.activeElement.blur(); return; }
+      // TV Back-key codes (GoBack/Escape) LEAVE the field - without this a
+      // remote with no Esc key was hard-trapped inside #epFilter / party
+      // inputs with no way out. Backspace stays an editing key.
+      if (e.key === "Escape" || e.keyCode === 27 || e.keyCode === 461 || e.keyCode === 10009) {
+        e.preventDefault();
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        return;
+      }
       // TV: arrows leave the overlay search box into results instead of being trapped
       if ((dir === "down" || dir === "up") && document.activeElement.id === "searchBox") {
         const first = document.querySelector("#searchPanel:not(.hidden) #searchResults .card");
-        if (first) { e.preventDefault(); window._kbNav = true; first.focus(); }
+        if (first) { e.preventDefault(); window._kbNav = true; first.focus(); return; }
       }
-      return;
+      // Up/Down also LEAVE any other text field (spatial nav below picks it
+      // up from the field's position) - SELECT/TEXTAREA keep their keys
+      if ((dir === "down" || dir === "up") && tag === "INPUT" && (document.activeElement.type || "text") === "text" && document.activeElement.id !== "searchBox") {
+        /* fall through to spatial navigation */
+      } else {
+        return;
+      }
     }
+    // remotes hold OK/Space and auto-repeat: ONE press = ONE action (the
+    // repeat stream used to strobe play/pause and double-fire buttons)
+    if (okPressed(e) && e.repeat) { e.preventDefault(); return; }
     // desktop shortcuts (ignored on anything interactive; native keys win there)
-    if (e.code === "Space" || e.code === "KeyF" || e.code === "KeyM") {
+    if ((e.code === "Space" || e.code === "KeyF" || e.code === "KeyM") && !e.repeat) {
       const ae2 = document.activeElement;
       const inter = ae2 && (ae2.tagName === "BUTTON" || ae2.tagName === "INPUT" || ae2.tagName === "SELECT" || ae2.tagName === "A" || ae2.tagName === "IFRAME" || ae2.getAttribute("role") === "button");
       const onWatch = !document.getElementById("watchView").classList.contains("hidden");
@@ -2228,6 +2285,24 @@ function purgeRetiredCaches(){
         if (e.code === "Space") ctlToggle();
         else if (e.code === "KeyF") ctlFullscreen();
         else ctlMuteToggle();
+        return;
+      }
+    }
+    // media transport keys (TV remotes, media keyboards) - they used to be
+    // dead: the WebView/browser ignored them and the app never listened
+    {
+      const mk = e.key || e.code || "";
+      const watching = !document.getElementById("watchView").classList.contains("hidden") && !topPopup();
+      if (watching && /^Media(PlayPause|Play|Pause|Stop|FastForward|Rewind)/.test(mk)) {
+        e.preventDefault();
+        if (!e.repeat) {
+          if (mk === "MediaPlayPause") ctlToggle();
+          else if (mk === "MediaPlay") { try { if (pState.paused) ctlToggle(); } catch(err){} }
+          else if (mk === "MediaPause") { try { if (!pState.paused) ctlToggle(); } catch(err){} }
+          else if (mk === "MediaStop") { try { if (!pState.paused) ctlToggle(); } catch(err){} }
+          else if (mk === "MediaFastForward") ctlSeekRel(30);
+          else if (mk === "MediaRewind") ctlSeekRel(-10);
+        }
         return;
       }
     }
@@ -2463,7 +2538,7 @@ function purgeRetiredCaches(){
         }
       }
       const items = [...scope.querySelectorAll('[data-focusable="1"], button, select, input, a, [tabindex="0"]')]
-        .filter(el => el.offsetParent !== null && !el.disabled
+        .filter(el => focusVisible(el)
           && !(el.tagName === "INPUT" && (el.type === "range" || el.type === "color"))
           && !(el.closest && el.closest("#ctlBar.bar-hidden"))
           && (navZone || !el.closest("nav")));
@@ -2522,6 +2597,10 @@ function purgeRetiredCaches(){
     }
     // TV Back / Esc: popups, then fullscreen(s), then go home
     if (e.key === "Escape" || e.keyCode === 27 || e.key === "Backspace" || e.keyCode === 461 || e.keyCode === 10009) {
+      if (e.repeat) { e.preventDefault(); return; } // a held Back must NOT close a layer AND eject home
+      // a Back press invalidates any detail modal still loading: the old code
+      // let a slow TMDB fetch pop the modal AFTER the user backed out
+      detailReq++;
       const top = topPopup();
       if (top) {
         if (top.id === "tvGuide") closeTvGuide();
@@ -2539,14 +2618,14 @@ function purgeRetiredCaches(){
       try {
         if (document.fullscreenElement) { document.exitFullscreen(); e.preventDefault(); return; }
       } catch(err){}
-      if (document.body.classList.contains("video-fs")) { exitVideoFs(); goHome(e); e.preventDefault(); return; }
-      const watch = document.getElementById("watchView");
-      if (watch && !watch.classList.contains("hidden")) { goHome(e); e.preventDefault(); return; }
       // action toast dismisses before anything navigates
       try {
         const tst = document.getElementById("toast");
         if (tst && tst.classList.contains("show")) { hideToast(); e.preventDefault(); return; }
       } catch(err){}
+      if (document.body.classList.contains("video-fs")) { exitVideoFs(); goHome(e); e.preventDefault(); return; }
+      const watch = document.getElementById("watchView");
+      if (watch && !watch.classList.contains("hidden")) { goHome(e); e.preventDefault(); return; }
       // browse grids + My List fall back home (never a dead-end for Back)
       const lv = document.getElementById("listView"), gv2 = document.getElementById("gridView");
       if ((lv && !lv.classList.contains("hidden")) || (gv2 && !gv2.classList.contains("hidden"))) { goHome(e); e.preventDefault(); return; }
@@ -2622,8 +2701,17 @@ function buildHero(items){
   // (big decode + layout) every 15s — a jank spike weak SoCs never stop paying
   if (document.body.classList.contains("calm")) return;
   heroT = setInterval(()=>{
-    if(!document.getElementById("homeView").classList.contains("hidden"))
+    if(!document.getElementById("homeView").classList.contains("hidden")) {
+      // never rotate under the user's hands: the rebuild destroys the focused
+      // hero button and TV focus silently drops to <body> mid-navigation
+      // (the boot focus sits on a hero button - this was guaranteed on TVs)
+      try {
+        const ae = document.activeElement;
+        if (ae && ae.closest && ae.closest("#hero")) return;
+        if (topPopup()) return;
+      } catch(e){}
       setHero((heroIdx+1)%heroItems.length);
+    }
   }, document.body.classList.contains("tv-mode") ? 15000 : 8000);
 }
 function heroListToggle(){
@@ -2693,6 +2781,14 @@ function setHero(i){
   const year = (x.release_date || x.first_air_date || "").slice(0, 4);
   const genres = genreNames(x, type);
   const saved = inList(type, x.id);
+  // the rebuild below destroys whatever was focused inside the hero (the
+  // bookmark toggle repaints constantly) - remember WHICH button and put
+  // focus back on its replacement, never on <body>
+  let fIdx = -1;
+  try {
+    const ae = document.activeElement;
+    if (ae && ae.closest && ae.closest("#hero")) fIdx = [...document.querySelectorAll("#hero button")].indexOf(ae);
+  } catch(e){}
   document.getElementById("hero").innerHTML = `
     ${bg ? `<img src="${escapeHtml(bg)}" fetchpriority="high" decoding="async" onerror="this.style.display='none'" class="absolute inset-0 w-full h-full object-cover">` : ""}
     <div class="absolute inset-0 hero-gradient"></div>
@@ -2712,6 +2808,12 @@ function setHero(i){
         <button onclick="heroListToggle()" title="${saved ? "Remove from My List" : "Add to My List"}" aria-label="${saved ? "Remove from My List" : "Add to My List"}" class="w-12 h-12 rounded-full glass-pill ${saved ? "text-teal-300 border-teal-400/50" : "text-gray-300 hover:text-teal-300 hover:border-teal-400/40"} flex items-center justify-center transition-all text-lg">${saved ? "\u{2665}" : "\u{2661}"}</button>
       </div>
     </div>`;
+  if (fIdx >= 0) {
+    try {
+      const btns = document.querySelectorAll("#hero button");
+      if (btns[fIdx]) safeFocus(btns[fIdx]);
+    } catch(e){}
+  }
   // preload next hero backdrop so rotation is instant (calm never rotates:
   // no prefetch, no background decode burning CPU on weak boxes)
   if (document.body.classList.contains("calm")) return;
@@ -2741,11 +2843,7 @@ function closeSearch(){
   document.getElementById("searchPanel").classList.add("hidden");
   try { if (overlayCtrl) overlayCtrl.abort(); } catch(e){}
   clearTimeout(overlayTimer);
-  if (document.getElementById("modal").classList.contains("hidden")
-      && document.getElementById("tvGuide").classList.contains("hidden")
-      && document.getElementById("setPanel").classList.contains("hidden")
-      && document.getElementById("epDrawer").classList.contains("hidden"))
-    document.body.classList.remove("modal-open");
+  if (!topPopup()) document.body.classList.remove("modal-open");
   if (searchOpener && searchOpener.tagName !== "IFRAME" && searchOpener.focus) { try { searchOpener.focus({ preventScroll: true }); } catch(e){} }
   else restoreFocus(null);
 }
@@ -2991,8 +3089,10 @@ let pinMode = "", pinEntry = "", pinFirst = "";
    stored PIN of your own always wins over this default. */
 const DEFAULT_PIN_HASH = "83d91cc9aca3a66b17135509b9b8147c1a60b30db5e03e829f0dc88d9b14d956";
 try { if (!localStorage.getItem("streambox_pin")) localStorage.setItem("streambox_pin", DEFAULT_PIN_HASH); } catch(e){}
+let pinOpener = null;
 function openPin(mode, keepFirst){
   pinMode = mode; pinEntry = ""; if (!keepFirst) pinFirst = "";
+  if (document.getElementById("pinPad").classList.contains("hidden")) pinOpener = document.activeElement;
   document.getElementById("pinTitle").textContent = mode === "set" ? "Set a 6-digit PIN" : mode === "confirm" ? "Repeat the PIN" : "Enter PIN";
   document.getElementById("pinMsg").textContent = mode === "set" ? "Adults only — kids stay locked out." : "6 digits • Back cancels";
   const keys = document.getElementById("pinKeys");
@@ -3047,6 +3147,8 @@ function pinCancel(){ pinClose(); }
 function pinClose(){
   document.getElementById("pinPad").classList.add("hidden");
   if (!topPopup()) document.body.classList.remove("modal-open");
+  // closing the pad used to strand focus on a dead digit button -> body
+  if (pinOpener && pinOpener.tagName !== "IFRAME" && pinOpener.focus) { try { pinOpener.focus({ preventScroll: true }); } catch(e){} }
 }
 function paintAdultLock(){
   const lbl = document.getElementById("adultLockLabel");
@@ -3512,6 +3614,7 @@ async function openDetail(type, id){
     updateModalSeasonLabel();
     await loadModalEpisodes();
   } else sWrap.classList.add("hidden");
+  if (my !== detailReq) return; // user backed out (or opened another title) during the load - never pop a stale modal
   document.getElementById("modal").classList.remove("hidden");
   document.body.classList.add("modal-open");
   // Netflix-style: land focus on the primary action so remotes work instantly
@@ -3564,6 +3667,7 @@ function updateModalEpLabel(){
         <p class="text-[10px] text-gray-500 line-clamp-2 mt-1">${escapeHtml(String(e.overview || "").slice(0, 100))}</p>
       </div>`;
     if (!un) card.onclick = () => { modalEpIdx = i; updateModalEpLabel(); playModalEp(); };
+    else card.disabled = true; // unaired: visible info, but never a focusable dead button
     wrap.appendChild(card);
   });
 }
@@ -3638,6 +3742,8 @@ async function openWatch(type, id, s=1, e=1, t=0){
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
   try { saveWatchSession(); } catch(e){} // tab-switch survival: the player comes back
   window._autoHopped = false; // one self-heal per title, never one per app session
+  window._healthHopped = false; // ...and one health hop per title
+  window._boltPanels = {}; // panel cache is per-episode: never let it grow all session
   window._anipmRetryKey = ""; window._anipmRetryCount = 0; window._anipmStartAt = 0; window._anipmGestureBlocked = false;
   window._boltRetryKey = ""; window._boltRetryCount = 0; window._boltStartAt = 0;
   window._lastLoadAt = Date.now(); // boot settling window: provider echoes in the first 8s are noise
@@ -3729,7 +3835,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
   try {
     document.getElementById("wAudio").textContent = (window._anipmTracks && safeLabel(window._anipmTracks.lang, ""))
       ? (safeLabel(window._anipmTracks.lang, "").toUpperCase() + " track") : "Default";
-    document.getElementById("wQual").textContent = (QLEVELS[qIdx] || {}).l || "Auto";
+    document.getElementById("wQual").textContent = qualityChipLabel();
     document.getElementById("wEngine").textContent = ((MIRRORS.find(x => x.id === mirror) || {}).name || mirror) + " \u{00B7} "
       + (document.getElementById("player").hasAttribute("sandbox") ? "Sandboxed" : "Raw");
   } catch(e){}
@@ -3828,7 +3934,9 @@ async function loadEpisodes(s){
     return;
   }
   if (my !== window._epReq) return; // stale season response never repaints the grid
-  const grid = document.getElementById("epGrid"); grid.innerHTML = "";
+  const grid = document.getElementById("epGrid");
+  const gridHadFocus = !!(grid && grid.contains(document.activeElement)); // a repaint destroys the focused episode
+  grid.innerHTML = "";
   window._seasonArc = seasonDisplayName(d, seasonArc(titleOf(currentItem || {}), d.overview || "", sv));
   updateSeasonLabel();
   // finale flags for this season: last aired ep gets \u{1F3C1} (series \u{1F451} when this
@@ -3870,6 +3978,7 @@ async function loadEpisodes(s){
     grid.appendChild(b);
   });
   window._watchEps = { s: sv, eps: d.episodes || [] }; // Next-Ep guard consults this
+  refocusAfterRerender(grid, gridHadFocus);
   if (mirror === "vidrift" && sv === watchState.s) vidriftNextup(d.episodes || []); // our list steers their Up Next
   const box = document.getElementById("upNext");
   if (sv === watchState.s) paintUpNext(d.episodes || []);
@@ -4187,12 +4296,35 @@ function streamHas4k(){
   } catch(e){}
   return false;
 }
+function anipmActualQ(){
+  // AniPM reports the ACTIVE rendition on qualitychange - verified output,
+  // unlike availability probes
+  try {
+    const q = (window._anipmTracks || {}).quality;
+    if (q == null) return "";
+    if (typeof q === "number") return q >= 2160 ? "4K" : (q > 0 ? q + "p" : "");
+    const s = String(q);
+    if (/4k|2160/i.test(s)) return "4K";
+    const m = /(\d{3,4})/.exec(s);
+    return m ? m[1] + "p" : (/auto/i.test(s) ? "Auto" : "");
+  } catch(e){ return ""; }
+}
+function qualityChipLabel(){
+  // honest chip: the VERIFIED active rendition when the player reports one
+  // (VidBolt selected row, AniPM qualitychange) - never a bare "4K" from
+  // availability alone: Auto over a 4K-capable stream says what it knows
+  const actual = (typeof mirror !== "undefined" && mirror === "vidbolt" && window._boltActualQ)
+    ? window._boltActualQ
+    : (typeof mirror !== "undefined" && mirror === "anipm" ? anipmActualQ() : "");
+  if (actual) return actual;
+  if (QLEVELS[qIdx].v === "" && streamHas4k()) return "Auto \u{00B7} 4K avail";
+  return QLEVELS[qIdx].l;
+}
 function paintQuality(){
   // honest chip (0.91): on VidBolt show the quality its player actually
   // SELECTED (its panel rows carry selected flags) - the chip used to show
   // the REQUESTED level, so users saw "1080p" over a 480p picture
-  let t = (QLEVELS[qIdx].v === "" && streamHas4k()) ? "4K" : QLEVELS[qIdx].l;
-  if (mirror === "vidbolt" && window._boltActualQ) t = window._boltActualQ;
+  let t = qualityChipLabel();
   ["srvQLabel", "ctlQ"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = t;
@@ -4350,7 +4482,11 @@ function qDropAuto(){
     // kept struggling on the old rung) and TELL the viewer - session only,
     // their chosen quality returns on the next load (house rule)
     try {
-      if (mirror === "vidbolt") boltMobileOption("quality", nxt === "" ? "auto" : nxt);
+      if (mirror === "vidbolt") {
+        const resolved = boltQualityValue(nxt === "" ? "auto" : nxt);
+        if (resolved != null) boltMobileOption("quality", resolved); // echo their own value
+        else boltMobileOption("quality", nxt === "" ? "auto" : nxt);  // no panel data yet
+      }
     } catch(e){}
     try {
       toast("Playback is struggling - quality lightened to " + QLEVELS[qIdx].l + " for smoothness. Tap Quality to restore.");
@@ -4374,9 +4510,18 @@ function buildEmbedUrlClean(){
   let p = `autoplay=${document.getElementById("optAutoplay").checked}&autonext=${document.getElementById("optAutonext").checked}&autoskip=${document.getElementById("optAutoskip").checked}&color=${color}`;
   if (QLEVELS[qIdx].v) p += `&quality=${QLEVELS[qIdx].v}`;
   p += `&controls=${pControls ? "true" : "false"}`;
-  if (resumeAt >= 0) { p += `&t=${resumeAt}&continueprompt=false`; resumeAt = -1; watchState.t = 0; }
-  else if ((watchState.t || 0) > 0) {
-    p += `&t=${Math.floor(watchState.t)}`;
+  const stashT = watchState.t || 0;
+  if (resumeAt >= 0) {
+    // the rescue stash (watchState.t) outranks a zeroed carrier: after a
+    // mid-play rescue parked the position and a hop through an opaque mirror
+    // dropped it, reloadKeepPos resumed at 0:00 and WIPED the stash here.
+    // Take whichever carrier actually holds the bigger position.
+    const t = Math.max(resumeAt, stashT);
+    if (t > 0) p += `&t=${Math.floor(t)}`;
+    p += `&continueprompt=false`;
+    resumeAt = -1; watchState.t = 0;
+  } else if (stashT > 0) {
+    p += `&t=${Math.floor(stashT)}`;
     // TV remotes can't reach the player's own Continue/Restart prompt
     // (it lives inside the frame), so TV resumes straight in — desktop
     // and phone keep the prompt, their pointers can tap it.
@@ -4474,6 +4619,14 @@ function guardMirrorHealth(){
         "vidbolt", "vidzen", "vidapi", "vidcore", "vidlink", "vidfast", "autoembed", "twoembed", "vidsrcto", "vsembed"];
       const pick = order.find(x => x && x !== mirror && mirrorAllowed(x) && !mirrorLooksDown(x));
       if (pick) {
+        // one HEALTH hop per title (separate from the stall-heal budget but
+        // still bounded): a health-hop chain used to bounce load to load
+        if (window._healthHopped) {
+          const spn0 = document.getElementById("serverPillName");
+          if (spn0) spn0.textContent = stuckFallbackName(mirror) + " \u{00B7} Down (server error)";
+          return;
+        }
+        window._healthHopped = true;
         toast(stuckFallbackName(mirror) + " is having server trouble right now (502/down) - moved you to " + stuckFallbackName(pick) + ".");
         mirror = pick;
         updateMirrorUI();
@@ -4722,6 +4875,7 @@ function loadPlayer(){
   clearTimeout(window._anipmKickT);
   clearTimeout(window._anipmRetryT); window._anipmRetryT = 0;
   clearTimeout(window._boltRetryT); window._boltRetryT = 0;
+  clearTimeout(window._vrResumeT); // a stale VidRift resume must not seek the fresh frame
   window._boltProgress = false;
   clearTapHint(); // fresh video, fresh tap verdict
   if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
@@ -4811,7 +4965,8 @@ function loadPlayer(){
       // anime never belongs on the generic fallback — it lives on AniPM
       const fb = stuckFallback(watchState.anime ? "anipm" : isKDrama() ? "cinesrc" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
       const nm = stuckFallbackName(fb);
-      if (!autoSwitchOn()) { stuckRecommend("CineSrc stayed stuck", nm); return; }
+      if (!autoSwitchOn() || window._autoHopped) { stuckRecommend("CineSrc stayed stuck", nm); return; }
+      window._autoHopped = true;
       setMirror(fb, true);
       const ws2 = document.getElementById("watchStatus");
       if (ws2) ws2.textContent = `CineSrc stayed stuck — moved you to ${nm}. \u{21C4} Source anytime to go back.`;
@@ -4828,7 +4983,8 @@ function loadPlayer(){
     const _rt = Math.floor(resumeAt >= 0 ? resumeAt : (watchState.t || 0));
     resumeAt = -1; watchState.t = 0;
     if (_rt > 0) {
-      setTimeout(() => vidriftSend({ type: "vidrift:resume", currentTime: _rt }), 1500);
+      clearTimeout(window._vrResumeT);
+      window._vrResumeT = setTimeout(() => vidriftSend({ type: "vidrift:resume", currentTime: _rt }), 1500);
     }
     vidriftQuality(); // pin the saved rendition (best effort, pre-ready safe)
     armStuckWatchdogs(); // stage 3 lives here (TV anime only)
@@ -4961,6 +5117,7 @@ function goHome(ev){
   clearTimeout(window._qT); clearTimeout(window._playKickT); clearTimeout(window._boltRetryT);
   clearTimeout(window._anipmRetryT); clearTimeout(window._anipmKickT); clearTimeout(window._anipmHelloTo);
   clearTimeout(window._tapT); clearTimeout(window._tapMsgT); clearTimeout(window._anipmTapHintT);
+  clearTimeout(window._vrResumeT);
   resumeAt = -1; window._cmdQ = []; window._qSeekD = 0; window._cinePlaying = false; window._stuckShown = false;
   try { document.getElementById("healthBar").classList.add("hidden"); } catch(e){}
   exitVideoFs();
@@ -4974,6 +5131,11 @@ function goHome(ev){
   document.getElementById("player").src = "";
   syncMobileNav();
   showRows();
+  // Back out of the player dropped focus on <body> (the focused button was in
+  // the now-hidden watchView) - TV users got a dead remote until they moved
+  try {
+    if (document.body.classList.contains("tv-mode") || window._kbNav) navEscapeFocus();
+  } catch(e){}
 }
 
 /* ---------- Toast popup (every native alert() died for this) ----------
@@ -5120,10 +5282,15 @@ function paintContinueRow(row, grid, scope, active){
 }
 function removeContinue(type,id){
   try {
+    const scope = (document.activeElement && document.activeElement.closest)
+      ? (document.activeElement.closest("#continueRow") || document.activeElement.closest("#gridContinue") || document.getElementById("continueRow"))
+      : document.getElementById("continueRow");
+    const inside = !!(scope && scope.contains(document.activeElement));
     let arr = JSON.parse(localStorage.getItem("streambox_continue")||"[]");
     arr = arr.filter(x=>!(x.type===type&&x.id===id));
     localStorage.setItem("streambox_continue", JSON.stringify(arr));
     renderContinue();
+    refocusAfterRerender(scope, inside);
   } catch(e){ // corrupted store must never kill the remove button
     try { localStorage.removeItem("streambox_continue"); renderContinue(); } catch(e2){}
   }
@@ -5160,8 +5327,11 @@ function addToList(){
   } catch(e){}
 }
 function removeFromList(type, id){
+  const grid = document.getElementById("listGrid");
+  const inside = !!(grid && grid.contains(document.activeElement));
   saveList(getList().filter(x => !(x.type === type && x.id === id)));
   renderList();
+  refocusAfterRerender(grid, inside);
   toast("Removed from My List");
 }
 function showList(ev){
@@ -5627,7 +5797,8 @@ async function openEpisodes(){
   drawerS = watchState.s; // drawer opens on the playing season; browsing never plays
   updateDrawerSeasonLabel();
   await renderEpDrawer();
-  setTimeout(() => safeFocus(document.querySelector("#epDrawer button")), 60);
+  // land on the first EPISODE, not the spoiler toggle / close button
+  setTimeout(() => safeFocus(document.querySelector("#epDrawerList button") || document.getElementById("spoilerBtn") || document.querySelector("#epDrawer button")), 60);
 }
 function closePanels(){
   document.getElementById("setPanel").classList.add("hidden");
@@ -5635,13 +5806,7 @@ function closePanels(){
   document.getElementById("avSheet").classList.add("hidden");
   document.getElementById("vrSheet").classList.add("hidden");
   window._vrPanel = null; // dismissed with no pick: player keeps its previous value
-  if (document.getElementById("modal").classList.contains("hidden")
-      && document.getElementById("searchPanel").classList.contains("hidden")
-      && document.getElementById("avSheet").classList.contains("hidden")
-      && document.getElementById("vrSheet").classList.contains("hidden")
-      && document.getElementById("resumeDlg").classList.contains("hidden")
-      && document.getElementById("tvGuide").classList.contains("hidden"))
-    document.body.classList.remove("modal-open");
+  if (!topPopup()) document.body.classList.remove("modal-open");
   if (panelOpener && panelOpener.tagName !== "IFRAME" && panelOpener.focus) { try { panelOpener.focus({ preventScroll: true }); } catch(e){} }
   else restoreFocus(null);
 }
@@ -6201,6 +6366,10 @@ function setMirror(m, auto){  if (m === "trailer" && !trailerKey) {
     document.getElementById("watchStatus").textContent = "No trailer found for this title.";
     return;
   }
+  // tapping the ACTIVE pill must not reload the frame: every mirror but
+  // CineSrc restarted at 0:00 (their URL builders already spent the one-shot
+  // resume carriers on the first load)
+  if (m === mirror && !auto) return;
   const wasTrailer = mirror === "trailer";
   mirror = m;
   if (m === "anipm" && !auto) { window._anipmRetryKey = ""; window._anipmRetryCount = 0; window._anipmGestureBlocked = false; }
@@ -7324,6 +7493,7 @@ function drawerSeasonStep(dir){
 async function renderEpDrawer(){
   const list = document.getElementById("epDrawerList");
   if (!list) return;
+  const listHadFocus = list.contains(document.activeElement); // a repaint destroys the focused card
   const q = (document.getElementById("epFilter").value || "").trim().toLowerCase();
   list.innerHTML = `<p class="text-sm text-gray-500">Loading…</p>`;
   const my = window._epDrawerReq = (window._epDrawerReq || 0) + 1;
@@ -7431,12 +7601,18 @@ async function renderEpDrawer(){
       if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e}`;
     });
     card.onclick = () => {
-      if (hidden) { drawerRevealed.add(ep.episode_number); renderEpDrawer(); }
+      if (hidden) { drawerRevealed.add(ep.episode_number); window._epDrawerRefocus = ep.episode_number; renderEpDrawer(); }
       else play();
     };
-    card.onkeydown = (ev) => { if (okPressed(ev)) { ev.preventDefault(); card.onclick(); } };
+    card.onkeydown = (ev) => { if (ev.target !== card) return; if (okPressed(ev)) { ev.preventDefault(); card.onclick(); } };
+    card.setAttribute("data-ep", String(ep.episode_number));
     list.appendChild(card);
   });
+  // the repaint above (and the Loading state at the top) destroyed whatever
+  // was focused - re-seat the SAME logical item (the just-revealed episode)
+  const wantEp = window._epDrawerRefocus || 0;
+  window._epDrawerRefocus = 0;
+  refocusAfterRerender(list, listHadFocus, wantEp ? ('[data-ep="' + wantEp + '"]') : null);
 }
 
 /* ---------- CineSrc player events (per docs) ---------- */
@@ -7758,9 +7934,9 @@ function openVrSheet(panel, options, current, reply){
   try { panelOpener = document.activeElement; } catch(e){}
   document.getElementById("vrSheet").classList.remove("hidden");
   document.body.classList.add("modal-open");
-  // TV landing: focus the first pill so arrows start somewhere sane
-  // (sheet is phone-born, but the sheet itself stays remote-walkable)
-  const btn = document.querySelector("#vrSheet button");
+  // TV landing: focus the first OPTION pill (never the close button - a fresh
+  // remote press should have something to do, not sit on the X)
+  const btn = document.querySelector("#vrBody button") || [...document.querySelectorAll("#vrSheet button")].find(b => !b.getAttribute("aria-label"));
   if (btn && document.body.classList.contains("tv-mode")) { try { btn.focus({ preventScroll: true }); } catch(e){} }
 }
 /* ---------- VidZen: direct drive (v2.3 PostMessage controller, shapes
@@ -7820,9 +7996,11 @@ window.addEventListener("message", (event)=>{
   if (d.type === "vidrift:nextup-play") {
     // their countdown/Next fired under OUR nextup-info — OUR advance decides
     // the video (season-end roll + unaired guard), never raw provider numbers.
-    // Grace-gated like native: a nextup inside the 8s settling window is noise.
+    // Grace-gated + one-advance latch: a late duplicate nextup/ended pair
+    // (past the 8s grace) used to double-advance and skip an episode.
     closeVrSheet(); // phone panel options belong to the finished episode
-    if (pastSyncGrace()) advanceEpisode();
+    if (window._endedHandled) return;
+    if (pastSyncGrace()) { window._endedHandled = true; advanceEpisode(); }
   }
   if (d.type === "vidrift:mobile-panel") {
     // phone sheet delegation (?mobileSheets=true): render their panel in
@@ -7993,6 +8171,24 @@ function boltMobileOption(option, value){
   if (mirror !== "vidbolt") return;
   boltSend({ type: "mobile-option", option, value });
 }
+function boltQualityValue(target){
+  // Quality values are HLS level indices ("-1" = Auto) - echoed back
+  // VERBATIM, never invented. Resolve a requested height ("1080") to the
+  // player's own row value from its cached panel; returns null when no panel
+  // data exists yet (caller keeps the legacy height-string fallback).
+  try {
+    const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
+    const opts = (((window._boltPanels || {})[bk]) || []).filter(o => o && String(o.option) === "quality");
+    if (!opts.length) return null;
+    const t = (target == null || target === "" || target === "auto") ? "auto" : String(target);
+    if (t === "auto") {
+      const auto = opts.find(o => /auto/i.test(String(o.label != null ? o.label : o.value)) || String(o.value) === "-1");
+      return auto ? auto.value : opts[0].value;
+    }
+    const byLabel = opts.find(o => new RegExp("(^|\\D)" + t + "(\\D|$)").test(String(o.label != null ? o.label : "")));
+    return byLabel ? byLabel.value : null;
+  } catch(e){ return null; }
+}
 window.addEventListener("message", (event)=>{
   if (event.origin !== BOLT_ORIGIN) return;
   if (mirror !== "vidbolt") return; // stale frame from a switched-away mirror
@@ -8013,8 +8209,11 @@ window.addEventListener("message", (event)=>{
         try {
           const sel = d.options.find(o => o && String(o.option) === "quality" && (o.selected === true || o.selected === "true"));
           if (sel) {
-            const qm = /(\d{3,4})/.exec(String(sel.value != null ? sel.value : sel.label || ""));
-            window._boltActualQ = qm ? qm[1] + "p" : String(sel.value != null ? sel.value : "");
+            // LABEL first: values are HLS level indices ("2"/"-1") and must
+            // never surface as the chip ("2p" used to render)
+            const src = String(sel.label != null && sel.label !== "" ? sel.label : (sel.value != null ? sel.value : ""));
+            const qm = /(\d{3,4})/.exec(src);
+            window._boltActualQ = /4k|2160/i.test(src) ? "4K" : (qm ? qm[1] + "p" : (/auto/i.test(src) ? "Auto" : ""));
             if (window._boltActualQ) paintQuality();
           }
         } catch(e){}
@@ -8037,8 +8236,14 @@ window.addEventListener("message", (event)=>{
     // repaints the chip honestly via the mobile-panel handler above.
     try {
       const qv = QLEVELS[qIdx].v;
-      if (qv) boltMobileOption("quality", qv);
-      else window._boltActualQ = ""; // Auto: trust their pick, label it as it lands
+      if (qv) {
+        // contract-correct: echo the player's OWN quality value (HLS level
+        // index) for the requested height; only when no panel data has
+        // arrived yet fall back to the height string (their player accepts
+        // it as a rendition request)
+        const resolved = boltQualityValue(qv);
+        boltMobileOption("quality", resolved != null ? resolved : qv);
+      } else window._boltActualQ = ""; // Auto: trust their pick, label it as it lands
     } catch(e){}
     if (document.body.classList.contains("tv-mode")) {
       boltSend({ type: "play" });
@@ -8370,6 +8575,7 @@ async function loadVidboltAnime(){
   // VidBolt anime: AniList ID preferred, MAL fallback, absolute episode —
   // same cached year-aware mapping as AniPM, 15s cap, manual-aware fallback
   const id = watchState.id;
+  const seq = window._boltLoadSeq = (window._boltLoadSeq || 0) + 1; // load token: a slower second call must never land its stale frame
   const f = document.getElementById("player");
   const spin = document.getElementById("playerSpin");
   const ws = document.getElementById("watchStatus");
@@ -8377,6 +8583,11 @@ async function loadVidboltAnime(){
   // reroute before any mapping work, auto-mode so no saved pref is rewritten
   const bad = animeBadCatalog(titleOf(currentItem || {}), "vidbolt");
   if (bad) {
+    // deterministic reroute, but it still takes the one-hop heal budget:
+    // without it VidBolt's fault route and AniPM's no-match route ping-pong
+    // each other forever on the same title
+    if (!autoSwitchOn() || window._autoHopped) { stuckRecommend("VidBolt serves the wrong show here", stuckFallbackName(bad.instead || "anipm")); return; }
+    window._autoHopped = true;
     if (ws) ws.textContent = "VidBolt serves the wrong show for this title — moved you to AniPM";
     setMirror(bad.instead || "anipm", true);
     return;
@@ -8389,14 +8600,15 @@ async function loadVidboltAnime(){
   let route = { ids: {}, abs: true };
   try { route = await withTimeout(animeRouteResolve(), 15000, "anime-map"); } catch(e){ route = { ids: {}, abs: true }; }
   const ids = route.ids || {};
-  if (watchState.id !== id || mirror !== "vidbolt") return; // user moved on
+  if (seq !== window._boltLoadSeq || watchState.id !== id || mirror !== "vidbolt") return; // user moved on / stale load
   const ep = route.abs ? Math.max(1, animeAbsEp() || 1) : Math.max(1, watchState.e || 1);
   let vu = null;
   if (ids.ani) vu = `https://vidbolt.pro/anime/${ids.ani}/${ep}`;
   else if (ids.mal) vu = `https://vidbolt.pro/anime/mal/${ids.mal}/${ep}`;
   if (!vu) {
     if (spin) spin.style.display = "none";
-    if (!autoSwitchOn()) { stuckRecommend("Couldn't match this anime", "YapGrid"); return; }
+    if (!autoSwitchOn() || window._autoHopped) { stuckRecommend("Couldn't match this anime", "YapGrid"); return; }
+    window._autoHopped = true;
     if (ws) ws.textContent = "Couldn't match this anime — moved you to YapGrid";
     setMirror("yapgrid", true);
     return;
@@ -8414,6 +8626,7 @@ async function loadVidboltAnime(){
   window._boltStartAt = Math.max(0, Math.floor(watchState.t || 0));
   if (window._boltStartAt > 0) { ap.set("startAt", String(window._boltStartAt)); watchState.t = 0; resumeAt = -1; }
   window._boltDur = 0; window._boltStarted = false; window._boltProgress = false; window._boltSeekQ = null; // fresh frame, fresh duration
+  if (seq !== window._boltLoadSeq || watchState.id !== id || mirror !== "vidbolt") return; // stale load lost the race
   f.src = vu + "?" + ap.toString() + "&_=" + Date.now();
   boltArmStartRetry(45000);
   armStuckWatchdogs(); // anime path returns early — needs its own clocks
@@ -8463,6 +8676,7 @@ function anipmArmStartRetry(delay){
 }
 async function loadAnipmPlayer(){
   const id = watchState.id;  const f = document.getElementById("player");
+  const seq = window._anipmLoadSeq = (window._anipmLoadSeq || 0) + 1; // load token: a slower second call must never land its stale frame
   const spin = document.getElementById("playerSpin");
   const ws = document.getElementById("watchStatus");
   if (spin) spin.style.display = "grid";
@@ -8475,13 +8689,14 @@ async function loadAnipmPlayer(){
   let route = { ids: {}, abs: true };
   try { route = await withTimeout(animeRouteResolve(), 15000, "anime-map"); } catch(e){ route = { ids: {}, abs: true }; }
   const ids = route.ids || {};
-  if (watchState.id !== id || mirror !== "anipm") return; // user moved on
+  if (seq !== window._anipmLoadSeq || watchState.id !== id || mirror !== "anipm") return; // user moved on / stale load
   if (!ids.mal && !ids.ani) {
     // all mapping hosts failed — don't sit black, try VidBolt's matcher next
     // (its no-match then lands on YapGrid, TMDB-direct); manual hop mode
     // just names the fallback instead of moving
     if (spin) spin.style.display = "none";
-    if (!autoSwitchOn()) { stuckRecommend("Couldn't match this anime", "VidBolt"); return; }
+    if (!autoSwitchOn() || window._autoHopped) { stuckRecommend("Couldn't match this anime", "VidBolt"); return; }
+    window._autoHopped = true;
     if (ws) ws.textContent = "Couldn't match this anime — moved you to VidBolt";
     setMirror("vidbolt", true);
     return;
@@ -8508,6 +8723,7 @@ async function loadAnipmPlayer(){
   _anipmLive = false; _anipmHelloT = 0; _anipmQueue.length = 0;
   window._anipmStarted = false;
   clearTimeout(window._anipmKickT);
+  if (seq !== window._anipmLoadSeq || watchState.id !== id || mirror !== "anipm") return; // stale load lost the race
   f.src = as ? `${base}?${as}` : base;
   anipmArmStartRetry(document.body.classList.contains("tv-mode") ? 45000 : 25000);
   armTapHint(); // browsers may need a real in-player gesture; never silently wait
@@ -8700,7 +8916,8 @@ function openAV(){
   document.body.classList.add("modal-open");
   paintAV(); // after unhide — it guards on visibility
   // TV landing: focus the active audio pill so arrows start somewhere sane
-  const first = document.querySelector("#avSheet button");
+  // (never the close button - the first #avSheet button)
+  const first = document.querySelector("#avAudio button, #avSubs button, #avServers button, #avQuality button, #avStyle button");
   if (first && document.body.classList.contains("tv-mode")) { try { first.focus({ preventScroll: true }); } catch(e){} }
 }
 function paintAVServers(){
@@ -9113,9 +9330,9 @@ const PARTY = (() => {
   };
   const S = {
     ws: null, want: true, status: "idle", // idle | connecting | in-room | reconnecting
-    room: null, selfId: "", token: "", name: "",
+    room: null, selfId: "", token: "", name: "", pw: "",
     lastSeq: 0, offset: 0, rtt: 0,
-    reconnects: 0, nextRetry: 0, bestRtt: null, lastDrift: 0,
+    reconnects: 0, nextRetry: 0, bestRtt: null, lastDrift: 0, rttMiss: 0,
     suppressUntil: 0, lastContentKey: "", lastCorrect: 0,
     chat: [], unread: 0, panelOpen: false,
     hbT: null, driftT: null,
@@ -9178,8 +9395,11 @@ const PARTY = (() => {
       S.reconnects = 0;
       send({ t: "hello", name: displayName() });
       if (S.room) {
-        // rejoin with the resume token: same seat, same host role if host
-        send({ t: "join", name: displayName(), code: S.room.code, token: S.token, password: S.room._pw || "" });
+        // rejoin with the resume token: same seat, same host role if host.
+        // S.pw is the password the USER typed - the server snapshot never
+        // echoes it back (S.room._pw was dead plumbing and password rooms
+        // locked their own owner out on the second reconnect)
+        send({ t: "join", name: displayName(), code: S.room.code, token: S.token, password: S.pw || "" });
       } else if (S.pending) {
         // a create/join parked while the handshake was slow
         const p = S.pending; S.pending = null; send(p);
@@ -9194,16 +9414,20 @@ const PARTY = (() => {
       try { handle(m); } catch(err){}
     };
     ws.onclose = () => {
+      if (S.ws !== ws) return; // a stale close must never kill a newer socket's heartbeat
       clearInterval(S.hbT);
-      if (S.ws === ws) S.ws = null;
-      if (S.room && S.want) { S.status = "reconnecting"; retry(); }
+      S.ws = null;
+      if (S.want && (S.room || S.pending)) { S.status = "reconnecting"; retry(); }
       else S.status = S.room ? "reconnecting" : "idle";
       paint();
     };
     ws.onerror = () => {};
   }
   function retry(){
-    if (!S.want || !S.room) return;
+    // retry while there is something to resume: a live room OR a create/join
+    // still parked from before the handshake (the first connection dropping
+    // mid-handshake used to strand the click with no retry at all)
+    if (!S.want || (!S.room && !S.pending)) return;
     S.reconnects += 1;
     // exponential backoff with jitter: 0.5s -> 15s cap
     const base = Math.min(15000, 500 * Math.pow(1.8, Math.min(S.reconnects, 8)));
@@ -9224,13 +9448,17 @@ const PARTY = (() => {
   function handle(m){
     switch (m.t) {
       case "welcome":
-        S.selfId = m.participantId || S.selfId;
-        S.token = m.token || S.token;
+        // welcome carries the per-CONNECTION identity - never overwrite a
+        // stored resume identity with it (that rotation broke every second
+        // reconnect); the `room` response is the authority on identity
+        if (!S.selfId) S.selfId = m.participantId || S.selfId;
+        if (!S.token) S.token = m.token || S.token;
         return;
       case "heartbeat": {
         // NTP-lite: one server stamp, symmetric-latency assumption (documented)
         const t1 = Date.now();
-        const t0 = m.clientTs || t1;
+        if (!m.clientTs) return; // synthetic echo (clientTs 0/absent) is not a clock sample
+        const t0 = m.clientTs;
         const off = (m.serverTs || t1) - (t0 + t1) / 2;
         // the lowest-RTT samples anchor the clock (asymmetric routes skew a
         // single stamp); the rest smooth toward it - keeps the expected
@@ -9239,12 +9467,22 @@ const PARTY = (() => {
         S.rtt = rtt;
         if (S.bestRtt == null || rtt <= S.bestRtt + 25) {
           S.bestRtt = S.bestRtt == null ? rtt : Math.min(rtt, S.bestRtt);
+          S.rttMiss = 0;
           S.offset = S.offset === 0 ? off : Math.round(S.offset * 0.6 + off * 0.4);
+        } else {
+          // the anchor window must AGE: after a network change (Wi-Fi ->
+          // cellular) every real sample sits outside the old bestRtt + 25
+          // window and the offset froze forever. Five rejected samples in a
+          // row = the network changed - re-anchor on fresh ground.
+          S.rttMiss = (S.rttMiss || 0) + 1;
+          if (S.rttMiss >= 5) { S.bestRtt = rtt; S.rttMiss = 0; S.offset = Math.round(S.offset * 0.6 + off * 0.4); }
         }
         return;
       }
       case "room": {
         S.room = m.room;
+        // the room response is the identity authority (it returns the SEAT
+        // token - stable across reconnects, unlike the per-connection one)
         S.token = m.token || S.token;
         S.selfId = (m.room && m.room.selfId) || S.selfId;
         S.status = "in-room";
@@ -9252,10 +9490,10 @@ const PARTY = (() => {
         S.lastContentKey = contentKeyOf(m.room.content);
         S.chat = (m.room.chat || []).slice();
         S.unread = 0;
-        try { sessionStorage.setItem("sb_party", JSON.stringify({ code: m.room.code, roomId: m.room.roomId, token: S.token, name: displayName(), pw: (m.room && m.room._pw) || "" })); } catch(e){}
+        try { sessionStorage.setItem("sb_party", JSON.stringify({ code: m.room.code, roomId: m.room.roomId, token: S.token, name: displayName(), pw: S.pw || "" })); } catch(e){}
         if (m.room.content) applyContent(m.room.content, true);
         paint();
-        toast("Joined Watch Party \u{2713}");
+        if (!m.reattached) toast("Joined Watch Party \u{2713}"); // reconnects are silent - no toast spam
         return;
       }
       case "room_state": {
@@ -9263,7 +9501,12 @@ const PARTY = (() => {
         S.room.playback = m.room.playback;
         S.room.participants = m.room.participants;
         S.room.content = m.room.content;
-        S.room.chat = m.room.chat || S.chat;
+        // resync is authoritative: it carries the missed chat AND the newest
+        // seq - adopt both (the old code wrote chat into a dead field and
+        // left lastSeq stale, opening a rollback window for replayed events)
+        S.chat = (m.room.chat || S.chat).slice();
+        S.lastSeq = (m.room.playback && m.room.playback.seq) || S.lastSeq;
+        S.room.chat = S.chat;
         paint();
         return;
       }
@@ -9329,6 +9572,10 @@ const PARTY = (() => {
         }
         return;
       case "kicked":
+        // `kicked` is personal: only the named target tears down. (Older
+        // servers broadcast it to the whole room - one kick used to evict
+        // everyone from their own UI.)
+        if (m.targetId && m.targetId !== S.selfId) return;
         teardownRoom();
         paint();
         toast("You were removed from the party");
@@ -9339,10 +9586,13 @@ const PARTY = (() => {
         toast("The Watch Party ended");
         return;
       case "notice":
-        if (m.notice === "stale_playback") return; // silently ignored by design
+        if (m.notice === "stale_playback") {
+          sysMsg("That action was for the previous episode - ignored");
+          return;
+        }
         if (m.notice === "rejoin" && S.room) {
           // seat expired while we were away: reattach by resume token
-          send({ t: "join", name: displayName(), code: S.room.code, token: S.token, password: S.room._pw || "" });
+          send({ t: "join", name: displayName(), code: S.room.code, token: S.token, password: S.pw || "" });
           return;
         }
         if (m.notice === "room_gone") {
@@ -9362,6 +9612,8 @@ const PARTY = (() => {
           conflict: "Already in a room - leave it first.",
           closed: "That room is closed.",
           bad_message: "Message not understood.",
+          not_in_room: "You're not in the room anymore.",
+          room_limit: "Too many rooms right now - try again in a few minutes.",
         };
         if (m.for === "join") {
           if (m.error === "wrong_password") showJoinPw(true);
@@ -9518,6 +9770,10 @@ const PARTY = (() => {
     const nowS = serverNow();
     if ((pb.updatedAt || 0) > nowS) return; // scheduled start: hold the gate
     if (typeof pState !== "undefined" && pState.seeking) return;
+    // a LOCAL pause on a bridge with no pause API is a deliberate user action
+    // (the player itself is the only pause control) - correcting drift there
+    // would force-resume them every few seconds. Never yank a paused viewer.
+    if (a.paused() && a.cap === "partial") return;
     const drift = a.pos() - expectedPos();
     S.lastDrift = Math.round(drift * 1000);
     const mag = Math.abs(drift);
@@ -9547,10 +9803,11 @@ const PARTY = (() => {
   function create(){
     S.name = displayName();
     S.want = true;
+    S.pw = document.getElementById("partyRoomPw").value || "";
     connect();
     sendOrPark({ t: "create", name: S.name,
       roomName: (document.getElementById("partyRoomName").value || "").slice(0, 40),
-      password: document.getElementById("partyRoomPw").value || "",
+      password: S.pw,
       maxParticipants: 8,
       allowControl: document.getElementById("partyCtlAll").checked,
       chatEnabled: document.getElementById("partyChatOn").checked });
@@ -9561,6 +9818,7 @@ const PARTY = (() => {
     connect();
     const c = (code || document.getElementById("partyCode").value || "").trim().toUpperCase();
     const pw = password != null ? password : (document.getElementById("partyJoinPw").value || "");
+    S.pw = pw;
     sendOrPark({ t: "join", name: S.name, code: c, password: pw, token: S.token });
   }
   function leave(){
@@ -9584,6 +9842,7 @@ const PARTY = (() => {
     S.chat = [];
     S.unread = 0;
     S.lastContentKey = "";
+    S.pw = ""; // the room password dies with the room
   }
 
   /* ---- UI ---- */
@@ -9624,7 +9883,7 @@ const PARTY = (() => {
       el("partyNotice").textContent = a.cap === "coordinated"
         ? "This source can't be driven remotely - you'll see room updates and episode changes here. Play/pause/seek stay manual; Resync shows where the party is."
         : a.cap === "partial"
-          ? "Partial sync on this source: seeks and play follow the party, but pausing must be done in the player itself."
+          ? "Partial sync on this source: seeks follow the party, but play/pause must be done in the player itself."
           : "";
       paintPeople();
       paintChat(null);
@@ -9726,12 +9985,7 @@ const PARTY = (() => {
   function closePanel(){
     S.panelOpen = false;
     el("partyPanel").classList.add("hidden");
-    if (document.getElementById("modal").classList.contains("hidden")
-        && document.getElementById("searchPanel").classList.contains("hidden")
-        && document.getElementById("tvGuide").classList.contains("hidden")
-        && document.getElementById("resumeDlg").classList.contains("hidden")) {
-      document.body.classList.remove("modal-open");
-    }
+    if (!topPopup()) document.body.classList.remove("modal-open");
     // focus back to the party button if it is on screen
     const b = el("wPartyBtn") || el("mPartyBtn");
     if (b && !b.closest(".hidden")) { try { b.focus({ preventScroll: true }); } catch(e){} }
@@ -9758,8 +10012,9 @@ const PARTY = (() => {
         if (s && s.code) {
           S.token = s.token || "";
           S.name = s.name || S.name;
+          S.pw = s.pw || "";
           connect();
-          sendOrPark({ t: "join", name: displayName(), code: s.code, token: S.token, password: s.pw || "" });
+          sendOrPark({ t: "join", name: displayName(), code: s.code, token: S.token, password: S.pw || "" });
         }
       }
     } catch(e){}
@@ -9826,27 +10081,26 @@ const PARTY = (() => {
 
 /* inline-handler surface (kept tiny and QA-visible) */
 /* inline-handler surface (kept tiny and QA-visible) */
+let aboutOpener = null;
 function aboutOpen(){
   try {
+    aboutOpener = document.activeElement;
     document.getElementById("aboutVer").textContent = "build " + BUILD_NUM;
     document.getElementById("aboutStatus").textContent = "";
     const b = document.getElementById("aboutCheckBtn");
     if (b) { b.disabled = false; b.textContent = "Check for Updates"; b.onclick = () => aboutCheckUpdate(); }
     document.getElementById("aboutPanel").classList.remove("hidden");
     document.body.classList.add("modal-open");
-    setTimeout(() => { const c = document.querySelector("#aboutPanel button"); if (c) try { c.focus({ preventScroll: true }); } catch(e){} }, 60);
+    // land on the content button, not the close X (a fresh remote press should DO
+    // something, not sit on the close button)
+    setTimeout(() => { const c = document.getElementById("aboutCheckBtn") || document.querySelector("#aboutPanel button"); if (c) try { c.focus({ preventScroll: true }); } catch(e){} }, 60);
   } catch(e){}
 }
 function aboutClose(){
   try {
     document.getElementById("aboutPanel").classList.add("hidden");
-    if (document.getElementById("modal").classList.contains("hidden")
-        && document.getElementById("searchPanel").classList.contains("hidden")
-        && document.getElementById("partyPanel").classList.contains("hidden")
-        && document.getElementById("tvGuide").classList.contains("hidden")
-        && document.getElementById("resumeDlg").classList.contains("hidden")) {
-      document.body.classList.remove("modal-open");
-    }
+    if (!topPopup()) document.body.classList.remove("modal-open");
+    if (aboutOpener && aboutOpener.tagName !== "IFRAME" && aboutOpener.focus) { try { aboutOpener.focus({ preventScroll: true }); } catch(e){} }
   } catch(e){}
 }
 async function aboutCheckUpdate(){

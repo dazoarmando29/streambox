@@ -117,7 +117,10 @@ class RoomManager {
           p.id = id; // caller adopts the original id
           if (id === room.hostId) room.hostDisconnectedAt = 0;
           room.lastActivityAt = now;
-          return { room: this.snapshot(room, id), reattached: id };
+          // the SEAT's token is the client's identity across reconnects -
+          // never the per-connection token (that would rotate on every
+          // reconnect and strand the next one on a fresh seat)
+          return { room: this.snapshot(room, id), reattached: id, token: part.token };
         }
       }
       // seat already expired (long background): a remembered seat restores
@@ -132,9 +135,19 @@ class RoomManager {
         part.name = saved.name || part.name;
         room.participants.set(saved.id, part);
         p.id = saved.id;
-        if (saved.wasHost) { room.hostId = saved.id; room.hostDisconnectedAt = 0; }
+        const events = [];
+        if (saved.wasHost) {
+          // reclaiming the host seat is a host change when someone else was
+          // promoted meanwhile - every client must hear it or their UI shows
+          // a stale host (and the returning host's controls get rejected)
+          if (room.hostId !== saved.id) {
+            events.push({ t: "host_changed", room: room.id, hostId: saved.id, hostName: part.name });
+          }
+          room.hostId = saved.id;
+          room.hostDisconnectedAt = 0;
+        }
         room.lastActivityAt = now;
-        return { room: this.snapshot(room, saved.id), reattached: saved.id };
+        return { room: this.snapshot(room, saved.id), reattached: saved.id, token, events };
       }
     }
     if (room.passwordHash && hashPassword(password || "", room.passwordSalt) !== room.passwordHash) {
@@ -144,7 +157,7 @@ class RoomManager {
     if (connectedCount >= room.maxParticipants) return { error: "full" };
     room.participants.set(p.id, this._mkParticipant(p, now, false));
     room.lastActivityAt = now;
-    return { room: this.snapshot(room, p.id), joined: p.id };
+    return { room: this.snapshot(room, p.id), joined: p.id, token: p.token };
   }
 
   leave(roomId, participantId) {
@@ -291,8 +304,12 @@ class RoomManager {
     if (!room || room.ended) return { error: "not_found" };
     if (room.hostId !== participantId) return { error: "unauthorized" };
     if (targetId === room.hostId || !room.participants.has(targetId)) return { error: "bad_message" };
-    const events = [{ t: "kicked", targetId }];
-    return { events: events.concat(this._removeParticipant(room, targetId, "kicked").events || []) };
+    // `kicked` goes ONLY to the target - the room just hears the leave.
+    // Broadcasting "kicked" to everyone used to tear down every client.
+    return {
+      events: this._removeParticipant(room, targetId, "kicked").events || [],
+      targetEvents: [{ t: "kicked", targetId }],
+    };
   }
 
   mute(roomId, participantId, targetId, muted) {

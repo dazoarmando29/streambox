@@ -16,7 +16,11 @@ function createPartyServer(opts = {}) {
   const rooms = new RoomManager(opts.ttl || {});
   const path = opts.path || "/party";
   const allowedOrigins = opts.allowedOrigins || []; // empty = same-site policy left to the proxy
-  const msgLimiters = new Map(); // participantId -> { msg, chat, sync }
+  const { RateLimiter } = require("./rooms");
+  // per-remote-address create limiter: room creation is cheap for an attacker
+  // and expensive for the server (rooms live up to 24h) - bound it like code
+  // guessing is bounded
+  const createLimiters = new RateLimiter(60 * 1000, opts.maxCreatesPerMin || 5);
 
   const server = http.createServer((req, res) => {
     if (req.url === "/healthz" || req.url === "/") {
@@ -43,17 +47,18 @@ function createPartyServer(opts = {}) {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   });
 
-  function limitersFor(participantId) {
-    let l = msgLimiters.get(participantId);
-    if (!l) {
-      l = {
-        msg: new (require("./rooms").RateLimiter)(LIMITS.MSG_WINDOW_MS, LIMITS.MSG_MAX),
-        chat: new (require("./rooms").RateLimiter)(LIMITS.CHAT_WINDOW_MS, LIMITS.CHAT_RATE_MAX),
-        sync: new (require("./rooms").RateLimiter)(LIMITS.SYNC_REPORT_MIN_MS * 3, 3),
+  // limiters live ON the connection object so they die with it: the old Map
+  // keyed by participantId leaked one entry per reattach (p.id changes) and
+  // gave every reconnect a fresh rate budget
+  function limitersFor(p) {
+    if (!p._lim) {
+      p._lim = {
+        msg: new RateLimiter(LIMITS.MSG_WINDOW_MS, LIMITS.MSG_MAX),
+        chat: new RateLimiter(LIMITS.CHAT_WINDOW_MS, LIMITS.CHAT_RATE_MAX),
+        sync: new RateLimiter(LIMITS.SYNC_REPORT_MIN_MS * 3, 3),
       };
-      msgLimiters.set(participantId, l);
     }
-    return l;
+    return p._lim;
   }
 
   function send(ws, obj) {
@@ -89,9 +94,9 @@ function createPartyServer(opts = {}) {
       if (isBinary) { send(ws, { t: "error", error: "bad_message" }); return; }
       const raw = data.toString();
       if (raw.length > LIMITS.MAX_MSG_BYTES) { send(ws, { t: "error", error: "bad_message" }); return; }
-      const lim = limitersFor(p.id);
+      const lim = limitersFor(p);
       const now = Date.now();
-      if (!lim.msg.allow(p.id, now)) { send(ws, { t: "error", error: "rate_limited" }); return; }
+      if (!lim.msg.allow("m", now)) { send(ws, { t: "error", error: "rate_limited" }); return; }
 
       const inRoom = !!p.roomId;
       const v = validateClientMsg(raw, inRoom);
@@ -104,11 +109,18 @@ function createPartyServer(opts = {}) {
       switch (m.t) {
         case "hello": {
           p.name = m.name;
-          send(ws, { t: "heartbeat", clientTs: 0, serverTs: Date.now(), participantId: p.id });
+          // no synthetic heartbeat echo here: a `clientTs: 0` reply used to
+          // poison the client's clock sync (rtt=0 pinned the anchor window
+          // shut for every real WAN sample). The client's own heartbeat on
+          // open gets a real echo - that is the clock sample.
           break;
         }
         case "create": {
           if (p.roomId) { send(ws, { t: "error", error: "conflict" }); return; }
+          if (!createLimiters.allow(remoteIp || "unknown", Date.now())) {
+            send(ws, { t: "error", error: "rate_limited", for: "create" });
+            return;
+          }
           p.name = m.name;
           const r = rooms.create(p, m);
           p.roomId = r.room.roomId;
@@ -125,7 +137,11 @@ function createPartyServer(opts = {}) {
           if (r.error) { send(ws, { t: "error", error: r.error, for: "join" }); return; }
           p.roomId = r.room.roomId;
           if (r.reattached) p.id = r.reattached;
-          send(ws, { t: "room", room: r.room, token: p.token, reattached: !!r.reattached });
+          // always hand back the SEAT token (r.token): the connection token
+          // rotates on every reconnect and must never become the client's
+          // resume identity
+          send(ws, { t: "room", room: r.room, token: r.token || p.token, reattached: !!r.reattached });
+          if (r.events && r.events.length) broadcast(r.room.roomId, r.events, p.id);
           if (!r.reattached) {
             broadcast(r.room.roomId, [{ t: "peer_joined", room: r.room.roomId, participant: r.room.participants.find((x) => x.id === p.id) }], p.id);
           }
@@ -161,7 +177,7 @@ function createPartyServer(opts = {}) {
           break;
         }
         case "chat": {
-          if (!lim.chat.allow("chat:" + p.id, Date.now())) { send(ws, { t: "error", error: "rate_limited", for: "chat" }); return; }
+          if (!lim.chat.allow("c", Date.now())) { send(ws, { t: "error", error: "rate_limited", for: "chat" }); return; }
           const r = rooms.chat(p.roomId, p.id, m.text);
           if (r.error) { send(ws, { t: "error", error: r.error, for: "chat" }); return; }
           broadcast(p.roomId, r.events || []);
@@ -173,9 +189,10 @@ function createPartyServer(opts = {}) {
           const target = room && room.participants.get(m.targetId);
           const r = rooms.kick(rid, p.id, m.targetId);
           if (r.error) { send(ws, { t: "error", error: r.error }); return; }
-          // the kicked participant hears its own removal first - it is already
-          // out of the room, so the broadcast below can no longer reach it
-          if (target && target.conn) for (const ev of r.events || []) send(target.conn, ev);
+          // `kicked` reaches ONLY the target - the room hears just the leave.
+          // (Broadcasting `kicked` to everyone used to tear down every client:
+          // each one treated any `kicked` event as its own removal.)
+          if (target && target.conn) for (const ev of r.targetEvents || []) send(target.conn, ev);
           broadcast(rid, r.events || []);
           break;
         }
@@ -201,7 +218,7 @@ function createPartyServer(opts = {}) {
           break;
         }
         case "sync_report": {
-          if (!lim.sync.allow("sync:" + p.id, Date.now())) return; // drop silently
+          if (!lim.sync.allow("s", Date.now())) return; // drop silently
           rooms.syncReport(p.roomId, p.id, m.position, m.paused);
           break;
         }
@@ -218,7 +235,6 @@ function createPartyServer(opts = {}) {
 
     ws.on("close", () => {
       const rid = p.roomId;
-      msgLimiters.delete(p.id);
       if (!rid) return;
       const r = rooms.disconnect(rid, p.id);
       broadcast(rid, r.events || [], p.id);

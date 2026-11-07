@@ -3,3 +3,7 @@ android/build/
 android/app/build/
 android/local.properties
 *.iml
+node_modules/
+android/.idea/
+build-log.txt
+build-err.txt
