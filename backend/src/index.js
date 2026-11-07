@@ -82,6 +82,10 @@ async function route(request, env, ctx) {
   // per home IP made every check fail and the app said "up to date"). One
   // upstream fetch per 10 minutes serves every device behind that colo.
   if (url.pathname === "/api/native-latest") return nativeLatest(env, ctx, origin);
+  // WebView app (full + lite) update channel: same edge-cached mirror over
+  // the `latest` rolling release - the APK shell's in-app updater rides this
+  // so a house full of boxes can never exhaust the GitHub API quota
+  if (url.pathname === "/api/apk-latest") return apkLatest(env, ctx, origin);
   // Mirror health: which streaming servers are actually answering right now
   // (the browser cannot read cross-origin status codes - a 502 page looks
   // like any other frame - so the client asks here and auto-switches to a
@@ -654,10 +658,10 @@ async function bsSubs(url, env, origin) {
   }
 }
 
-/* ---------- native update channel (edge-cached GitHub mirror) ---------- */
-async function nativeLatest(env, ctx, origin) {
-  const freshKey = new Request("https://sb-cache.internal/v2/native-latest");
-  const staleKey = new Request("https://sb-cache.internal/v2/native-latest-stable");
+/* ---------- release update channels (edge-cached GitHub mirrors) ---------- */
+async function releaseChannel(tag, freshName, staleName, env, ctx, origin) {
+  const freshKey = new Request("https://sb-cache.internal/v2/" + freshName);
+  const staleKey = new Request("https://sb-cache.internal/v2/" + staleName);
   const out = (body, status, cacheTag) =>
     new Response(body, {
       status,
@@ -674,7 +678,7 @@ async function nativeLatest(env, ctx, origin) {
   } catch (e) {}
   try {
     const res = await fetch(
-      "https://api.github.com/repos/dazoarmando29/streambox/releases/tags/latest-native",
+      "https://api.github.com/repos/dazoarmando29/streambox/releases/tags/" + tag,
       {
         headers: { accept: "application/vnd.github+json", "user-agent": UA },
         signal: AbortSignal.timeout(8000),
@@ -703,6 +707,12 @@ async function nativeLatest(env, ctx, origin) {
     return json({ error: "upstream_unavailable" }, 503, origin);
   }
 }
+async function nativeLatest(env, ctx, origin) {
+  return releaseChannel("latest-native", "native-latest", "native-latest-stable", env, ctx, origin);
+}
+async function apkLatest(env, ctx, origin) {
+  return releaseChannel("latest", "apk-latest", "apk-latest-stable", env, ctx, origin);
+}
 
 /* ---------- mirror health (which servers are alive right now) ---------- */
 const MIRROR_HEALTH_URLS = {
@@ -713,7 +723,7 @@ const MIRROR_HEALTH_URLS = {
   vsembed: "https://vsembed.su/embed/movie/550",
   yapgrid: "https://yapgrid.com/embed/movie/550?autoplay=1&lang=en",
   vidapi: "https://vaplayer.ru/embed/movie/550?autoplay=1&ds_lang=en",
-  vidcore: "https://vidcore.org/embed/movie/550?autoplay=1&lang=en",
+  vidcore: "https://vidspark.to/movie/550",
   vidrift: "https://embed.vidrift.net/embed/movie/550?mobileSheets=true",
   vidbolt: "https://vidbolt.pro/movie/550?autoPlay=true&mobileSheets=true",
   vidzen: "https://vidzen.fun/movie/550?autoPlay=true",
