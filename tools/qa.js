@@ -831,11 +831,16 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
 
 /* ---------- 91. Obsidian Glow palette ---------- */
 {
-  if (/tailwind\.config/.test(html) && /"#00F0B5"/.test(html) && /"#00D2FF"/.test(html)) ok("tailwind palette maps to the Obsidian Glow tokens");
+  // since the static-CSS swap the palette lives in tailwind.config.js (the
+  // generated tailwind.css carries the values); html keeps the raw tokens
+  let tw = "";
+  try { tw = read("tailwind.config.js"); } catch (e) {}
+  const pal = html + tw;
+  if (/tailwind\.config/.test(pal) && /"#00F0B5"/.test(pal) && /"#00D2FF"/.test(pal)) ok("tailwind palette maps to the Obsidian Glow tokens");
   else bad("tailwind.config must map teal/cyan to #00F0B5 / #00D2FF");
-  if (/#0B111E/.test(html) && /#F5A623/.test(html)) ok("ink #0B111E + amber #F5A623 present");
+  if (/#0B111E/.test(pal) && /#F5A623/.test(pal)) ok("ink #0B111E + amber #F5A623 present");
   else bad("the ink (#0B111E) and amber (#F5A623) tokens must be in play");
-  if (/"#8E9CAE"/.test(html) && /"#C7D5E8"/.test(html)) ok("dim/soft text tokens mapped (#8E9CAE / #C7D5E8)");
+  if (/"#8E9CAE"/.test(pal) && /"#C7D5E8"/.test(pal)) ok("dim/soft text tokens mapped (#8E9CAE / #C7D5E8)");
   else bad("gray text must wear the Dim #8E9CAE / Soft #C7D5E8 tokens");
   const stale = [...html.matchAll(/#14b8a6|#2dd4bf|#7dd3fc|#0b1426|#16294d/gi)];
   if (!stale.length) ok("no stale pre-glow palette hexes");
@@ -1507,9 +1512,9 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
     const t = ad[0];
     const full = (t.match(/cap: "full"/g) || []).length;
     const partial = (t.match(/cap: "partial"/g) || []).length;
-    if (full === 4 && partial === 1 && /cap: "coordinated"/.test(t))
-      ok("adapters: 4 full-sync mirrors, VidRift partial, everything else coordinated-start");
-    else bad("adapter registry must claim full sync ONLY for cinesrc/anipm/vidbolt/vidzen, partial for vidrift, coordinated for the rest");
+    if (full === 5 && partial === 1 && /cap: "coordinated"/.test(t))
+      ok("adapters: 5 full-sync mirrors (cinesrc/anipm/vidbolt/vidzen/vidcore), VidRift partial, the rest coordinated-start");
+    else bad("adapter registry must claim full sync ONLY for cinesrc/anipm/vidbolt/vidzen/vidcore, partial for vidrift, coordinated for the rest");
     if (/NO play\/pause API/.test(t) || /no pause/i.test(t)) ok("VidRift's missing pause API is documented in the adapter");
     else bad("the vidrift adapter must document that no play/pause API exists");
     if (/CAP_TXT|FULL SYNC|COORDINATED START/.test(html)) ok("the UI labels the honest sync mode");
@@ -1673,6 +1678,77 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (rs && /S\.chat = \(m\.room\.chat/.test(rs[0]) && /S\.lastSeq = \(m\.room\.playback/.test(rs[0]))
     ok("resync (room_state) adopts the missed chat AND the newest seq (no rollback window)");
   else bad("room_state must adopt S.chat and S.lastSeq from the snapshot");
+}
+
+/* ---------- 147. in-app update trust chain (the download is an APK) ---------- */
+{
+  let man = "", ma = "", prov = "";
+  try { man = read("android/app/src/main/AndroidManifest.xml"); } catch (e) {}
+  try { ma = read("android/app/src/main/java/com/streambox/app/MainActivity.java"); } catch (e) {}
+  try { prov = read("android/app/src/main/java/com/streambox/app/UpdateFileProvider.java"); } catch (e) {}
+  if (/REQUEST_INSTALL_PACKAGES/.test(man) && /UpdateFileProvider/.test(man) && /grantUriPermissions="true"/.test(man))
+    ok("the shell declares the install permission and a granted read-only provider");
+  else bad("AndroidManifest must carry REQUEST_INSTALL_PACKAGES + the UpdateFileProvider entry");
+  if (prov && /MODE_READ_ONLY/.test(prov) && /updates/.test(prov) && /getCanonicalPath/.test(prov))
+    ok("UpdateFileProvider serves read-only files from updates/ only (traversal rejected)");
+  else bad("UpdateFileProvider must be read-only, confined to updates/, and reject path traversal");
+  if (ma && /wantDigest\.startsWith\("sha256:"\)/.test(ma) && /sameSignerAsInstalled\(out\)/.test(ma)
+      && /arch\.versionCode <= me\.versionCode/.test(ma))
+    ok("an update installs only after digest AND signer pin AND a strictly newer versionCode");
+  else bad("runUpdate must gate the installer on the published sha256 + our own signing cert + newer versionCode");
+  if (ma && /updateSourceAllowed\(u\)/.test(ma) && /setInstanceFollowRedirects\(false\)/.test(ma))
+    ok("every download redirect hop is re-checked against the release hosts");
+  else bad("the update download must validate each redirect hop (no blind CDN following)");
+  if (ma && /api\/apk-latest/.test(ma) && /api\.github\.com/.test(ma))
+    ok("the update channel rides the edge-cached worker mirror with the GitHub API as fallback");
+  else bad("the update check must use /api/apk-latest (rate-limit-proof) with api.github.com fallback");
+  if (/installUpdateFromApp/.test(html) && /Download &amp; Install|Download & Install/.test(html))
+    ok("the About page installs the update in-app (the shell intercepts the release asset URL)");
+  else bad("aboutCheckUpdate must offer Download & Install inside the app shell");
+}
+
+/* ---------- 148. VidCore rides the real player (vidspark.to), honestly ---------- */
+{
+  const url = html.match(/case "vidcore": \{[\s\S]{0,700}/);
+  if (url && /https:\/\/vidspark\.to\/movie/.test(url[0]) && /https:\/\/vidspark\.to\/tv/.test(url[0]) && !/vidcore\.org/.test(url[0]))
+    ok("VidCore loads the VidSpark player DIRECTLY (the ad-wrapper relays nothing and injects popunders)");
+  else bad('the vidcore case must build vidspark.to URLs - never the vidcore.org ad-wrapper');
+  const bridge = html.match(/const CORE_ORIGIN[\s\S]{0,2600}/);
+  if (bridge && /event\.origin !== CORE_ORIGIN/.test(bridge[0]) && /vidspark-player/.test(bridge[0])
+      && /mirror !== "vidcore"/.test(bridge[0]) && /"ended"/.test(bridge[0]))
+    ok("the VidCore bridge is origin-checked, source-tagged and stale-frame-guarded (play/pause/seeked/timeupdate/ended)");
+  else bad("coreSend/VidCore message handler must check origin + source + mirror (stale frames) and handle ended");
+  if (/coreSend\(pState\.paused \? "play" : "pause"\)/.test(html) && /coreSend\("seek", \{ time:/.test(html))
+    ok("our bar drives VidCore play/pause/seek through its real command API");
+  else bad("ctlToggle/ctlSeekRel must dispatch to coreSend for the vidcore mirror");
+  if (/case "vidapi": \{[\s\S]{0,300}coordinated-start only/.test(html))
+    ok("VidAPI is honestly labeled coordinated-only (its wrapper relays no player events)");
+  else bad('the vidapi case comment must not claim player events - it is coordinated-start only');
+}
+
+/* ---------- 149. production Tailwind build (no runtime CDN) ---------- */
+{
+  let css = "", cfgJs = "";
+  try { css = read("tailwind.css"); } catch (e) {}
+  try { cfgJs = read("tailwind.config.js"); } catch (e) {}
+  if (!/cdn\.tailwindcss\.com/.test(html) && /<link rel="stylesheet" href="tailwind\.css">/.test(html))
+    ok("the site ships a static tailwind.css (the runtime Play CDN is gone - no JIT flash on TV)");
+  else bad("index.html must link tailwind.css and never load cdn.tailwindcss.com");
+  if (css.length > 5000 && /#00F0B5/i.test(css) && /\.tracking-widest/.test(css))
+    ok("tailwind.css is generated and carries the house palette + utilities");
+  else bad("tailwind.css is missing/stale - rebuild: npx tailwindcss -c tailwind.config.js -i tailwind.input.css -o tailwind.css --minify");
+  if (/content:\s*\[\s*"\.\/index\.html"\s*\]/.test(cfgJs) && /#00F0B5/.test(cfgJs))
+    ok("tailwind.config.js scans index.html and carries the Obsidian Glow tokens");
+  else bad("tailwind.config.js must scan index.html and map the house palette");
+  // the link must load AFTER the design-pack styles (the Play CDN injected
+  // its sheet late - Tailwind wins the cascade ties exactly like before)
+  const styleEnd = html.indexOf("</style>");
+  const linkAt = html.indexOf('<link rel="stylesheet" href="tailwind.css">');
+  if (styleEnd >= 0 && linkAt > styleEnd) ok("tailwind.css loads after the design-pack styles (cascade parity with the old CDN)");
+  else bad("the tailwind.css link must sit after the </style> design pack or utility ties flip");
+  if (/tools\/visual-diff\.js/.test(html) || fs.existsSync(path.join(ROOT, "tools", "visual-diff.js")))
+    ok("tools/visual-diff.js exists (CDN vs generated-CSS computed-style regression harness)");
+  else bad("the visual regression harness must exist alongside the Tailwind build");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

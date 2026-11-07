@@ -1,6 +1,7 @@
 package com.streambox.app;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
@@ -14,11 +15,27 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 /** StreamBox: fullscreen WebView wrapper for phone + Android TV. */
 public class MainActivity extends Activity {
     private static final String HOME = BuildConfig.HOME_URL;
     private static final String APP_PREFIX = "https://dazoarmando29.github.io/streambox/";
+    // ---- in-app update trust rules (the download is an APK - the sharp edge) ----
+    // only these hosts are ever contacted for an update, over TLS, and EVERY
+    // redirect hop is re-checked; the trigger URL must be one of our release
+    // assets; the bytes MUST match the sha256 the release channel reports AND
+    // be signed with THIS app's own certificate before the installer sees them;
+    // only a strictly newer versionCode is ever offered (no downgrades)
+    private static final String UPDATE_TRIGGER =
+            "https://github.com/dazoarmando29/streambox/releases/download/";
+    private static final String[] UPDATE_HOSTS = {
+            "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
+    };
+    private static final String API_MIRROR =
+            "https://streambox-api.dazoarmando.workers.dev/api/apk-latest";
+    private static final String API_DIRECT =
+            "https://api.github.com/repos/dazoarmando29/streambox/releases/tags/latest";
     private WebView web;
     private WebChromeClient chromeClient;
     private View fullscreenView;
@@ -29,6 +46,7 @@ public class MainActivity extends Activity {
     private static long rendererCrashAt;
     private static int rendererCrashBurst;
     private String partyCode;
+    private volatile boolean updateRunning;
 
     private static boolean isHostOrSubdomain(String host, String domain) {
         return host.equals(domain) || host.endsWith("." + domain);
@@ -122,6 +140,7 @@ public class MainActivity extends Activity {
         // data (Local Storage: watch progress, My List, PIN, settings;
         // IndexedDB; cookies) is preserved across updates.
         freshStartIfNewVersion();
+        wipeUpdateLeftovers(); // the installer needs the file alive while it works; leftovers never pile up
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         FrameLayout root = new FrameLayout(this);
@@ -180,6 +199,14 @@ public class MainActivity extends Activity {
                 try { host = request.getUrl().getHost(); if (host == null) host = ""; }
                 catch (Exception ignored) { host = ""; }
                 host = host.toLowerCase(java.util.Locale.US);
+                // Self-update: our own WebView release assets are never
+                // "browsed" - the tap starts the native verified installer
+                // flow (github.com stays blocked as a browsing destination)
+                if (url.startsWith(UPDATE_TRIGGER)
+                        && (url.endsWith("/streambox.apk") || url.endsWith("/streambox-lite.apk"))) {
+                    startUpdateFlow();
+                    return true;
+                }
                 // Allowlist: our site + TMDB + CineSrc + all mirror players + trailer.
                 // Everything else (ad popups, hijacks, non-http schemes) is cancelled
                 // so a bad mirror can never navigate the app away.
@@ -336,6 +363,13 @@ public class MainActivity extends Activity {
             }
         };
         web.setWebChromeClient(chromeClient);
+        // second update path: JS/subframe-initiated APK downloads land here
+        web.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
+            if (url != null && url.startsWith(UPDATE_TRIGGER)
+                    && (url.endsWith("/streambox.apk") || url.endsWith("/streambox-lite.apk"))) {
+                startUpdateFlow();
+            }
+        });
 
         boolean crashed = webviewCrashed;
         webviewCrashed = false; // one-shot: the next recreate restores normally
@@ -518,5 +552,214 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         if (web != null) { web.destroy(); web = null; }
         super.onDestroy();
+    }
+
+    /* ---------- in-app updates: verified download -> package installer ----------
+       Trust chain (in order): trigger URL must be one of OUR release assets ->
+       release channel (edge-cached worker mirror, GitHub API fallback) reports
+       the asset's sha256 -> every download redirect hop re-checked against the
+       release hosts -> bytes match the published digest -> the archive is
+       signed with THIS app's own certificate -> strictly newer versionCode ->
+       content:// hand-off to the system installer. Any failure deletes the
+       file and says so; nothing unverified ever reaches the installer. */
+
+    private void wipeUpdateLeftovers() {
+        // the installer needs the file alive while it works and the install
+        // kills this process - leftovers are wiped on boot and before downloads
+        try { deleteRecursive(new java.io.File(getFilesDir(), "updates")); } catch (Exception ignored) {}
+    }
+
+    private void updateMsg(final String msg) {
+        try {
+            runOnUiThread(() -> {
+                try { Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
+            });
+        } catch (Exception ignored) {}
+    }
+
+    /** github.com is only ever OUR release-asset path; the CDN redirect hosts
+        are accepted bare. Nothing else can ever be an update source. */
+    private static boolean updateSourceAllowed(String u) {
+        try {
+            java.net.URI uri = new java.net.URI(u);
+            String h = uri.getHost() == null ? "" : uri.getHost().toLowerCase(java.util.Locale.US);
+            String path = uri.getPath() == null ? "" : uri.getPath();
+            if (h.equals("github.com")) {
+                return path.startsWith("/dazoarmando29/streambox/releases/download/");
+            }
+            return isHostOrSubdomain(h, "objects.githubusercontent.com")
+                    || isHostOrSubdomain(h, "release-assets.githubusercontent.com");
+        } catch (Exception ignored) { return false; }
+    }
+
+    /** The release METADATA channel rides two hardcoded, TLS-only endpoints. */
+    private static boolean metaSourceAllowed(String u) {
+        try {
+            java.net.URI uri = new java.net.URI(u);
+            String h = uri.getHost() == null ? "" : uri.getHost().toLowerCase(java.util.Locale.US);
+            String path = uri.getPath() == null ? "" : uri.getPath();
+            if (isHostOrSubdomain(h, "streambox-api.dazoarmando.workers.dev")) {
+                return path.startsWith("/api/apk-latest");
+            }
+            if (h.equals("api.github.com")) {
+                return path.startsWith("/repos/dazoarmando29/streambox/releases/tags/");
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private String wantedAsset() {
+        // the flavor is known from OUR identity - never from a clicked link
+        return getPackageName().contains("lite") ? "streambox-lite.apk" : "streambox.apk";
+    }
+
+    private void startUpdateFlow() {
+        if (updateRunning) return; // one update at a time
+        updateRunning = true;
+        new Thread(() -> {
+            try {
+                runUpdate();
+            } catch (Exception e) {
+                updateMsg("Update failed: " + ((e != null && e.getMessage() != null) ? e.getMessage() : "unknown error"));
+            } finally {
+                updateRunning = false;
+            }
+        }, "sb-update").start();
+    }
+
+    private void runUpdate() throws Exception {
+        updateMsg("Checking for updates\u2026");
+        final String asset = wantedAsset();
+        org.json.JSONObject rel = fetchJson(API_MIRROR);
+        if (rel == null) rel = fetchJson(API_DIRECT);
+        if (rel == null) { updateMsg("Could not reach the update server - try again later."); return; }
+        String wantDigest = null, wantUrl = null;
+        org.json.JSONArray assets = rel.optJSONArray("assets");
+        if (assets != null) {
+            for (int i = 0; i < assets.length(); i++) {
+                org.json.JSONObject a = assets.optJSONObject(i);
+                if (a != null && asset.equals(a.optString("name"))) {
+                    wantDigest = a.optString("digest", "");
+                    wantUrl = a.optString("browser_download_url", "");
+                    break;
+                }
+            }
+        }
+        if (wantUrl == null || wantUrl.isEmpty() || wantDigest == null || !wantDigest.startsWith("sha256:")) {
+            updateMsg("The update could not be verified - nothing was installed.");
+            return;
+        }
+        if (!updateSourceAllowed(wantUrl)) {
+            updateMsg("The update source looks wrong - nothing was installed.");
+            return;
+        }
+        wipeUpdateLeftovers();
+        java.io.File dir = new java.io.File(getFilesDir(), "updates");
+        if (!dir.mkdirs() && !dir.isDirectory()) { updateMsg("No space for the update."); return; }
+        java.io.File out = new java.io.File(dir, asset);
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        java.net.HttpURLConnection conn = openValidated(wantUrl);
+        if (conn == null) { updateMsg("The update download was blocked or failed - nothing was installed."); return; }
+        try {
+            java.io.InputStream in = conn.getInputStream();
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(out);
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) { md.update(buf, 0, n); fo.write(buf, 0, n); }
+            fo.close();
+            in.close();
+        } finally { conn.disconnect(); }
+        StringBuilder sb = new StringBuilder();
+        for (byte b : md.digest()) sb.append(String.format(java.util.Locale.US, "%02x", b));
+        if (!("sha256:" + sb.toString()).equals(wantDigest)) {
+            deleteQuietly(out);
+            updateMsg("The downloaded update did not match the published checksum - nothing was installed.");
+            return;
+        }
+        if (!sameSignerAsInstalled(out)) {
+            deleteQuietly(out);
+            updateMsg("The update is not signed with this app's key - nothing was installed.");
+            return;
+        }
+        android.content.pm.PackageManager pm = getPackageManager();
+        android.content.pm.PackageInfo arch = pm.getPackageArchiveInfo(out.getAbsolutePath(), 0);
+        android.content.pm.PackageInfo me = pm.getPackageInfo(getPackageName(), 0);
+        if (arch == null || arch.versionCode <= me.versionCode) {
+            deleteQuietly(out);
+            updateMsg("You are already up to date.");
+            return;
+        }
+        updateMsg("Update ready (v" + arch.versionName + ") - confirm the install.");
+        android.net.Uri uri = android.net.Uri.parse("content://" + UpdateFileProvider.authority(this) + "/" + asset);
+        Intent it = new Intent(Intent.ACTION_VIEW);
+        it.setDataAndType(uri, "application/vnd.android.package-archive");
+        it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(it);
+    }
+
+    /** Follow redirects by hand so EVERY hop is re-checked against the
+        update-source rules (a CDN hop to anywhere else is refused). */
+    private java.net.HttpURLConnection openValidated(String url) {
+        try {
+            String u = url;
+            for (int hop = 0; hop < 5; hop++) {
+                if (!updateSourceAllowed(u)) return null;
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(u).openConnection();
+                c.setConnectTimeout(15000);
+                c.setReadTimeout(60000);
+                c.setInstanceFollowRedirects(false);
+                c.setRequestProperty("user-agent", "StreamBox-Update");
+                int code = c.getResponseCode();
+                if (code / 100 == 3) {
+                    String loc = c.getHeaderField("Location");
+                    c.disconnect();
+                    if (loc == null) return null;
+                    u = new java.net.URL(new java.net.URL(u), loc).toString();
+                    continue;
+                }
+                if (code != 200) { c.disconnect(); return null; }
+                return c;
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private org.json.JSONObject fetchJson(String url) {
+        try {
+            if (!metaSourceAllowed(url)) return null;
+            java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(15000);
+            c.setRequestProperty("accept", "application/vnd.github+json");
+            c.setRequestProperty("user-agent", "StreamBox-Update");
+            if (c.getResponseCode() != 200) { c.disconnect(); return null; }
+            java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(c.getInputStream(), "utf-8"));
+            StringBuilder b = new StringBuilder();
+            String line;
+            while ((line = r.readLine()) != null) b.append(line);
+            r.close();
+            c.disconnect();
+            return new org.json.JSONObject(b.toString());
+        } catch (Exception e) { return null; }
+    }
+
+    /** The downloaded archive must carry THIS app's signing certificate -
+        the pin that makes a tampered or cross-signed APK impossible to
+        install through this flow (the installer enforces it for updates too,
+        but here we can fail honestly BEFORE the prompt). */
+    private boolean sameSignerAsInstalled(java.io.File apk) {
+        try {
+            android.content.pm.PackageManager pm = getPackageManager();
+            android.content.pm.PackageInfo arch = pm.getPackageArchiveInfo(apk.getAbsolutePath(), android.content.pm.PackageManager.GET_SIGNATURES);
+            android.content.pm.PackageInfo me = pm.getPackageInfo(getPackageName(), android.content.pm.PackageManager.GET_SIGNATURES);
+            if (arch == null || me == null) return false;
+            if (arch.signatures == null || arch.signatures.length == 0
+                    || me.signatures == null || me.signatures.length == 0) return false;
+            return java.util.Arrays.equals(arch.signatures[0].toByteArray(), me.signatures[0].toByteArray());
+        } catch (Exception e) { return false; }
+    }
+
+    private static void deleteQuietly(java.io.File f) {
+        try { if (f != null && !f.delete()) f.deleteOnExit(); } catch (Exception ignored) {}
     }
 }

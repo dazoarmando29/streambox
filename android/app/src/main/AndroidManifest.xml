@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- in-app updates: the verified APK hands off to the system installer -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Phone AND TV: neither touchscreen nor leanback is required -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -52,5 +54,13 @@
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:screenOrientation="unspecified">
         </activity>
+
+        <!-- Serves downloaded update APKs to the system installer as
+             content:// URIs (read-only, updates/ dir only, never exported) -->
+        <provider
+            android:name=".UpdateFileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

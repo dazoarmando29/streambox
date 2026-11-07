@@ -33,30 +33,9 @@
 <link rel="dns-prefetch" href="https://api.jikan.moe">
 <link rel="dns-prefetch" href="https://api.consumet.org">
 <link rel="dns-prefetch" href="https://graphql.anilist.co">
-<script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-<script>
-  // Obsidian Glow palette (native Theme.kt parity): the stock utility names
-  // keep working, their VALUES wear the house tokens now.
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          teal: { 200: "#7DF5DC", 300: "#3AF0C8", 400: "#00F0B5", 500: "#00F0B5", 600: "#00D6A2", 700: "#00B88A" },
-          cyan: { 300: "#67E5FF", 400: "#00D2FF", 500: "#00D2FF", 600: "#00B8E6" },
-          amber: { 400: "#F5A623", 500: "#F5A623", 600: "#D98C12" },
-          gray: { 200: "#EAF2FF", 300: "#C7D5E8", 400: "#8E9CAE", 500: "#7A8798", 600: "#5C6B80" }
-        },
-        fontFamily: {
-          sans: ["Plus Jakarta Sans", "Inter", "Segoe UI", "sans-serif"],
-          display: ["Space Grotesk", "sans-serif"]
-        }
-      }
-    }
-  };
-</script>
 <style>
   * { scrollbar-width: thin; scrollbar-color: #00F0B5 #111; }
   ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
@@ -707,6 +686,15 @@
   .tv-mode #partyQuick button, .tv-app #partyQuick button { min-height: 56px; font-size: 17px; }
   .tv-mode #partyChatInput, .tv-app #partyChatInput { min-height: 56px; font-size: 17px; }
 </style>
+<!-- Tailwind: ONE static stylesheet generated from tailwind.config.js (the
+     Obsidian Glow palette lives there now - same teal/cyan/amber/gray house
+     tokens as the old runtime config). It loads at the END of <head>, after
+     the design-pack styles, matching the cascade the Play CDN's runtime
+     injected sheet used to produce (Tailwind's utility wins the ties exactly
+     like before the swap) - pixel-identical output, zero CDN round-trips and
+     no JIT flash on slow TV boxes. Rebuild after any class change:
+     npx tailwindcss -c tailwind.config.js -i tailwind.input.css -o tailwind.css --minify -->
+<link rel="stylesheet" href="tailwind.css">
 </head>
 <body>
 
@@ -722,7 +710,7 @@
 
 <!-- UPDATE BANNER: shown when this copy is older than the live site -->
 <div id="updateBar" class="hidden fixed top-0 left-0 right-0 z-[95] bg-teal-500 text-[#0B111E] text-sm font-bold px-4 py-2.5 flex items-center gap-3">
-  <span class="flex-1">&#x2B06; New StreamBox version available — refresh the page (TV app: reinstall / clear data) to get it.</span>
+  <span id="updateBarMsg" class="flex-1">&#x2B06; New StreamBox version available — refresh the page to get it.</span>
   <button onclick="document.getElementById('updateBar').classList.add('hidden')" aria-label="Dismiss" class="shrink-0 w-8 h-8 rounded-full bg-black/20 font-black">&#x2715;</button>
 </div>
 
@@ -745,7 +733,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 224; // bump every release alongside version.txt
+  const BUILD_NUM = 225; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -761,7 +749,7 @@ const CINESRC_TV = (id,s,e) => `https://cinesrc.st/embed/tv/${id}?s=${s}&e=${e}`
 /* TV-safe lineup (early: boot code below reads these at parse time):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
-const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift", "vidzen", "vidbolt", "anipm", "hls"]);
+const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift", "vidzen", "vidbolt", "anipm", "vidcore", "hls"]);
 const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVIA|Fire TV|AFT/i.test(navigator.userAgent || "");
 </script>
 
@@ -1286,7 +1274,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <a href="https://github.com/dazoarmando29/streambox/releases/download/latest/streambox.apk" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">WebView app</a>
         <a href="https://github.com/dazoarmando29/streambox/releases/download/latest/streambox-lite.apk" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">Lite app</a>
       </div>
-      <p class="text-[11px] text-gray-500 mt-2">Direct downloads - use these if the in-app update popup is missing on your TV.</p>
+      <p class="text-[11px] text-gray-500 mt-2">In the Android apps these buttons install the update directly (checksum + signature verified); in a browser they download the APK file.</p>
     </div>
   </div>
 </div>
@@ -1852,12 +1840,24 @@ function hideSplash(){
 setTimeout(hideSplash, 15000); // failsafe: never trap users on the splash
 /* update checker: compares baked build against live version.txt (cache-busted,
    so even a sticky service worker can't hide a new release) */
+function inAppShell(){ try { return document.body.classList.contains("tv-app"); } catch(e){ return false; } }
+function installUpdateFromApp(){
+  // the WebView shell intercepts our own release-asset URLs and runs the
+  // native verified installer (digest + signer pinned) instead of browsing
+  try { location.href = "https://github.com/dazoarmando29/streambox/releases/download/latest/streambox.apk"; } catch(e){}
+}
 async function checkUpdate(){
   try {
     const r = await fetch("version.txt?_=" + Date.now(), { cache: "no-store" });
     if (!r.ok) return;
     const n = parseInt((await r.text()).trim(), 10);
-    if (n > BUILD_NUM) document.getElementById("updateBar").classList.remove("hidden");
+    if (n > BUILD_NUM) {
+      document.getElementById("updateBar").classList.remove("hidden");
+      const msg = document.getElementById("updateBarMsg");
+      if (msg && inAppShell()) {
+        msg.textContent = "\u{2B06} New StreamBox version available \u{2014} open About and tap Download & Install to update this app.";
+      }
+    }
   } catch(e){ /* offline — ignore */ }
 }
 checkUpdate();
@@ -4715,9 +4715,10 @@ function armStuckWatchdogs(){
   clearTimeout(window._watchdog); clearTimeout(window._watchdog2);
   const hasPlayback = () => mirror === "anipm" ? !!window._anipmStarted
     : mirror === "vidbolt" ? !!window._boltProgress
+    : mirror === "vidcore" ? !!window._coreStarted
     : mirror === "vidzen" ? !!window._zenStarted : !!window._cinePlaying;
   if (hasPlayback()) return;
-  if (mirror !== "anipm" && mirror !== "vidrift" && mirror !== "vidbolt" && mirror !== "vidzen") return;
+  if (mirror !== "anipm" && mirror !== "vidrift" && mirror !== "vidbolt" && mirror !== "vidzen" && mirror !== "vidcore") return;
   const _aTV = document.body.classList.contains("tv-mode");
   if (mirror === "anipm") {
     window._watchdog = setTimeout(() => {
@@ -4778,14 +4779,14 @@ function armStuckWatchdogs(){
     const nm = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
     const fb = stuckFallback(watchState.anime ? "anipm" : isKDrama() ? "cinesrc" : "yapgrid");
     const fbn = stuckFallbackName(fb);
+    const pairStarted = () => mirror === "vidbolt" ? window._boltProgress
+      : mirror === "vidcore" ? window._coreStarted : window._zenStarted;
     window._watchdog = setTimeout(() => {
-      if ((mirror === "vidbolt" ? window._boltProgress : window._zenStarted)
-          || (mirror !== "vidbolt" && mirror !== "vidzen")) return;
+      if (pairStarted() || (mirror !== "vidbolt" && mirror !== "vidzen" && mirror !== "vidcore")) return;
       stuckRecommend(`${nm} is taking a while — slow boxes can need a full minute`, fbn);
     }, _aTV ? 45000 : 18000);
     window._watchdog2 = setTimeout(() => {
-      if ((mirror === "vidbolt" ? window._boltProgress : window._zenStarted)
-          || (mirror !== "vidbolt" && mirror !== "vidzen")) return;
+      if (pairStarted() || (mirror !== "vidbolt" && mirror !== "vidzen" && mirror !== "vidcore")) return;
       if (window._autoHopped || !autoSwitchOn()) { stuckRecommend(`${nm} stayed stuck`, fbn); return; }
       window._autoHopped = true;
       const wsb = document.getElementById("watchStatus");
@@ -4989,7 +4990,7 @@ function loadPlayer(){
     vidriftQuality(); // pin the saved rendition (best effort, pre-ready safe)
     armStuckWatchdogs(); // stage 3 lives here (TV anime only)
   }
-  if (mirror === "vidzen" || mirror === "vidbolt") {
+  if (mirror === "vidzen" || mirror === "vidbolt" || mirror === "vidcore") {
     // direct-drive mirrors finally get clocks too (warn \u{2192} heal-once)
     armStuckWatchdogs();
     armTapHint(); // gesture-gated browsers may need one in-frame click
@@ -4997,9 +4998,10 @@ function loadPlayer(){
     // explicit play kick after the frame settles — a no-op if playing.
     clearTimeout(window._playKickT);
     window._playKickT = setTimeout(() => {
-      if (mirror !== "vidbolt" && mirror !== "vidzen") return;
-      if (window._cinePlaying || window._boltStarted || window._zenStarted) return;
+      if (mirror !== "vidbolt" && mirror !== "vidzen" && mirror !== "vidcore") return;
+      if (window._cinePlaying || window._boltStarted || window._zenStarted || window._coreStarted) return;
       if (mirror === "vidbolt") boltSend({ type: "play" });
+      else if (mirror === "vidcore") coreSend("play");
       else zenSend({ type: "play" });
     }, document.body.classList.contains("tv-mode") ? 10000 : 6000);
   }
@@ -5198,7 +5200,7 @@ function saveContinue(){
 let lastProgSave = 0;
 function saveProgress(cur, dur){
   // throttled resume-point saver (trailer mirror never writes playback position)
-  if (typeof mirror !== "undefined" && mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt") return;
+  if (typeof mirror !== "undefined" && mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt" && mirror !== "vidcore") return;
   if (!(dur > 60) || !(cur > 5)) return;
   // proven playback (vidbolt included now): future stuck-hops prefer this
   // mirror over static guesses — your working mirror may differ per network
@@ -5557,6 +5559,7 @@ function ctlToggle(){ // optimistic flip; corrected by play/pause events
   if (mirror === "vidrift") { focusMirror(); return; }
   if (mirror === "vidbolt") { boltSend(pState.paused ? { type: "play" } : { type: "pause" }); return; }
   if (mirror === "vidzen") { zenSend(pState.paused ? { type: "play" } : { type: "pause" }); return; }
+  if (mirror === "vidcore") { coreSend(pState.paused ? "play" : "pause"); return; }
   if (mirror === "cinesrc" && !window._cineReady && !(pState.dur > 0) && window._loadT
       && Date.now() - window._loadT > (document.body.classList.contains("tv-mode") ? 45000 : 18000)) {
     // play pressed on a frame that never said hello (blocked embed, dead
@@ -5578,6 +5581,7 @@ function ctlSeekRel(d){
   if (mirror === "vidrift") { vidriftSeekRel(d); return; } // resume-seek answers
   if (mirror === "vidbolt") { boltSeekRel(d); return; } // direct seek answers
   if (mirror === "vidzen") { zenSeekRel(d); return; } // direct seek answers
+  if (mirror === "vidcore") { coreSeekRel(d); return; } // direct seek answers
   if (mirror !== "cinesrc" && mirror !== "anipm") return; // undriven mirrors use their own controls
   if (mirror === "anipm") {
     const t = Math.max(0, (pState.cur || 0) + d);
@@ -6250,9 +6254,10 @@ function mirrorUrl(id){
         : `https://yapgrid.com/embed/movie/${tmdb}?${yq}`;
     }
     case "vidapi": {
-      // best-in-class mirror: resume position, auto subs in your language,
-      // server-side sub fetch (any URL works), rich player events. No command
-      // API, so like all mirrors it uses its own controls + TV handoff.
+      // sub_url attach works (server-side sub fetch, any URL). NO player
+      // events reach us here though (verified 2026-11: the wrapper only
+      // relays storage/title/cursor messages and its inner player host has
+      // moved before) - coordinated-start only, its own controls + handoff.
       const vp = new URLSearchParams({ autoplay: "1", ds_lang: (typeof wyzLang === "string" && wyzLang) || "en" });
       try {
         if (typeof subFile !== "undefined" && subFile && subFile.corsUrl) {
@@ -6267,14 +6272,16 @@ function mirrorUrl(id){
         : `https://vaplayer.ru/embed/movie/${tmdb}?${vq}`;
     }
     case "vidcore": {
-      // no command API, no sub_url attach — last-resort mirror that still
-      // routes by TMDB ID and speaks vidcore:play/pause/ended events.
-      // Autoplay saves one OK press; lang follows your Subs language.
-      const cp = new URLSearchParams({ autoplay: "1", lang: (typeof wyzLang === "string" && wyzLang) || "en" });
-      const cq = cp.toString();
+      // VidCore's embed page is only an ad-wrapper around the REAL player at
+      // vidspark.to (verified 2026-11: the wrapper relays no messages and
+      // injects popunders every 8-20s) - we load the player DIRECTLY and
+      // speak its real bridge: play/pause/seek in, play/pause/seeked/
+      // timeupdate/ended out (see the VidCore section below). The player
+      // page is TMDB-routed (/movie/{id}, /tv/{id}/{s}/{e}) and starts on
+      // its own defaults - no URL params exist on this route.
       return tv
-        ? `https://vidcore.org/embed/tv/${tmdb}/${s}/${e}?${cq}`
-        : `https://vidcore.org/embed/movie/${tmdb}?${cq}`;
+        ? `https://vidspark.to/tv/${tmdb}/${s}/${e}`
+        : `https://vidspark.to/movie/${tmdb}`;
     }
     case "vidrift": {
       // anime-first mirror (TMDB-native, sub/dub + own 30-language subs,
@@ -6397,11 +6404,11 @@ function updateMirrorUI(){
   const isTrailer = mirror === "trailer";
   const isCS = mirror === "cinesrc" || mirror === "anipm";
   // paired mirrors ride our bar too. VidRift seeks via resume-seek, VidBolt
-  // + VidZen via real seek APIs, play direct where an API exists (VidBolt,
-  // VidZen); otherwise play hands keys in (VidRift). Mute/rate/speed live in
-  // their player or have no events to stay honest — they hide instead of
-  // sitting dead.
-  const isPaired = mirror === "vidrift" || mirror === "vidzen" || mirror === "vidbolt";
+  // + VidZen + VidCore (VidSpark) via real seek APIs, play direct where an
+  // API exists (VidBolt, VidZen, VidCore); otherwise play hands keys in
+  // (VidRift). Mute/rate/speed live in their player or have no events to
+  // stay honest — they hide instead of sitting dead.
+  const isPaired = mirror === "vidrift" || mirror === "vidzen" || mirror === "vidbolt" || mirror === "vidcore";
   document.getElementById("trailerBar").classList.toggle("hidden", !isTrailer);
   document.getElementById("ctlBar").classList.toggle("hidden", !(isCS || isPaired));
   // paired mirrors ride ctlBar now, so the strip stays away — in cinema it
@@ -6433,7 +6440,7 @@ function updateMirrorUI(){
   // quality lives in the A/V sheet too (fed by player panels), so its bar
   // button hides as well.
   const q = document.getElementById("ctlQ");
-  if (q) q.classList.toggle("hidden", mirror === "anipm" || mirror === "vidzen" || mirror === "vidbolt");
+  if (q) q.classList.toggle("hidden", mirror === "anipm" || mirror === "vidzen" || mirror === "vidbolt" || mirror === "vidcore");
   const st = document.getElementById("ctlSettings");
   if (st) st.classList.toggle("hidden", mirror === "anipm");
   // paired mirrors: mute/rate/speed have no drivable API (volume is blind,
@@ -6550,13 +6557,14 @@ function paintMirrors(){
 /* server tiers for the picker: OUR PLAYERS (our bar + remote drive the
    video) vs MORE SERVERS (their own player — cursor/\u{1F3AF} on TV). VidRift rides
    with ours: remote seeks + auto-skip sync + progress feed our UI. */
-const MAIN_PLAYERS = ["cinesrc", "anipm", "vidrift", "vidzen", "vidbolt"];
+const MAIN_PLAYERS = ["cinesrc", "anipm", "vidrift", "vidzen", "vidbolt", "vidcore"];
 const MAIN_HINTS = {
   cinesrc: "Our bar drives everything: play, seek, subs, speed",
   anipm: "Our bar drives it after one \u{25B6} tap inside: sub/dub, quality, skip",
   vidrift: "Remote seeks + auto-skip sync; Up Next + quality follow our UI; our bar drives seek/skip/subs; phone panels open in our sheet",
   vidzen: "Our bar drives play, seek, skip; server picker + subs in its player",
   vidbolt: "Our bar drives play, seek, skip; A/V holds servers, quality, subtitles; our CC overlay works too",
+  vidcore: "Our bar drives play, seek, skip on the VidSpark player (verified real events); volume keys own volume",
 };
 /* Wyzie subtitles: search + download with the built-in shared key (no key UI —
    it just works; a personal key saved on-device by older builds still wins
@@ -8286,6 +8294,64 @@ window.addEventListener("message", (event)=>{
     }
   }
 });
+/* ---------- VidCore: full bar pairing via the REAL player (vidspark.to) ----------
+   VidCore's embed page is only an ad-wrapper around the VidSpark player
+   (verified 2026-11: the wrapper relays no messages and injects popunders),
+   so we load the player DIRECTLY and speak its own bridge, mined from the
+   player bundle: IN  {action: play/pause/togglePlay/seek+time/setVolume/
+   mute/unmute/setSpeed/getStatus}, OUT {source:"vidspark-player" (or
+   "viesapi-player"), event: play/pause/seeked/timeupdate+percentage/ended/
+   playerstatus, currentTime, duration}. Play/pause/seek are event-confirmed
+   and ride our bar; volume/mute/speed have NO confirmation events (blind
+   toggles desync) so they stay hidden like VidBolt - TV keys own volume. */
+const CORE_ORIGIN = "https://vidspark.to";
+function coreSend(action, extra){
+  if (mirror !== "vidcore") return;
+  try {
+    const f = document.getElementById("player");
+    if (f && f.contentWindow) f.contentWindow.postMessage(Object.assign({ action }, extra || {}), CORE_ORIGIN);
+  } catch(e){}
+}
+function coreSeekRel(d){
+  if (mirror !== "vidcore") return;
+  const t = Math.max(0, (pState.cur || 0) + d);
+  coreSend("seek", { time: Math.floor(pState.dur > 0 ? Math.min(t, pState.dur) : t) });
+  skipFlash(d);
+}
+window.addEventListener("message", (event)=>{
+  if (event.origin !== CORE_ORIGIN) return;
+  if (mirror !== "vidcore") return; // stale frame from a switched-away mirror
+  const d = event.data || {};
+  const src = String(d.source || "");
+  if (src !== "vidspark-player" && src !== "viesapi-player") return;
+  const evn = String(d.event || "");
+  const cur = typeof d.currentTime === "number" ? d.currentTime : null;
+  const dur = typeof d.duration === "number" ? d.duration : null;
+  if (evn === "timeupdate" || evn === "seeked" || evn === "playerstatus") {
+    if (cur != null) pState.cur = cur;
+    if (dur != null && dur > 0) pState.dur = dur;
+    if (evn === "playerstatus" && typeof d.paused === "boolean") pState.paused = d.paused;
+    if (cur != null && cur > 0.5) { window._cinePlaying = true; window._coreStarted = true; }
+    try { clearStuckTip(); } catch(e){} try { clearTapHint(); } catch(e){}
+    hideSpin(); ctlPaint();
+    if ((pState.dur || 0) > 0) saveProgress(pState.cur, pState.dur);
+    autoSkipIntro();
+    try { sleepTick(); } catch(e){} // sleep timer runs on every drivable mirror
+    return;
+  }
+  if (evn === "play") { pState.paused = false; window._cinePlaying = true; window._coreStarted = true; ctlPaint(); return; }
+  if (evn === "pause") { pState.paused = true; ctlPaint(); return; }
+  if (evn === "ended") {
+    try { markWatched(); } catch(e){}
+    if (sleepOnEnd) applySleepOnEnd();
+    else { try { maybeUpNext(); } catch(e){} }
+    if (watchState.type === "movie") {
+      try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+      if (document.body.classList.contains("video-fs")) exitVideoFs();
+    }
+    return;
+  }
+});
 /* ---------- AniPM: anime-native two-way player (like CineSrc, for anime)
    Embed by MAL id, driven over {ns:'anipm.player'} messages: play/pause/
    seek/volume/subs/quality/episodes in, full event set out. Keyless end to
@@ -9354,6 +9420,8 @@ const PARTY = (() => {
       play(){ boltSend({ type: "play" }); }, pause(){ boltSend({ type: "pause" }); }, seek(t){ boltSeekTo(Math.floor(t)); }, rate:null };
     if (m === "vidzen") return { id: m, cap: "full", pos, dur, paused,
       play(){ zenSend({ type: "play" }); }, pause(){ zenSend({ type: "pause" }); }, seek(t){ zenSeekTo(Math.floor(t)); }, rate:null };
+    if (m === "vidcore") return { id: m, cap: "full", pos, dur, paused,
+      play(){ coreSend("play"); }, pause(){ coreSend("pause"); }, seek(t){ coreSend("seek", { time: Math.floor(t) }); }, rate:null };
     if (m === "vidrift") return { id: m, cap: "partial", pos, dur, paused,
       play(){}, pause(){}, // NO play/pause API exists on this bridge (audit)
       seek(t){ vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(t) }); }, rate:null };
@@ -10113,7 +10181,18 @@ async function aboutCheckUpdate(){
     const n = r.ok ? parseInt((await r.text()).trim(), 10) : 0;
     if (n > BUILD_NUM) {
       if (s) s.textContent = "Update available: build " + n + " (you have " + BUILD_NUM + ")";
-      if (b) { b.disabled = false; b.textContent = "Refresh to Update"; b.onclick = () => location.reload(); }
+      if (b) {
+        b.disabled = false;
+        if (inAppShell()) {
+          // the shell intercepts the release-asset URL and runs its verified
+          // installer (checksum + signer pinned) - no sideload detour
+          b.textContent = "Download & Install";
+          b.onclick = () => installUpdateFromApp();
+        } else {
+          b.textContent = "Refresh to Update";
+          b.onclick = () => location.reload();
+        }
+      }
       const ub = document.getElementById("updateBar");
       if (ub) ub.classList.remove("hidden");
     } else if (!r.ok) {
