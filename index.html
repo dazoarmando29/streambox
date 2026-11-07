@@ -9549,9 +9549,12 @@ const PARTY = (() => {
       }
       case "room": {
         S.room = m.room;
-        // the room response is the identity authority (it returns the SEAT
-        // token - stable across reconnects, unlike the per-connection one)
-        S.token = m.token || S.token;
+        // identity rule that survives BOTH hub generations: on a REATTACH our
+        // stored resume token is the seat identity - never let a response
+        // rotate it (older hubs echo the per-connection token there, which
+        // used to strand the NEXT reconnect on a ghost seat). A fresh join
+        // adopts the token the server minted for the new seat.
+        if (!m.reattached && m.token) S.token = m.token;
         S.selfId = (m.room && m.room.selfId) || S.selfId;
         S.status = "in-room";
         S.lastSeq = (m.room.playback && m.room.playback.seq) || 0;

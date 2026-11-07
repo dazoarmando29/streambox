@@ -1671,9 +1671,10 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
     ok("welcome never rotates the stored resume token (per-connection tokens broke reattach)");
   else bad("the welcome handler must never overwrite an existing S.token");
   const room = html.match(/case "room": \{[\s\S]{0,1200}/);
-  if (room && /S\.pw \|\| ""/.test(room[0]) && /if \(!m\.reattached\) toast/.test(room[0]))
-    ok("room snapshots persist the typed room password and reconnects stay toast-silent");
-  else bad("the room handler must store S.pw for rejoin and toast only on fresh joins");
+  if (room && /S\.pw \|\| ""/.test(room[0]) && /if \(!m\.reattached\) toast/.test(room[0])
+      && /if \(!m\.reattached && m\.token\) S\.token = m\.token/.test(room[0]))
+    ok("room snapshots persist the typed password, reconnects stay toast-silent, and a reattach never rotates the seat token");
+  else bad('the room handler must store S.pw, toast only on fresh joins, and keep the stored token on reattach (older hubs echo per-connection tokens)');
   const rs = html.match(/case "room_state": \{[\s\S]{0,500}/);
   if (rs && /S\.chat = \(m\.room\.chat/.test(rs[0]) && /S\.lastSeq = \(m\.room\.playback/.test(rs[0]))
     ok("resync (room_state) adopts the missed chat AND the newest seq (no rollback window)");
