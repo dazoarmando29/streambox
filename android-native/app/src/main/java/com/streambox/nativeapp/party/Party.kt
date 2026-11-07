@@ -401,7 +401,12 @@ object Party {
                     lastSeq = rm.seq
                     lastContentKey = rm.content?.key ?: ""
                     unread.value = 0
-                    if (m.has("token")) token = m.optString("token")
+                    // identity rule that survives BOTH hub generations: on a
+                    // reattach our stored resume token IS the seat identity -
+                    // never let a response rotate it (older hubs echo the
+                    // per-connection token there, stranding the next
+                    // reconnect). A fresh join adopts the new seat's token.
+                    if (!m.optBoolean("reattached") && m.has("token")) token = m.optString("token")
                     saveSession()
                     val c = rm.content
                     if (c != null) {
