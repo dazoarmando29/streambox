@@ -375,19 +375,28 @@ object Party {
     private fun handle(m: JSONObject) {
         when (m.optString("t")) {
             "welcome" -> {
-                if (m.has("participantId")) selfId = m.optString("participantId")
-                if (m.has("token")) token = m.optString("token")
+                // per-CONNECTION identity - never overwrite a stored resume
+                // identity with it (that rotation broke every second reconnect)
+                if (selfId.isEmpty() && m.has("participantId")) selfId = m.optString("participantId")
+                if (token.isEmpty() && m.has("token")) token = m.optString("token")
             }
             "heartbeat" -> {
                 val t1 = System.currentTimeMillis()
-                val t0 = m.optLong("clientTs", t1)
-                val off = m.optLong("serverTs", t1) - (t0 + t1) / 2
-                offsetMs = if (offsetMs == 0L) off else (offsetMs * 0.7 + off * 0.3).toLong()
+                val t0 = m.optLong("clientTs", 0L)
+                // synthetic echoes (clientTs 0/absent) are not clock samples:
+                // accepting one pinned rtt=0 and froze the offset forever
+                if (t0 > 0L) {
+                    val off = m.optLong("serverTs", t1) - (t0 + t1) / 2
+                    offsetMs = if (offsetMs == 0L) off else (offsetMs * 0.7 + off * 0.3).toLong()
+                }
             }
             "room" -> {
                 val rm = parseRoom(m.optJSONObject("room"))
                 if (rm != null) {
                     room.value = rm
+                    // the SNAPSHOT names our identity: after a token reattach
+                    // it is the seat id, not the connection id from welcome
+                    if (rm.selfId.isNotEmpty()) selfId = rm.selfId
                     status.value = "in-room"
                     lastSeq = rm.seq
                     lastContentKey = rm.content?.key ?: ""
@@ -406,6 +415,9 @@ object Party {
             "room_state" -> {
                 val rm = parseRoom(m.optJSONObject("room")) ?: return
                 room.value = rm
+                // the snapshot is authoritative: adopt its seq or a replayed
+                // older event passes the stale gate and rolls state back
+                if (rm.seq > lastSeq) lastSeq = rm.seq
             }
             "playback" -> {
                 val r = room.value ?: return
@@ -472,6 +484,11 @@ object Party {
                 )
             }
             "kicked" -> {
+                // `kicked` is personal: only the named target tears down
+                // (older hubs broadcast it to the whole room - one kick evicted
+                // everyone from their own UI)
+                val target = m.optString("targetId")
+                if (target.isNotEmpty() && target != selfId) return
                 disconnect()
                 lastError.value = "You were removed from the party"
             }

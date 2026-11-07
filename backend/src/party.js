@@ -141,7 +141,7 @@ export class PartyHub {
       return;
     }
     const lim = this.limFor(m0.id);
-    if (!lim.msg.allow(m0.id, Date.now())) { this.send(ws, { t: "error", error: "rate_limited" }); return; }
+    if (!lim.msg.allow("m", Date.now())) { this.send(ws, { t: "error", error: "rate_limited" }); return; }
 
     let m;
     try { m = JSON.parse(raw); } catch (e) { return this.send(ws, { t: "error", error: "bad_message" }); }
@@ -186,9 +186,19 @@ export class PartyHub {
           typeof m.token === "string" ? m.token : "");
         if (r.error) return this.send(ws, { t: "error", error: r.error, for: "join" });
         m0.roomId = r.room.id;
-        if (r.reattached) m0.id = r.reattached;
+        if (r.reattached) {
+          // the limiter follows the seat: p.id churn used to orphan its entry
+          // AND hand every reconnect a fresh rate budget
+          const l = this.msgLim.get(m0.id);
+          if (l) this.msgLim.delete(m0.id);
+          m0.id = r.reattached;
+          if (l) this.msgLim.set(m0.id, l);
+        }
         ws.serializeAttachment(m0);
-        this.send(ws, { t: "room", room: this.snapshot(this.rooms.get(m0.roomId), m0.id), token: m0.token, reattached: !!r.reattached });
+        // always hand back the SEAT token (r.token): the connection token
+        // rotates on every reconnect and must never become the resume identity
+        this.send(ws, { t: "room", room: this.snapshot(this.rooms.get(m0.roomId), m0.id), token: r.token || m0.token, reattached: !!r.reattached });
+        if (r.events && r.events.length) this.broadcast(m0.roomId, r.events, m0.id);
         if (!r.reattached) {
           const pub = this.snapshot(this.rooms.get(m0.roomId), m0.id).participants.find((x) => x.id === m0.id);
           this.broadcast(m0.roomId, [{ t: "peer_joined", room: m0.roomId, participant: pub }], m0.id);
@@ -272,7 +282,7 @@ export class PartyHub {
         if (!room || room.ended) return this.send(ws, { t: "error", error: "not_found", for: "chat" });
         const part = room.participants.get(m0.id);
         if (!part || part.muted || !room.chatEnabled) return this.send(ws, { t: "error", error: "unauthorized", for: "chat" });
-        if (!lim.chat.allow("c:" + m0.id, Date.now())) return this.send(ws, { t: "error", error: "rate_limited", for: "chat" });
+        if (!lim.chat.allow("c", Date.now())) return this.send(ws, { t: "error", error: "rate_limited", for: "chat" });
         const text = cleanText(m.text, LIMITS.CHAT_MAX);
         if (!text) return this.send(ws, { t: "error", error: "bad_message" });
         room.chatSeq += 1;
@@ -288,17 +298,21 @@ export class PartyHub {
         if (room.hostId !== m0.id) return this.send(ws, { t: "error", error: "unauthorized" });
         const targetId = String(m.targetId || "");
         if (!targetId || targetId === room.hostId || !room.participants.has(targetId)) return this.send(ws, { t: "error", error: "bad_message" });
-        const events = [{ t: "kicked", targetId }].concat(this.removeParticipant(m0.roomId, targetId, "kicked"));
+        // `kicked` goes ONLY to the target - the room just hears the leave.
+        // (Broadcasting `kicked` to everyone used to tear down every client:
+        // each one treated any `kicked` event as its own removal.)
+        const targetEvents = [{ t: "kicked", targetId }];
+        const roomEvents = this.removeParticipant(m0.roomId, targetId, "kicked");
         for (const ws2 of this.state.getWebSockets()) {
           const m2 = this.meta(ws2);
           if (m2 && m2.id === targetId) {
-            for (const ev of events) this.send(ws2, ev);
+            for (const ev of targetEvents.concat(roomEvents)) this.send(ws2, ev);
             // detach BEFORE the broadcast or the kicked socket hears it twice
             m2.roomId = "";
             ws2.serializeAttachment(m2);
           }
         }
-        this.broadcast(m0.roomId, events);
+        this.broadcast(m0.roomId, roomEvents);
         return;
       }
       case "mute": {
@@ -413,7 +427,11 @@ export class PartyHub {
           part.connected = true; part.lastSeen = now;
           p.id = id;
           if (id === room.hostId) room.hostDisconnectedAt = 0;
-          return { room, reattached: id };
+          // the SEAT's token is the client's identity across reconnects -
+          // never the per-connection token (that rotated every reconnect and
+          // stranded the next one on a fresh seat: ghost duplicates, host
+          // loss, password lockout)
+          return { room, reattached: id, token: part.token };
         }
       }
       const saved = room.recentSeats.get(token);
@@ -425,15 +443,25 @@ export class PartyHub {
         part.name = saved.name || part.name;
         room.participants.set(saved.id, part);
         p.id = saved.id;
-        if (saved.wasHost) { room.hostId = saved.id; room.hostDisconnectedAt = 0; }
-        return { room, reattached: saved.id };
+        const events = [];
+        if (saved.wasHost) {
+          // reclaiming the host seat is a host change when someone else was
+          // promoted meanwhile - every client must hear it or their UI keeps
+          // a stale host (and the returning host's controls get rejected)
+          if (room.hostId !== saved.id) {
+            events.push({ t: "host_changed", room: room.id, hostId: saved.id, hostName: part.name });
+          }
+          room.hostId = saved.id;
+          room.hostDisconnectedAt = 0;
+        }
+        return { room, reattached: saved.id, token, events };
       }
     }
     if (room.password && password !== room.password) return { error: "wrong_password" };
     const connected = [...room.participants.values()].filter((x) => x.connected).length;
     if (connected >= room.maxParticipants) return { error: "full" };
     room.participants.set(p.id, this.mkPart(p, now));
-    return { room };
+    return { room, token: p.token };
   }
 
   mkPart(p, now) {
