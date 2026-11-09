@@ -1,6 +1,6 @@
-AniPM is back in the Watch Party server list.
+Pausing from inside the player reaches the party now.
 
 Fixes
-- Watch Party: when the room opens an anime title, the app now resolves its MAL/AniList mapping before opening the player. The server list only offers AniPM when that mapping exists - party content used to arrive without it, so AniPM was nowhere to be seen in party sessions. Anime rooms now show the same servers as opening the title from its own page (AniPM first)
+- Watch Party: pausing (or playing) through the provider player's OWN button now tells the room - before, only our overlay's button was relayed, so "one of us paused and it kept playing". Provider play/pause events relay with echo gates (remote events and our own sends never bounce back at the room)
 
-Locked by native QA 90 (the party route must resolve the mapping and pass it to play()).
+Locked by native QA 91 (Party.providerPlayState + the bridge relay must stay).

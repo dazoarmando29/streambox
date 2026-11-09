@@ -1967,5 +1967,17 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   else bad("the party open route must call Api.animeMap for JP animation and pass mal/ani into play() - null ids hid AniPM from the server list");
 }
 
+/* ---------- 91. provider play/pause events relay to the party room ---------- */
+{
+  let party = "", ps = "";
+  try { party = read("android-native/app/src/main/java/com/streambox/nativeapp/party/Party.kt"); } catch (e) {}
+  try { ps = read("android-native/app/src/main/java/com/streambox/nativeapp/ui/PlayerScreen.kt"); } catch (e) {}
+  const relay = /fun providerPlayState\(paused: Boolean\)/.test(party) && /localSentAt \+ 1500/.test(party);
+  const wired = /providerPlayState\(false\)/.test(ps) && /providerPlayState\(true\)/.test(ps);
+  if (relay && wired)
+    ok("pauses/plays inside the provider's own player relay to the room (echoes gated by the local-send window)");
+  else bad("Party.providerPlayState must exist and the PlayerScreen bridge play/pause events must call it");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

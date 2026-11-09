@@ -3008,9 +3008,14 @@ fun PlayerScreen(
                                 when (t) {
                                     "play" -> {
                                         pm.playing = true
+                                        // the user paused/played inside the PROVIDER's own
+                                        // player - the room must hear it (echoes of our own
+                                        // sends are gated inside providerPlayState)
+                                        try { com.streambox.nativeapp.party.Party.providerPlayState(false) } catch (e: Exception) {}
                                     }
                                     "pause" -> {
                                         pm.playing = false
+                                        try { com.streambox.nativeapp.party.Party.providerPlayState(true) } catch (e: Exception) {}
                                     }
                                     "ended" -> {
                                         pm.playing = false

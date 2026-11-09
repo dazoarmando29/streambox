@@ -299,14 +299,25 @@ object Party {
 
     // ---------- local player -> room ----------
     private fun suppressLocal(): Boolean = System.currentTimeMillis() < suppressUntil
+    private var localSentAt = 0L
 
     fun onLocalPlayPause(paused: Boolean) {
         val r = room.value ?: return
         if (!r.canControl() || suppressLocal()) return
+        localSentAt = System.currentTimeMillis()
         send(JSONObject().put("t", "playback")
             .put("action", if (paused) "pause" else "play")
             .put("position", PartyPlayer.ops?.position() ?: 0f)
             .put("sessionVersion", r.sessionVersion))
+    }
+
+    /** The user paused/played INSIDE the provider's own player (its own
+        button, not our overlay) - the room must hear it. Echoes of OUR OWN
+        sends and remote-driven changes are gated away (suppressLocal + the
+        1.5s local-send window), so nothing bounces back at the room. */
+    fun providerPlayState(paused: Boolean) {
+        if (System.currentTimeMillis() < localSentAt + 1500) return
+        onLocalPlayPause(paused)
     }
 
     fun onLocalSeek(seconds: Float) {
