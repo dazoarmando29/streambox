@@ -225,10 +225,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await check("details My List toggles with visible feedback", "#mListBtn", { escape: false, keep: true });
   await check("details Watch opens the player", "#mWatch",
     { expect: (b, a, s) => s.overlays.includes("watchView"), escape: false, keep: true });
-  // --- mobile player controls (the "phone tap shows nothing / won't hide" bugs) ---
-  // the tap layer must own taps over the iframe: engage while our bar drives
-  // the player, single tap TOGGLES the bar (down on second tap), double tap
-  // seeks by side (left -10s / right +30s)
+  // --- mobile player controls (the "phone tap shows nothing / won't hide /
+  // bar vanishes in a second so I can't click the button" bugs) ---
   {
     await sleep(1200);
     const engaged = await evaluate(`!!document.querySelector("#playerBox.tap-catch")`);
@@ -239,27 +237,36 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       tl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: w * ${frac}, button: 0 }));
       return true;
     })()`);
-    // establish state first (the load poke may have idled out), then toggle
-    for (let i = 0; i < 20; i++) { if (await evaluate(`!document.getElementById("ctlBar").classList.contains("bar-hidden")`)) break; await sleep(250); }
-    // single tap #1 -> bar goes DOWN (the "won't go down" fix)
+    const isHidden = () => evaluate(`document.getElementById("ctlBar").classList.contains("bar-hidden")`);
+    // the regression: a tap on the LOAD-TIME auto-bar must EXTEND it, never
+    // schedule a hide ("controls vanish in a second, can't click a button")
+    await evaluate(`try { hideHud(); pokeHud(); window._barFromTap = false; } catch(e){}`);
+    await sleep(50);
     await tap(0.5);
+    await sleep(500);
+    const stillUp = !(await isHidden());
+    // tapping a SUMMONED bar hides it (the requested tap-again-down)
+    await evaluate(`try { hideHud(); } catch(e){}`); // bar away, not user-summoned
+    await tap(0.5); // wake -> summoned by tap
+    await sleep(450);
+    await tap(0.5); // tap again -> dismiss
     let down = false;
-    for (let i = 0; i < 10 && !down; i++) { await sleep(300); down = await evaluate(`document.getElementById("ctlBar").classList.contains("bar-hidden")`); }
-    // single tap #2 -> bar back UP
+    for (let i = 0; i < 8 && !down; i++) { await sleep(300); down = await isHidden(); }
+    // wake is INSTANT (no 300ms delay) and unconditional
     await tap(0.5);
-    let up = false;
-    for (let i = 0; i < 10 && !up; i++) { await sleep(300); up = await evaluate(`!document.getElementById("ctlBar").classList.contains("bar-hidden")`); }
-    // double tap right -> +30s feedback
+    await sleep(150);
+    const instantUp = !(await isHidden());
+    // double tap right -> +30s, double tap left -> -10s (bar stays up)
     await tap(0.85); await tap(0.85);
     await sleep(300);
     const fwd = await evaluate(`(document.getElementById("volToast") || {}).textContent || ""`);
-    // double tap left -> -10s feedback
     await tap(0.15); await tap(0.15);
     await sleep(300);
     const back = await evaluate(`(document.getElementById("volToast") || {}).textContent || ""`);
-    if (engaged && down && up && /30/.test(fwd) && /10/.test(back))
-      { console.log("ok    tap layer: engages with our bar, tap toggles it down/up, double-tap seeks by side"); passed++; }
-    else { console.log(`FAIL tap layer: engaged=${engaged} down=${down} up=${up} fwd=${JSON.stringify(fwd)} back=${JSON.stringify(back)}`); dead++; }
+    const upAfterSeek = !(await isHidden());
+    if (engaged && stillUp && down && instantUp && /30/.test(fwd) && /10/.test(back) && upAfterSeek)
+      { console.log("ok    tap layer: instant wake, load-bar taps extend (never vanish), summoned bar tap hides, double-tap seeks"); passed++; }
+    else { console.log(`FAIL tap layer: engaged=${engaged} stillUp=${stillUp} down=${down} instantUp=${instantUp} fwd=${JSON.stringify(fwd)} back=${JSON.stringify(back)} upAfterSeek=${upAfterSeek}`); dead++; }
   }
   {
     await settle(); // player Back -> home (toast-first ladder may need 2 presses)

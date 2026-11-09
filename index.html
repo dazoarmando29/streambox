@@ -790,7 +790,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 229; // bump every release alongside version.txt
+  const BUILD_NUM = 230; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -2746,11 +2746,14 @@ function purgeRetiredCaches(){
   // ---- tap layer over the video (phones/tablets/desktop) ----
   // The video is a cross-origin iframe that swallows every touch, so while
   // our bar drives the player a transparent layer owns taps over it:
-  //   single tap       -> toggle the control bar (tap again HIDES it)
-  //   double tap left  -> -10s      double tap right -> +30s
-  // (the old letterbox-only "tap to play/pause" never fired on real phones -
-  // the iframe ate the touch - and single-tap-only wake ignored the request
-  // to hide the bar again with a second tap)
+  //   tap on hidden bar -> WAKE instantly (always - the controls must be
+  //                       there to press; the old delayed toggle decided at
+  //                       TIMER time and a tap on the load-time auto-bar
+  //                       scheduled a HIDE - "the controls vanish in a
+  //                       second and I can't click the button")
+  //   tap on your own summoned bar -> dismiss (the requested tap-again-down)
+  //   tap on the load-time auto-bar -> keep it up (never yank it away)
+  //   double tap left -> -10s   double tap right -> +30s
   try {
     const tl = document.getElementById("tapLayer");
     let tapAt = 0, tapZone = "", tapTimer = null;
@@ -2760,6 +2763,8 @@ function purgeRetiredCaches(){
       const w = window.innerWidth || 1;
       const x = e.clientX || 0;
       const zone = x < w * 0.38 ? "left" : (x > w * 0.62 ? "right" : "mid");
+      const bar = document.getElementById("ctlBar");
+      const hiddenNow = !bar || bar.classList.contains("bar-hidden");
       if (now - tapAt < 320 && zone === tapZone && zone !== "mid") {
         clearTimeout(tapTimer); tapAt = 0;
         const d = zone === "left" ? -10 : 30;
@@ -2769,12 +2774,21 @@ function purgeRetiredCaches(){
       }
       tapAt = now; tapZone = zone;
       clearTimeout(tapTimer);
-      tapTimer = setTimeout(() => {
-        const bar = document.getElementById("ctlBar");
-        if (!bar) return;
-        if (bar.classList.contains("bar-hidden")) pokeHud();
-        else hideHud(); // second tap = hide again (the reported "won't go down")
-      }, 300);
+      if (hiddenNow) {
+        // WAKE: instant and unconditional - no delay, never hides
+        pokeHud();
+        window._barFromTap = true;
+        return;
+      }
+      if (!window._barFromTap) {
+        // the load-time/auto bar: this tap EXTENDS it (restarts the idle),
+        // it must never vanish the moment the user reaches for a button
+        pokeHud();
+        return;
+      }
+      // the bar is one the USER summoned: tap again = dismiss (300ms delay so
+      // a double-tap seek doesn't also hide the bar)
+      tapTimer = setTimeout(() => { hideHud(); }, 300);
     }, { passive: true });
   } catch(e){}
   try {
@@ -5131,6 +5145,7 @@ function loadPlayer(){
   // load-time handoff above (their player demands first press inside);
   // every other mirror is manual \u{1F3AF} only. TV *browsers* never had auto-handoff.
   pokeHud(); // reveal HUD + bar briefly on every (re)load
+  window._barFromTap = false; // the load-time auto-bar is not user-summoned
   showTitleCard();
   try { tapLayerSync(); } catch(e){}
 }
@@ -5510,18 +5525,23 @@ function renderList(){
     } catch(e){}
     const bar = document.getElementById("ctlBar");
     bar.classList.add("bar-hidden");
+    window._barFromTap = false;
     try { capFloat(false); } catch(e){} // bar minimized: captions settle back
     try { document.getElementById("titleCard").classList.add("hidden"); } catch(e){}
   }
   function pokeHud(){
-    // any interaction while watching: show the bar, hide again after 4s idle
+    // any interaction while watching: show the bar, auto-hide after idle.
+    // touch devices get 6s (aiming at small buttons takes longer than the
+    // old 4s - the bar kept vanishing mid-reach)
     if (document.getElementById("watchView").classList.contains("hidden")) return;
     const bar = document.getElementById("ctlBar");
     const wasHidden = bar.classList.contains("bar-hidden");
     bar.classList.remove("bar-hidden");
     try { capFloat(true); } catch(e){} // bar up: captions float above it
     clearTimeout(window._idleT);
-    window._idleT = setTimeout(hideHud, 4000);
+    let idle = 4000;
+    try { if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) idle = 6000; } catch(e){}
+    window._idleT = setTimeout(hideHud, idle);
     // the title card rides with the bar: one render per reveal (mousemove
     // floods pokeHud - rewriting the card per event was pure churn)
     if (wasHidden) { try { showTitleCard(true); } catch(e){} }
