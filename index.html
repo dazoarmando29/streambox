@@ -790,7 +790,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 230; // bump every release alongside version.txt
+  const BUILD_NUM = 231; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -5809,6 +5809,7 @@ try {
 } catch(e){}
 function enterVideoFs(){
   document.body.classList.add("video-fs");
+  lockLandscape(); // phones/tablets: the 16:9 picture fills the screen in landscape
   pokeHud();
   const b = document.getElementById("ctlPlay");
   if (b && b.offsetParent) { try { b.focus({ preventScroll: true }); } catch(e){} return; }
@@ -5819,8 +5820,34 @@ function enterVideoFs(){
 }
 function exitVideoFs(){
   document.body.classList.remove("video-fs");
-  clearTimeout(window._idleT);
-  document.getElementById("ctlBar").classList.remove("bar-hidden");
+  unlockOrientation();
+  // re-arm the auto-minimize: the old code cleared the idle timer and left
+  // the bar up FOREVER after leaving fullscreen (the "it never minimizes
+  // automatically anymore" bug)
+  try { pokeHud(); } catch(e){}
+}
+function lockLandscape(){
+  // phones/tablets: fullscreen should BE landscape so the 16:9 video fills
+  // the screen. Screen Orientation API covers Android Chrome + the mobile
+  // web; the APK ALSO locks natively in onShowCustomView (WebViews often
+  // refuse the JS lock). iOS Safari cannot rotate programmatically - the
+  // call is a harmless no-op there. TVs keep their own orientation.
+  try {
+    if (typeof IS_TV_DEVICE !== "undefined" && IS_TV_DEVICE) return;
+    window._sbOrient = "landscape";
+    const so = screen.orientation;
+    if (so && typeof so.lock === "function") {
+      const p = so.lock("landscape");
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    }
+  } catch(e){}
+}
+function unlockOrientation(){
+  try {
+    window._sbOrient = "";
+    const so = screen.orientation;
+    if (so && typeof so.unlock === "function") so.unlock();
+  } catch(e){}
 }
 function nudgePlayerSize(){
   // force the player to re-measure its frame (fixes stale/zoomed layouts)

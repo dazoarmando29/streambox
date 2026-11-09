@@ -1863,5 +1863,28 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("the player iframe must be position:absolute (its 300px intrinsic width expands the phone viewport) and pill rows must wrap");
 }
 
+/* ---------- 156. idle auto-minimize + auto-landscape fullscreen ---------- */
+{
+  // the bar must ALWAYS auto-minimize: exitVideoFs used to clear the idle
+  // timer and leave the bar up forever after fullscreen
+  const ex = html.match(/function exitVideoFs\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (ex && /pokeHud\(\)/.test(ex[0]) && !/clearTimeout\(window\._idleT\)/.test(ex[0]))
+    ok("exitVideoFs re-arms the idle auto-minimize (the bar can never stay up forever)");
+  else bad("exitVideoFs must re-arm auto-minimize via pokeHud - never clear the idle timer and strand the bar");
+  const en = html.match(/function enterVideoFs\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (en && /lockLandscape\(\)/.test(en[0]))
+    ok("enterVideoFs locks landscape (the 16:9 picture fills phones/tablets sideways)");
+  else bad("enterVideoFs must call lockLandscape - fullscreen on phones/tablets must rotate to landscape");
+  if (/so\.lock\("landscape"\)/.test(html) && /so\.unlock\(\)/.test(html))
+    ok("the Screen Orientation API lock/unlock pair exists (best effort on iOS, real on Android)");
+  else bad("lockLandscape/unlockOrientation must use the Screen Orientation API");
+  // the APK WebView shell locks natively too (JS lock is unreliable there)
+  let ma2 = "";
+  try { ma2 = read("android/app/src/main/java/com/streambox/app/MainActivity.java"); } catch (e) {}
+  if (/SCREEN_ORIENTATION_SENSOR_LANDSCAPE/.test(ma2) && /SCREEN_ORIENTATION_UNSPECIFIED/.test(ma2))
+    ok("the APK shell locks landscape in onShowCustomView and restores on exit");
+  else bad("MainActivity must request SENSOR_LANDSCAPE on video fullscreen and UNSPECIFIED on exit");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

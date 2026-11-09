@@ -1,10 +1,9 @@
-Tap-to-show controls never vanish mid-reach anymore - and tapping hides only YOUR bar.
+The controls minimize themselves again when you stop touching them, and fullscreen now turns the phone sideways so the movie actually fills the screen.
 
-What was wrong (the reported bug): tap the video and the controls showed for about a second then minimized themselves, so the buttons could never be pressed. Root cause: the tap toggle decided what to do at TIMER time (300ms later) instead of tap time - so any tap on the bar that was ALREADY up (the one shown when the player loads, or a quick second tap before the first one landed) scheduled a HIDE. Your tap literally hid the bar 300ms later.
+What is new
+- Auto-minimize is back and reliable: stop touching the screen for a few seconds and the control bar tucks itself away (it used to stay up forever after you left fullscreen - the idle timer was being cleared and never re-armed)
+- Fullscreen rotates to LANDSCAPE on phones and tablets (web + both APKs): tap fullscreen and the movie fills the screen sideways, the way a 16:9 picture is meant to be watched. Leaving fullscreen returns the device to its own orientation. The app shell locks it natively (web rotation locks are unreliable inside Android WebViews), the website uses the Screen Orientation API - and on iPhone Safari (which can't rotate from a page) everything else still works
+- The native Kotlin app rotates to landscape for the playback session too, and returns to the previous orientation when you leave the player (TVs keep their own orientation - their panel is landscape already)
 
 Fixes
-- Waking is instant and unconditional: tap the video and the controls appear immediately - the tap can never hide them
-- A tap on the load-time auto-bar now EXTENDS it (restarts the idle clock) instead of dismissing it - the bar is yours to press
-- Tapping hides the bar only when you summoned it yourself (the requested tap-again-to-hide), and the hide is delayed slightly so a double-tap seek never also hides the bar
-- Touch devices get 6 seconds of idle before the bar auto-hides (was 4 - too fast to aim at buttons), and every tap on a button keeps it alive
-- Regression-locked in the click-test: instant wake, load-bar taps extend, summoned-bar tap hides, double-tap seeks, bar survives seeks
+- The auto-minimize timer now re-arms after EVERY path that shows the bar (leaving fullscreen included) - verified by test: wake the bar, stop touching, it hides on its own

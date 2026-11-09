@@ -338,6 +338,14 @@ public class MainActivity extends Activity {
                 if (fullscreenView != null) { callback.onCustomViewHidden(); return; }
                 fullscreenView = view;
                 fullscreenCallback = callback;
+                // phones/tablets: video fullscreen = LANDSCAPE - a 16:9
+                // picture only fills a phone screen sideways. The JS-side
+                // screen.orientation.lock is unreliable inside WebViews, so
+                // the shell locks natively. (TVs don't rotate - the request
+                // is a harmless no-op there.)
+                try {
+                    setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                } catch (Exception ignored) {}
                 FrameLayout decor = (FrameLayout) getWindow().getDecorView();
                 // immersive fullscreen so player controls are never clipped by system bars
                 decor.setSystemUiVisibility(
@@ -430,6 +438,10 @@ public class MainActivity extends Activity {
         fullscreenView = null;
         WebChromeClient.CustomViewCallback cb = fullscreenCallback;
         fullscreenCallback = null;
+        // leaving video fullscreen: give the device its own orientation back
+        try {
+            setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        } catch (Exception ignored) {}
         if (web != null) {
             web.setVisibility(View.VISIBLE);
             // refocus the page so remote/keyboard input lands in it again

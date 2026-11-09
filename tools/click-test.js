@@ -268,6 +268,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       { console.log("ok    tap layer: instant wake, load-bar taps extend (never vanish), summoned bar tap hides, double-tap seeks"); passed++; }
     else { console.log(`FAIL tap layer: engaged=${engaged} stillUp=${stillUp} down=${down} instantUp=${instantUp} fwd=${JSON.stringify(fwd)} back=${JSON.stringify(back)} upAfterSeek=${upAfterSeek}`); dead++; }
   }
+  // --- auto-minimize on idle + fullscreen orientation (the "it never
+  // minimizes anymore" and "fullscreen should be landscape" bugs) ---
+  {
+    await evaluate(`try { pokeHud(); } catch(e){}`); // bar up, idle armed
+    let autoDown = false;
+    for (let i = 0; i < 14 && !autoDown; i++) { await sleep(600); autoDown = await evaluate(`document.getElementById("ctlBar").classList.contains("bar-hidden")`); }
+    // fullscreen: cinema on + landscape lock attempted
+    await evaluate(`try { ctlFullscreen(); } catch(e){}`);
+    await sleep(600);
+    const fsOn = await evaluate(`document.body.classList.contains("video-fs")`);
+    const oriented = await evaluate(`window._sbOrient === "landscape"`);
+    // leaving fullscreen unlocks orientation AND re-arms the auto-minimize
+    await evaluate(`try { exitVideoFs(); } catch(e){}`);
+    await sleep(200);
+    const unlocked = await evaluate(`window._sbOrient === ""`);
+    const reArmed = await evaluate(`!!window._idleT`);
+    if (autoDown && fsOn && oriented && unlocked && reArmed)
+      { console.log("ok    idle auto-minimize works, fullscreen locks landscape, exit unlocks and re-arms the auto-minimize"); passed++; }
+    else { console.log(`FAIL idle/fs: autoDown=${autoDown} fsOn=${fsOn} oriented=${oriented} unlocked=${unlocked} reArmed=${reArmed}`); dead++; }
+  }
   {
     await settle(); // player Back -> home (toast-first ladder may need 2 presses)
     const s2 = JSON.parse(await snapshot());
