@@ -232,7 +232,23 @@
   @keyframes herofade { from { opacity: 0; } to { opacity: 1; } }
   @keyframes herozoom { from { transform: scale(1); } to { transform: scale(1.07); } }
   html { scroll-behavior: smooth; }
-  .player-wrap { aspect-ratio: 16/9; background: #000; }
+  .player-wrap { aspect-ratio: 16/9; background: #000; min-width: 0; }
+  /* the player iframe must NOT contribute its intrinsic 300px to layout
+     sizing: on phones narrower than that the min-content floor EXPANDED the
+     layout viewport (everything rendered zoomed and the right edge clipped -
+     the classic "page looks too big on small phones" bug). Absolute + inset
+     takes it out of flow; the frame still fills the 16:9 box. */
+  .player-wrap #player { position: absolute; inset: 0; }
+  /* quality pills wrap: their unwrapped row was a ~300px min-content floor
+     that widened the whole player column past the phone viewport */
+  #qPills { flex-wrap: wrap; }
+  /* grid items default to min-width:auto = min-content of their children -
+     one wide child then widens the COLUMN and the phone layout viewport
+     expands (page renders zoomed + clipped). Always allow shrink. */
+  #watchView > .grid > * { min-width: 0; }
+  /* the Motion Judder pill is a nowrap flex around a 128px range - its
+     ~305px min-content was the exact floor that broke 320-340px phones */
+  #judderPill { flex-wrap: wrap; }
   iframe { border: 0; }
   #ctlBar { transition: opacity .3s ease, transform .3s ease; }
   #ctlBar.bar-hidden { opacity: 0; pointer-events: none; transform: translateY(10px); }
@@ -315,14 +331,12 @@
   #seekWrap:focus-within { outline: 2px solid #00F0B5; outline-offset: 4px; border-radius: 12px; }
   /* controls row: WRAPS so every control is reachable on any width - the old
      hidden-scrollbar scroller (nowrap + overflow-x:auto) cut buttons off on
-     phones and needed a horizontal drag to reach the rest */
+     phones and needed a horizontal drag to reach the rest. Phone sizing lives
+     in ONE place: the PHONES DESIGN PASS block below (a stale duplicate rule
+     here once pinned 10px !important padding and broke the compact bar). */
   #btnRow { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding-bottom: 2px;
     flex-wrap: wrap; }
   #btnRow > * { flex-shrink: 0; }
-  @media (max-width: 640px) {
-    #btnRow { gap: 6px; }
-    #btnRow > button { padding-left: 10px !important; padding-right: 10px !important; }
-  }
   /* floating Skip Intro (all targets): sits above the bar, bottom-right —
      a bold white pill that's impossible to miss and never crowds the bar.
      TV positions it clear of its taller bar; D-pad \25B2  climbs straight to it. */
@@ -477,6 +491,33 @@
        (both sat at bottom:148px and overlapped below ~430px) */
     #upNextCard { bottom: 208px; }
     .player-wrap { border-radius: 0; margin: 0 -1rem; }
+    /* PHONES DESIGN PASS: the video owns the screen and the bar is a slim
+       overlay INSIDE its bottom - the old 44px buttons wrapped to two tall
+       rows and ate the whole 16:9 picture. Tailwind utilities load last,
+       so these win by ID specificity. */
+    #playerBox { border-radius: 0 !important; margin: 0 -16px !important; width: calc(100% + 32px) !important; border-left: 0 !important; border-right: 0 !important; }
+    #playerBox #ctlBar { left: 8px; right: 8px; bottom: 8px; padding: 6px 8px 8px !important; border-radius: 14px !important; gap: 4px; }
+    #seekRow { gap: 8px; }
+    #ctlCur, #ctlDur { font-size: 10px; }
+    #ctlRemain { display: none; }
+    #btnRow { gap: 5px; row-gap: 5px; justify-content: center; }
+    /* the global a11y rule (button min 44px) clamps even !important widths -
+       exempt the compact phone bar or nothing can shrink */
+    #btnRow > button { height: 34px !important; min-height: 34px !important; min-width: 0 !important; padding: 0 8px !important; font-size: 11px; }
+    #btnRow #ctlSettings, #btnRow #ctlFs { width: 34px !important; min-width: 34px !important; padding: 0 !important; }
+    #btnRow > button svg { width: 16px; height: 16px; }
+    #ctlPlay { width: 36px !important; min-width: 36px !important; height: 36px !important; min-height: 36px !important; }
+    /* ONE slim row of essentials (YouTube-inline pattern): play, -10/+30,
+       CC, settings, fullscreen. Speed / quality / mute live in the settings
+       sheet (and the quality pills in the card below) - the old 10-button
+       bar wrapped to two tall rows that ate the whole 16:9 picture. */
+    #btnRow #ctlMute, #btnRow #ctlRate, #btnRow #ctlQ { display: none !important; }
+    /* grouping margins break centering on a wrapped phone row */
+    #ctlBar #ctlMute.ctl-group-start { margin-left: 0; }
+    #subTip { padding: 12px !important; }
+    #subTip .font-bold { font-size: 13px; }
+    #subTip p { font-size: 12px; margin-top: 4px; }
+    #subTip button { padding: 8px 12px; font-size: 12px; }
   }
   /* short landscape (phones sideways / split-screen): the billboard's
      badge+title+overview+buttons overflowed the clipped hero and ate the
@@ -614,16 +655,17 @@
     box-shadow: 0 24px 80px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08); }
   /* focus zoom + ring come from the base .card rules (shared with desktop) */
   /* true fullscreen: fill the screen, no letterbox box, no clipped controls */
-  #playerBox:fullscreen { aspect-ratio: auto; width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; border: 0; background: #000; }
+  #playerBox:fullscreen { aspect-ratio: auto; width: 100%; height: 100%; border-radius: 0; border: 0; background: #000; }
   #playerBox:fullscreen #playerSpin { border-radius: 0; }
   /* fallback fullscreen (TV WebViews ignore element fullscreen requests):
-     pin video + our bar, hide the rest */
-  body.video-fs { overflow: hidden; }
+     pin video + our bar, hide the rest. inset:0 + 100% (never 100vw - the
+     scrollbar/safe-area math left a colored sliver down one edge). */
+  body.video-fs { overflow: hidden; padding: 0 !important; margin: 0 !important; }
   body.video-fs nav { display: none; }
   body.video-fs #playerBox {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 80;
-    width: 100vw; height: 100vh; height: 100dvh;
-    aspect-ratio: auto; border-radius: 0; border: 0; background: #000;
+    position: fixed; inset: 0; z-index: 80;
+    width: 100% !important; height: 100% !important; margin: 0 !important;
+    aspect-ratio: auto; border-radius: 0 !important; border: 0 !important; background: #000;
   }
   /* cinema shows ONLY video + bar: everything else would peek through */
   body.video-fs .no-cinema { display: none !important; }
@@ -748,7 +790,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 228; // bump every release alongside version.txt
+  const BUILD_NUM = 229; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -814,9 +856,11 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   </div>
 </nav>
 
-<!-- Floating TV-help button (phones / small screens where the nav link is hidden) -->
-<button onclick="openTvGuide(event)" aria-label="TV setup guide" title="TV setup guide"
-  class="md:hidden fixed bottom-24 right-4 z-50 w-12 h-12 rounded-full bg-teal-500 text-xl shadow-lg shadow-teal-900/50">&#x1F4FA;</button>
+<!-- Floating TV-help chip (phones / small screens where the nav link is hidden)
+     - kept small + glassy: the old solid teal 48px circle overlapped page
+     content and read as clutter on every phone screen -->
+<button id="tvGuideFab" onclick="openTvGuide(event)" aria-label="TV setup guide" title="TV setup guide"
+  class="md:hidden fixed bottom-20 right-3 z-50 w-10 h-10 rounded-full bg-white/10 border border-white/20 text-base backdrop-blur opacity-80 shadow-lg">&#x1F4FA;</button>
 
 <!-- HOME VIEW -->
 <div id="homeView">
@@ -1023,7 +1067,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
             <button id="avBtn" onclick="openAV()" aria-label="Audio and subtitles" title="Audio (sub/dub), subtitles and quality - no settings detour" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">A/V</button>
             <button id="ctlControl" onclick="focusMirror()" aria-label="Send remote to mirror player" title="Control: send remote keys to this mirror own player (VidRift has no play API)" class="hidden w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 grid place-items-center"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.4" fill="#fff" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
             <button id="ctlHome" onclick="mirrorHome()" aria-label="Back to primary player" title="Back to primary (CineSrc / AniPM)" class="hidden h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 8h11l-3-3"/><path d="M17 16H6l3 3"/></svg></button>
-            <button onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows glide a pointer, OK clicks - TV fallback for stubborn players" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 grid place-items-center"><svg viewBox="0 0 24 24" width="18" height="18" fill="#fff" aria-hidden="true"><path d="M6 3l12 8.2-5.3 1.1L15 19l-2.6 1-2.4-6.4L6 17V3z"/></svg></button>
+            <button onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows glide a pointer, OK clicks - TV fallback for stubborn players" class="hidden md:grid w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 place-items-center"><svg viewBox="0 0 24 24" width="18" height="18" fill="#fff" aria-hidden="true"><path d="M6 3l12 8.2-5.3 1.1L15 19l-2.6 1-2.4-6.4L6 17V3z"/></svg></button>
             <button onclick="openSettings()" id="ctlSettings" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 grid place-items-center"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10"/><circle cx="17" cy="7" r="2.2"/><path d="M20 17H10"/><circle cx="7" cy="17" r="2.2"/></svg></button>
             <button id="ctlFs" onclick="ctlFullscreen()" aria-label="Fullscreen" title="Fullscreen" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 grid place-items-center"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg></button>
           </div>
@@ -1092,7 +1136,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         </div>
         <!-- engine row: one Motion Judder control + the real actions -->
         <div class="flex flex-wrap items-center gap-2 mt-4">
-          <div class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-full px-4 py-2">
+          <div id="judderPill" class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-full px-4 py-2">
             <span class="text-xs font-semibold text-gray-300 flex items-center gap-1.5"><span class="text-teal-300">&#x26A1;</span> Motion Judder</span>
             <input type="range" id="optJudder" min="0" max="10" value="10" step="1" class="w-32 sm:w-44 h-6 accent-teal-400" aria-label="Judder reduction" oninput="motionOpts(); judderPaint()">
             <span id="judderLabel" class="text-xs font-bold text-teal-300 w-14">Smooth</span>

@@ -81,6 +81,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const AUDIT = `(() => {
   const vw = window.innerWidth, vh = window.innerHeight;
   const out = { vw, vh, overflow: [], outside: [], fit: [], tiny: 0, tinySample: [] };
+  // VIEWPORT EXPANSION: when content forces a wider min-content than the
+  // screen, Chrome grows the layout viewport and the page renders "zoomed"
+  // with a clipped edge. Compare against the EMULATED width (innerWidth lies
+  // in exactly the case this catches).
+  if (typeof window.__sbVw === "number" && Math.abs(vw - window.__sbVw) > 1)
+    out.overflow.push("layout viewport EXPANDED to " + vw + " (screen " + window.__sbVw + ") - some element's min-content is wider than the phone");
   if (document.documentElement.scrollWidth > vw + 1)
     out.overflow.push("documentElement scrollWidth " + document.documentElement.scrollWidth + " > viewport " + vw);
   if (document.body.scrollWidth > vw + 1)
@@ -156,6 +162,7 @@ const AUDIT = `(() => {
     await s("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: w <= 480 });
     await s("Page.enable");
     await s("Page.navigate", { url: `http://127.0.0.1:8788/index.html?calm=1` });
+    await evaluate(`window.__sbVw = ${w}`); // the EMULATED width - innerWidth lies when the layout expands
     // wait for feed
     for (let i = 0; i < 30; i++) {
       await sleep(400);

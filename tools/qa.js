@@ -1837,10 +1837,30 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
 {
   if (fs.existsSync(path.join(ROOT, "tools", "responsive-test.js"))) {
     const rt = fs.readFileSync(path.join(ROOT, "tools", "responsive-test.js"), "utf8");
-    if (/320/.test(rt) && /3840/.test(rt) && /scrollWidth/.test(rt))
-      ok("tools/responsive-test.js exists (phone..4K viewports, overflow + fit + touch-target geometry)");
-    else bad("responsive-test.js must span phone..4K viewports and check overflow/fit");
+    if (/320/.test(rt) && /3840/.test(rt) && /scrollWidth/.test(rt) && /EXPANDED/.test(rt))
+      ok("tools/responsive-test.js exists (phone..4K viewports, overflow + expansion + fit + touch-target geometry)");
+    else bad("responsive-test.js must span phone..4K viewports and check overflow/fit AND layout-viewport expansion");
   } else bad("tools/responsive-test.js missing - the responsive design needs a regression harness");
+  if (fs.existsSync(path.join(ROOT, "tools", "phone-shots.js")))
+    ok("tools/phone-shots.js exists (visual phone screenshots for eyeballing the design)");
+  else bad("phone-shots.js missing - phone design must be SEEABLE, not just measurable");
+}
+
+/* ---------- 155. phone bar beats the 44px a11y floor + viewport floors die ---------- */
+{
+  // the global `button { min-width/min-height: 44px }` a11y rule clamps even
+  // !important widths - without an exemption the compact phone bar can never
+  // shrink (buttons stayed 44px and wrapped to two rows over the video)
+  const bar = html.match(/#btnRow > button \{[^}]*\}/g) || [];
+  const compact = bar.find((r) => /min-width: 0/.test(r) && /!important/.test(r));
+  if (compact && /min-height: 34px !important/.test(compact))
+    ok("the compact phone bar exempts the global 44px button floor (min-width/min-height)");
+  else bad("#btnRow > button at phone widths must set min-width:0 !important + min-height to break the 44px a11y floor");
+  // min-content floors (iframe 300px intrinsic, unwrapped pill rows) expand
+  // the layout viewport on phones - the iframe must live out of flow
+  if (/\.player-wrap #player \{ position: absolute; inset: 0; \}/.test(html) && /#qPills \{ flex-wrap: wrap; \}/.test(html) && /#judderPill \{ flex-wrap: wrap; \}/.test(html))
+    ok("min-content floors are dead: the player iframe is out of flow and pill rows wrap");
+  else bad("the player iframe must be position:absolute (its 300px intrinsic width expands the phone viewport) and pill rows must wrap");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
