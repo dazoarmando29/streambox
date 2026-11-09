@@ -175,6 +175,22 @@ const AUDIT = `(() => {
       const raw = await evaluate(AUDIT);
       const a = JSON.parse(raw || "{}");
       const probs = [...(a.overflow || []), ...(a.outside || []).slice(0, 8), ...(a.fit || [])];
+      if (screen === "player page") {
+        // player-specific phone rules: the control row must WRAP (never a
+        // hidden scroller that cuts buttons off) and the keyboard/remote
+        // hotkeys strip must not pollute phone widths
+        const extra = JSON.parse(await evaluate(`(() => {
+          const out = {};
+          const row = document.getElementById("btnRow");
+          if (row && row.offsetParent && row.scrollWidth - row.clientWidth > 2)
+            out.row = "btnRow scrolls " + (row.scrollWidth - row.clientWidth) + "px - buttons must wrap into view";
+          const hk = document.getElementById("hotkeysStrip");
+          if (hk && window.innerWidth <= 640 && getComputedStyle(hk).display !== "none")
+            out.hk = "hotkeys strip visible at " + window.innerWidth + "px (phones have no keyboard)";
+          return JSON.stringify(out);
+        })()`) || "{}");
+        for (const k of Object.keys(extra)) probs.push(extra[k]);
+      }
       if (probs.length) {
         fails++;
         console.log(`FAIL ${label} ${w}x${h} / ${screen}:`);

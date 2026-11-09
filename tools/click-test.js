@@ -225,18 +225,41 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await check("details My List toggles with visible feedback", "#mListBtn", { escape: false, keep: true });
   await check("details Watch opens the player", "#mWatch",
     { expect: (b, a, s) => s.overlays.includes("watchView"), escape: false, keep: true });
-  // --- mobile player controls (the "phone tap shows nothing" bug) ---
-  // the bar auto-hides ~4s after load; then the tap layer must engage over
-  // the iframe (which swallows touches) and its tap must wake the controls
+  // --- mobile player controls (the "phone tap shows nothing / won't hide" bugs) ---
+  // the tap layer must own taps over the iframe: engage while our bar drives
+  // the player, single tap TOGGLES the bar (down on second tap), double tap
+  // seeks by side (left -10s / right +30s)
   {
-    await sleep(4800);
+    await sleep(1200);
     const engaged = await evaluate(`!!document.querySelector("#playerBox.tap-catch")`);
-    const woke = await evaluate(`(() => { const tl = document.getElementById("tapLayer"); if (!tl) return false; tl.click(); return true; })()`);
-    await sleep(400);
-    const barUp = await evaluate(`!document.getElementById("ctlBar").classList.contains("bar-hidden")`);
-    const layerOff = await evaluate(`!document.querySelector("#playerBox.tap-catch")`);
-    if (engaged && woke && barUp && layerOff) { console.log("ok    phone tap layer: sleeping bar engages it, tap wakes the controls"); passed++; }
-    else { console.log(`FAIL tap layer: engaged=${engaged} woke=${woke} barUp=${barUp} layerOff=${layerOff}`); dead++; }
+    const tap = (frac) => evaluate(`(() => {
+      const tl = document.getElementById("tapLayer");
+      if (!tl) return false;
+      const w = window.innerWidth || 1;
+      tl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: w * ${frac}, button: 0 }));
+      return true;
+    })()`);
+    // establish state first (the load poke may have idled out), then toggle
+    for (let i = 0; i < 20; i++) { if (await evaluate(`!document.getElementById("ctlBar").classList.contains("bar-hidden")`)) break; await sleep(250); }
+    // single tap #1 -> bar goes DOWN (the "won't go down" fix)
+    await tap(0.5);
+    let down = false;
+    for (let i = 0; i < 10 && !down; i++) { await sleep(300); down = await evaluate(`document.getElementById("ctlBar").classList.contains("bar-hidden")`); }
+    // single tap #2 -> bar back UP
+    await tap(0.5);
+    let up = false;
+    for (let i = 0; i < 10 && !up; i++) { await sleep(300); up = await evaluate(`!document.getElementById("ctlBar").classList.contains("bar-hidden")`); }
+    // double tap right -> +30s feedback
+    await tap(0.85); await tap(0.85);
+    await sleep(300);
+    const fwd = await evaluate(`(document.getElementById("volToast") || {}).textContent || ""`);
+    // double tap left -> -10s feedback
+    await tap(0.15); await tap(0.15);
+    await sleep(300);
+    const back = await evaluate(`(document.getElementById("volToast") || {}).textContent || ""`);
+    if (engaged && down && up && /30/.test(fwd) && /10/.test(back))
+      { console.log("ok    tap layer: engages with our bar, tap toggles it down/up, double-tap seeks by side"); passed++; }
+    else { console.log(`FAIL tap layer: engaged=${engaged} down=${down} up=${up} fwd=${JSON.stringify(fwd)} back=${JSON.stringify(back)}`); dead++; }
   }
   {
     await settle(); // player Back -> home (toast-first ladder may need 2 presses)

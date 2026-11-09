@@ -273,10 +273,12 @@
     padding: 8px 14px 10px !important;
     display: flex; flex-direction: column; gap: 6px;
   }
-  /* touch tap layer: visible ONLY while the bar sleeps (tap-catch class set by
-     hideHud/pokeHud). Sits above the cross-origin iframe (which swallows all
-     touches) and below the bar (z-6) and trailer chip (z-7). */
-  #tapLayer { position: absolute; inset: 0; z-index: 5; display: none; }
+  /* touch tap layer: engaged by tapLayerSync() while OUR bar drives the
+     player (watching + ctlBar visible). Sits above the cross-origin iframe
+     (which swallows all touches) and below the bar (z-6) and trailer chip
+     (z-7). manipulation = no double-tap-zoom delay (double-tap seeks). */
+  #tapLayer { position: absolute; inset: 0; z-index: 5; display: none;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none; }
   #playerBox.tap-catch #tapLayer { display: block; }
   /* narrow phones: the PWA Install button must not break the header row
      (the browser menu / About page remain the install paths there) */
@@ -311,11 +313,16 @@
   #ctlSeek { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
     -webkit-appearance: none; appearance: none; background: transparent; opacity: 0; cursor: pointer; }
   #seekWrap:focus-within { outline: 2px solid #00F0B5; outline-offset: 4px; border-radius: 12px; }
-  /* controls row: one scrollable line, focus pulls items into view */
-  #btnRow { display: flex; align-items: center; gap: 8px; width: 100%; padding-bottom: 2px;
-    flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
-  #btnRow::-webkit-scrollbar { display: none; }
+  /* controls row: WRAPS so every control is reachable on any width - the old
+     hidden-scrollbar scroller (nowrap + overflow-x:auto) cut buttons off on
+     phones and needed a horizontal drag to reach the rest */
+  #btnRow { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding-bottom: 2px;
+    flex-wrap: wrap; }
   #btnRow > * { flex-shrink: 0; }
+  @media (max-width: 640px) {
+    #btnRow { gap: 6px; }
+    #btnRow > button { padding-left: 10px !important; padding-right: 10px !important; }
+  }
   /* floating Skip Intro (all targets): sits above the bar, bottom-right —
      a bold white pill that's impossible to miss and never crowds the bar.
      TV positions it clear of its taller bar; D-pad \25B2  climbs straight to it. */
@@ -741,7 +748,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 227; // bump every release alongside version.txt
+  const BUILD_NUM = 228; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -918,12 +925,12 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 
 <!-- WATCH VIEW -->
 <div id="watchView" class="hidden min-h-screen pt-20 px-4 md:px-10 pb-16">
-  <div class="no-cinema flex flex-wrap items-center gap-3 mb-4">
-    <button id="backBtn" onclick="goHome(event)" class="glass-pill text-sm px-4 py-2 rounded-full flex items-center gap-2"><span>&#x2190;</span> Back to Browse</button>
-    <p id="watchCrumb" class="text-sm text-gray-400 truncate"></p>
+  <div class="no-cinema flex flex-wrap items-center gap-2 md:gap-3 mb-3 md:mb-4">
+    <button id="backBtn" onclick="goHome(event)" class="glass-pill text-[13px] md:text-sm px-3 py-1.5 md:px-4 md:py-2 rounded-full flex items-center gap-2"><span>&#x2190;</span> <span class="hidden min-[400px]:inline">Back to Browse</span><span class="min-[400px]:hidden">Back</span></button>
+    <p id="watchCrumb" class="text-[13px] md:text-sm text-gray-400 truncate"></p>
     <div class="ml-auto flex items-center gap-2">
-      <span class="flex items-center gap-2 px-3.5 py-2 rounded-full bg-teal-400/10 border border-teal-400/30 text-xs font-semibold text-teal-300"><span class="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span><span id="serverPillName">Server</span></span>
-      <button onclick="openSettings(); setTab('servers')" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">Switch Server</button>
+      <span class="flex items-center gap-2 px-2.5 py-1.5 md:px-3.5 md:py-2 rounded-full bg-teal-400/10 border border-teal-400/30 text-[11px] md:text-xs font-semibold text-teal-300"><span class="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span><span id="serverPillName">Server</span></span>
+      <button onclick="openSettings(); setTab('servers')" class="glass-pill px-3 py-1.5 md:px-4 md:py-2 rounded-full text-[11px] md:text-xs font-semibold">Switch Server</button>
     </div>
   </div>
   <div class="grid lg:grid-cols-3 gap-6">
@@ -945,13 +952,13 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           allowfullscreen allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
           referrerpolicy="strict-origin-when-cross-origin" loading="eager"
           sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"></iframe>
-        <!-- TOUCH TAP LAYER: a cross-origin iframe swallows every touch, so on
-             phones tapping the video never woke our controls (the reported
-             "can't skip / can't pause" bug). While the bar is asleep this
-            transparent layer sits over the video and its tap wakes the HUD;
-             the moment the bar is up the layer goes pointer-transparent and
-             taps reach the provider player again (coordinated mirrors keep
-             their own controls). Never covers the bar (z below it). -->
+        <!-- TOUCH TAP LAYER: a cross-origin iframe swallows every touch, so
+             phones could neither wake the controls nor reach skip/pause.
+             While OUR bar drives the player this transparent layer owns taps:
+             single tap toggles the control bar (tap again = hide it), double
+             tap left = -10s, double tap right = +30s. It stands down entirely
+             on coordinated mirrors (their own player needs the touches) and
+             never covers the bar (z below it). -->
         <div id="tapLayer" aria-hidden="true"></div>
         <!-- dormant HLS shell: OUR OWN <video> — the one place an AI upscaler
              can legally and technically attach. Dormant until a lawful source
@@ -1042,8 +1049,9 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         </div>
         <div class="tip-arrow"></div>
       </div>
-      <!-- cinema hotkeys strip (design pack keycaps) -->
-      <div class="no-cinema glass mt-3 px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-400">
+      <!-- cinema hotkeys strip (design pack keycaps) - keyboard/remote help is
+           pointless on phones (no keys) - they get the clean player instead -->
+      <div id="hotkeysStrip" class="no-cinema glass mt-3 px-4 py-3 hidden md:flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-400">
         <span class="font-bold text-gray-300 flex items-center gap-2"><span class="text-teal-300">&#x1F3AE;</span> Cinema Remote Hotkeys:</span>
         <span class="flex items-center gap-1.5"><kbd class="px-2 py-1 rounded bg-white/10 border border-white/15 font-bold text-gray-200">&#x25C0;</kbd> = -10s</span>
         <span class="flex items-center gap-1.5"><kbd class="px-2 py-1 rounded bg-white/10 border border-white/15 font-bold text-gray-200">&#x25B6;</kbd> = +30s</span>
@@ -1052,9 +1060,9 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <button onclick="openTvGuide(event)" class="ml-auto text-teal-300 font-semibold underline">Need Remote Pairing Help?</button>
       </div>
       <!-- player options -->
-      <div class="no-cinema glass mt-3 p-5">
-        <div class="flex flex-wrap items-center gap-3">
-          <p class="font-bold text-base">Playback Settings &amp; Engine Controls</p>
+      <div class="no-cinema glass mt-3 p-4 md:p-5">
+        <div class="flex flex-wrap items-center gap-2 md:gap-3">
+          <p class="font-bold text-[15px] md:text-base">Playback Settings &amp; Engine Controls</p>
           <span id="engineChip" class="text-[10px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-full bg-teal-400/10 border border-teal-400/30 text-teal-300">Sandboxed</span>
           <div id="qPills" class="ml-auto flex items-center gap-1 bg-black/30 border border-white/10 rounded-full p-1"></div>
         </div>
@@ -2353,10 +2361,12 @@ function purgeRetiredCaches(){
     }
     if (dir) {
       pokeHud(); // every keypress restarts the 4s idle clock
-      // If the video's own fullscreen got engaged (its own button), any key
-      // steps back out to our cinema mode where the remote works.
+      // If the PROVIDER's own fullscreen got engaged (its own button) with no
+      // cinema mode, any key steps back out to our mode where the remote
+      // works. OUR fullscreen (native + video-fs together) is legitimate and
+      // keeps handling arrows normally below.
       try {
-        if (document.fullscreenElement) {
+        if (document.fullscreenElement && !document.body.classList.contains("video-fs")) {
           e.preventDefault();
           document.exitFullscreen();
           if (!document.body.classList.contains("video-fs")) enterVideoFs();
@@ -2638,7 +2648,14 @@ function purgeRetiredCaches(){
         e.preventDefault(); return;
       }
       try {
-        if (document.fullscreenElement) { document.exitFullscreen(); e.preventDefault(); return; }
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+          // one Esc leaves fullscreen ENTIRELY (native + our cinema together)
+          window._fsNative = false;
+          try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch(err){}
+          if (document.body.classList.contains("video-fs")) exitVideoFs();
+          try { nudgePlayerSize(); } catch(err){}
+          e.preventDefault(); return;
+        }
       } catch(err){}
       // action toast dismisses before anything navigates
       try {
@@ -2667,30 +2684,54 @@ function purgeRetiredCaches(){
     window._kbNav = false;
     document.querySelectorAll(".tv-focus").forEach(x => x.classList.remove("tv-focus"));
     // mobile: any touch on the player brings the controls alive right away
-    // (click is delayed on mobile, so touchstart must wake the HUD itself)
+    // (click is delayed on mobile, so touchstart must wake the HUD itself) -
+    // except the tap layer, which owns its taps (toggle + double-tap seek)
     try {
+      if (e.target && e.target.closest && e.target.closest("#tapLayer")) return;
       const tgt = e.target && e.target.closest ? e.target.closest("#playerBox,#ctlBar") : null;
       if (tgt) pokeHud();
-    } catch(err){}
+    } catch(e){}
   }, { capture: true, passive: true }));
   // pointer activity wakes the cinema UI (mouse/touch)
   document.addEventListener("click", (e) => {
-    try { if (e.target && e.target.closest && e.target.closest("#ctlBar,#playerBox")) pokeHud(); } catch(err){}
+    try {
+      if (e.target && e.target.closest && e.target.closest("#tapLayer")) return;
+      if (e.target && e.target.closest && e.target.closest("#ctlBar,#playerBox")) pokeHud();
+    } catch(e){}
   }, true);
-  // tap the video surface to WAKE the controls (phones/tablets): the video is
-  // a cross-origin iframe that swallows every touch, so #tapLayer (displayed
-  // only while the bar sleeps) catches the tap and brings the bar up - then it
-  // stands down and taps reach the provider player's own controls again. The
-  // old letterbox-only "tap to play/pause" was unreachable on real phones for
-  // the same swallow reason and surprised people who only wanted the controls.
+  // ---- tap layer over the video (phones/tablets/desktop) ----
+  // The video is a cross-origin iframe that swallows every touch, so while
+  // our bar drives the player a transparent layer owns taps over it:
+  //   single tap       -> toggle the control bar (tap again HIDES it)
+  //   double tap left  -> -10s      double tap right -> +30s
+  // (the old letterbox-only "tap to play/pause" never fired on real phones -
+  // the iframe ate the touch - and single-tap-only wake ignored the request
+  // to hide the bar again with a second tap)
   try {
-    const tapWake = (e) => {
-      try { if (e && e.cancelable) e.preventDefault(); } catch(err){}
-      pokeHud();
-    };
     const tl = document.getElementById("tapLayer");
-    tl.addEventListener("touchend", tapWake, { passive: false });
-    tl.addEventListener("click", tapWake); // desktop mouse / remote cursor
+    let tapAt = 0, tapZone = "", tapTimer = null;
+    tl.addEventListener("pointerup", (e) => {
+      if (e.button != null && e.button !== 0) return;
+      const now = Date.now();
+      const w = window.innerWidth || 1;
+      const x = e.clientX || 0;
+      const zone = x < w * 0.38 ? "left" : (x > w * 0.62 ? "right" : "mid");
+      if (now - tapAt < 320 && zone === tapZone && zone !== "mid") {
+        clearTimeout(tapTimer); tapAt = 0;
+        const d = zone === "left" ? -10 : 30;
+        try { ctlSeekRel(d); } catch(err){}
+        try { skipFlash(d); } catch(err){}
+        return;
+      }
+      tapAt = now; tapZone = zone;
+      clearTimeout(tapTimer);
+      tapTimer = setTimeout(() => {
+        const bar = document.getElementById("ctlBar");
+        if (!bar) return;
+        if (bar.classList.contains("bar-hidden")) pokeHud();
+        else hideHud(); // second tap = hide again (the reported "won't go down")
+      }, 300);
+    }, { passive: true });
   } catch(e){}
   try {
     document.getElementById("playerBox").addEventListener("mousemove", () => pokeHud());
@@ -5047,6 +5088,7 @@ function loadPlayer(){
   // every other mirror is manual \u{1F3AF} only. TV *browsers* never had auto-handoff.
   pokeHud(); // reveal HUD + bar briefly on every (re)load
   showTitleCard();
+  try { tapLayerSync(); } catch(e){}
 }
 function reloadPlayer(){ loadPlayer(); }
 function otherSource(){
@@ -5155,6 +5197,7 @@ function goHome(ev){
   document.getElementById("watchView").classList.add("hidden");
   document.getElementById("homeView").classList.remove("hidden");
   document.getElementById("player").src = "";
+  try { tapLayerSync(); } catch(e){} // leaving the player disengages the tap layer
   syncMobileNav();
   showRows();
   // Back out of the player dropped focus on <body> (the focused button was in
@@ -5425,9 +5468,6 @@ function renderList(){
     bar.classList.add("bar-hidden");
     try { capFloat(false); } catch(e){} // bar minimized: captions settle back
     try { document.getElementById("titleCard").classList.add("hidden"); } catch(e){}
-    // bar asleep: the tap layer goes live over the video (the iframe swallows
-    // touches - without the layer a phone tap could never wake the controls)
-    try { document.getElementById("playerBox").classList.add("tap-catch"); } catch(e){}
   }
   function pokeHud(){
     // any interaction while watching: show the bar, hide again after 4s idle
@@ -5435,14 +5475,24 @@ function renderList(){
     const bar = document.getElementById("ctlBar");
     const wasHidden = bar.classList.contains("bar-hidden");
     bar.classList.remove("bar-hidden");
-    // bar awake: the layer stands down so taps reach the provider player again
-    try { document.getElementById("playerBox").classList.remove("tap-catch"); } catch(e){}
     try { capFloat(true); } catch(e){} // bar up: captions float above it
     clearTimeout(window._idleT);
     window._idleT = setTimeout(hideHud, 4000);
     // the title card rides with the bar: one render per reveal (mousemove
     // floods pokeHud - rewriting the card per event was pure churn)
     if (wasHidden) { try { showTitleCard(true); } catch(e){} }
+  }
+  function tapLayerSync(){
+    // the tap layer serves OUR driven bar only: engaged while watching with
+    // the bar on screen (driven mirrors); coordinated mirrors need the
+    // touches for their own player, so it stands down there entirely
+    try {
+      const box = document.getElementById("playerBox");
+      const bar = document.getElementById("ctlBar");
+      const watching = !document.getElementById("watchView").classList.contains("hidden");
+      const driven = bar && !bar.classList.contains("hidden");
+      if (box) box.classList.toggle("tap-catch", !!(watching && driven));
+    } catch(e){}
   }
 
 /* ---------- Watch session (tab-switch survival) ----------
@@ -5652,17 +5702,47 @@ function ctlRateCycle(){
   ctlPaint();
 }
 function ctlFullscreen(){
-  // one fullscreen: our cinema mode (video + our bar). No native element
-  // fullscreen — it hides our controls and strands TV remotes.
-  if (document.body.classList.contains("video-fs")) { exitVideoFs(); nudgePlayerSize(); return; }
-  try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+  // REAL fullscreen everywhere the platform has it (laptops, desktops,
+  // Android phones/tablets, iPads, the APK WebView): element fullscreen on
+  // #playerBox keeps OUR bar inside the frame - it is not the old "video-only
+  // fullscreen" that hid our controls. The CSS cinema mode (video-fs) always
+  // runs underneath and alone on platforms without element fullscreen
+  // (iPhone Safari, TV WebViews that ignore it) so the look matches.
+  const box = document.getElementById("playerBox");
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  if (isFs || document.body.classList.contains("video-fs")) {
+    try { if (isFs) (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch(e){}
+    window._fsNative = false;
+    exitVideoFs(); nudgePlayerSize(); return;
+  }
   enterVideoFs();
   nudgePlayerSize();
+  try {
+    const req = box && (box.requestFullscreen || box.webkitRequestFullscreen);
+    if (req && !(typeof IS_TV_DEVICE !== "undefined" && IS_TV_DEVICE)) {
+      window._fsNative = true;
+      const p = req.call(box);
+      if (p && p.catch) p.catch(() => { window._fsNative = false; }); // CSS cinema already active
+    }
+  } catch(e){}
   // stay on OUR bar: focusing the frame hands all keys to the player's menu,
   // which ignores TV remotes and strands you (only Back escapes)
   const cp = document.getElementById("ctlPlay");
   if (cp) { try { cp.focus({ preventScroll: true }); } catch(e){} }
 }
+// native fullscreen exit (Esc at browser level / the OS back gesture) must
+// also leave OUR cinema mode - otherwise a fixed overlay is left hanging
+try {
+  const _fsSync = () => {
+    if (window._fsNative && !(document.fullscreenElement || document.webkitFullscreenElement)) {
+      window._fsNative = false;
+      if (document.body.classList.contains("video-fs")) exitVideoFs();
+      try { nudgePlayerSize(); } catch(e){}
+    }
+  };
+  document.addEventListener("fullscreenchange", _fsSync);
+  document.addEventListener("webkitfullscreenchange", _fsSync);
+} catch(e){}
 function enterVideoFs(){
   document.body.classList.add("video-fs");
   pokeHud();
@@ -6440,6 +6520,7 @@ function updateMirrorUI(){
   const isPaired = mirror === "vidrift" || mirror === "vidzen" || mirror === "vidbolt" || mirror === "vidcore";
   document.getElementById("trailerBar").classList.toggle("hidden", !isTrailer);
   document.getElementById("ctlBar").classList.toggle("hidden", !(isCS || isPaired));
+  try { tapLayerSync(); } catch(e){} // the tap layer serves OUR bar only
   // paired mirrors ride ctlBar now, so the strip stays away — in cinema it
   // used to pin over our bar (two bars piled at the bottom on TV). VidRift
   // keeps its \u{1F3AF} handoff + all paired keep \u{21C4} home as in-bar buttons.

@@ -1,11 +1,12 @@
-Phones can drive the player again, the layout is verified clean from 320px phones to 4K, and joining a party drops you straight into the movie.
+The mobile player finally behaves like a real player: every control fits without scrolling, a second tap hides the bar again, double-tap seeks, and fullscreen is REALLY fullscreen everywhere.
 
 What is new
-- Touch the video on a phone or tablet and the controls appear: the player video is a cross-origin iframe that swallows every touch (the reported "can't skip / can't pause" bug), so a transparent tap layer now sits over the video while the bar sleeps - one tap wakes play/pause, seek, skip and the rest of the controls, and it stands down the moment the bar is up so the provider player's own taps still work
-- Joining or creating a Watch Party takes you straight to the movie: the room panel closes itself the moment there is something to watch (the room's content on join, the movie you created it for from the details modal) - no extra taps
-- Verified across every screen size: 13 viewports from 320px phones through tablets, laptops, desktops and 4K TVs, on five screens each (home, details, party, search, player) - zero overflow, zero clipped layouts (tools/responsive-test.js runs this in the build)
+- Double-tap to seek (phones, tablets, laptops, desktops, and both APKs): double tap the RIGHT side of the video = +30s, the LEFT side = -10s, with the same visual feedback as the skip buttons
+- Real fullscreen on every device: the Fullscreen API now expands the whole player (video + our controls together) on phones, tablets, laptops and desktops - the old cinema mode was only a page overlay with the browser bars still showing. iPhones and TVs without element fullscreen keep the cinema overlay so the look matches, and leaving fullscreen (Esc / the OS back gesture) always lands you back cleanly
+- Tap the video to hide the controls again: the second tap now collapses the bar (it used to stay up until an idle timer) - tap once for controls, tap again for a clean picture
 
 Fixes
-- The header no longer overflows on any phone: search/party/about/install collapse to icons on phones and in the tight laptop band, the wordmark shrinks away on the narrowest screens, the PWA Install button steps aside below 520px (browser menu / About remain the install paths), and the hero action row wraps instead of stretching the page
-- The desktop tab strip only appears where it fits (xl+) - phones AND tablets use the bottom tab bar, which now covers the tablet sizes that used to squeeze the desktop nav off-screen
-- The hero buttons wrap on small screens instead of forcing horizontal scrolling
+- The player control row WRAPS instead of scrolling: play, -10s, +30s, Skip, volume, speed, quality, episodes, CC, A/V and the rest are ALL visible on any width - no more horizontal scrolling to find hidden buttons (this was the "I can't see all of the buttons" bug)
+- The keyboard/remote hotkeys card no longer clutters phones (there is no keyboard in your hands) - tablets, laptops, desktops and TVs keep it
+- The player page tightens up on phones: compact Back button, smaller server pill row, denser settings card
+- Verified again across 13 viewports (320px phones through 4K) x 5 screens: zero overflow, the control row never scrolls, the hotkeys card stays away from phone widths (tools/responsive-test.js)

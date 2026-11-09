@@ -1810,11 +1810,27 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (/#tapLayer/.test(html) && /tap-catch/.test(html))
     ok("the tap layer exists over the player iframe (phones can wake the controls)");
   else bad("index.html must carry the #tapLayer / tap-catch wake layer - a cross-origin iframe swallows touches and the bar never woke on phones");
-  const hk = html.match(/function hideHud\s*\(\)\s*\{[\s\S]*?\n  \}/);
-  const pk = html.match(/function pokeHud\s*\(\)\s*\{[\s\S]*?\n  \}/);
-  if (hk && /tap-catch/.test(hk[0]) && pk && /tap-catch/.test(pk[0]))
-    ok("hideHud engages the tap layer and pokeHud stands it down");
-  else bad("hideHud/pokeHud must toggle the tap-catch class (sleep = catch taps, awake = taps reach the player)");
+  const sync = html.match(/function tapLayerSync\s*\(\)\s*\{[\s\S]*?\n  \}/);
+  const wired = (html.match(/tapLayerSync\(\)/g) || []).length;
+  if (sync && /tap-catch/.test(sync[0]) && wired >= 4)
+    ok("tapLayerSync engages the layer for our driven bar only and is wired into the player lifecycle (" + wired + " call sites)");
+  else bad("tapLayerSync must exist and be called from updateMirrorUI/loadPlayer/goHome (per-mirror engagement)");
+  // tap toggles the bar DOWN again and double tap seeks by side
+  const tp = html.match(/#tapLayer[\s\S]{0,60}[\s\S]*?pointerup[\s\S]{0,1600}/);
+  if (tp && /hideHud\(\)/.test(tp[0]) && /ctlSeekRel\(d\)/.test(tp[0]) && /zone/.test(tp[0]))
+    ok("the tap layer toggles the bar (second tap hides it) and double-tap seeks left -10s / right +30s");
+  else bad("the tap layer handler must toggle hideHud on second tap and seek by side on double tap");
+}
+
+/* ---------- 154. real fullscreen with the CSS cinema fallback ---------- */
+{
+  const cf = html.match(/function ctlFullscreen\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (cf && /requestFullscreen/.test(cf[0]) && /enterVideoFs/.test(cf[0]) && /IS_TV_DEVICE/.test(cf[0]))
+    ok("ctlFullscreen requests REAL element fullscreen (keeping our bar) with the CSS cinema fallback for TV/iPhone");
+  else bad("ctlFullscreen must request element fullscreen where available and fall back to video-fs");
+  if (/fullscreenchange/.test(html) && /_fsNative/.test(html))
+    ok("native fullscreen exits sync with the cinema mode (no fixed overlay left hanging)");
+  else bad("a fullscreenchange sync must exit video-fs when the user leaves native fullscreen");
 }
 
 /* ---------- 153. responsive geometry harness ---------- */
