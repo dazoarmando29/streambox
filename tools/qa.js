@@ -1901,5 +1901,24 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("MainActivity must rotate via onShowCustomView + onReceivedTitle(sb:landscape/sb:portrait) and restore UNSPECIFIED on exit");
 }
 
+/* ---------- 157. episode switches refresh subs; outside doors join-only ---------- */
+{
+  // the party/auto-advance/grid/drawer episode switches used to keep the
+  // PREVIOUS episode's subtitle file on screen (an S01E01 file over E5)
+  const wired = (html.match(/subsRefreshForEpisode\(\); loadPlayer\(\)/g) || []).length;
+  const hasFn = /function subsRefreshForEpisode\s*\(\)/.test(html);
+  if (hasFn && wired >= 4)
+    ok("every episode-switch path refreshes the subtitle chain for the new episode (" + wired + " sites)");
+  else bad("subsRefreshForEpisode must exist and run on all 4 episode-switch sites (applyEpisodeSwitch, nextEpisode, grid pick, drawer pick)");
+  // outside the player the party door is JOIN-only (code + password) - a
+  // create box with no video to attach is noise
+  if (/id="mPartyBtn" onclick="partyOpen\('join'\)"/.test(html))
+    ok("the details-modal Watch Party door is join-only (no create box without a video)");
+  else bad("mPartyBtn must open the JOIN view - no video playing means join + password only");
+  if (/id="wPartyBtn" onclick="partyOpen\('create'\)"/.test(html))
+    ok("the player-page door still CREATES a room (that is where a video exists)");
+  else bad("wPartyBtn must remain the create door (player page = video playing)");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

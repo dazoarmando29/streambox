@@ -1,13 +1,8 @@
-Fullscreen REALLY rotates now - the "Rotate Your Phone" hint is gone on Android.
-
-What was wrong (from your screenshot): tapping fullscreen showed the player's own "Rotate Your Phone - flip to landscape" hint instead of rotating. Root cause: Chrome/Brave only honor the screen.orientation.lock() from INSIDE fullscreen - our lock ran BEFORE the fullscreen was granted (silently rejected) and never ran again. And inside the APK WebView the JS lock is unreliable at all.
+Watch Party subtitles follow the episode, AniPM returns to the party server list (native), and the outside Party door is join-only.
 
 Fixes
-- The landscape lock now runs at every moment it is ALLOWED to work: on entering cinema, again the instant the fullscreen promise resolves, again on the fullscreenchange event, with a 500ms retry ladder while cinema is active (the pre-fullscreen attempt is kept only as a cheap first try)
-- The app (WebView APK) gets a second, independent channel: the page signals cinema orientation through a brief "sb:landscape" title marker that the shell watches natively (and "sb:portrait" to restore) - this covers WebViews that refuse the JS lock AND the CSS-cinema path where no native fullscreen event ever fires. The tab title is restored right after so it never stays "sb:..."
-- Leaving fullscreen restores the device orientation through both channels and re-arms the auto-minimize (locked from the previous release)
-- The native Kotlin app already rotates for the whole playback session (0.96) - verified and its QA lock stays
+- Watch Party episode changes now carry the RIGHT subtitles: when the room (or auto-next, or an episode pick) switches episodes, the old episode's subtitle file is cleared and the new episode's subtitles load - the reported bug showed an "S01E01" caption file playing over episode 5. Every episode-switch path (party switches, Next Episode, the watch grid, the episodes drawer) now refreshes the subtitle chain
+- Native app: AniPM is back in the server list during Watch Party - party content opens anime titles WITHOUT their MAL/AniList mapping, and the server list only offers AniPM when that mapping resolves (so it was invisible). The party route now resolves the mapping before opening the player
+- The Watch Party button OUTSIDE the player (movie/TV details) now shows the JOIN view (code + password) - creating a room only makes sense where a video is playing, which stays on the player page's button
 
-Verified by test: fullscreen signals landscape through the API + the shell marker, exit unlocks and restores the title. QA 156 now locks the re-run wiring (fullscreen promise + fullscreenchange + retry ladder) and the title-marker channel in both the page and the shell - a future change that reintroduces the pre-fullscreen-only lock fails the build.
-
-Note for iPhone Safari: iOS does not allow pages to rotate the device - the player's rotate hint is the fallback there. Android phones/tablets (web + both APKs) now rotate automatically.
+Locked so it never happens again: all 4 episode-switch sites must refresh subs (QA 157), the details door must stay join-only and the player door create-only, and the native party route must pass the anime mapping (native QA 90)

@@ -790,7 +790,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 232; // bump every release alongside version.txt
+  const BUILD_NUM = 233; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1232,7 +1232,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <div class="flex flex-wrap gap-3 mt-5 items-center">
         <button id="mWatch" class="h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold shadow-[0_0_35px_-5px_rgba(0,240,181,0.35)] hover:scale-[1.02] active:scale-[0.98] transition-all">&#x25B6; Watch Now</button>
         <button id="mListBtn" onclick="addToList()" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">+ My List</button>
-        <button id="mPartyBtn" onclick="partyOpen('create')" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">Watch Party</button>
+        <button id="mPartyBtn" onclick="partyOpen('join')" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">Watch Party</button>
       </div>
       <div id="mSeasons" class="mt-6 hidden">
         <div class="flex flex-wrap items-center gap-2">
@@ -4096,7 +4096,7 @@ async function loadEpisodes(s){
         ? "bg-teal-400 text-[#0B111E] font-bold ring-2 ring-teal-300 shadow-[0_0_18px_rgba(0,240,181,0.45)]"
         : isNext ? "bg-white/10 hover:bg-white/20 text-teal-300 border border-teal-400/40"
         : "bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10");
-      b.onclick = ()=>{ watchState.s = sv; gridS = sv; watchState.e = ep.episode_number; loadPlayer(); loadEpisodes(); updateSeasonLabel(); saveContinue(); };
+      b.onclick = ()=>{ watchState.s = sv; gridS = sv; watchState.e = ep.episode_number; subsRefreshForEpisode(); loadPlayer(); loadEpisodes(); updateSeasonLabel(); saveContinue(); };
     }
     grid.appendChild(b);
   });
@@ -4284,7 +4284,7 @@ function applyEpisodeSwitch(){
   _introKey = "";
   if (watchState.type === "tv") { try { updateSeasonLabel(); } catch(e){} }
   window._lastLoadAt = Date.now();
-  loadPlayer(); loadEpisodes(); saveContinue();
+  subsRefreshForEpisode(); loadPlayer(); loadEpisodes(); saveContinue();
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e}`;
   showTitleCard();
@@ -4342,7 +4342,7 @@ function nextEpisode(dir){
   watchState.e = Math.max(1, watchState.e + dir);
   _introKey = "";
   window._lastLoadAt = Date.now();
-  loadPlayer(); loadEpisodes(); saveContinue();
+  subsRefreshForEpisode(); loadPlayer(); loadEpisodes(); saveContinue();
 }
 
 /* Embed URL per https://cinesrc.st/docs */
@@ -7414,6 +7414,16 @@ function setSubs(o, remember = true){
   paintSubsUI();
   paintCaps(true);
 }
+function subsRefreshForEpisode(){
+  // the episode changed OUTSIDE openWatch (Watch Party switches, auto-next,
+  // grid/drawer picks): a loaded subtitle file belongs to the PREVIOUS
+  // episode - clear it and refill from THIS episode's storage key (the auto
+  // chain fills the gap). Without this the party kept showing the old
+  // episode's captions (an "S01E01" file over E5 was the reported bug).
+  try { subFile = null; } catch(e){}
+  try { loadStoredSubs(); } catch(e){}
+  try { wyzAutoSubs(); } catch(e){}
+}
 function loadStoredSubs(){
   subFile = null;
   try {
@@ -7861,7 +7871,7 @@ async function renderEpDrawer(){
       watchState.s = drawerS; gridS = drawerS;
       watchState.e = ep.episode_number;
       closePanels();
-      loadPlayer(); loadEpisodes(); updateSeasonLabel(); updateDrawerSeasonLabel(); saveContinue();
+      subsRefreshForEpisode(); loadPlayer(); loadEpisodes(); updateSeasonLabel(); updateDrawerSeasonLabel(); saveContinue();
       const ws = document.getElementById("watchStatus");
       if (ws) ws.textContent = `Now playing S${watchState.s} E${watchState.e}`;
     });
