@@ -1670,11 +1670,16 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (welcome && /if \(!S\.token\) S\.token = m\.token/.test(welcome[0]))
     ok("welcome never rotates the stored resume token (per-connection tokens broke reattach)");
   else bad("the welcome handler must never overwrite an existing S.token");
-  const room = html.match(/case "room": \{[\s\S]{0,1200}/);
-  if (room && /S\.pw \|\| ""/.test(room[0]) && /if \(!m\.reattached\) toast/.test(room[0])
+  const room = html.match(/case "room": \{[\s\S]{0,2600}/);
+  if (room && /S\.pw \|\| ""/.test(room[0]) && /if \(!m\.reattached\)/.test(room[0])
+      && /toast\("Joined Watch Party/.test(room[0])
       && /if \(!m\.reattached && m\.token\) S\.token = m\.token/.test(room[0]))
     ok("room snapshots persist the typed password, reconnects stay toast-silent, and a reattach never rotates the seat token");
   else bad('the room handler must store S.pw, toast only on fresh joins, and keep the stored token on reattach (older hubs echo per-connection tokens)');
+  // the party panel must hand the user straight to the movie on join/create
+  if (room && /closePanel\(\)/.test(room[0]) && /openWatch\(/.test(room[0]))
+    ok("joining/creating a room auto-closes the party panel and goes straight to the movie");
+  else bad("the room handler must auto-close the party panel and open the room's content (or the modal title) for fresh joins/creates");
   const rs = html.match(/case "room_state": \{[\s\S]{0,500}/);
   if (rs && /S\.chat = \(m\.room\.chat/.test(rs[0]) && /S\.lastSeq = \(m\.room\.playback/.test(rs[0]))
     ok("resync (room_state) adopts the missed chat AND the newest seq (no rollback window)");
@@ -1798,6 +1803,28 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
       ok("the APK Back cascade closes partyPanel and aboutPanel before the details modal (z-order)");
     else bad("the APK Back cascade must handle partyPanel/aboutPanel (Back used to close the modal BEHIND the open party panel)");
   } else bad("MainActivity onBackPressed cascade not found - the hook contract check cannot run");
+}
+
+/* ---------- 152. phone tap layer (iframe swallows touches) ---------- */
+{
+  if (/#tapLayer/.test(html) && /tap-catch/.test(html))
+    ok("the tap layer exists over the player iframe (phones can wake the controls)");
+  else bad("index.html must carry the #tapLayer / tap-catch wake layer - a cross-origin iframe swallows touches and the bar never woke on phones");
+  const hk = html.match(/function hideHud\s*\(\)\s*\{[\s\S]*?\n  \}/);
+  const pk = html.match(/function pokeHud\s*\(\)\s*\{[\s\S]*?\n  \}/);
+  if (hk && /tap-catch/.test(hk[0]) && pk && /tap-catch/.test(pk[0]))
+    ok("hideHud engages the tap layer and pokeHud stands it down");
+  else bad("hideHud/pokeHud must toggle the tap-catch class (sleep = catch taps, awake = taps reach the player)");
+}
+
+/* ---------- 153. responsive geometry harness ---------- */
+{
+  if (fs.existsSync(path.join(ROOT, "tools", "responsive-test.js"))) {
+    const rt = fs.readFileSync(path.join(ROOT, "tools", "responsive-test.js"), "utf8");
+    if (/320/.test(rt) && /3840/.test(rt) && /scrollWidth/.test(rt))
+      ok("tools/responsive-test.js exists (phone..4K viewports, overflow + fit + touch-target geometry)");
+    else bad("responsive-test.js must span phone..4K viewports and check overflow/fit");
+  } else bad("tools/responsive-test.js missing - the responsive design needs a regression harness");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

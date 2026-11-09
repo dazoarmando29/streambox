@@ -10,8 +10,8 @@ android {
         applicationId 'com.streambox.app'
         minSdk 24
         targetSdk 34
-        versionCode 26
-        versionName '2.24'
+        versionCode 27
+        versionName '2.25'
     }
 
     buildFeatures {

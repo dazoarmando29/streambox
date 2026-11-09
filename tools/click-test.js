@@ -225,6 +225,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await check("details My List toggles with visible feedback", "#mListBtn", { escape: false, keep: true });
   await check("details Watch opens the player", "#mWatch",
     { expect: (b, a, s) => s.overlays.includes("watchView"), escape: false, keep: true });
+  // --- mobile player controls (the "phone tap shows nothing" bug) ---
+  // the bar auto-hides ~4s after load; then the tap layer must engage over
+  // the iframe (which swallows touches) and its tap must wake the controls
+  {
+    await sleep(4800);
+    const engaged = await evaluate(`!!document.querySelector("#playerBox.tap-catch")`);
+    const woke = await evaluate(`(() => { const tl = document.getElementById("tapLayer"); if (!tl) return false; tl.click(); return true; })()`);
+    await sleep(400);
+    const barUp = await evaluate(`!document.getElementById("ctlBar").classList.contains("bar-hidden")`);
+    const layerOff = await evaluate(`!document.querySelector("#playerBox.tap-catch")`);
+    if (engaged && woke && barUp && layerOff) { console.log("ok    phone tap layer: sleeping bar engages it, tap wakes the controls"); passed++; }
+    else { console.log(`FAIL tap layer: engaged=${engaged} woke=${woke} barUp=${barUp} layerOff=${layerOff}`); dead++; }
+  }
   {
     await settle(); // player Back -> home (toast-first ladder may need 2 presses)
     const s2 = JSON.parse(await snapshot());

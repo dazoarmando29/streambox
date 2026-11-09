@@ -273,6 +273,14 @@
     padding: 8px 14px 10px !important;
     display: flex; flex-direction: column; gap: 6px;
   }
+  /* touch tap layer: visible ONLY while the bar sleeps (tap-catch class set by
+     hideHud/pokeHud). Sits above the cross-origin iframe (which swallows all
+     touches) and below the bar (z-6) and trailer chip (z-7). */
+  #tapLayer { position: absolute; inset: 0; z-index: 5; display: none; }
+  #playerBox.tap-catch #tapLayer { display: block; }
+  /* narrow phones: the PWA Install button must not break the header row
+     (the browser menu / About page remain the install paths there) */
+  @media (max-width: 519px) { #installBtn { display: none !important; } }
   .tv-mode #playerBox #ctlBar { left: 18px; right: 18px; bottom: 18px; padding: 10px 18px 12px !important; }
   /* seek row: elapsed / total | track | remaining (YouTube-style grouping -
      three bare numbers in a row read like a math problem) */
@@ -733,7 +741,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 226; // bump every release alongside version.txt
+  const BUILD_NUM = 227; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -759,9 +767,11 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <span class="grid place-items-center w-10 h-10 rounded-2xl bg-gradient-to-br from-sky-300 via-cyan-400 to-teal-400 shadow-lg shadow-teal-900/40 ring-2 ring-[#22345c]">
       <svg width="22" height="22" viewBox="0 0 48 48" fill="none"><path d="M18 15.5v17c0 1.6 1.7 2.6 3.1 1.8l13.5-8.5c1.3-.8 1.3-2.8 0-3.6L21.1 13.7c-1.4-.8-3.1.2-3.1 1.8z" stroke="#0B111E" stroke-width="3.5" stroke-linejoin="round"/></svg>
     </span>
-    <span class="text-2xl font-black tracking-tight text-white">Stream<span class="text-teal-400">Box</span></span>
+    <span class="text-2xl font-black tracking-tight text-white hidden min-[520px]:inline">Stream<span class="text-teal-400">Box</span></span>
   </a>
-  <div class="hidden md:flex gap-2 text-sm">
+  <!-- desktop tab strip needs ~1250px to fit beside the actions - below xl
+       the bottom tab bar (mobileNav) carries navigation on phones + tablets -->
+  <div class="hidden xl:flex gap-2 text-sm">
     <button id="navHome" onclick="goHome(event)" class="navlink nav-active">Home</button>
     <button id="navMovies" onclick="filterType('movie',event)" class="navlink">Movies</button>
     <button id="navTv" onclick="filterType('tv',event)" class="navlink">TV Shows</button>
@@ -769,19 +779,23 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <button id="navKdrama" onclick="filterType('ko',event)" class="navlink">KDrama</button>
     <button id="navList" onclick="showList(event)" class="navlink">My List</button>
     <button id="navBrowse" onclick="openBrowseTab(event)" class="navlink">Browse</button>
-    <button onclick="openTvGuide(event)" class="navlink" title="How to install & use on TV">&#x1F4FA; TV Setup</button>
+    <button onclick="openTvGuide(event)" class="navlink hidden 2xl:inline-flex" title="How to install & use on TV">&#x1F4FA; TV Setup</button>
   </div>
-  <div class="ml-auto flex items-center gap-2 w-full md:w-auto justify-end">
-    <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-4 md:w-56 lg:w-64 md:justify-start rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm text-gray-400 flex items-center gap-2"><span class="text-teal-300">&#x1F50D;</span><span>Search...</span></button>
+  <!-- action cluster: labels show on tablets (md-lg, no strip above) and wide
+       desktops (2xl) - icon-only on phones and in the xl strip band, where
+       every pixel beside the tab strip counts -->
+  <div class="ml-auto flex items-center gap-1 min-[520px]:gap-1.5 md:gap-2 w-full md:w-auto justify-end">
+    <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 md:w-44 lg:w-52 xl:w-auto 2xl:w-64 md:justify-start rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm text-gray-400 flex items-center gap-2"><span class="text-teal-300">&#x1F50D;</span><span class="hidden md:inline xl:hidden 2xl:inline">Search...</span></button>
     <button id="adultLockNav" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" aria-label="Adults-only gate" class="shrink-0 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-gray-300">&#x1F512;</button>
-    <button onclick="partyOpen('join')" title="Join a Watch Party" class="shrink-0 h-10 px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x1F4E1;</span>Party</button>
-    <button onclick="aboutOpen()" title="About StreamBox and updates" class="shrink-0 h-10 px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2139;</span>About</button>
-    <button id="installBtn" onclick="installPWA()" class="hidden shrink-0 h-10 px-4 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2B07;</span>Install</button>
+    <button onclick="partyOpen('join')" title="Join a Watch Party" aria-label="Join a Watch Party" class="shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x1F4E1;</span><span class="hidden md:inline xl:hidden 2xl:inline">Party</span></button>
+    <button onclick="aboutOpen()" title="About StreamBox and updates" aria-label="About StreamBox" class="shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2139;</span><span class="hidden md:inline xl:hidden 2xl:inline">About</span></button>
+    <button id="installBtn" onclick="installPWA()" aria-label="Install app" class="hidden shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2B07;</span><span class="hidden md:inline xl:hidden 2xl:inline">Install</span></button>
   </div>
 </nav>
 
-<!-- MOBILE TAB BAR: the desktop links hide below md — phones get this instead -->
-<nav id="mobileNav" aria-label="Sections" class="md:hidden fixed bottom-0 left-0 right-0 z-50">
+<!-- MOBILE/TABLET TAB BAR: the desktop links only fit at xl — phones AND
+     tablets (which never reach the 1250px the strip + actions need) get this -->
+<nav id="mobileNav" aria-label="Sections" class="xl:hidden fixed bottom-0 left-0 right-0 z-50">
   <div class="flex bg-[#0B111E]/92 backdrop-blur-md border-t border-white/10 px-1 pt-1.5" style="padding-bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px))">
     <button id="mnavHome" onclick="goHome(event)" class="mnav-btn mnav-active"><span class="text-xl leading-none">&#x1F3E0;</span><span>Home</span></button>
     <button id="mnavMovies" onclick="filterType('movie',event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F3AC;</span><span>Movies</span></button>
@@ -931,6 +945,14 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           allowfullscreen allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
           referrerpolicy="strict-origin-when-cross-origin" loading="eager"
           sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"></iframe>
+        <!-- TOUCH TAP LAYER: a cross-origin iframe swallows every touch, so on
+             phones tapping the video never woke our controls (the reported
+             "can't skip / can't pause" bug). While the bar is asleep this
+            transparent layer sits over the video and its tap wakes the HUD;
+             the moment the bar is up the layer goes pointer-transparent and
+             taps reach the provider player again (coordinated mirrors keep
+             their own controls). Never covers the bar (z below it). -->
+        <div id="tapLayer" aria-hidden="true"></div>
         <!-- dormant HLS shell: OUR OWN <video> — the one place an AI upscaler
              can legally and technically attach. Dormant until a lawful source
              feeds window._hlsSource (nothing does today). -->
@@ -2655,18 +2677,20 @@ function purgeRetiredCaches(){
   document.addEventListener("click", (e) => {
     try { if (e.target && e.target.closest && e.target.closest("#ctlBar,#playerBox")) pokeHud(); } catch(err){}
   }, true);
-  // tap the video surface to play/pause when the controls are asleep
+  // tap the video surface to WAKE the controls (phones/tablets): the video is
+  // a cross-origin iframe that swallows every touch, so #tapLayer (displayed
+  // only while the bar sleeps) catches the tap and brings the bar up - then it
+  // stands down and taps reach the provider player's own controls again. The
+  // old letterbox-only "tap to play/pause" was unreachable on real phones for
+  // the same swallow reason and surprised people who only wanted the controls.
   try {
-    document.getElementById("playerBox").addEventListener("touchend", (e) => {
-      if (document.getElementById("watchView").classList.contains("hidden")) return;
-      if (topPopup()) return;
-      const bar = document.getElementById("ctlBar");
-      if (e.target && e.target.closest && e.target.closest("#ctlBar")) return; // button owns its tap
-      if (bar && bar.classList.contains("bar-hidden") && (pState.dur || 0) > 0) {
-        e.preventDefault();
-        ctlToggle();
-      }
-    }, { passive: false });
+    const tapWake = (e) => {
+      try { if (e && e.cancelable) e.preventDefault(); } catch(err){}
+      pokeHud();
+    };
+    const tl = document.getElementById("tapLayer");
+    tl.addEventListener("touchend", tapWake, { passive: false });
+    tl.addEventListener("click", tapWake); // desktop mouse / remote cursor
   } catch(e){}
   try {
     document.getElementById("playerBox").addEventListener("mousemove", () => pokeHud());
@@ -2802,7 +2826,7 @@ function setHero(i){
         ${genres ? `<span class="text-gray-500">\u{00B7}</span><span>${genres}</span>` : ""}
       </div>
       <p class="text-sm text-gray-300 mt-4 line-clamp-3 leading-relaxed drop-shadow">${escapeHtml(x.overview||"")}</p>
-      <div class="flex gap-3 mt-6 items-center">
+      <div class="flex flex-wrap gap-3 mt-6 items-center">
         <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold text-base flex items-center gap-2.5 shadow-lg shadow-teal-400/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200">\u{25B6} Watch</button>
         <button onclick='openDetail("${type}",${x.id})' class="h-12 px-7 rounded-full glass-pill text-white hover:bg-white/15 font-semibold text-base flex items-center gap-2 border border-white/20 hover:border-white/40 transition-all">\u{24D8} Details</button>
         <button onclick="heroListToggle()" title="${saved ? "Remove from My List" : "Add to My List"}" aria-label="${saved ? "Remove from My List" : "Add to My List"}" class="w-12 h-12 rounded-full glass-pill ${saved ? "text-teal-300 border-teal-400/50" : "text-gray-300 hover:text-teal-300 hover:border-teal-400/40"} flex items-center justify-center transition-all text-lg">${saved ? "\u{2665}" : "\u{2661}"}</button>
@@ -5401,6 +5425,9 @@ function renderList(){
     bar.classList.add("bar-hidden");
     try { capFloat(false); } catch(e){} // bar minimized: captions settle back
     try { document.getElementById("titleCard").classList.add("hidden"); } catch(e){}
+    // bar asleep: the tap layer goes live over the video (the iframe swallows
+    // touches - without the layer a phone tap could never wake the controls)
+    try { document.getElementById("playerBox").classList.add("tap-catch"); } catch(e){}
   }
   function pokeHud(){
     // any interaction while watching: show the bar, hide again after 4s idle
@@ -5408,6 +5435,8 @@ function renderList(){
     const bar = document.getElementById("ctlBar");
     const wasHidden = bar.classList.contains("bar-hidden");
     bar.classList.remove("bar-hidden");
+    // bar awake: the layer stands down so taps reach the provider player again
+    try { document.getElementById("playerBox").classList.remove("tap-catch"); } catch(e){}
     try { capFloat(true); } catch(e){} // bar up: captions float above it
     clearTimeout(window._idleT);
     window._idleT = setTimeout(hideHud, 4000);
@@ -9564,7 +9593,34 @@ const PARTY = (() => {
         try { sessionStorage.setItem("sb_party", JSON.stringify({ code: m.room.code, roomId: m.room.roomId, token: S.token, name: displayName(), pw: S.pw || "" })); } catch(e){}
         if (m.room.content) applyContent(m.room.content, true);
         paint();
-        if (!m.reattached) toast("Joined Watch Party \u{2713}"); // reconnects are silent - no toast spam
+        if (!m.reattached) {
+          toast("Joined Watch Party \u{2713}");
+          // go straight to the movie: the room panel closes itself the moment
+          // there IS a movie to show - the room's own content (join) or the
+          // title the room was created for (details modal). A content-less
+          // room joined from the header keeps the panel open (that is the
+          // waiting room - closing it would leave nothing to see).
+          try {
+            const modalEl = document.getElementById("modal");
+            const modalOpen = modalEl && !modalEl.classList.contains("hidden");
+            const haveDetail = typeof currentDetail !== "undefined" && currentDetail && currentDetail.id;
+            const playing = !document.getElementById("watchView").classList.contains("hidden");
+            if ((m.room.content || playing || (modalOpen && haveDetail)) && S.panelOpen) closePanel();
+            if (!m.room.content && !playing && modalOpen && haveDetail) {
+              // created from the details modal: start THAT title in the room
+              // (openWatch reports it as the room's content automatically)
+              if (currentDetail.type === "tv") {
+                const s = (modalSeasons[modalSeasonIdx] || {}).season_number || 1;
+                const mep = modalEpisodes[modalEpIdx] || {};
+                const un = epUnaired(mep);
+                if (!un) { closeModal(); openWatch("tv", currentDetail.id, s, mep.episode_number || 1); }
+              } else {
+                closeModal();
+                openWatch(currentDetail.type, currentDetail.id);
+              }
+            }
+          } catch(e){}
+        }
         return;
       }
       case "room_state": {
