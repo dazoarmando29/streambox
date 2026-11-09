@@ -1752,5 +1752,53 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("the visual regression harness must exist alongside the Tailwind build");
 }
 
+/* ---------- 151. dead-click harness exists (doors open things) ---------- */
+{
+  if (fs.existsSync(path.join(ROOT, "tools", "click-test.js"))) {
+    const ct = fs.readFileSync(path.join(ROOT, "tools", "click-test.js"), "utf8");
+    if (/mPartyBtn/.test(ct) && /DEAD CLICK/.test(ct) && /partyPanel/.test(ct))
+      ok("tools/click-test.js exists and covers the party-door regression class (clicks must change visible state)");
+    else bad("click-test.js must exercise the party doors and flag dead clicks");
+  } else bad("tools/click-test.js missing - the dead-click class (Watch Party doors opening nothing) needs a runtime harness");
+}
+
+/* ---------- 150. dead-click class: panel doors reach their panels ---------- */
+{
+  // the bug this locks: openMode() called a bare open() that silently
+  // resolved to window.open() - every Watch Party door opened a blank tab
+  // (web) or nothing at all (APK). A party/panel opener must call the panel
+  // opener, never an unqualified open().
+  const om = html.match(/openMode\(mode\)\{[\s\S]*?\n    \}/);
+  if (om && /openPanel\(\)/.test(om[0]) && !/(^|[^.\w$'"`])open\(\)/.test(om[0]))
+    ok("openMode reaches openPanel() - no bare open() window.open() trap");
+  else bad("openMode must call openPanel() and never a bare open() (that is window.open - a dead door)");
+  if (/function partyOpen\(mode\)\{ try \{ PARTY\.openMode\(mode\)/.test(html)
+      && /function openPanel\(\)\{[\s\S]{0,200}partyPanel/.test(html))
+    ok("the party doors are wired end to end: partyOpen -> PARTY.openMode -> openPanel -> partyPanel");
+  else bad("partyOpen/openPanel wiring must reach #partyPanel");
+  // the APK's injected Back cascade calls site functions BY NAME - every one
+  // of them must exist or Back dies with a swallowed JS error inside the app
+  let ma = "";
+  try { ma = read("android/app/src/main/java/com/streambox/app/MainActivity.java"); } catch (e) {}
+  const cascade = ma.match(/onBackPressed[\s\S]*?evaluateJavascript\([\s\S]*?value ->/);
+  if (cascade) {
+    // scan ONLY the JS string fragments the shell injects (not the Java around them)
+    const jsCode = [...cascade[0].matchAll(/\+\s*"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]).join("\n");
+    const BUILTINS = new Set(["document", "getElementById", "querySelector", "querySelectorAll", "contains", "focus",
+      "blur", "add", "remove", "toggle", "String", "JSON", "Math", "parseInt", "Object", "if", "for",
+      "return", "try", "catch", "var", "function", "classList", "activeElement", "body", "tagName", "closest", "hidden",
+      "not"]); // not( = the CSS :not(.hidden) selector, not a function call
+    const calls = [...jsCode.matchAll(/\b([a-zA-Z_$][\w$]*)\s*\(/g)].map((m) => m[1]);
+    const siteHooks = [...new Set(calls)].filter((fn) => !BUILTINS.has(fn));
+    const missing = siteHooks.filter((fn) => !new RegExp("function " + fn + "\\s*\\(").test(html));
+    if (!missing.length && siteHooks.length >= 8)
+      ok("every hook the APK Back cascade injects exists on the site (" + siteHooks.length + " checked: " + siteHooks.join(", ") + ")");
+    else bad("APK Back cascade calls site functions that do not exist: " + (missing.join(", ") || "(none found in cascade)"));
+    if (/partyClose/.test(jsCode) && /aboutClose/.test(jsCode))
+      ok("the APK Back cascade closes partyPanel and aboutPanel before the details modal (z-order)");
+    else bad("the APK Back cascade must handle partyPanel/aboutPanel (Back used to close the modal BEHIND the open party panel)");
+  } else bad("MainActivity onBackPressed cascade not found - the hook contract check cannot run");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

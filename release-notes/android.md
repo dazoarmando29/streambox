@@ -1,13 +1,11 @@
-Self-updating app, a real third full-sync player, and one static stylesheet: StreamBox now installs its own verified updates on TV, VidCore joins CineSrc/AniPM/VidBolt/VidZen as a bar-driven full-sync source (through its real VidSpark player, not the ad-wrapper), and the site boots without the Tailwind CDN.
+Every door opens something - guaranteed. The Watch Party buttons in the details modal (and everywhere else) had a silent bug that opened nothing; fixed at the root, covered by a new click-through test that clicks every door and fails if the screen does not change.
 
 What is new
-- In-app updates: when a new version exists, About shows Download & Install and the app downloads, verifies and hands the APK straight to the system installer - no sideload, no browser, no "reinstall / clear data". Every update is pinned twice (the published sha256 checksum AND this app's own signing certificate) and only a strictly newer version is ever installed; anything that fails verification is deleted and says why
-- VidCore is now a fully driven source: play/pause/seek run from our bar with verified events (play/pause/seeked/timeupdate/ended) from its real player, so it joins the FULL SYNC Watch Party set (5 full-sync mirrors now) and saves your resume position - and because we talk to the player directly, its wrapper's pop-under ads are gone
-- The website and app boot with ONE static stylesheet (32KB, 6.5KB gzipped) instead of the runtime Tailwind CDN - no JIT compile flash on slow TVs, no CDN dependency, verified pixel-identical to the old rendering (1677 class tokens + full-page computed-style diff = zero drift)
-- Media transport keys (play/pause/ff/rw on remotes and keyboards) work on the website too
-- A rate-limit-proof update channel (edge-cached worker mirror) so a whole house of boxes can never exhaust the GitHub API quota
+- Watch Party works from the movie/TV details modal again: the button used to call a bare open() that silently resolved to the browser's window.open (a blank tab on the web, a dead tap in the app) instead of opening the party panel - now every Party door (details modal, player sidebar, header) opens the room panel
+- tools/click-test.js: a dead-click regression harness that boots the real site in headless Edge, clicks every interactive door (header, nav, hero, details modal, party panel), and asserts a visible state change each time - a button that opens nothing now fails the build
+- The app's Back button now handles the party panel and About panel before the details modal (Back used to close the modal BEHIND an open party panel, then a second Back closed the app with the panel still up)
+- QA locks the full contract: the party doors wiring, the no-window.open rule, and every JavaScript hook the APK injects must exist on the site (a missing hook used to swallow Back presses inside the app)
 
 Fixes
-- The Quality label is verified everywhere: it shows the rendition the player actually reports (VidBolt's selected row, AniPM's qualitychange events) and "4K" only appears as "Auto · 4K avail" when the stream really carries a 2160p rendition - never a bare 4K badge over a 1080p picture
-- VidCore/VidAPI honesty: VidAPI is labeled coordinated-only (its wrapper relays no player events - it never did), and the VidCore integration documents and uses the real player protocol
-- Update-check copy inside the app now points at the real flow (About → Download & Install)
+- Closing the party panel returns focus to the visible party button (it used to target the hidden player-page button and strand focus)
+- The click-test also validated the Escape layering: closing the party panel over a details modal keeps the modal open underneath

@@ -733,7 +733,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 225; // bump every release alongside version.txt
+  const BUILD_NUM = 226; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -10057,9 +10057,10 @@ const PARTY = (() => {
     S.panelOpen = false;
     el("partyPanel").classList.add("hidden");
     if (!topPopup()) document.body.classList.remove("modal-open");
-    // focus back to the party button if it is on screen
-    const b = el("wPartyBtn") || el("mPartyBtn");
-    if (b && !b.closest(".hidden")) { try { b.focus({ preventScroll: true }); } catch(e){} }
+    // focus back to the FIRST VISIBLE party door (wPartyBtn lives inside the
+    // hidden watch view - grabbing it blind stranded focus on <body>)
+    const b = [el("wPartyBtn"), el("mPartyBtn")].find(x => x && !x.closest(".hidden"));
+    if (b) { try { b.focus({ preventScroll: true }); } catch(e){} }
   }
   function copy(text, label){
     const done = () => toast(label + " copied \u{2713}");
@@ -10125,7 +10126,10 @@ const PARTY = (() => {
           } catch(e){}
         }
       }
-      open();
+      // MUST be the panel opener: a bare open call here silently resolved to
+      // window.open (blank tab on the web, dead tap in the APK) - the bug
+      // that made every Watch Party door look broken
+      openPanel();
     },
     close: closePanel,
     create, join, leave, endRoom,
