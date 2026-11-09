@@ -1,8 +1,9 @@
-Watch Party subtitles follow the episode, AniPM returns to the party server list (native), and the outside Party door is join-only.
+Party pause finally stops BOTH videos - and play/pause presses work the first time.
 
 Fixes
-- Watch Party episode changes now carry the RIGHT subtitles: when the room (or auto-next, or an episode pick) switches episodes, the old episode's subtitle file is cleared and the new episode's subtitles load - the reported bug showed an "S01E01" caption file playing over episode 5. Every episode-switch path (party switches, Next Episode, the watch grid, the episodes drawer) now refreshes the subtitle chain
-- Native app: AniPM is back in the server list during Watch Party - party content opens anime titles WITHOUT their MAL/AniList mapping, and the server list only offers AniPM when that mapping resolves (so it was invisible). The party route now resolves the mapping before opening the player
-- The Watch Party button OUTSIDE the player (movie/TV details) now shows the JOIN view (code + password) - creating a room only makes sense where a video is playing, which stays on the player page's button
-
-Locked so it never happens again: all 4 episode-switch sites must refresh subs (QA 157), the details door must stay join-only and the player door create-only, and the native party route must pass the anime mapping (native QA 90)
+- Pausing (or playing) from INSIDE the player now reaches the whole room: only our own bar's button was relayed to the party before - a pause through the player's own button (the natural target on desktop, and inside frames on every device) never left your device, so "one of us paused and it kept playing". Every provider play/pause event now relays to the room (with echo gates so remote events never bounce back). The same fix is in the native app
+- If a pause/play event is ever LOST, the room's pause now stops a controller's still-running player within seconds (honest limit: VidRift has no pause API)
+- "Slight not in synchronize": the drift corrector nudged at 4% (1 second of drift took 25 seconds to close) and only ran every 5s. It now nudges at 10% on a 3s cadence and hard-seeks past 1.5s - a visible pause/seek lands within a few seconds
+- Play/pause works on the FIRST press: pre-ready commands can be lost and the old blind toggle then sent the OPPOSITE action on your next click ("I have to click it a few times"). The button now tracks your intent - mashing play RE-SENDS play instead of flipping to pause, and a lost command retries once by itself
+- Videos AUTOPLAY again at the start: when the browser blocks audible autoplay, the old recovery asked you to "click once inside the video" - but our tap layer covers the video, so it could never happen. The recovery now arms a one-shot gesture: your next tap ANYWHERE starts playback with sound
+- Subtitles are no longer a beat late: provider clocks update only ~4 times a second on slow devices and captions rendered straight off them lagged. Captions now extrapolate between updates with the wall clock and repaint on a 150ms ticker (the same fix the native app got in 0.94)

@@ -790,7 +790,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 233; // bump every release alongside version.txt
+  const BUILD_NUM = 234; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -5692,33 +5692,62 @@ function ctlReset(){
   pState.cur = 0; pState.dur = 0; pState.seeking = false;
   ctlPaint();
 }
-function ctlToggle(){ // optimistic flip; corrected by play/pause events
+function sendPlayPause(play){
   if (mirror === "anipm") {
-      anipmSend(pState.paused ? "play" : "pause"); return;
+    anipmSend(play ? "play" : "pause");
+    pState.paused = !play; ctlPaint(); // optimistic; provider events correct
+    return;
   } // events correct us
-  // VidRift has no play API: hand keys into its player instead — its own
+  // VidRift has no play API: hand keys into its player instead - its own
   // OK/space/arrows drive it, Back returns (TV app). VidBolt + VidZen HAVE
   // play APIs, so \u{25B6} talks straight to them (events correct us).
   if (mirror === "vidrift") { focusMirror(); return; }
-  if (mirror === "vidbolt") { boltSend(pState.paused ? { type: "play" } : { type: "pause" }); return; }
-  if (mirror === "vidzen") { zenSend(pState.paused ? { type: "play" } : { type: "pause" }); return; }
-  if (mirror === "vidcore") { coreSend(pState.paused ? "play" : "pause"); return; }
+  if (mirror === "vidbolt") { boltSend(play ? { type: "play" } : { type: "pause" }); pState.paused = !play; ctlPaint(); return; }
+  if (mirror === "vidzen") { zenSend(play ? { type: "play" } : { type: "pause" }); pState.paused = !play; ctlPaint(); return; }
+  if (mirror === "vidcore") { coreSend(play ? "play" : "pause"); pState.paused = !play; ctlPaint(); return; }
   if (mirror === "cinesrc" && !window._cineReady && !(pState.dur > 0) && window._loadT
       && Date.now() - window._loadT > (document.body.classList.contains("tv-mode") ? 45000 : 18000)) {
     // play pressed on a frame that never said hello (blocked embed, dead
-    // source): parking the command would answer with silence — name the hop
+    // source): parking the command would answer with silence - name the hop
     // instead. Same patience as the watchdog warn stage, never earlier.
     const fb = stuckFallback(watchState.anime ? "anipm" : isKDrama() ? "cinesrc" : (document.body.classList.contains("tv-mode") ? "yapgrid" : "vidapi"));
     const nm = stuckFallbackName(fb);
     stuckRecommend("CineSrc isn't answering", nm);
     return;
   }
-  pState.paused = !pState.paused;
+  pState.paused = !play;
   window._userPauseHold = pState.paused;
   if (pState.paused) window._userPauseAt = Date.now();
   else window._unexpectedPauseAt = 0;
-  sendCmd(pState.paused ? "pause" : "play");
+  sendCmd(play ? "play" : "pause");
   ctlPaint();
+}
+function ctlToggle(){
+  // DESIRED-state toggle: a press must BECOME true. Pre-ready/pre-hello
+  // commands can be lost and a blind flip then sent the OPPOSITE action on
+  // the next press ("I had to click play a few times"). Two rules fix it:
+  //   - a mash (press again within 700ms while unconfirmed) RE-SENDS the
+  //     same intent instead of toggling it
+  //   - if no provider event confirms the intent within 2.5s, the same
+  //     intent is sent once more (bounded)
+  const now = Date.now();
+  const unconfirmed = window._ctlWant != null;
+  const mash = unconfirmed && now - (window._ctlLastPress || 0) < 700;
+  window._ctlLastPress = now;
+  const playing = (typeof pState !== "undefined" && !pState.paused);
+  const want = mash ? window._ctlWant : (unconfirmed ? !window._ctlWant : !playing);
+  window._ctlWant = want;
+  window._ctlSawEvent = false;
+  sendPlayPause(want);
+  clearTimeout(window._ctlConfirmT);
+  window._ctlConfirmT = setTimeout(() => {
+    try {
+      if (window._ctlWant == null) return;
+      if (window._ctlSawEvent) { window._ctlWant = null; return; } // it landed
+      const again = window._ctlWant; window._ctlWant = null;
+      sendPlayPause(again); // one bounded retry - the press must become true
+    } catch(e){}
+  }, 2500);
 }
 function ctlSeekRel(d){
   if (mirror === "vidrift") { vidriftSeekRel(d); return; } // resume-seek answers
@@ -6185,7 +6214,7 @@ function sleepTick(){
       else if (mirror === "vidzen") zenSend({ type: "pause" });
       else if (mirror === "vidbolt") boltSend({ type: "pause" });
       else sendCmd("pause");
-      pState.paused = true; ctlPaint();
+      pState.paused = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){}
       if (ws) ws.textContent = "\u{1F634} Sleep timer — playback paused";
     }
     paintSleep();
@@ -6203,7 +6232,7 @@ function applySleepOnEnd(){
   else if (mirror === "vidzen") zenSend({ type: "pause" });
   else if (mirror === "vidbolt") boltSend({ type: "pause" });
   else sendCmd("pause");
-  pState.paused = true; ctlPaint();
+  pState.paused = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){}
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "\u{1F634} Sleep when video ends — playback paused";
 }
@@ -7640,6 +7669,21 @@ function paintSubsUI(){
   }
   try { paintCapStyleUI(); } catch(e){}
 }
+function capNow(){
+  // provider clocks are THINNED (~4Hz on weak devices) and captions rendered
+  // straight off them landed a beat late (the native 0.94 fix, web side):
+  // extrapolate between timeupdates with the wall clock - never while paused
+  // or seeking (that would drift the text away from a frozen picture)
+  try {
+    const cur = pState.cur || 0;
+    if (window._capAnchor == null || window._capAnchor.cur !== cur) {
+      window._capAnchor = { cur, at: Date.now() };
+      return cur;
+    }
+    if (pState.paused || pState.seeking) return cur;
+    return window._capAnchor.cur + (Date.now() - window._capAnchor.at) / 1000;
+  } catch(e){ return (typeof pState !== "undefined" ? (pState.cur || 0) : 0); }
+}
 function paintCaps(force){
   const ov = document.getElementById("capOverlay");
   if (!ov) return;
@@ -7647,7 +7691,7 @@ function paintCaps(force){
   if (ourSubsActive()
       && !document.getElementById("watchView").classList.contains("hidden")
       && (mirror === "cinesrc" || mirror === "vidbolt" || mirror === "anipm")) {
-    const t = (pState.cur || 0) + (subFile.offset || 0);
+    const t = capNow() + (subFile.offset || 0);
     for (let i = 0; i < subFile.cues.length; i++) {
       const c = subFile.cues[i];
       if (t >= c.s && t <= c.e) { html = c.text.split("\n").map(escapeHtml).join("<br>"); break; }
@@ -7672,6 +7716,17 @@ function paintCaps(force){
     ov.classList.remove("floating");
   }
 }
+// caption ticker: repaint on a short cadence so the extrapolated cues land ON
+// TIME even while provider timeupdates crawl (~4Hz on weak devices). The
+// dataset.h guard above makes this a no-op unless the visible text changed.
+setInterval(() => {
+  try {
+    if (typeof subsOn !== "undefined" && subsOn && typeof subFile !== "undefined" && subFile
+        && subFile.cues && subFile.cues.length
+        && !document.getElementById("watchView").classList.contains("hidden")
+        && typeof pState !== "undefined" && !pState.paused) paintCaps();
+  } catch(e){}
+}, 150);
 /* episodes drawer — browsing seasons NEVER touches playback: the drawer
    keeps its own season cursor (drawerS); only tapping an episode plays. */
 let drawerEps = [], drawerRevealed = new Set(), spoilerOn = false, drawerS = 1;
@@ -8259,8 +8314,8 @@ window.addEventListener("message", (event)=>{
     autoSkipIntro();
     try { sleepTick(); } catch(e){} // sleep timer runs on every drivable mirror
   }
-  if (d.type === "vidrift:paused") { pState.paused = true; ctlPaint(); }
-  if (d.type === "vidrift:unpaused") { pState.paused = false; window._cinePlaying = true; ctlPaint(); }
+  if (d.type === "vidrift:paused") { pState.paused = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){} }
+  if (d.type === "vidrift:unpaused") { pState.paused = false; window._cinePlaying = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){} }
   if (d.type === "vidrift:episode") {
     // provider episode events enter state ONLY through adoptProviderEpisode
     // (echoes / settling noise / out-of-range are dropped); an adopted switch
@@ -8345,7 +8400,7 @@ window.addEventListener("message", (event)=>{
     try { sleepTick(); } catch(e){} // sleep timer runs on every drivable mirror
   }
   if (evn === "play" || evn === "playing" || evn === "unpaused") { pState.paused = false; window._cinePlaying = true; window._zenStarted = true; ctlPaint(); }
-  if (evn === "pause" || evn === "paused") { pState.paused = true; ctlPaint(); }
+  if (evn === "pause" || evn === "paused") { pState.paused = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){} }
   if (evn === "status") { hideSpin(); ctlPaint(); }
   if (evn === "ended" || evn === "complete") {
     try { markWatched(); } catch(e){}
@@ -8550,7 +8605,7 @@ window.addEventListener("message", (event)=>{
     return;
   }
   if (d.type === "play" || d.type === "playing") { pState.paused = false; window._cinePlaying = true; window._boltStarted = true; ctlPaint(); }
-  if (d.type === "pause" || d.type === "paused") { pState.paused = true; ctlPaint(); }
+  if (d.type === "pause" || d.type === "paused") { pState.paused = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){} }
   if (d.type === "ended") {
     try { markWatched(); } catch(e){}
     if (sleepOnEnd) applySleepOnEnd();
@@ -8607,7 +8662,7 @@ window.addEventListener("message", (event)=>{
     return;
   }
   if (evn === "play") { pState.paused = false; window._cinePlaying = true; window._coreStarted = true; ctlPaint(); return; }
-  if (evn === "pause") { pState.paused = true; ctlPaint(); return; }
+  if (evn === "pause") { pState.paused = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){} return; }
   if (evn === "ended") {
     try { markWatched(); } catch(e){}
     if (sleepOnEnd) applySleepOnEnd();
@@ -9169,7 +9224,7 @@ window.addEventListener("message", (event)=>{
       pState.paused = false; window._cinePlaying = true;
       window._anipmGestureBlocked = false;
       clearTimeout(window._anipmKickT); ctlPaint(); break;
-    case "pause": pState.paused = true; ctlPaint(); break;
+    case "pause": pState.paused = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){} break;
     case "seeking": pState.seeking = true; break;
     case "seeked":
       pState.seeking = false;
@@ -9196,20 +9251,37 @@ window.addEventListener("message", (event)=>{
       else if (d.language) window._anipmTracks.lang = d.language;
       paintAV(); break;
     case "autoplayblocked": {
-      // TV gets an audible play kick instead of sitting black; desktop keeps the tap hint
+      // TV gets an audible play kick instead of sitting black; on phones and
+      // desktops the browser blocks audible autoplay until a gesture - and
+      // OUR tap layer covers the video, so the old "click once inside the
+      // video" recovery could literally never happen. Arm a one-shot PAGE
+      // gesture instead: the next tap/keypress anywhere starts playback.
       if (document.body.classList.contains("tv-mode")) { anipmPlayKick(); break; }
       window._anipmGestureBlocked = true;
       clearTimeout(window._anipmRetryT); window._anipmRetryT = 0;
       const wsb = document.getElementById("watchStatus");
-      if (wsb) wsb.textContent = "Click once inside the video to start; then our bar drives it";
+      if (wsb) wsb.textContent = "Tap anywhere to start playback";
       try {
         const t = document.getElementById("volToast");
         if (t) {
-          t.textContent = "Click once inside the anime video to allow playback";
+          t.textContent = "Tap anywhere to start playback";
           t.classList.remove("hidden");
           clearTimeout(window._anipmTapHintT);
           window._anipmTapHintT = setTimeout(() => { try { t.classList.add("hidden"); } catch(e){} }, 9000);
         }
+      } catch(e){}
+      try {
+        const go = () => {
+          try {
+            // the gesture is the key: one tap starts playback with sound
+            if (typeof pState !== "undefined" && pState.paused) ctlToggle();
+            else anipmPlayKick();
+          } catch(e){}
+          ["pointerdown", "touchstart", "mousedown", "keydown"].forEach(ev => document.removeEventListener(ev, go, true));
+        };
+        if (window._autoGo) ["pointerdown", "touchstart", "mousedown", "keydown"].forEach(ev => document.removeEventListener(ev, window._autoGo, true));
+        window._autoGo = go;
+        ["pointerdown", "touchstart", "mousedown", "keydown"].forEach(ev => document.addEventListener(ev, go, true));
       } catch(e){}
       break;
     }
@@ -9509,7 +9581,7 @@ window.addEventListener("message", (event)=>{
   }
   if(type === "cinesrc:play") { pState.paused = false; window._userPauseHold = false; window._unexpectedPauseAt = 0; window._cinePlaying = true; ctlPaint(); }
   if(type === "cinesrc:pause") {
-    pState.paused = true; ctlPaint();
+    pState.paused = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){}
     // pauses WE did not command (buffer-stall loops, flaky embeds): a burst
     // of them is the source struggling, not the viewer
     try {
@@ -9612,7 +9684,7 @@ window.addEventListener("message", (event)=>{
       window._userPauseAt = Date.now();
       window._userPauseHold = true;
       sendCmd("pause");
-      pState.paused = true; ctlPaint();
+      pState.paused = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){}
       const ws = document.getElementById("watchStatus");
       if (ws) ws.textContent = "\u{1F634} Sleep when video ends — playback paused";
     } else if (watchState.type === "movie") {
@@ -9653,10 +9725,10 @@ const PARTY = (() => {
       // elsewhere (self-hosted party-server works identically)
       return "wss://streambox-api.dazoarmando.workers.dev/party";
     },
-    SYNC_NUDGE: 0.25,     // seconds of drift before a gentle rate nudge
-    SYNC_SEEK: 2.0,       // seconds of drift before a hard seek
-    SYNC_INTERVAL: 5000,  // drift check cadence
-    SYNC_MIN_GAP: 4000,   // min ms between corrections (no correction loops)
+    SYNC_NUDGE: 0.2,      // seconds of drift before a gentle rate nudge
+    SYNC_SEEK: 1.5,       // seconds of drift before a hard seek
+    SYNC_INTERVAL: 3000,  // drift check cadence
+    SYNC_MIN_GAP: 2500,   // min ms between corrections (no correction loops)
     HEARTBEAT: 20000,     // clock sync + liveness
     CHAT_MAX: 300,
     QUICK: ["Hello!", "Ready!", "One sec", "LOL", "Brb", "Bye!"],
@@ -10004,8 +10076,23 @@ const PARTY = (() => {
 
   function onLocalPlayPause(){
     if (!inRoom() || !canControl() || suppressLocalEcho()) return;
+    S._localSentAt = Date.now();
     send({ t: "playback", action: (typeof pState !== "undefined" && pState.paused) ? "pause" : "play",
       position: (typeof pState !== "undefined" ? (pState.cur || 0) : 0), sessionVersion: S.room.playback.sessionVersion });
+  }
+  function onProviderPlayState(){
+    // a provider play/pause event arrived: whatever the user pressed has
+    // taken effect (also the confirmation signal for ctlToggle's retry)
+    window._ctlSawEvent = true;
+    // the user paused/played INSIDE the provider's own player (desktop clicks
+    // land in the frame; the player's own button is the natural target) -
+    // the room must hear it. Remote-driven changes bounce back as provider
+    // echoes inside two suppression windows and never re-send: the shared
+    // remote window (suppressUntil) and the echo of OUR OWN last send.
+    if (!inRoom() || !canControl()) return;
+    if (suppressLocalEcho()) return;
+    if (Date.now() < (S._localSentAt || 0) + 1500) return;
+    onLocalPlayPause();
   }
   function onLocalSeek(t){
     if (!inRoom() || !canControl() || suppressLocalEcho()) return;
@@ -10131,7 +10218,18 @@ const PARTY = (() => {
     const a = adapter();
     if (a.cap === "coordinated" || !a.seek) return;
     const pb = S.room.playback;
-    if (!pb || pb.status !== "playing") return;
+    if (!pb || pb.status !== "playing") {
+      // the room is PAUSED and this player still runs = a lost/late pause
+      // event ("one of us paused and it kept playing"). Controllers follow
+      // the room's pause; VidRift (no pause API) is the honest limit.
+      try {
+        if (pb && pb.status === "paused" && !a.paused() && a.pause && a.cap === "full"
+            && !suppressLocalEcho() && canControl()) {
+          a.pause();
+        }
+      } catch(e){}
+      return;
+    }
     const nowS = serverNow();
     if ((pb.updatedAt || 0) > nowS) return; // scheduled start: hold the gate
     if (typeof pState !== "undefined" && pState.seeking) return;
@@ -10150,9 +10248,11 @@ const PARTY = (() => {
       if (mag >= CFG.SYNC_SEEK) {
         a.seek(expectedPos() + 0.25); // big drift: one clean seek
       } else if (a.rate) {
-        // subtle nudge in the right direction, then restore the rate
-        a.rate(drift > 0 ? 0.96 : 1.04);
-        setTimeout(() => { try { const a2 = adapter(); if (a2.rate) a2.rate(1); } catch(e){} }, Math.min(8000, Math.round(mag / 0.04 * 1000)));
+        // subtle nudge in the right direction, then restore the rate.
+        // 10% closes 1s of drift in ~10s (the old 4% took 25s - "a slight
+        // not in synchronize" was exactly that slow catch-up)
+        a.rate(drift > 0 ? 0.9 : 1.1);
+        setTimeout(() => { try { const a2 = adapter(); if (a2.rate) a2.rate(1); } catch(e){} }, Math.min(8000, Math.round(mag / 0.10 * 1000)));
       } else if (mag > 1.2) {
         a.seek(expectedPos() + 0.25); // no rate control: correct gently, rarely
       }
@@ -10443,7 +10543,7 @@ const PARTY = (() => {
     copyCode(){ if (S.room) copy(S.room.code, "Room code"); },
     toggleCtl(){ if (isHost()) send({ t: "settings", allowControl: el("partyCtlToggle").checked }); },
     toggleChat(){ if (isHost()) send({ t: "settings", chatEnabled: el("partyChatToggle").checked }); },
-    inRoom, isHost, suppressAutoAdvance, onLocalPlayPause, onLocalSeek, detectContentChange,
+    inRoom, isHost, suppressAutoAdvance, onLocalPlayPause, onLocalSeek, onProviderPlayState, detectContentChange,
     state: S,
   };
 })();

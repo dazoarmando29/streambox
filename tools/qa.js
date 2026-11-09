@@ -1724,7 +1724,7 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
       && /mirror !== "vidcore"/.test(bridge[0]) && /"ended"/.test(bridge[0]))
     ok("the VidCore bridge is origin-checked, source-tagged and stale-frame-guarded (play/pause/seeked/timeupdate/ended)");
   else bad("coreSend/VidCore message handler must check origin + source + mirror (stale frames) and handle ended");
-  if (/coreSend\(pState\.paused \? "play" : "pause"\)/.test(html) && /coreSend\("seek", \{ time:/.test(html))
+  if (/coreSend\((pState\.paused|play) \? "play" : "pause"\)/.test(html) && /coreSend\("seek", \{ time:/.test(html))
     ok("our bar drives VidCore play/pause/seek through its real command API");
   else bad("ctlToggle/ctlSeekRel must dispatch to coreSend for the vidcore mirror");
   if (/case "vidapi": \{[\s\S]{0,300}coordinated-start only/.test(html))
@@ -1918,6 +1918,34 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (/id="wPartyBtn" onclick="partyOpen\('create'\)"/.test(html))
     ok("the player-page door still CREATES a room (that is where a video exists)");
   else bad("wPartyBtn must remain the create door (player page = video playing)");
+}
+
+/* ---------- 158. party pause parity + play reliability + caption timing ---------- */
+{
+  // pauses/pauses from INSIDE the provider player must reach the room
+  const exp = /onLocalPlayPause, onLocalSeek, onProviderPlayState/.test(html);
+  const wired = (html.match(/PARTY\.onProviderPlayState\(\)/g) || []).length;
+  if (exp && wired >= 8 && /window\._ctlSawEvent = true/.test(html))
+    ok("provider play/pause events relay to the room AND confirm ctlToggle (" + wired + " event sites)");
+  else bad("PARTY.onProviderPlayState must be exported, set _ctlSawEvent, and run from every provider play/pause handler");
+  // play/pause presses must become true (mash = re-send, lost commands retried)
+  const ct = html.match(/function ctlToggle\s*\(\)\s*\{[\s\S]*?\n\}/);
+  if (ct && /window\._ctlWant/.test(ct[0]) && /_ctlConfirmT/.test(ct[0]) && /sendPlayPause\(again\)/.test(ct[0]))
+    ok("ctlToggle tracks user intent: mashing re-sends the same intent and lost commands retry once");
+  else bad("ctlToggle must track _ctlWant intent with a confirm/retry - blind toggling sent the opposite action on the next press");
+  // blocked autoplay recovers on the FIRST page gesture (the tap layer made
+  // "click inside the video" impossible)
+  if (/window\._autoGo/.test(html) && /Tap anywhere to start playback/.test(html))
+    ok("blocked autoplay arms a one-shot page gesture that starts playback (the tap layer ate the old in-frame click)");
+  else bad("autoplayblocked must arm a one-shot gesture recovery and say 'Tap anywhere to start playback'");
+  // captions render on the extrapolated clock, not the thinned provider ticks
+  if (/function capNow\s*\(\)/.test(html) && /capNow\(\) \+ \(subFile\.offset/.test(html) && /\}, 150\);/.test(html))
+    ok("captions extrapolate between timeupdates and repaint on the 150ms ticker (no more late subtitles)");
+  else bad("paintCaps must use capNow() extrapolation + the 150ms caption ticker");
+  // drift: room-paused enforcement + fast enough nudges
+  if (/SYNC_NUDGE: 0\.2/.test(html) && /0\.9 : 1\.1/.test(html) && /pb\.status === "paused" && !a\.paused\(\)/.test(html))
+    ok("drift correction: room-pause enforced locally, 10% nudges, 3s cadence (the 'slight desync' fix)");
+  else bad("driftTick must enforce the room's pause on controllers and use the faster nudge/cadence");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
