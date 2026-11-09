@@ -366,6 +366,23 @@ public class MainActivity extends Activity {
             }
 
             @Override
+            public void onReceivedTitle(WebView view, String title) {
+                // the page signals cinema-mode orientation through the title
+                // ("sb:landscape" / "sb:portrait"): WebViews often refuse the
+                // JS screen.orientation.lock and the CSS-cinema path never
+                // fires onShowCustomView - the marker covers BOTH so video
+                // fullscreen always rotates on phones/tablets
+                try {
+                    if (title != null && title.startsWith("sb:landscape")) {
+                        setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                    } else if (title != null && title.startsWith("sb:portrait")) {
+                        setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                    }
+                } catch (Exception ignored) {}
+                super.onReceivedTitle(view, title);
+            }
+
+            @Override
             public Bitmap getDefaultVideoPoster() {
                 return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888);
             }

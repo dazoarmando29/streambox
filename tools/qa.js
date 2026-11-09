@@ -1878,12 +1878,27 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (/so\.lock\("landscape"\)/.test(html) && /so\.unlock\(\)/.test(html))
     ok("the Screen Orientation API lock/unlock pair exists (best effort on iOS, real on Android)");
   else bad("lockLandscape/unlockOrientation must use the Screen Orientation API");
+  // Chrome/Brave only honor the lock FROM fullscreen - the lock must re-run
+  // the moment fullscreen lands (the pre-fullscreen attempt silently fails)
+  const cf2 = html.match(/function ctlFullscreen[\s\S]{0,2600}/);
+  const fs2 = html.match(/const _fsSync = [\s\S]{0,700}/);
+  if (cf2 && /p\.then\(\(\) => \{[\s\S]{0,160}lockLandscape\(\)/.test(cf2[0])
+      && fs2 && /lockLandscape\(\)/.test(fs2[0])
+      && /landscape-retry/.test(html))
+    ok("the orientation lock re-runs after the fullscreen promise and on fullscreenchange, with a retry ladder");
+  else bad("lockLandscape must re-run after requestFullscreen resolves, on fullscreenchange, and retry - the pre-fullscreen call is rejected by Chrome");
+  // title-marker channel: WebViews refuse the JS lock and the CSS-cinema path
+  // never fires onShowCustomView - the shell rotates on "sb:landscape"
+  if (/sbTitlePing\("sb:landscape"\)/.test(html) && /sbTitlePing\("sb:portrait"\)/.test(html))
+    ok("cinema orientation is signalled to the APK shell via the sb:landscape / sb:portrait title markers");
+  else bad("lockLandscape/unlockOrientation must ping the sb:landscape / sb:portrait title markers for the shell");
   // the APK WebView shell locks natively too (JS lock is unreliable there)
   let ma2 = "";
   try { ma2 = read("android/app/src/main/java/com/streambox/app/MainActivity.java"); } catch (e) {}
-  if (/SCREEN_ORIENTATION_SENSOR_LANDSCAPE/.test(ma2) && /SCREEN_ORIENTATION_UNSPECIFIED/.test(ma2))
-    ok("the APK shell locks landscape in onShowCustomView and restores on exit");
-  else bad("MainActivity must request SENSOR_LANDSCAPE on video fullscreen and UNSPECIFIED on exit");
+  if (/SCREEN_ORIENTATION_SENSOR_LANDSCAPE/.test(ma2) && /SCREEN_ORIENTATION_UNSPECIFIED/.test(ma2)
+      && /onReceivedTitle/.test(ma2) && /sb:landscape/.test(ma2) && /sb:portrait/.test(ma2))
+    ok("the APK shell locks landscape in onShowCustomView AND on the sb:landscape title marker, restoring on exit");
+  else bad("MainActivity must rotate via onShowCustomView + onReceivedTitle(sb:landscape/sb:portrait) and restore UNSPECIFIED on exit");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

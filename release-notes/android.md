@@ -1,9 +1,13 @@
-The controls minimize themselves again when you stop touching them, and fullscreen now turns the phone sideways so the movie actually fills the screen.
+Fullscreen REALLY rotates now - the "Rotate Your Phone" hint is gone on Android.
 
-What is new
-- Auto-minimize is back and reliable: stop touching the screen for a few seconds and the control bar tucks itself away (it used to stay up forever after you left fullscreen - the idle timer was being cleared and never re-armed)
-- Fullscreen rotates to LANDSCAPE on phones and tablets (web + both APKs): tap fullscreen and the movie fills the screen sideways, the way a 16:9 picture is meant to be watched. Leaving fullscreen returns the device to its own orientation. The app shell locks it natively (web rotation locks are unreliable inside Android WebViews), the website uses the Screen Orientation API - and on iPhone Safari (which can't rotate from a page) everything else still works
-- The native Kotlin app rotates to landscape for the playback session too, and returns to the previous orientation when you leave the player (TVs keep their own orientation - their panel is landscape already)
+What was wrong (from your screenshot): tapping fullscreen showed the player's own "Rotate Your Phone - flip to landscape" hint instead of rotating. Root cause: Chrome/Brave only honor the screen.orientation.lock() from INSIDE fullscreen - our lock ran BEFORE the fullscreen was granted (silently rejected) and never ran again. And inside the APK WebView the JS lock is unreliable at all.
 
 Fixes
-- The auto-minimize timer now re-arms after EVERY path that shows the bar (leaving fullscreen included) - verified by test: wake the bar, stop touching, it hides on its own
+- The landscape lock now runs at every moment it is ALLOWED to work: on entering cinema, again the instant the fullscreen promise resolves, again on the fullscreenchange event, with a 500ms retry ladder while cinema is active (the pre-fullscreen attempt is kept only as a cheap first try)
+- The app (WebView APK) gets a second, independent channel: the page signals cinema orientation through a brief "sb:landscape" title marker that the shell watches natively (and "sb:portrait" to restore) - this covers WebViews that refuse the JS lock AND the CSS-cinema path where no native fullscreen event ever fires. The tab title is restored right after so it never stays "sb:..."
+- Leaving fullscreen restores the device orientation through both channels and re-arms the auto-minimize (locked from the previous release)
+- The native Kotlin app already rotates for the whole playback session (0.96) - verified and its QA lock stays
+
+Verified by test: fullscreen signals landscape through the API + the shell marker, exit unlocks and restores the title. QA 156 now locks the re-run wiring (fullscreen promise + fullscreenchange + retry ladder) and the title-marker channel in both the page and the shell - a future change that reintroduces the pre-fullscreen-only lock fails the build.
+
+Note for iPhone Safari: iOS does not allow pages to rotate the device - the player's rotate hint is the fallback there. Android phones/tablets (web + both APKs) now rotate automatically.

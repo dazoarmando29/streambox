@@ -790,7 +790,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 231; // bump every release alongside version.txt
+  const BUILD_NUM = 232; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -5786,6 +5786,14 @@ function ctlFullscreen(){
     if (req && !(typeof IS_TV_DEVICE !== "undefined" && IS_TV_DEVICE)) {
       window._fsNative = true;
       const p = req.call(box);
+      if (p && p.then) {
+        // Chrome/Brave only honor screen.orientation.lock FROM fullscreen -
+        // re-run the lock the moment the fullscreen actually lands (guarded:
+        // a late resolution must not re-mark the title after the user left)
+        p.then(() => {
+          try { if (document.body.classList.contains("video-fs")) lockLandscape(); } catch(e){}
+        });
+      }
       if (p && p.catch) p.catch(() => { window._fsNative = false; }); // CSS cinema already active
     }
   } catch(e){}
@@ -5802,6 +5810,12 @@ try {
       window._fsNative = false;
       if (document.body.classList.contains("video-fs")) exitVideoFs();
       try { nudgePlayerSize(); } catch(e){}
+      return;
+    }
+    // fullscreen ENGAGED: this is the first moment the orientation lock is
+    // allowed to work - run it here too (the pre-fullscreen attempt rejects)
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      try { lockLandscape(); } catch(e){}
     }
   };
   document.addEventListener("fullscreenchange", _fsSync);
@@ -5828,25 +5842,67 @@ function exitVideoFs(){
 }
 function lockLandscape(){
   // phones/tablets: fullscreen should BE landscape so the 16:9 video fills
-  // the screen. Screen Orientation API covers Android Chrome + the mobile
-  // web; the APK ALSO locks natively in onShowCustomView (WebViews often
-  // refuse the JS lock). iOS Safari cannot rotate programmatically - the
-  // call is a harmless no-op there. TVs keep their own orientation.
+  // the screen. Two channels, both needed:
+  //   1. Screen Orientation API - but Chrome/Brave only honor it AFTER the
+  //      page is in fullscreen, so this must RE-RUN on fullscreenchange /
+  //      after the requestFullscreen promise (the original call before the
+  //      fullscreen was what silently failed - the player's own "Rotate
+  //      Your Phone" hint stood in for the missing rotation)
+  //   2. a title marker ("sb:landscape") the APK shell watches in
+  //      onReceivedTitle and rotates natively - WebViews often refuse the
+  //      JS lock, and the marker also covers the CSS-cinema-only path
+  // iOS Safari cannot rotate from a page at all - the marker still helps the
+  // APK there; browsers on iOS keep the player's rotate hint. TVs skip all
+  // of this (their panel is landscape already).
   try {
     if (typeof IS_TV_DEVICE !== "undefined" && IS_TV_DEVICE) return;
     window._sbOrient = "landscape";
+    sbTitlePing("sb:landscape"); // APK shell rotates in onReceivedTitle
     const so = screen.orientation;
     if (so && typeof so.lock === "function") {
-      const p = so.lock("landscape");
-      if (p && typeof p.catch === "function") p.catch(() => {});
+      const attempt = () => {
+        try {
+          const p = so.lock("landscape");
+          if (p && typeof p.then === "function") {
+            p.then(() => { window._sbOrient = "landscape-ok"; })
+             .catch(() => {
+               // not in fullscreen yet (or the platform refuses): try again
+               // shortly - the fullscreen usually lands within a beat
+               window._sbOrient = "landscape-retry";
+               clearTimeout(window._sbOrientT);
+               window._sbOrientT = setTimeout(() => {
+                 if (document.body.classList.contains("video-fs") || document.fullscreenElement) attempt();
+               }, 500);
+             });
+          }
+        } catch(e){}
+      };
+      attempt();
     }
   } catch(e){}
 }
 function unlockOrientation(){
   try {
     window._sbOrient = "";
+    clearTimeout(window._sbOrientT);
+    sbTitlePing("sb:portrait"); // APK shell restores the device orientation
     const so = screen.orientation;
     if (so && typeof so.unlock === "function") so.unlock();
+  } catch(e){}
+}
+function sbTitlePing(mark){
+  // orientation signal for the APK shell via onReceivedTitle - the marker is
+  // only held briefly so the browser tab title never stays "sb:..."
+  try {
+    if (window._sbTitle == null) window._sbTitle = document.title;
+    const real = window._sbTitle;
+    const my = (window._sbPing = (window._sbPing || 0) + 1);
+    try { (window._sbPingLog = window._sbPingLog || []).push(mark + "@" + Math.round(performance.now())); } catch(e){}
+    document.title = mark;
+    setTimeout(() => {
+      // restore when no NEWER ping has re-marked the title since
+      try { if (window._sbPing === my) document.title = real; } catch(e){}
+    }, 800);
   } catch(e){}
 }
 function nudgePlayerSize(){

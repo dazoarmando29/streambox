@@ -274,19 +274,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await evaluate(`try { pokeHud(); } catch(e){}`); // bar up, idle armed
     let autoDown = false;
     for (let i = 0; i < 14 && !autoDown; i++) { await sleep(600); autoDown = await evaluate(`document.getElementById("ctlBar").classList.contains("bar-hidden")`); }
-    // fullscreen: cinema on + landscape lock attempted
+    // fullscreen: cinema on + landscape lock ATTEMPTED (headless cannot
+    // actually rotate; the signal + retry wiring is what real devices need)
     await evaluate(`try { ctlFullscreen(); } catch(e){}`);
     await sleep(600);
     const fsOn = await evaluate(`document.body.classList.contains("video-fs")`);
-    const oriented = await evaluate(`window._sbOrient === "landscape"`);
+    const oriented = await evaluate(`String(window._sbOrient || "").startsWith("landscape")`);
+    const titlePing = await evaluate(`window._sbTitle != null && window._sbTitle !== ""`);
     // leaving fullscreen unlocks orientation AND re-arms the auto-minimize
     await evaluate(`try { exitVideoFs(); } catch(e){}`);
-    await sleep(200);
+    await sleep(300);
     const unlocked = await evaluate(`window._sbOrient === ""`);
+    let titleBack = false; // poll: the marker title restores itself shortly
+    for (let i = 0; i < 10 && !titleBack; i++) { await sleep(300); titleBack = await evaluate(`!String(document.title || "").startsWith("sb:")`); }
+    const titleState = await evaluate(`JSON.stringify({ now: document.title, saved: window._sbTitle, pings: window._sbPing, log: (window._sbPingLog||[]).join(",") })`);
     const reArmed = await evaluate(`!!window._idleT`);
-    if (autoDown && fsOn && oriented && unlocked && reArmed)
-      { console.log("ok    idle auto-minimize works, fullscreen locks landscape, exit unlocks and re-arms the auto-minimize"); passed++; }
-    else { console.log(`FAIL idle/fs: autoDown=${autoDown} fsOn=${fsOn} oriented=${oriented} unlocked=${unlocked} reArmed=${reArmed}`); dead++; }
+    if (autoDown && fsOn && oriented && titlePing && unlocked && titleBack && reArmed)
+      { console.log("ok    idle auto-minimize works, fullscreen signals landscape (API + shell title marker), exit unlocks and re-arms"); passed++; }
+    else { console.log(`FAIL idle/fs: autoDown=${autoDown} fsOn=${fsOn} oriented=${oriented} titlePing=${titlePing} unlocked=${unlocked} titleBack=${titleBack} reArmed=${reArmed} title=${titleState}`); dead++; }
   }
   {
     await settle(); // player Back -> home (toast-first ladder may need 2 presses)
