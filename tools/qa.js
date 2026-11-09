@@ -1957,5 +1957,15 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   else bad("PlayerScreen must lock SENSOR_LANDSCAPE while playing and restore requestedOrientation on dispose (skipped on TV)");
 }
 
+/* ---------- 90. party content resolves the anime mapping (AniPM visible) ---------- */
+{
+  let app = "";
+  try { app = read("android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"); } catch (e) {}
+  const partyOpen = app.match(/PartyPlayer\.open = open@\{[\s\S]{0,3200}/);
+  if (partyOpen && /animeMap\(/.test(partyOpen[0]) && /resolved\.second, resolved\.third/.test(partyOpen[0]))
+    ok("party content resolves the MAL/AniList mapping and passes it to play() (AniPM stays in the server list)");
+  else bad("the party open route must call Api.animeMap for JP animation and pass mal/ani into play() - null ids hid AniPM from the server list");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

@@ -181,30 +181,45 @@ fun StreamBoxApp() {
         com.streambox.nativeapp.party.Party.init(partyCtx)
         com.streambox.nativeapp.party.PartyPlayer.open = open@{ c ->
             partyScope.launch {
-                val title = withContext(Dispatchers.IO) {
+                // Party content arrives as movie/tv (the protocol normalizes)
+                // - JP animation re-types to the anime route AND resolves its
+                // MAL/AniList mapping here. Passing null mapping ids used to
+                // hide AniPM from the server list entirely (mirrorsFor only
+                // lists it when the mapping resolved) - the reported "the
+                // anipm server is nowhere to be seen in party" bug.
+                val resolved = withContext(Dispatchers.IO) {
                     try {
                         val d = com.streambox.nativeapp.api.Api.details(c.type, c.tmdbId)
                         val ja = c.type != "movie" && d.originalLanguage == "ja"
-                        Title(
-                            id = c.tmdbId,
-                            type = if (ja) "anime" else c.type,
-                            name = d.name.ifBlank { "Watch Party" },
-                            poster = null,
-                            backdrop = null,
-                            year = d.year,
-                            overview = "",
-                            vote = 0.0,
-                            genreIds = if (ja) listOf(16) else listOf(),
-                            lang = d.originalLanguage,
+                        val ids = if (ja) {
+                            try { com.streambox.nativeapp.api.Api.animeMap(d.name, d.year) } catch (e: Exception) { null }
+                        } else null
+                        Triple(
+                            Title(
+                                id = c.tmdbId,
+                                type = if (ja) "anime" else c.type,
+                                name = d.name.ifBlank { "Watch Party" },
+                                poster = null,
+                                backdrop = null,
+                                year = d.year,
+                                overview = "",
+                                vote = 0.0,
+                                genreIds = if (ja) listOf(16) else listOf(),
+                                lang = d.originalLanguage,
+                            ),
+                            ids?.mal, ids?.ani,
                         )
                     } catch (e: Exception) {
-                        Title(
-                            id = c.tmdbId, type = c.type, name = "Watch Party",
-                            poster = null, backdrop = null, year = 0, overview = "", vote = 0.0,
+                        Triple(
+                            Title(
+                                id = c.tmdbId, type = c.type, name = "Watch Party",
+                                poster = null, backdrop = null, year = 0, overview = "", vote = 0.0,
+                            ),
+                            null, null,
                         )
                     }
                 }
-                play(title, c.season, c.episode, null, null)
+                play(resolved.first, c.season, c.episode, resolved.second, resolved.third)
             }
         }
         if (AppEnv.partyCode.value.isNullOrBlank()) {
