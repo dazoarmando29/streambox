@@ -1,7 +1,7 @@
-Update channels for every StreamBox app + the VidCore player mapping fix.
+Playing a video rotates the phone to landscape - and back when you leave.
 
 What is new
-- /api/apk-latest: the WebView apps (full + lite) get the same edge-cached, rate-limit-proof update channel the native app has - one upstream GitHub fetch per 10 minutes per edge, stale-on-error fallback, so a house full of devices can never burn the API quota and miss updates
+- Auto-landscape for playback: opening the player rotates phones and tablets to landscape (the 16:9 video fills the screen the way it should), and leaving the player returns the device to the orientation it had before. TVs are untouched - their panel is landscape already
 
 Fixes
-- The mirror-health probe now checks the VidSpark player directly (vidspark.to) for VidCore - that is the URL the site actually loads since VidCore joined the full-sync set (its embed wrapper is only an ad layer around the player)
+- The rotation is tied to the player session (enter/leave), so the rest of the app keeps the orientation you use it in

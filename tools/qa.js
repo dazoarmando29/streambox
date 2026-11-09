@@ -1947,5 +1947,15 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   }
 }
 
+/* ---------- 89. auto-landscape when playing (phones/tablets) ---------- */
+{
+  let ps = "";
+  try { ps = read("android-native/app/src/main/java/com/streambox/nativeapp/ui/PlayerScreen.kt"); } catch (e) {}
+  if (/SCREEN_ORIENTATION_SENSOR_LANDSCAPE/.test(ps) && /requestedOrientation = prevOrientation/.test(ps)
+      && /!AppEnv\.isTv/.test(ps))
+    ok("the player rotates to landscape for the playback session and restores the device orientation on exit (TVs untouched)");
+  else bad("PlayerScreen must lock SENSOR_LANDSCAPE while playing and restore requestedOrientation on dispose (skipped on TV)");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

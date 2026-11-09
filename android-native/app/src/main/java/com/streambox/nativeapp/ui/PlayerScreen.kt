@@ -1479,8 +1479,25 @@ fun PlayerScreen(
 
     // Motion mode is per-player (0.52): leaving restores the display's own
     // refresh so the rest of the UI runs as the panel likes it.
+    // Auto-landscape while playing (0.96): the video is 16:9 - phones and
+    // tablets rotate to landscape for the playback session and return to
+    // their own orientation on the way out. TVs don't rotate (their panel is
+    // landscape already) - the lock is skipped there.
     DisposableEffect(Unit) {
-        onDispose { restoreDisplayRate(ctx) }
+        val act = ctx as? android.app.Activity
+        val prevOrientation = act?.requestedOrientation
+        if (act != null && !AppEnv.isTv) {
+            try {
+                act.requestedOrientation =
+                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } catch (e: Exception) {}
+        }
+        onDispose {
+            restoreDisplayRate(ctx)
+            try {
+                if (act != null && prevOrientation != null) act.requestedOrientation = prevOrientation
+            } catch (e: Exception) {}
+        }
     }
 
     // Resume (Continue Watching / Detail Resume / My List): playback boots
