@@ -1948,5 +1948,32 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("driftTick must enforce the room's pause on controllers and use the faster nudge/cadence");
 }
 
+/* ---------- 159. browse never sticks, browsing stops the video, party QoL ---------- */
+{
+  // the browse.loading early-return swallowed a filter change's fresh load
+  // whenever a previous request was in flight (grid empty, no Load More)
+  const bm = html.match(/async function browseMore\(focusFirst\)\{[\s\S]*?\n\}/);
+  if (bm && !/if \(browse\.loading \|\|/.test(bm[0]) && /finally \{/.test(bm[0]) && /myBrowse\.loading = false/.test(bm[0]))
+    ok("browseMore never sticks: no loading-guard swallow + the flag clears in finally");
+  else bad("browseMore must not early-return on browse.loading and must clear it in finally - the 'browse stuck' bug");
+  // browsing away must STOP the video - src="" never unloaded the frame
+  const sn = html.match(/function stopPlayerNow\s*\(\)\s*\{[\s\S]*?\n\}/);
+  const gh = html.match(/function goHome\(ev\)\{[\s\S]*?\n\}/);
+  if (sn && /about:blank/.test(sn[0]) && gh && /stopPlayerNow\(\)/.test(gh[0])
+      && /function showList[\s\S]{0,240}stopPlayerNow\(\)/.test(html))
+    ok("goHome AND showList stop the player with about:blank (src='' kept the old video playing)");
+  else bad("stopPlayerNow (about:blank) must run from goHome and showList - browsing away must stop the video");
+  // never drive a hidden player + events realign instantly
+  const dt = html.match(/function driftTick\s*\(\)\s*\{[\s\S]{0,300}/);
+  if (dt && /watchView"\)\.classList\.contains\("hidden"\)/.test(dt[0])
+      && /SYNC_INTERVAL: 2000/.test(html) && /\}, 0\.35 && a\.seek\)|> 0\.35 && a\.seek/.test(html))
+    ok("sync feels together: hidden players untouched, 2s drift cadence, 0.35s align threshold");
+  else bad("driftTick must skip hidden players and use the tighter 2s/0.35s sync constants");
+  // QoL: solo-room reminder + live party indicator on the header door
+  if (/You're alone in the party now/.test(html) && /headerPartyBtn/.test(html) && /ring-teal-400/.test(html))
+    ok("party QoL: solo-room reminder + the header door shows the live room");
+  else bad("the party needs the solo-room hint and the header live-room indicator");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

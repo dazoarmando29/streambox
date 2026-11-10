@@ -790,7 +790,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 234; // bump every release alongside version.txt
+  const BUILD_NUM = 235; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -836,7 +836,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
   <div class="ml-auto flex items-center gap-1 min-[520px]:gap-1.5 md:gap-2 w-full md:w-auto justify-end">
     <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 md:w-44 lg:w-52 xl:w-auto 2xl:w-64 md:justify-start rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm text-gray-400 flex items-center gap-2"><span class="text-teal-300">&#x1F50D;</span><span class="hidden md:inline xl:hidden 2xl:inline">Search...</span></button>
     <button id="adultLockNav" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" aria-label="Adults-only gate" class="shrink-0 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-gray-300">&#x1F512;</button>
-    <button onclick="partyOpen('join')" title="Join a Watch Party" aria-label="Join a Watch Party" class="shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x1F4E1;</span><span class="hidden md:inline xl:hidden 2xl:inline">Party</span></button>
+    <button id="headerPartyBtn" onclick="partyOpen('join')" title="Join a Watch Party" aria-label="Join a Watch Party" class="shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x1F4E1;</span><span class="hidden md:inline xl:hidden 2xl:inline">Party</span></button>
     <button onclick="aboutOpen()" title="About StreamBox and updates" aria-label="About StreamBox" class="shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2139;</span><span class="hidden md:inline xl:hidden 2xl:inline">About</span></button>
     <button id="installBtn" onclick="installPWA()" aria-label="Install app" class="hidden shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2B07;</span><span class="hidden md:inline xl:hidden 2xl:inline">Install</span></button>
   </div>
@@ -3578,9 +3578,14 @@ function setStudio(id){
   browseMore(true);
 }
 async function browseMore(focusFirst){
-  if (browse.loading || browse.page >= browse.totalPages) return;
+  if (browse.page >= browse.totalPages) return;
   // request token: every load bumps it, so a slow page from the PREVIOUS
-  // filters can never write page counters or cards into the new session
+  // filters can never write page counters or cards into the new session.
+  // NOTE: no `browse.loading` early-return - that guard used to SWALLOW a
+  // filter change's fresh load whenever a previous request was still in
+  // flight (the grid stayed empty with no Load More = the reported "browse
+  // is stuck / not loading more"). The stale-token guard makes double loads
+  // safe instead: the older one loses the grid.
   const my = (window._browseReq = (window._browseReq || 0) + 1);
   const myBrowse = browse;
   browse.loading = true;
@@ -3686,8 +3691,11 @@ async function browseMore(focusFirst){
     const grid = document.getElementById("grid");
     if (!grid.children.length) grid.innerHTML = "<p class='text-gray-500'>Couldn't load titles. Check connection.</p>";
     else btn.classList.remove("hidden");
+  } finally {
+    // always unstick the flag - the old my===_browseReq guard could leave a
+    // replaced browse object's successor waiting forever
+    myBrowse.loading = false;
   }
-  if (my === window._browseReq) myBrowse.loading = false;
 }
 /* ---------- DETAIL MODAL ---------- */
 let modalSeasons = [], modalSeasonIdx = 0, modalEpisodes = [], modalEpIdx = 0, lastOpener = null;
@@ -5226,6 +5234,17 @@ function toggleShield(){
   reloadKeepPos();
 }
 
+function stopPlayerNow(){
+  // browsing away MUST stop the video: setting player.src = "" does NOT
+  // unload the frame on Android WebViews/Chrome - the old video kept playing
+  // BEHIND the browse grid (the reported "it keeps playing the video we
+  // watched earlier"). about:blank is the only reliable stop.
+  try {
+    const f = document.getElementById("player");
+    if (f) { try { f.src = "about:blank"; } catch(e){} }
+    window._barFromTap = false;
+  } catch(e){}
+}
 function goHome(ev){
   if(ev) ev.preventDefault();
   try { hideUpNext(); } catch(e){}
@@ -5255,7 +5274,7 @@ function goHome(ev){
   if (!document.getElementById("modal").classList.contains("hidden")) closeModal();
   document.getElementById("watchView").classList.add("hidden");
   document.getElementById("homeView").classList.remove("hidden");
-  document.getElementById("player").src = "";
+  stopPlayerNow(); // about:blank - src="" never unloaded the frame (audio kept playing)
   try { tapLayerSync(); } catch(e){} // leaving the player disengages the tap layer
   syncMobileNav();
   showRows();
@@ -5465,6 +5484,7 @@ function removeFromList(type, id){
 function showList(ev){
   if (ev) ev.preventDefault();
   closePanels();
+  if (!document.getElementById("watchView").classList.contains("hidden")) stopPlayerNow(); // browsing stops the video
   document.getElementById("hero").classList.add("hidden");
   document.getElementById("rows").classList.add("hidden");
   document.getElementById("continueRow").classList.add("hidden");
@@ -9727,7 +9747,7 @@ const PARTY = (() => {
     },
     SYNC_NUDGE: 0.2,      // seconds of drift before a gentle rate nudge
     SYNC_SEEK: 1.5,       // seconds of drift before a hard seek
-    SYNC_INTERVAL: 3000,  // drift check cadence
+    SYNC_INTERVAL: 2000,  // drift check cadence (events also realign instantly)
     SYNC_MIN_GAP: 2500,   // min ms between corrections (no correction loops)
     HEARTBEAT: 20000,     // clock sync + liveness
     CHAT_MAX: 300,
@@ -9990,6 +10010,15 @@ const PARTY = (() => {
           S.room.participants = (S.room.participants || []).filter((p) => p.id !== m.participantId);
           paint();
           sysMsg((m.name || "Someone") + " left");
+          // QoL: when the last OTHER participant leaves, gently remind -
+          // "we finished the series together and the room stayed open" was
+          // a real night. Once a minute, never nagging.
+          try {
+            if ((S.room.participants || []).length <= 1 && Date.now() - (S._soloHintAt || 0) > 60000) {
+              S._soloHintAt = Date.now();
+              toast("You're alone in the party now \u{2014} tap Party to end it");
+            }
+          } catch(e){}
         }
         return;
       case "host_changed":
@@ -10145,6 +10174,7 @@ const PARTY = (() => {
      really ready first; never starts late-joiners at 00:00. */
   function syncToRoom(tries){
     if (!inRoom()) return;
+    try { if (document.getElementById("watchView").classList.contains("hidden")) return; } catch(e){}
     const a = adapter();
     const pb = S.room.playback;
     if (a.cap === "coordinated") {
@@ -10198,14 +10228,18 @@ const PARTY = (() => {
     try {
       if (action === "play") {
         if (a.paused() && a.play) a.play();
-        if (Math.abs(a.pos() - target) > 0.6 && a.seek) a.seek(target + 0.25);
+        if (Math.abs(a.pos() - target) > 0.35 && a.seek) a.seek(target + 0.25);
       } else if (action === "pause") {
         if (!a.paused() && a.pause) a.pause();
-        if (Math.abs(a.pos() - target) > 0.6 && a.seek) a.seek(target);
+        if (Math.abs(a.pos() - target) > 0.35 && a.seek) a.seek(target);
       } else if (action === "seek") {
         if (a.seek) a.seek(target + 0.25);
       }
     } catch(e){}
+    // realign RIGHT after every room event (still MIN_GAP-guarded inside):
+    // "watching together" means an event lands within a beat, not at the
+    // next tick
+    try { driftTick(); } catch(e){}
   }
 
   /* Drift correction: subtle 4% rate nudges for small drift, one clean seek
@@ -10214,6 +10248,9 @@ const PARTY = (() => {
      seeking every tick (the old "constant seeking" bug). */
   function driftTick(){
     if (!inRoom()) return;
+    // never drive a hidden player: browsing away parks the frame (about:blank)
+    // and corrections into it are pointless - returning re-syncs via syncToRoom
+    try { if (document.getElementById("watchView").classList.contains("hidden")) return; } catch(e){}
     detectContentChange();
     const a = adapter();
     if (a.cap === "coordinated" || !a.seek) return;
@@ -10326,6 +10363,16 @@ const PARTY = (() => {
           wps.classList.remove("hidden");
           wps.textContent = "\u{1F4E1} Party \u{00B7} " + (S.room.code || "") + (S.unread ? " \u{00B7} " + S.unread + " new" : "");
         } else wps.classList.add("hidden");
+      }
+      // the HEADER door shows the live room at a glance (you browse away from
+      // the player and forget the room is still running - a real night)
+      const hb = el("headerPartyBtn");
+      if (hb) {
+        hb.classList.toggle("ring-2", inRoom());
+        hb.classList.toggle("ring-teal-400", inRoom());
+        hb.title = inRoom()
+          ? ("Watch Party " + (S.room.code || "") + " - tap to open the room")
+          : "Join a Watch Party";
       }
       if (!S.panelOpen) return;
       const room = S.room;
