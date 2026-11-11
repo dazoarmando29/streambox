@@ -1,6 +1,15 @@
-Pausing from inside the player reaches the party now.
+The watch-in-peace party hardening: no ghost duplicates, no stuck connecting, and source switches follow the room.
 
 Fixes
-- Watch Party: pausing (or playing) through the provider player's OWN button now tells the room - before, only our overlay's button was relayed, so "one of us paused and it kept playing". Provider play/pause events relay with echo gates (remote events and our own sends never bounce back at the room)
+- Ghost duplicate seats are dead: reconnecting with your resume token now REPLACES the half-open old connection on the hub instead of minting a second you (same fix as the website, hub + app together). A replaced ghost's traffic or late close can never evict the live seat
+- The create/join handshake can't strand you on "connecting" anymore: a socket that died before the room answered now retries (and re-sends the request), and a failed join retries with backoff before cleaning up with an honest message - never a zombie state
+- A reconnect mid-episode no longer rebuilds the player and yanks you backward: the room's content only opens when it actually differs from what's playing. A dropped content message retries on the next tick instead of being eaten silently
+- Pause/play from inside the provider's own player still reaches the room, but now CONFIRMS for a beat first - a buffer stall that auto-resumes cancels itself instead of pausing everyone. Your own quick pause-then-play always lands (the echo of your first press used to swallow the second)
+- Episode switching can't corrupt the room timeline: drift correction holds off for 8s after any load (stale-timeline guard) and non-hosts follow the host's episode instead of a provider's auto-next
+- Switching server moves the whole room: manual picks (and the host's auto-heals) broadcast a room-wide source switch, everyone follows keeping position, and late joiners open on the room's source
 
-Locked by native QA 91 (Party.providerPlayState + the bridge relay must stay).
+Honest limits
+- Two different cuts (sub vs dub) stay approximate in position sync - pause and episodes still follow exactly
+- Room-wide source switching speaks the new hub protocol: full effect lands with the next manual Worker deploy; older hubs answer "bad_message" quietly and the app simply stays local
+
+Locked by native QA (party relay gates, bridge mapping, and the sync rules must stay). Builds at 0.99.

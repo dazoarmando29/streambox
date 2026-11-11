@@ -24,6 +24,8 @@ const LIMITS = {
   CODE_ATTEMPT_MAX: 12,
   HOST_GRACE_MS: 60 * 1000,
   PARTICIPANT_TTL_MS: 45 * 1000,
+  // half-open sockets (no close fires) must not pin a seat "connected" forever
+  PARTICIPANT_STALE_MS: 100 * 1000,
   EMPTY_ROOM_TTL_MS: 120 * 1000,
   MAX_ROOM_AGE_MS: 24 * 60 * 60 * 1000,
   RECENT_SEAT_MS: 5 * 60 * 1000,
@@ -95,7 +97,10 @@ export class PartyHub {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     const ip = (request.headers.get("cf-connecting-ip") || "").split(",")[0].trim() || "unknown";
-    const meta = { id: uid("p"), token: uid("tok"), name: "Guest", roomId: "", ip };
+    // cid = per-CONNECTION generation: the seat keeps the cid of the socket
+    // that owns it, so a replaced ghost's traffic/close can never evict the
+    // live connection (the duplicate-"you" bug)
+    const meta = { id: uid("p"), token: uid("tok"), name: "Guest", roomId: "", ip, cid: uid("c") };
     server.serializeAttachment(meta);
     this.state.acceptWebSocket(server);
     this.send(server, { t: "welcome", participantId: meta.id, token: meta.token, serverTs: Date.now() });
@@ -151,11 +156,19 @@ export class PartyHub {
     const allowIn = ["hello", "create", "join", "heartbeat"];
     if (!inRoom && !allowIn.includes(m.t)) return this.send(ws, { t: "error", error: "not_in_room" });
 
+    // a REPLACED ghost socket (this seat already moved to a newer connection)
+    // must never drive the room - drop its leftover traffic entirely
+    if (m0.roomId && m.t !== "join" && m.t !== "heartbeat") {
+      const rN = this.rooms.get(m0.roomId);
+      const pN = rN && rN.participants.get(m0.id);
+      if (pN && pN.cid && m0.cid && pN.cid !== m0.cid) return;
+    }
+
     switch (m.t) {
       case "hello":
         m0.name = cleanName(m.name); ws.serializeAttachment(m0); return;
       case "heartbeat": {
-        this.send(ws, { t: "heartbeat", clientTs: Number(m.clientTs) || 0, serverTs: Date.now() });
+        this.send(ws, { t: "heartbeat", clientTs: Number(m.clientTs) || 0, serverTs: Date.now(), participantId: m0.id });
         const room = m0.roomId ? this.rooms.get(m0.roomId) : null;
         if (m0.roomId && !room) {
           this.send(ws, { t: "notice", notice: "room_gone" });
@@ -197,7 +210,7 @@ export class PartyHub {
         ws.serializeAttachment(m0);
         // always hand back the SEAT token (r.token): the connection token
         // rotates on every reconnect and must never become the resume identity
-        this.send(ws, { t: "room", room: this.snapshot(this.rooms.get(m0.roomId), m0.id), token: r.token || m0.token, reattached: !!r.reattached });
+        this.send(ws, { t: "room", room: this.snapshot(this.rooms.get(m0.roomId), m0.id), token: r.token || m0.token, reattached: !!r.reattached, replaced: !!r.replaced });
         if (r.events && r.events.length) this.broadcast(m0.roomId, r.events, m0.id);
         if (!r.reattached) {
           const pub = this.snapshot(this.rooms.get(m0.roomId), m0.id).participants.find((x) => x.id === m0.id);
@@ -248,6 +261,12 @@ export class PartyHub {
           if (!Number.isFinite(r) || r < 0.25 || r > 3) return this.send(ws, { t: "error", error: "bad_message" });
           pb.position = cur; pb.rate = r;
         } else if (action === "ended") { pb.status = "ended"; pb.position = cur; }
+        else if (action === "buffer") {
+          // participant-side buffering notice: state unchanged, no broadcast
+          // (protocol parity with party-server: never answered bad_message)
+          part.buffering = true;
+          return;
+        }
         else return this.send(ws, { t: "error", error: "bad_message" });
         pb.updatedAt = now;
         pb.seq += 1;
@@ -344,7 +363,37 @@ export class PartyHub {
       case "sync_report": {
         const room = this.rooms.get(m0.roomId);
         const part = room && room.participants.get(m0.id);
-        if (part) { part.position = Number(m.position) || 0; part.paused = m.paused === true; part.buffering = false; }
+        if (part) {
+          // clamp like party-server/protocol.js (negatives/Infinity never enter room state)
+          const pos = Number(m.position);
+          part.position = Number.isFinite(pos) && pos >= 0 && pos <= 24 * 3600 ? pos : 0;
+          part.paused = m.paused === true;
+          part.buffering = false;
+          // additive: duration + source name let members see real peer state
+          // and detect different cuts (sub vs dub / two mirrors)
+          const dur = Number(m.dur);
+          if (Number.isFinite(dur) && dur > 0 && dur <= 24 * 3600) part.dur = dur;
+          const src = cleanText(m.source != null ? String(m.source) : "", 24);
+          if (src) part.source = src;
+          part.lastSeen = Date.now();
+          room.lastActivityAt = part.lastSeen;
+        }
+        return;
+      }
+      case "source": {
+        // room-wide mirror ("server") switch: controllers drive it, the room's
+        // timeline is NEVER reset here (switching source mid-episode keeps the
+        // room where it is). Protocol parity with party-server.
+        const room = this.rooms.get(m0.roomId);
+        if (!room || room.ended) return this.send(ws, { t: "error", error: "not_found", for: "source" });
+        const part = room.participants.get(m0.id);
+        if (!part || !part.connected) return this.send(ws, { t: "error", error: "not_in_room", for: "source" });
+        if (room.hostId !== m0.id && !room.allowControl) return this.send(ws, { t: "error", error: "unauthorized", for: "source" });
+        const mirror = cleanText(m.mirror != null ? String(m.mirror) : "", 24);
+        if (!mirror) return this.send(ws, { t: "error", error: "bad_message" });
+        room.source = mirror;
+        room.lastActivityAt = Date.now();
+        this.broadcast(m0.roomId, [{ t: "source", room: room.id, mirror: room.source, actor: part.name }]);
         return;
       }
       default:
@@ -364,6 +413,9 @@ export class PartyHub {
     const room = this.rooms.get(m.roomId);
     const part = room && room.participants.get(m.id);
     if (!part) return;
+    // stale close: the seat already moved to a NEWER connection (reattach
+    // replaced the ghost) - the old socket dying must never evict the live one
+    if (part.cid && m.cid && part.cid !== m.cid) return;
     part.connected = false;
     part.lastSeen = Date.now();
     if (room.hostId === m.id) room.hostDisconnectedAt = part.lastSeen;
@@ -403,6 +455,7 @@ export class PartyHub {
       chatEnabled: m.chatEnabled !== false,
       hostId: host.id,
       content: null,
+      source: "", // room-wide mirror ("server") - follows the last controller switch
       playback: { status: "waiting", position: 0, rate: 1, updatedAt: now, sessionVersion: 1, seq: 0 },
       participants: new Map(),
       recentSeats: new Map(),
@@ -423,15 +476,20 @@ export class PartyHub {
     if (!room || room.ended) return { error: "not_found" };
     if (token) {
       for (const [id, part] of room.participants) {
-        if (part.token === token && !part.connected) {
+        if (part.token === token) {
+          // same token = same seat: REATTACH and replace the connection. A
+          // half-open ghost socket must never force the same person onto a
+          // fresh seat (duplicate "you"s, host loss, full-room bounces).
+          const replaced = !!(part.cid && p.cid && part.cid !== p.cid);
           part.connected = true; part.lastSeen = now;
+          part.cid = p.cid;
           p.id = id;
           if (id === room.hostId) room.hostDisconnectedAt = 0;
           // the SEAT's token is the client's identity across reconnects -
           // never the per-connection token (that rotated every reconnect and
           // stranded the next one on a fresh seat: ghost duplicates, host
           // loss, password lockout)
-          return { room, reattached: id, token: part.token };
+          return { room, reattached: id, token: part.token, replaced };
         }
       }
       const saved = room.recentSeats.get(token);
@@ -465,7 +523,7 @@ export class PartyHub {
   }
 
   mkPart(p, now) {
-    return { id: p.id, name: cleanName(p.name), token: p.token, joinedAt: now, lastSeen: now, connected: true, muted: false, buffering: false, position: 0, paused: true };
+    return { id: p.id, name: cleanName(p.name), token: p.token, cid: p.cid || "", joinedAt: now, lastSeen: now, connected: true, muted: false, buffering: false, position: 0, paused: true, dur: 0, source: "" };
   }
 
   removeParticipant(roomId, participantId, reason) {
@@ -476,7 +534,7 @@ export class PartyHub {
     room.participants.delete(participantId);
     room.recentSeats.set(part.token, {
       id: part.id, name: part.name, wasHost: room.hostId === participantId,
-      removedAt: Date.now(), kicked: reason === "kicked",
+      removedAt: Date.now(), kicked: reason === "kicked", reason,
     });
     room.lastActivityAt = Date.now();
     if (room.hostId === participantId && !room.ended && !room.hostDisconnectedAt) room.hostDisconnectedAt = Date.now();
@@ -495,7 +553,7 @@ export class PartyHub {
   }
 
   pub(part, room) {
-    return { id: part.id, name: part.name, connected: part.connected, muted: part.muted, buffering: part.buffering, position: part.position, paused: part.paused };
+    return { id: part.id, name: part.name, connected: part.connected, muted: part.muted, buffering: part.buffering, position: part.position, paused: part.paused, dur: part.dur || 0, source: part.source || "" };
   }
 
   pbState(room, now) {
@@ -518,6 +576,7 @@ export class PartyHub {
       maxParticipants: room.maxParticipants,
       allowControl: room.allowControl, chatEnabled: room.chatEnabled,
       content: room.content,
+      source: room.source || "",
       playback: { ...this.pbState(room, now), seq: room.playback.seq },
       participants: [...room.participants.values()].map((p) => ({ ...this.pub(p, room), host: p.id === room.hostId })),
       chat: room.chat.slice(-LIMITS.CHAT_HISTORY),
@@ -542,6 +601,12 @@ export class PartyHub {
         continue;
       }
       for (const [id, part] of [...room.participants]) {
+        // half-open sockets never fire close: silence counts as gone so a
+        // ghost can neither hold a seat "connected" nor fill the room
+        if (part.connected && now - part.lastSeen > LIMITS.PARTICIPANT_STALE_MS) {
+          part.connected = false;
+          if (room.hostId === id && !room.hostDisconnectedAt) room.hostDisconnectedAt = now;
+        }
         if (!part.connected && now - part.lastSeen > LIMITS.PARTICIPANT_TTL_MS) {
           const evs = this.removeParticipant(room.id, id, "timeout");
           if (evs.length) this.broadcast(room.id, evs);
@@ -550,6 +615,10 @@ export class PartyHub {
       for (const [tok, s] of [...room.recentSeats]) {
         if (now - s.removedAt > LIMITS.RECENT_SEAT_MS) room.recentSeats.delete(tok);
       }
+      // a dropped member's restorable seat keeps the ROOM alive for the return
+      // window: both phones losing signal for a minute must never end the party
+      const restorable = [...room.recentSeats.values()].some(
+        (s) => !s.kicked && s.reason !== "left" && now - s.removedAt <= LIMITS.RECENT_SEAT_MS);
       const host = room.participants.get(room.hostId);
       if (!host || !host.connected) {
         if (!room.hostDisconnectedAt) room.hostDisconnectedAt = now;
@@ -559,7 +628,7 @@ export class PartyHub {
             room.hostId = next.id;
             room.hostDisconnectedAt = 0;
             this.broadcast(room.id, [{ t: "host_changed", room: room.id, hostId: next.id, hostName: next.name }]);
-          } else if (room.participants.size === 0) {
+          } else if (room.participants.size === 0 && !restorable) {
             room.ended = true;
             this.broadcast(room.id, [{ t: "room_ended", roomId: room.id, reason: "abandoned" }]);
             this.dropRoom(room);
@@ -568,7 +637,7 @@ export class PartyHub {
       } else {
         room.hostDisconnectedAt = 0;
       }
-      if (room.participants.size === 0 && now - room.lastActivityAt > LIMITS.EMPTY_ROOM_TTL_MS) {
+      if (room.participants.size === 0 && !restorable && now - room.lastActivityAt > LIMITS.EMPTY_ROOM_TTL_MS) {
         room.ended = true;
         this.dropRoom(room);
       }

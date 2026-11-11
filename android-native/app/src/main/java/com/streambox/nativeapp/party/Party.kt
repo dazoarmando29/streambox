@@ -48,6 +48,7 @@ data class PartyRoom(
     val allowControl: Boolean,
     val chatEnabled: Boolean,
     val content: PartyContent?,
+    val source: String = "", // room-wide mirror ("server") - follows the last controller switch
     val status: String,
     val position: Float,
     val rate: Float,
@@ -75,11 +76,16 @@ interface PartyOps {
     fun syncCap(): String = "full"
     /** Subtle drift nudges where the bridge supports playback rate. */
     fun rate(r: Float) {}
+    /** Ms since THIS player loaded its episode - drift correction holds off
+        right after a load (stale-timeline guard). */
+    fun sinceLoadMs(): Long = Long.MAX_VALUE
 }
 
 object PartyPlayer {
     @Volatile var ops: PartyOps? = null
     @Volatile var open: ((PartyContent) -> Unit)? = null
+    /** Room-wide source ("server") switch: registered by PlayerScreen. */
+    @Volatile var onSource: ((String) -> Unit)? = null
 }
 
 object Party {
@@ -122,6 +128,11 @@ object Party {
     private var hbRunnable: Runnable? = null
     private var tickRunnable: Runnable? = null
     private var retryRunnable: Runnable? = null
+    private var relayRunnable: Runnable? = null
+    private var pendingMsg: org.json.JSONObject? = null // create/join awaiting its room reply
+    private var rejoinTries = 0
+    private var lastRelayedPaused: Boolean? = null
+    private var lastLoadAtMs = 0L
 
     fun init(context: Context) {
         if (ctx != null) return
@@ -139,8 +150,8 @@ object Party {
 
     fun wsUrl(): String = BuildConfig.PARTY_WS
 
-    private fun send(o: JSONObject) {
-        try { ws?.send(o.toString()) } catch (e: Exception) {}
+    private fun send(o: JSONObject): Boolean {
+        return try { ws?.send(o.toString()) == true } catch (e: Exception) { false }
     }
 
     // ---------- connection (single socket, backoff + jitter) ----------
@@ -160,8 +171,14 @@ object Party {
                 send(JSONObject().put("t", "hello").put("name", displayName()))
                 val code = wantRoom
                 if (code != null && room.value != null) {
+                    // ONE join per connection: a second join on the same socket
+                    // is how ghost seats used to multiply on older hubs
                     send(JSONObject().put("t", "join").put("name", displayName())
                         .put("code", code).put("token", token).put("password", joinPw))
+                } else if (room.value == null && pendingMsg != null) {
+                    // the create/join died with the last socket before its
+                    // reply: re-send it instead of stranding "connecting"
+                    send(pendingMsg!!)
                 }
                 webSocket.send(JSONObject().put("t", "heartbeat").put("clientTs", System.currentTimeMillis()).toString())
                 scheduleHeartbeat()
@@ -173,16 +190,16 @@ object Party {
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (ws === webSocket) ws = null
-                if (room.value != null) {
-                    status.value = "reconnecting"
+                if (room.value != null || pendingMsg != null) {
+                    status.value = if (room.value != null) "reconnecting" else "connecting"
                     retry()
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (ws === webSocket) ws = null
-                if (room.value != null) {
-                    status.value = "reconnecting"
+                if (room.value != null || pendingMsg != null) {
+                    status.value = if (room.value != null) "reconnecting" else "connecting"
                     retry()
                 }
             }
@@ -190,12 +207,12 @@ object Party {
     }
 
     private fun retry() {
-        if (room.value == null) return
+        if (room.value == null && pendingMsg == null) return
         reconnects += 1
         val base = min(15000L, (500.0 * Math.pow(1.8, min(reconnects, 8).toDouble())).toLong())
         val wait = (base * (0.7 + Random.nextDouble() * 0.6)).toLong()
         retryRunnable?.let { main.removeCallbacks(it) }
-        val r = Runnable { if (ws == null && room.value != null) connect() }
+        val r = Runnable { if (ws == null && (room.value != null || pendingMsg != null)) connect() }
         retryRunnable = r
         main.postDelayed(r, wait)
     }
@@ -214,8 +231,12 @@ object Party {
 
     fun disconnect() {
         wantRoom = null
+        pendingMsg = null
+        rejoinTries = 0
+        lastRelayedPaused = null
         retryRunnable?.let { main.removeCallbacks(it) }
         hbRunnable?.let { main.removeCallbacks(it) }
+        relayRunnable?.let { main.removeCallbacks(it) }
         try { ws?.close(1000, "bye") } catch (e: Exception) {}
         ws = null
         room.value = null
@@ -231,24 +252,22 @@ object Party {
 
     fun create(roomName: String, password: String, allowControl: Boolean, chatOn: Boolean) {
         wantRoom = null
+        val msg = JSONObject().put("t", "create").put("name", displayName())
+            .put("roomName", roomName.trim().take(40)).put("password", password)
+            .put("maxParticipants", 8).put("allowControl", allowControl).put("chatEnabled", chatOn)
+        pendingMsg = msg
         connect()
-        val go = Runnable {
-            send(JSONObject().put("t", "create").put("name", displayName())
-                .put("roomName", roomName.trim().take(40)).put("password", password)
-                .put("maxParticipants", 8).put("allowControl", allowControl).put("chatEnabled", chatOn))
-        }
-        main.post(go)
+        main.post { send(msg) }
     }
 
     fun join(code: String, password: String, resumeToken: String = token) {
         wantRoom = code.trim().uppercase()
         joinPw = password
+        val msg = JSONObject().put("t", "join").put("name", displayName())
+            .put("code", wantRoom ?: "").put("password", joinPw).put("token", resumeToken)
+        pendingMsg = msg
         connect()
-        val go = Runnable {
-            send(JSONObject().put("t", "join").put("name", displayName())
-                .put("code", wantRoom ?: "").put("password", joinPw).put("token", resumeToken))
-        }
-        main.post(go)
+        main.post { send(msg) }
     }
 
     fun leave() {
@@ -303,8 +322,12 @@ object Party {
 
     fun onLocalPlayPause(paused: Boolean) {
         val r = room.value ?: return
-        if (!r.canControl() || suppressLocal()) return
+        // a DELIBERATE press always reaches the room - the echo window guards
+        // provider events, never the user's own hands (a quick pause->play was
+        // swallowed by the echo of the first press and force-reverted after)
+        if (!r.canControl()) return
         localSentAt = System.currentTimeMillis()
+        lastRelayedPaused = paused
         send(JSONObject().put("t", "playback")
             .put("action", if (paused) "pause" else "play")
             .put("position", PartyPlayer.ops?.position() ?: 0f)
@@ -314,17 +337,45 @@ object Party {
     /** The user paused/played INSIDE the provider's own player (its own
         button, not our overlay) - the room must hear it. Echoes of OUR OWN
         sends and remote-driven changes are gated away (suppressLocal + the
-        1.5s local-send window), so nothing bounces back at the room. */
+        1.5s local-send window). The relay is CONFIRMED after 1.2s so a
+        provider machine pause/resume flap (buffer stall) cancels itself
+        instead of pausing the whole room. */
     fun providerPlayState(paused: Boolean) {
         if (System.currentTimeMillis() < localSentAt + 1500) return
-        onLocalPlayPause(paused)
+        if (suppressLocal()) return
+        relayRunnable?.let { main.removeCallbacks(it) }
+        val r = Runnable {
+            try {
+                val now = System.currentTimeMillis()
+                if (now < localSentAt + 1500 || suppressLocal()) return@Runnable
+                val rr = room.value ?: return@Runnable
+                if (!rr.canControl()) return@Runnable
+                val still = PartyPlayer.ops?.isPaused() ?: return@Runnable
+                if (still == lastRelayedPaused) return@Runnable // the room already knows
+                onLocalPlayPause(still)
+            } catch (e: Exception) {}
+        }
+        relayRunnable = r
+        main.postDelayed(r, 1200)
     }
 
     fun onLocalSeek(seconds: Float) {
         val r = room.value ?: return
-        if (!r.canControl() || suppressLocal()) return
+        // deliberate seeks always reach the room
+        if (!r.canControl()) return
+        localSentAt = System.currentTimeMillis()
         send(JSONObject().put("t", "playback").put("action", "seek")
             .put("position", max(0f, seconds)).put("sessionVersion", r.sessionVersion))
+    }
+
+    /** Room-wide source ("server") switch: controllers move the whole room.
+        Old hubs answer bad_message - a capability gap, never an error. */
+    fun onLocalSource(mirror: String) {
+        val r = room.value ?: return
+        if (!r.canControl()) return
+        val m = mirror.trim().take(24)
+        if (m.isEmpty() || m == "trailer") return
+        send(JSONObject().put("t", "source").put("mirror", m))
     }
 
     private fun detectContentChange() {
@@ -332,9 +383,12 @@ object Party {
         if (!r.isHost || suppressLocal()) return
         val s = PartyPlayer.ops?.session() ?: return
         if (s.key != lastContentKey) {
-            lastContentKey = s.key
-            send(JSONObject().put("t", "content").put("type", s.type)
-                .put("tmdbId", s.tmdbId).put("season", s.season).put("episode", s.episode))
+            // stamp ONLY on a successful send: a dropped message on a dying
+            // socket used to eat the switch silently (the room never heard it)
+            if (send(JSONObject().put("t", "content").put("type", s.type)
+                .put("tmdbId", s.tmdbId).put("season", s.season).put("episode", s.episode))) {
+                lastContentKey = s.key
+            }
         }
     }
 
@@ -361,6 +415,11 @@ object Party {
         if (r.status != "playing") return
         val nowS = serverNow()
         if (r.updatedAt > nowS) return // scheduled start: hold the gate
+        // fresh load / episode switch: syncToRoom lands it - correcting
+        // against the PREVIOUS episode's room timeline used to seek the new
+        // player to the old episode's end (clamped -> ended -> the room
+        // lurched a whole step)
+        if (min(ops.sinceLoadMs(), System.currentTimeMillis() - lastLoadAtMs) < 8000) return
         val drift = ops.position() - expectedPos()
         val mag = abs(drift)
         if (mag < SYNC_NUDGE) return
@@ -411,6 +470,9 @@ object Party {
                     status.value = "in-room"
                     lastSeq = rm.seq
                     lastContentKey = rm.content?.key ?: ""
+                    lastRelayedPaused = rm.status != "playing"
+                    pendingMsg = null // the handshake answered - stop re-sending
+                    rejoinTries = 0
                     unread.value = 0
                     // identity rule that survives BOTH hub generations: on a
                     // reattach our stored resume token IS the seat identity -
@@ -420,9 +482,10 @@ object Party {
                     if (!m.optBoolean("reattached") && m.has("token")) token = m.optString("token")
                     saveSession()
                     val c = rm.content
-                    if (c != null) {
-                        openContent(c)
-                    } else if (rm.isHost) {
+                    val live = PartyPlayer.ops?.session()
+                    if (c != null && (live == null || live.key != c.key)) {
+                        openContent(c) // a reconnect NEVER rebuilds the player mid-episode
+                    } else if (c == null && rm.isHost) {
                         // a room created around the player carries its content
                         detectContentChange()
                     }
@@ -463,6 +526,14 @@ object Party {
                 ) else null
                 room.value = r.copy(content = content, sessionVersion = r.sessionVersion + 1, position = 0f, status = "loading")
                 if (content != null) openContent(content)
+            }
+            "source" -> {
+                // room-wide mirror ("server") switch: follow it
+                val r = room.value ?: return
+                val src = m.optString("mirror", "")
+                if (src.isEmpty()) return
+                room.value = r.copy(source = src)
+                try { main.post { PartyPlayer.onSource?.invoke(src) } } catch (e: Exception) {}
             }
             "chat" -> {
                 val r = room.value ?: return
@@ -520,6 +591,31 @@ object Party {
             }
             "error" -> {
                 val e = m.optString("error")
+                val forJoin = m.optString("for") == "join"
+                if (forJoin && room.value == null && pendingMsg != null) {
+                    // the handshake failed: retry what's retryable, stop on
+                    // the rest with an honest message (never stuck "connecting")
+                    if (e == "full" || e == "rate_limited") {
+                        rejoinTries += 1
+                        if (rejoinTries <= 5) {
+                            val msg = pendingMsg
+                            main.postDelayed({ if (room.value == null && msg != null) { pendingMsg = msg; send(msg) } },
+                                min(15000L, 1500L * rejoinTries))
+                            return
+                        }
+                    }
+                    pendingMsg = null
+                    status.value = "idle"
+                    lastError.value = when (e) {
+                        "not_found" -> "Room not found (wrong code or it expired)"
+                        "wrong_password" -> "Wrong room password"
+                        "full" -> "That room is full"
+                        "conflict" -> "Already in a room - leave it first"
+                        else -> "Couldn't join the party: " + e
+                    }
+                    return
+                }
+                if (e == "conflict") { if (room.value != null) status.value = "in-room"; return }
                 lastError.value = when (e) {
                     "not_found" -> "Room not found (wrong code or it expired)"
                     "wrong_password" -> "Wrong room password"
@@ -557,6 +653,7 @@ object Party {
             chatEnabled = o.optBoolean("chatEnabled", true),
             content = if (c != null) PartyContent(c.optString("type", "movie"), c.optInt("tmdbId"),
                 max(1, c.optInt("season", 1)), max(1, c.optInt("episode", 1))) else null,
+            source = o.optString("source", ""),
             status = pb?.optString("status", "waiting") ?: "waiting",
             position = pb?.optDouble("position", 0.0)?.toFloat() ?: 0f,
             rate = pb?.optDouble("rate", 1.0)?.toFloat() ?: 1f,
@@ -611,7 +708,10 @@ object Party {
             scheduleGate() // scheduled start - hold everyone at the gate
             return
         }
-        suppressUntil = System.currentTimeMillis() + 1500
+        // own echo (the hub broadcasts back to the sender) must never
+        // suppress the user's NEXT press - only remote-driven changes may
+        if (System.currentTimeMillis() >= localSentAt + 1200) suppressUntil = System.currentTimeMillis() + 1500
+        if (action == "play" || action == "pause") lastRelayedPaused = (action == "pause")
         try {
             val target = expectedPos() + 0.25f
             when (action) {
@@ -630,6 +730,7 @@ object Party {
 
     private fun openContent(c: PartyContent) {
         lastContentKey = c.key
+        lastLoadAtMs = System.currentTimeMillis() // drift grace starts here
         suppressUntil = System.currentTimeMillis() + 4000
         try { main.post { PartyPlayer.open?.invoke(c) } } catch (e: Exception) {}
         // joiners used to open the video and sit at 00:00 - sync to the room

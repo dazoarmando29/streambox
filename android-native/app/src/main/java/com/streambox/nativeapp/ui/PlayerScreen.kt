@@ -1799,6 +1799,7 @@ fun PlayerScreen(
         // The auto-hop keeps the spot (task rule: switching providers never
         // loses your place) - it used to reset to 0 like a fresh play.
         load(startAt = at)
+        com.streambox.nativeapp.party.Party.onLocalSource(fb) // the room follows the host's heal
     }
 
     // Startup watchdog (0.37 fix): hop only after 30s of TOTAL silence -
@@ -2120,6 +2121,7 @@ fun PlayerScreen(
             override fun session(): com.streambox.nativeapp.party.PartyContent? =
                 if (title.type == "movie") com.streambox.nativeapp.party.PartyContent("movie", title.id, 1, 1)
                 else com.streambox.nativeapp.party.PartyContent("tv", title.id, pm.epSeason, pm.epNumber)
+            override fun sinceLoadMs(): Long = System.currentTimeMillis() - pm.lastLoadAtMs
             override fun syncCap(): String = when {
                 pm.mirror == "hls" -> "full"
                 pm.mirror == "vidcore" || pm.mirror.startsWith("vidsrc") -> "coordinated"
@@ -2127,7 +2129,20 @@ fun PlayerScreen(
                 else -> "full"
             }
         }
-        onDispose { com.streambox.nativeapp.party.PartyPlayer.ops = null }
+        // room-wide source ("server") switch: follow the room's pick, keeping
+        // the position (never echo it back - the room already knows)
+        com.streambox.nativeapp.party.PartyPlayer.onSource = { src ->
+            if (src != pm.mirror && (MIRROR_NAMES.containsKey(src) || src == "hls")) {
+                val at = pm.cur
+                pm.mirror = src
+                pm.playing = true
+                load(startAt = at)
+            }
+        }
+        onDispose {
+            com.streambox.nativeapp.party.PartyPlayer.ops = null
+            com.streambox.nativeapp.party.PartyPlayer.onSource = null
+        }
     }
 
     // Anime season routing (0.60): split franchises carry one ENTRY PER
@@ -4133,6 +4148,7 @@ fun PlayerScreen(
                                         pm.mirror = id
                                         pm.playing = true
                                         load(startAt = at)
+                                        com.streambox.nativeapp.party.Party.onLocalSource(id) // the room follows
                                     }
                                     pm.showSubs = false
                                 }
