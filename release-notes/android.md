@@ -18,6 +18,6 @@ Quality of life
 Honest limits
 - Two different cuts (sub vs dub) can never be second-for-second in sync - we approximate and admit it instead of pretending
 - In-iframe ads inside a third-party player can't be stripped by any website (browsers forbid it) - the sandbox kills their popups/tab-hijacks; Brave/uBlock still handles in-stream ads, and the A/V sheet's Reload button is the one-tap escape
-- Room-wide source switching and the ghost-seat fixes speak the new hub protocol: the Cloudflare hub update ships with the next manual Worker deploy - until then the client-side protections (join-once-per-socket, rejoin recovery, teardown) are already protecting you
+- Room-wide source switching and the ghost-seat fixes speak the new hub protocol - and the hub UPDATE IS LIVE (deployed together with this release), so ghost replacement, source-follow and room survival work end-to-end right now. The client-side protections (join-once-per-socket, rejoin recovery, teardown) cover you even against any older hub
 
 Locked: QA 160 pins the ghost-seat transport, the relay confirm window, the no-echo-swallow rule, the in-room resume skip, source-follow, click-through/tap-through, the honest engine label, hop-budget symmetry, live stall recovery and the network-vs-source triage - 35 party-server protocol tests (6 new) pin the server side. All of it fails the build if it regresses.
