@@ -10,6 +10,6 @@ Fixes
 
 Honest limits
 - Two different cuts (sub vs dub) stay approximate in position sync - pause and episodes still follow exactly
-- Room-wide source switching speaks the new hub protocol: full effect lands with the next manual Worker deploy; older hubs answer "bad_message" quietly and the app simply stays local
+- The hub update is LIVE (deployed with this release): ghost replacement, source-follow and room survival work end-to-end now; older hubs answer "bad_message" quietly and the app stays local
 
 Locked by native QA (party relay gates, bridge mapping, and the sync rules must stay). Builds at 0.99.
