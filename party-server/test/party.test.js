@@ -636,3 +636,158 @@ test("room creation is rate limited per address", async (t) => {
   const err = await bot.next((m) => m.t === "error" && m.error === "rate_limited");
   assert.strictEqual(err.for, "create");
 });
+
+/* ---------- ghost seats / reattach replace (the "duplicate users" bug) ---------- */
+
+test("ghost duplicate killed: token reattach replaces a LIVE seat (same seat, never a fresh one)", async (t) => {
+  const { app, url } = await startServer(t, { ttl: { participantTtl: 5000, hostGrace: 5000, emptyRoomTtl: 5000, maxRoomAge: 60000 } });
+  const a = await connect(url);
+  a.send({ t: "create", name: "Ana" });
+  const m1 = await a.waitType("room");
+  // network blip: a NEW socket joins with the same resume token while the old
+  // socket is still open server-side (half-open ghost - no close ever fired).
+  // The old bug minted a fresh seat here: duplicate "you"s, host loss, full rooms.
+  const a2 = await connect(url);
+  a2.send({ t: "join", name: "Ana", code: m1.room.code, token: m1.token });
+  const r = await a2.next((m) => m.t === "room" || m.t === "error");
+  assert.strictEqual(r.t, "room");
+  assert.strictEqual(r.reattached, true, "same token = same seat, even while the ghost looks connected");
+  assert.strictEqual(r.replaced, true, "the server reports the ghost connection was replaced");
+  assert.strictEqual(r.room.selfId, m1.room.selfId, "identity is preserved - no duplicate 'you'");
+  assert.strictEqual(r.room.participants.length, 1, "no ghost seats accumulate across reconnects");
+  assert.strictEqual(r.room.hostId, m1.room.hostId, "the host star survives the reconnect");
+  void app;
+});
+
+test("stale close from the replaced socket never evicts the live seat", async (t) => {
+  const { app, url } = await startServer(t, { ttl: { participantTtl: 5000, hostGrace: 5000, emptyRoomTtl: 5000, maxRoomAge: 60000 } });
+  const a = await connect(url);
+  a.send({ t: "create", name: "Ana" });
+  const m1 = await a.waitType("room");
+  const a2 = await connect(url);
+  a2.send({ t: "join", name: "Ana", code: m1.room.code, token: m1.token });
+  await a2.next((m) => m.t === "room");
+  // the replaced ghost socket dies LATER - its close must be ignored
+  a.close();
+  await new Promise((r) => setTimeout(r, 100));
+  const snap = app.rooms.rooms.get(m1.room.roomId);
+  const seat = snap.participants.get(m1.room.selfId);
+  assert.ok(seat, "the seat survives the ghost's late close");
+  assert.strictEqual(seat.connected, true, "the LIVE connection is still seated");
+  // and the live socket still drives the room afterwards
+  a2.send({ t: "playback", action: "play", position: 12, sessionVersion: snap.playback.sessionVersion });
+  const ev = await a2.next((m) => m.t === "playback");
+  assert.ok(ev.state, "the live connection still commands the room after the ghost died");
+});
+
+test("silence marks a seat gone: sweep heals the room list and unblocks full rooms", async (t) => {
+  const { app, url } = await startServer(t, { ttl: { staleMs: 60, participantTtl: 60, hostGrace: 60000, emptyRoomTtl: 5000, maxRoomAge: 60000, seatMemory: 5000 } });
+  const a = await connect(url);
+  a.send({ t: "create", name: "Ana", maxParticipants: 2 });
+  const m1 = await a.waitType("room");
+  const b = await connect(url);
+  b.send({ t: "join", name: "Bo", code: m1.room.code });
+  await b.waitType("room");
+  // a third is bounced: the room is full (2 of 2)
+  const c = await connect(url);
+  c.send({ t: "join", name: "Cy", code: m1.room.code });
+  const err = await c.next((m) => m.t === "error");
+  assert.strictEqual(err.error, "full");
+  // Bo's socket goes QUIET (half-open: no close, no heartbeats) while Ana
+  // keeps heartbeating like a real viewer
+  await new Promise((r) => setTimeout(r, 120));
+  a.send({ t: "heartbeat", clientTs: Date.now() });
+  await new Promise((r) => setTimeout(r, 20));
+  app.rooms.sweep(); // silence past the stale window = gone
+  const snap = app.rooms.rooms.get(m1.room.roomId);
+  assert.strictEqual(snap.participants.size, 1, "the silent ghost seat was reclaimed");
+  // the room accepts the third member again - no more permanent full-room bounces
+  const c2 = await connect(url);
+  c2.send({ t: "join", name: "Cy", code: m1.room.code });
+  const m3 = await c2.next((m) => m.t === "room" || m.t === "error");
+  assert.strictEqual(m3.t, "room", "full-room bounce healed once the ghost was gone");
+});
+
+test("the room survives a full drop-out for the return window (no 'party removed itself')", async (t) => {
+  const { app, url } = await startServer(t, { ttl: { participantTtl: 40, hostGrace: 40, emptyRoomTtl: 40, seatMemory: 250, maxRoomAge: 60000 } });
+  const a = await connect(url);
+  a.send({ t: "create", name: "Ana" });
+  const m1 = await a.waitType("room");
+  const b = await connect(url);
+  b.send({ t: "join", name: "Bo", code: m1.room.code });
+  await b.waitType("room");
+  // BOTH devices lose signal at once (elevator / network switch)
+  a.close();
+  b.close();
+  await new Promise((r) => setTimeout(r, 120));
+  const batches = app.rooms.sweep(); // seats expired - but the return window holds the room
+  assert.ok(!batches.some((x) => x.events.some((e) => e.t === "room_ended")), "the room must not end while a resume token can still return");
+  assert.strictEqual(app.rooms.roomCount(), 1);
+  // the host's phone comes back and finds the SAME room
+  const a2 = await connect(url);
+  a2.send({ t: "join", name: "Ana", code: m1.room.code, token: m1.token });
+  const r = await a2.next((m) => m.t === "room" || m.t === "error");
+  assert.strictEqual(r.t, "room", "the returning host finds the SAME room");
+  assert.strictEqual(r.reattached, true);
+  assert.strictEqual(r.room.hostId, m1.room.hostId, "host seat restored");
+  // once the return window lapses with everyone gone, the room is reclaimed
+  a2.close();
+  await new Promise((r) => setTimeout(r, 60));
+  app.rooms.sweep(); // the seat drops out and is remembered (return window starts)
+  await new Promise((r) => setTimeout(r, 300));
+  const batches2 = app.rooms.sweep();
+  assert.ok(batches2.some((x) => x.events.some((e) => e.t === "room_ended")), "after the return window the abandoned room is reclaimed");
+  assert.strictEqual(app.rooms.roomCount(), 0);
+});
+
+test("sync_report carries dur + source so members see real peer state", async (t) => {
+  const { app, url } = await startServer(t);
+  const a = await connect(url);
+  a.send({ t: "create", name: "Ana" });
+  const m1 = await a.waitType("room");
+  const b = await connect(url);
+  b.send({ t: "join", name: "Bo", code: m1.room.code });
+  await b.waitType("room");
+  a.send({ t: "sync_report", position: 30, paused: false, dur: 3021, source: "VidBolt" });
+  await new Promise((r) => setTimeout(r, 50));
+  const c = await connect(url);
+  c.send({ t: "join", name: "Cy", code: m1.room.code });
+  const m3 = await c.next((m) => m.t === "room" || m.t === "error");
+  const ana = m3.room.participants.find((x) => x.id === m1.room.selfId);
+  assert.strictEqual(ana.dur, 3021, "peer duration visible (sub vs dub cut detection)");
+  assert.strictEqual(ana.source, "VidBolt", "peer source visible (source-mismatch hints)");
+  assert.strictEqual(ana.paused, false);
+  void app;
+});
+
+test("source switch: controllers move the room's mirror for everyone, timeline untouched", async (t) => {
+  const { app, url } = await startServer(t);
+  const a = await connect(url);
+  a.send({ t: "create", name: "Ana" }); // allowControl off
+  const m1 = await a.waitType("room");
+  const b = await connect(url);
+  b.send({ t: "join", name: "Bo", code: m1.room.code });
+  await b.waitType("room");
+  // non-controller cannot move the room's source
+  b.send({ t: "source", mirror: "vidbolt" });
+  const err = await b.next((m) => m.t === "error");
+  assert.strictEqual(err.error, "unauthorized");
+  // the room is mid-episode when the host switches server: everyone follows
+  a.send({ t: "playback", action: "play", position: 120, sessionVersion: 1 });
+  await b.waitType("playback");
+  a.send({ t: "source", mirror: "vidbolt" });
+  const ev = await b.waitType("source");
+  assert.strictEqual(ev.mirror, "vidbolt");
+  assert.strictEqual(ev.actor, "Ana");
+  const snap = app.rooms.rooms.get(m1.room.roomId);
+  assert.strictEqual(snap.source, "vidbolt", "the snapshot carries the room's source for late joiners");
+  assert.strictEqual(snap.playback.status, "playing", "switching source never pauses the room");
+  assert.ok(Math.abs(snap.playback.position - 120) < 5, "switching source never resets the timeline");
+  // with allowControl on, a member's switch moves the room too
+  a.send({ t: "settings", allowControl: true });
+  await b.waitType("settings");
+  a.drain(); // the sender hears its own source echo - match only the new one
+  b.send({ t: "source", mirror: "cinesrc" });
+  const ev2 = await a.next((m) => m.t === "source" && m.mirror === "cinesrc");
+  assert.strictEqual(ev2.mirror, "cinesrc");
+});

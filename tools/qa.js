@@ -1209,10 +1209,14 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
 /* ---------- 113. Ad Shield everywhere (website sandbox + APK filter) ---------- */
 {
   const ns = html.match(/const NO_SANDBOX = new Set\(\[([^\]]*)\]\)/);
-  if (ns && /"vidbolt"/.test(ns[1]) && /"vidrift"/.test(ns[1]) && /"anipm"/.test(ns[1])
-      && !/"cinesrc"/.test(ns[1]) && !/"vidzen"/.test(ns[1]))
-    ok("NO_SANDBOX is only the sandbox-breaking set (CineSrc/VidZen keep the pop-up block)");
-  else bad("NO_SANDBOX must be the BREAK set only -- CineSrc/VidZen need sandbox popup-blocking on the website");
+  if (ns && /"vidrift"/.test(ns[1]) && /"anipm"/.test(ns[1])
+      && !/"vidbolt"/.test(ns[1]) && !/"cinesrc"/.test(ns[1]) && !/"vidzen"/.test(ns[1]))
+    ok("NO_SANDBOX is only the sandbox-breaking set (CineSrc/VidZen/VidBolt keep the pop-up block)");
+  else bad("NO_SANDBOX must be the BREAK set only -- CineSrc/VidZen/VidBolt need sandbox popup-blocking on the website");
+  if (/function boltSandboxProbe/.test(html) && /window\._boltRaw = true/.test(html)
+      && /mirror === "vidbolt" && window\._boltRaw/.test(html))
+    ok("VidBolt is shield-first: sandboxed until it earns ONE honest raw retry (boltSandboxProbe)");
+  else bad("VidBolt must load sandboxed with a one-shot raw fallback probe -- its popups died behind the old blanket raw mode");
   if (/Ad Shield unavailable/.test(html)) bad("the Ad Shield unavailable path survives -- the shield covers every player");
   else ok("no Ad Shield unavailable dead-end");
   const am = html.match(/function applyMirrorSandbox\s*\(\)\s*\{[\s\S]*?\n\}/);
@@ -1670,7 +1674,7 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (welcome && /if \(!S\.token\) S\.token = m\.token/.test(welcome[0]))
     ok("welcome never rotates the stored resume token (per-connection tokens broke reattach)");
   else bad("the welcome handler must never overwrite an existing S.token");
-  const room = html.match(/case "room": \{[\s\S]{0,2600}/);
+  const room = html.match(/case "room": \{[\s\S]{0,3400}/);
   if (room && /S\.pw \|\| ""/.test(room[0]) && /if \(!m\.reattached\)/.test(room[0])
       && /toast\("Joined Watch Party/.test(room[0])
       && /if \(!m\.reattached && m\.token\) S\.token = m\.token/.test(room[0]))
@@ -1973,6 +1977,55 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (/You're alone in the party now/.test(html) && /headerPartyBtn/.test(html) && /ring-teal-400/.test(html))
     ok("party QoL: solo-room reminder + the header door shows the live room");
   else bad("the party needs the solo-room hint and the header live-room indicator");
+}
+
+/* ---------- 160. party reliability: ghost seats, honest sync, source follow ---------- */
+{
+  // A: join-once-per-socket + full teardown (the ghost-seat / zombie killers)
+  if (/_joinSentOn/.test(html)
+      && /function teardownRoom[\s\S]{0,1400}clearInterval\(S\.hbT\)/.test(html)
+      && /function teardownRoom[\s\S]{0,1400}S\.token = ""/.test(html))
+    ok("party transport: one join per connection, teardown clears heartbeat + resume token");
+  else bad("party teardown must stop the heartbeat and drop the token, and joins must be once-per-socket");
+  if (/case "error": \{[\s\S]{0,3200}rejoinTries/.test(html) && /not_in_room[\s\S]{0,800}_repairAt/.test(html))
+    ok("rejoin failures recover (capped retry -> clean teardown) and not_in_room self-repairs");
+  else bad("a failed rejoin must never leave the client stuck on CONNECTING (rejoin recovery + seat repair)");
+  // B: relay = user intent only; own echo never suppresses the next press
+  const olpp = html.match(/function onLocalPlayPause\(\)\s*\{[\s\S]{0,700}?\n  \}/);
+  if (olpp && !/suppressLocalEcho/.test(olpp[0]) && /_relayT/.test(html)
+      && /still === S\._lastRelayedPaused/.test(html) && /Date\.now\(\) >= \(S\._localSentAt \|\| 0\) \+ 1200/.test(html))
+    ok("party relay: deliberate presses always send, provider events confirm after 1.2s, own echo never suppresses");
+  else bad("the relay must never swallow user presses, never relay machine pause flaps, and never suppress on own echo");
+  // G: nobody inside a room is asked Continue/Start over
+  if (/function maybeResumePrompt[\s\S]{0,500}PARTY\.inRoom/.test(html))
+    ok("in a room: no resume prompt - join/reload land on the room's timeline automatically");
+  else bad("maybeResumePrompt must skip the dialog inside a room (join/reload snap to the room)");
+  // C: source ("server") switches follow the room
+  if (/case "source":/.test(html) && /\{ t: "source", mirror: m \}/.test(html)
+      && /function onLocalMirror/.test(html) && /PARTY\.roomSource\(\)/.test(html))
+    ok("source ('server') switches follow the room: broadcast on manual/host heals, applied on arrival");
+  else bad("a source switch must move the whole room (source message + room-source-aware openWatch)");
+  // E/F: the iframe's own chrome is reachable on every device
+  if (/@media \(pointer: fine\)/.test(html) && /#playerBox\.tap-catch #tapLayer \{ pointer-events: none; \}/.test(html)
+      && /function tapThruToggle/.test(html) && /#tapThruBtn/.test(html))
+    ok("in-frame chrome reachable: mouse clicks pass the tap layer, touch gets a tap-through toggle");
+  else bad("VidBolt's own buttons (quality/audio/ad close) must be clickable on desktop AND via a touch-through toggle");
+  // honest engine label + hop-budget symmetry
+  if (/function paintEngineLabel/.test(html) && /window\._healthHopped = false/.test(html))
+    ok("engine label reflects the live sandbox state and manual server picks reset BOTH hop budgets");
+  else bad("paintEngineLabel + _healthHopped reset on manual picks are required");
+  // buffering recovery: live quality drops (never a reload loop) + a real first rung
+  if (/function recoverMidPlayStall[\s\S]{0,1400}boltSend\(\{ type: "play" \}\)/.test(html)
+      && /window\._boltActualQ[\s\S]{0,300}cur = "1080"/.test(html))
+    ok("buffering recovery is live: quality drops in place (no reload loop) and steps from the REAL running level");
+  else bad("stalls must recover with a live quality step from the real level - not a full reload onto the same quality");
+  // stall triage: fast-line stalls blame the SERVER and hop; slow lines get the ladder
+  if (/function netProbe/.test(html) && /function perfRecordStall/.test(html) && /function perfLabel/.test(html)
+      && /function recoverMidPlayStall[\s\S]{0,600}netProbe\(\)/.test(html)
+      && /keeps stalling on your fast connection/.test(html)
+      && /function paintMirrors[\s\S]{0,1200}perfLabel/.test(html))
+    ok("stall triage is honest: a fast line that stalls HOPS servers, a slow line drops quality, every server shows live status");
+  else bad("stalls must triage network vs source honestly and the server list must show live per-server status (down / struggles / fast)");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");

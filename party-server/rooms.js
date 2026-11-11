@@ -54,6 +54,12 @@ class RoomManager {
     this.ttl = {
       hostGrace: opts.hostGrace != null ? opts.hostGrace : LIMITS.HOST_GRACE_MS,
       participantTtl: opts.participantTtl != null ? opts.participantTtl : LIMITS.PARTICIPANT_TTL_MS,
+      // silence this long = gone, even if the socket never closed (half-open
+      // TCP after a network blip is the norm on phones)
+      staleMs: opts.staleMs != null ? opts.staleMs : LIMITS.PARTICIPANT_STALE_MS,
+      // how long a dropped seat stays restorable by its resume token - and how
+      // long the ROOM outlives everyone to give them that return window
+      seatMemory: opts.seatMemory != null ? opts.seatMemory : 5 * 60 * 1000,
       emptyRoomTtl: opts.emptyRoomTtl != null ? opts.emptyRoomTtl : LIMITS.EMPTY_ROOM_TTL_MS,
       maxRoomAge: opts.maxRoomAge != null ? opts.maxRoomAge : LIMITS.MAX_ROOM_AGE_MS,
     };
@@ -74,6 +80,7 @@ class RoomManager {
       chatEnabled: o.chatEnabled !== false,
       hostId: host.id,
       content: null,
+      source: "", // room-wide mirror ("server") - follows the last controller switch
       playback: { status: "waiting", position: 0, rate: 1, updatedAt: now, sessionVersion: 1, seq: 0 },
       participants: new Map(),
       chat: [],
@@ -107,10 +114,17 @@ class RoomManager {
       room = this.rooms.get(roomId);
     }
     if (!room || room.ended) return { error: "not_found" };
-    // reconnect identity: a returning participant reattaches to its seat
+    // reconnect identity: a returning participant reattaches to its seat.
+    // The token IS the identity - a half-open ghost socket (no close ever
+    // fires after a network blip) must NEVER force the same person onto a
+    // fresh seat: that minted duplicate "you"s per reconnect, filled the room
+    // against maxParticipants (real members bounced with `full`) and left the
+    // host star on a ghost (controls answered `unauthorized`). Same token =
+    // same seat: REATTACH and replace the connection.
     if (token) {
       for (const [id, part] of room.participants) {
-        if (part.token === token && !part.connected) {
+        if (part.token === token) {
+          const dropConn = part.conn && part.conn !== p.conn ? part.conn : null;
           part.connected = true;
           part.lastSeen = now;
           part.conn = p.conn;
@@ -120,7 +134,7 @@ class RoomManager {
           // the SEAT's token is the client's identity across reconnects -
           // never the per-connection token (that would rotate on every
           // reconnect and strand the next one on a fresh seat)
-          return { room: this.snapshot(room, id), reattached: id, token: part.token };
+          return { room: this.snapshot(room, id), reattached: id, token: part.token, replaced: !!dropConn, dropConn };
         }
       }
       // seat already expired (long background): a remembered seat restores
@@ -168,12 +182,16 @@ class RoomManager {
 
   /* WS dropped (network blip, app backgrounded): keep the seat so the same
      resume token can reattach within the TTL. Voluntary `leave` removes. */
-  disconnect(roomId, participantId) {
+  disconnect(roomId, participantId, conn) {
     const room = this.rooms.get(roomId);
     if (!room) return { events: [] };
     const part = room.participants.get(participantId);
     if (!part) return { events: [] };
+    // stale close: the seat already moved to a NEWER connection (reattach
+    // replaced the ghost) - the old socket dying must never evict the live one
+    if (conn && part.conn && part.conn !== conn) return { events: [] };
     part.connected = false;
+    part.conn = null;
     part.lastSeen = Date.now();
     if (room.hostId === participantId) room.hostDisconnectedAt = part.lastSeen;
     return {
@@ -338,7 +356,7 @@ class RoomManager {
     return { t: "heartbeat", clientTs: clientTs || 0, serverTs: Date.now(), participantId };
   }
 
-  syncReport(roomId, participantId, position, paused) {
+  syncReport(roomId, participantId, position, paused, dur, source) {
     const room = this.rooms.get(roomId);
     if (!room) return { error: "not_found" };
     const part = room.participants.get(participantId);
@@ -346,9 +364,27 @@ class RoomManager {
     part.position = position;
     part.paused = paused === true;
     part.buffering = false;
+    if (dur != null && Number.isFinite(dur) && dur > 0) part.dur = dur;
+    if (source) part.source = String(source).slice(0, 24);
     part.lastSeen = Date.now();
     room.lastActivityAt = part.lastSeen;
     return { events: [] }; // reports are observability only - never rebroadcast
+  }
+
+  /* Room-wide mirror ("server") switch: controllers drive it, the timeline is
+     untouched (no playback reset - switching source mid-episode must keep the
+     room where it is). */
+  source(roomId, participantId, mirror) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    const part = room.participants.get(participantId);
+    if (!part || !part.connected) return { error: "not_in_room" };
+    if (room.hostId !== participantId && !room.allowControl) return { error: "unauthorized" };
+    room.source = String(mirror).slice(0, 24);
+    room.lastActivityAt = Date.now();
+    return {
+      events: [{ t: "source", room: room.id, mirror: room.source, actor: part.name }],
+    };
   }
 
   resync(roomId, participantId) {
@@ -357,10 +393,14 @@ class RoomManager {
     return { events: [{ t: "room_state", room: this.snapshot(room, participantId) }] };
   }
 
-  markSeen(roomId, participantId) {
+  markSeen(roomId, participantId, conn) {
     const room = this.rooms.get(roomId);
     const part = room && room.participants.get(participantId);
-    if (part) { part.lastSeen = Date.now(); part.connected = true; }
+    if (!part) return;
+    // a REPLACED ghost socket's leftover traffic never refreshes the live seat
+    if (conn && part.conn && part.conn !== conn) return;
+    part.lastSeen = Date.now();
+    part.connected = true;
   }
 
   /* ---- expiry sweep (called on a timer by the server) ---- */
@@ -377,17 +417,30 @@ class RoomManager {
       }
       // disconnected participants expire after a TTL (reconnect window)
       for (const [id, part] of [...room.participants]) {
+        // half-open sockets (network blip: no close ever fires) must not pin
+        // a seat "connected" - silence past the stale window counts as gone,
+        // so ghosts can neither fill the room nor hold the host star
+        if (part.connected && now - part.lastSeen > this.ttl.staleMs) {
+          part.connected = false;
+          part.conn = null;
+          if (room.hostId === id && !room.hostDisconnectedAt) room.hostDisconnectedAt = now;
+        }
         if (!part.connected && now - part.lastSeen > this.ttl.participantTtl) {
           const r = this._removeParticipant(room, id, "timeout");
           if (r.events && r.events.length) out.push({ roomId: room.id, events: r.events });
         }
       }
-      // remembered seats expire too (identity is restorable for 5 minutes)
+      // remembered seats expire too (identity is restorable for a while)
       if (room.recentSeats) {
         for (const [tok, s] of [...room.recentSeats]) {
-          if (now - s.removedAt > 5 * 60 * 1000) room.recentSeats.delete(tok);
+          if (now - s.removedAt > this.ttl.seatMemory) room.recentSeats.delete(tok);
         }
       }
+      // a dropped member's restorable seat keeps the ROOM alive for the return
+      // window: both phones losing signal for a minute must never end the
+      // party (that forced "leave and create a new room again and again")
+      const restorable = !!room.recentSeats && [...room.recentSeats.values()].some(
+        (s) => !s.kicked && s.reason !== "left" && now - s.removedAt <= this.ttl.seatMemory);
       // host grace: state preserved, host seat restored if the host returns
       const host = room.participants.get(room.hostId);
       if (!host || !host.connected) {
@@ -398,7 +451,7 @@ class RoomManager {
             room.hostId = next.id;
             room.hostDisconnectedAt = 0;
             out.push({ roomId: room.id, events: [{ t: "host_changed", room: room.id, hostId: next.id, hostName: next.name }] });
-          } else if (room.participants.size === 0) {
+          } else if (room.participants.size === 0 && !restorable) {
             room.ended = true;
             this._dropRoom(room);
             out.push({ roomId: room.id, events: [{ t: "room_ended", roomId: room.id, reason: "abandoned" }] });
@@ -407,8 +460,8 @@ class RoomManager {
       } else {
         room.hostDisconnectedAt = 0;
       }
-      // empty rooms are reclaimed
-      if (room.participants.size === 0 && now - room.lastActivityAt > this.ttl.emptyRoomTtl) {
+      // empty rooms are reclaimed (unless a restorable seat still promises a return)
+      if (room.participants.size === 0 && !restorable && now - room.lastActivityAt > this.ttl.emptyRoomTtl) {
         room.ended = true;
         this._dropRoom(room);
       }
@@ -423,6 +476,7 @@ class RoomManager {
       id: p.id, name: cleanName(p.name), token: p.token || makeId("tok"),
       conn: p.conn || null, joinedAt: now, lastSeen: now, connected: true,
       muted: false, buffering: false, position: 0, paused: true,
+      dur: 0, source: "",
     };
   }
 
@@ -434,7 +488,7 @@ class RoomManager {
     if (!room.recentSeats) room.recentSeats = new Map();
     room.recentSeats.set(part.token, {
       id: part.id, name: part.name, wasHost: room.hostId === participantId,
-      removedAt: Date.now(), kicked: reason === "kicked",
+      removedAt: Date.now(), kicked: reason === "kicked", reason,
     });
     room.lastActivityAt = Date.now();
     const events = [{ t: "peer_left", room: room.id, participantId, name: part.name, reason }];
@@ -465,6 +519,7 @@ class RoomManager {
     return {
       id: part.id, name: part.name, connected: part.connected, muted: part.muted,
       buffering: part.buffering, position: part.position, paused: part.paused,
+      dur: part.dur || 0, source: part.source || "",
     };
   }
 
@@ -481,6 +536,7 @@ class RoomManager {
       allowControl: room.allowControl,
       chatEnabled: room.chatEnabled,
       content: room.content,
+      source: room.source || "",
       playback: {
         ...this._pbState(room, now),
         seq: room.playback.seq,

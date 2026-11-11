@@ -103,8 +103,16 @@ function createPartyServer(opts = {}) {
       if (!v.ok) { send(ws, { t: "error", error: v.error }); return; }
       const m = v.msg;
 
-      // refresh liveness for any traffic
-      if (p.roomId) rooms.markSeen(p.roomId, p.id);
+      // refresh liveness for any traffic (conn-guarded: a replaced ghost
+      // socket never refreshes the live seat)
+      if (p.roomId) rooms.markSeen(p.roomId, p.id, ws);
+      // a REPLACED ghost socket (this seat already moved to a newer
+      // connection) must never drive the room - drop its leftover traffic
+      {
+        const rNow = p.roomId ? rooms.rooms.get(p.roomId) : null;
+        const partNow = rNow && rNow.participants.get(p.id);
+        if (partNow && partNow.conn && partNow.conn !== ws) return;
+      }
 
       switch (m.t) {
         case "hello": {
@@ -137,10 +145,14 @@ function createPartyServer(opts = {}) {
           if (r.error) { send(ws, { t: "error", error: r.error, for: "join" }); return; }
           p.roomId = r.room.roomId;
           if (r.reattached) p.id = r.reattached;
+          // a replaced ghost socket loses its seat: close it deliberately so
+          // it can linger half-open no longer (conn guards make its traffic
+          // and its late close harmless either way)
+          if (r.dropConn && r.dropConn !== ws) { try { r.dropConn.close(); } catch (e) {} }
           // always hand back the SEAT token (r.token): the connection token
           // rotates on every reconnect and must never become the client's
           // resume identity
-          send(ws, { t: "room", room: r.room, token: r.token || p.token, reattached: !!r.reattached });
+          send(ws, { t: "room", room: r.room, token: r.token || p.token, reattached: !!r.reattached, replaced: !!r.replaced });
           if (r.events && r.events.length) broadcast(r.room.roomId, r.events, p.id);
           if (!r.reattached) {
             broadcast(r.room.roomId, [{ t: "peer_joined", room: r.room.roomId, participant: r.room.participants.find((x) => x.id === p.id) }], p.id);
@@ -219,7 +231,14 @@ function createPartyServer(opts = {}) {
         }
         case "sync_report": {
           if (!lim.sync.allow("s", Date.now())) return; // drop silently
-          rooms.syncReport(p.roomId, p.id, m.position, m.paused);
+          rooms.syncReport(p.roomId, p.id, m.position, m.paused, m.dur, m.source);
+          break;
+        }
+        case "source": {
+          // room-wide mirror ("server") switch - timelines untouched
+          const r = rooms.source(p.roomId, p.id, m.mirror);
+          if (r.error) { send(ws, { t: "error", error: r.error, for: "source" }); return; }
+          broadcast(p.roomId, r.events || []);
           break;
         }
         case "resync": {
@@ -236,7 +255,9 @@ function createPartyServer(opts = {}) {
     ws.on("close", () => {
       const rid = p.roomId;
       if (!rid) return;
-      const r = rooms.disconnect(rid, p.id);
+      // conn-guarded: a replaced ghost socket closing must never evict the
+      // live seat it was replaced by
+      const r = rooms.disconnect(rid, p.id, ws);
       broadcast(rid, r.events || [], p.id);
     });
 

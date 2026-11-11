@@ -23,6 +23,10 @@ const LIMITS = {
   // room lifecycle
   HOST_GRACE_MS: 60 * 1000,
   PARTICIPANT_TTL_MS: 45 * 1000,
+  // half-open sockets (no close ever fires) must not pin a seat "connected"
+  // forever: this long a silence counts as gone. > 5 missed client heartbeats
+  // (20s cadence) so background-tab timer throttling never evicts a viewer.
+  PARTICIPANT_STALE_MS: 100 * 1000,
   EMPTY_ROOM_TTL_MS: 120 * 1000,
   MAX_ROOM_AGE_MS: 24 * 60 * 60 * 1000,
   CHAT_HISTORY: 50,
@@ -38,13 +42,14 @@ const CLIENT_MSGS = new Set([
   "hello", "create", "join", "leave", "end",
   "playback", "content", "chat", "resync",
   "kick", "mute", "settings", "heartbeat", "sync_report",
+  "source",
 ]);
 
 // server -> client message types
 const SERVER_MSGS = new Set([
   "welcome", "room", "room_state", "playback", "content", "chat",
   "peer_joined", "peer_left", "host_changed", "settings", "kicked",
-  "room_ended", "error", "heartbeat", "notice",
+  "room_ended", "error", "heartbeat", "notice", "source",
 ]);
 
 const ERROR_CODES = new Set([
@@ -194,7 +199,27 @@ function validateClientMsg(raw, inRoom) {
       const p = Number(m.position);
       const paused = m.paused === true;
       if (!Number.isFinite(p) || p < 0 || p > 24 * 3600) return { ok: false, error: "bad_message" };
-      return { ok: true, msg: { t, position: p, paused } };
+      const msg = { t, position: p, paused };
+      // additive observability fields: duration + source name let members see
+      // real peer state and detect different cuts (sub vs dub / different
+      // mirrors). Old hubs/clients ignore what they don't know.
+      if (m.dur != null) {
+        const d = Number(m.dur);
+        if (Number.isFinite(d) && d > 0 && d <= 24 * 3600) msg.dur = d;
+      }
+      if (m.source != null) {
+        const s = cleanText(m.source, 24);
+        if (s) msg.source = s;
+      }
+      return { ok: true, msg };
+    }
+    case "source": {
+      // room-wide mirror ("server") switch: last manual pick wins. The server
+      // never resets playback here - switching source mid-episode keeps the
+      // room's timeline intact.
+      const mirror = cleanText(m.mirror, 24);
+      if (!mirror) return { ok: false, error: "bad_message" };
+      return { ok: true, msg: { t, mirror } };
     }
     default:
       return { ok: false, error: "bad_message" };

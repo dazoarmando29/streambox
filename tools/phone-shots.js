@@ -91,6 +91,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const page = { s: (m, p) => cdp.send(m, p, sessionId) };
     const ev = async (x) => { const r = await page.s("Runtime.evaluate", { expression: x, returnByValue: true, awaitPromise: true }); return r.result ? r.result.value : null; };
     await page.s("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 2, mobile: true });
+  // a phone shot must FEEL like a phone: touch points + coarse pointer media,
+  // or touch-only UI (tap-through button) hides itself in the very shots that
+  // exist to prove it renders
+  await page.s("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  await page.s("Emulation.setEmitTouchEventsForMouse", { enabled: true });
     await page.s("Page.enable");
     await page.s("Page.navigate", { url: `http://127.0.0.1:8788/index.html?calm=1` });
     for (let i = 0; i < 30; i++) { await sleep(400); if (await ev(`!!document.querySelector("#hero button, .card")`)) break; }

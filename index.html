@@ -296,6 +296,18 @@
   #tapLayer { position: absolute; inset: 0; z-index: 5; display: none;
     touch-action: manipulation; user-select: none; -webkit-user-select: none; }
   #playerBox.tap-catch #tapLayer { display: block; }
+  /* mouse (fine pointer) clicks must REACH the iframe: VidBolt's own Quality &
+     Server / Audio & Subtitles / ad close / Try again live inside it and were
+     unclickable behind the layer. The bar wakes on mousemove (already wired);
+     touch keeps the full tap grammar below. */
+  @media (pointer: fine) { #playerBox.tap-catch #tapLayer { pointer-events: none; } }
+  /* touch-through toggle (coarse pointers only): stands the layer down so the
+     provider's own buttons are reachable; a floating pill returns to our bar.
+     The maxTouchPoints class (set at boot) covers devices whose pointer media
+     reports "fine" despite being touch-first - the button must never be lost. */
+  #tapThruBtn { display: none; }
+  @media (pointer: coarse) { #tapThruBtn { display: grid; } }
+  body.touch-capable #tapThruBtn { display: grid; }
   /* narrow phones: the PWA Install button must not break the header row
      (the browser menu / About page remain the install paths there) */
   @media (max-width: 519px) { #installBtn { display: none !important; } }
@@ -772,8 +784,11 @@
 </div>
 
 <!-- REMOTE CURSOR: TV-box fallback pointer for players that ignore arrows -->
-<button id="cursorBtn" onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows move a pointer, OK clicks — tap again to exit"
+<button id="cursorBtn" onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows move a pointer, OK clicks - tap again to exit"
   class="fixed bottom-40 right-4 md:bottom-4 md:right-4 z-[96] w-11 h-11 rounded-full bg-white/10 border border-white/25 text-lg backdrop-blur hover:bg-white/25"><svg viewBox="0 0 24 24" width="18" height="18" fill="#fff" aria-hidden="true"><path d="M6 3l12 8.2-5.3 1.1L15 19l-2.6 1-2.4-6.4L6 17V3z"/></svg></button>
+
+<!-- TOUCH-THROUGH RETURN: visible only while the tap layer stands down -->
+<button id="tapThruBack" onclick="tapThruToggle()" class="hidden fixed bottom-40 right-4 z-[97] h-11 px-4 rounded-full bg-teal-500 hover:bg-teal-300 text-[#0B111E] text-sm font-bold">&#x270B; Our controls</button>
 
 <!-- HEALTH BANNER: shown when CineSrc can't be reached from this network -->
 <div id="healthBar" class="hidden fixed left-0 right-0 z-[94] bg-amber-500 text-[#0B111E] text-sm font-bold px-4 py-2.5 flex items-center gap-3">
@@ -790,7 +805,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 235; // bump every release alongside version.txt
+  const BUILD_NUM = 236; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1068,6 +1083,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
             <button id="ctlControl" onclick="focusMirror()" aria-label="Send remote to mirror player" title="Control: send remote keys to this mirror own player (VidRift has no play API)" class="hidden w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 grid place-items-center"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.4" fill="#fff" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
             <button id="ctlHome" onclick="mirrorHome()" aria-label="Back to primary player" title="Back to primary (CineSrc / AniPM)" class="hidden h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 8h11l-3-3"/><path d="M17 16H6l3 3"/></svg></button>
             <button onclick="cursorToggle()" aria-label="Remote cursor" title="Remote cursor: arrows glide a pointer, OK clicks - TV fallback for stubborn players" class="hidden md:grid w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 place-items-center"><svg viewBox="0 0 24 24" width="18" height="18" fill="#fff" aria-hidden="true"><path d="M6 3l12 8.2-5.3 1.1L15 19l-2.6 1-2.4-6.4L6 17V3z"/></svg></button>
+            <button id="tapThruBtn" onclick="tapThruToggle()" aria-label="Touch through to the player's own controls" title="Touch through: let taps reach this player's own buttons (Quality &amp; Server, Audio &amp; Subtitles, ad close) - the floating pill brings our bar back" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 grid place-items-center"><svg viewBox="0 0 24 24" width="18" height="18" fill="#fff" aria-hidden="true"><path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V11h.5V7a1.5 1.5 0 0 1 3 0v4.5h.5V9a1.5 1.5 0 0 1 3 0v5.5c0 3.6-2.4 6.5-6 6.5h-1.2c-2 0-3.4-.9-4.4-2.4L4 14.2c-.6-1-.3-2.2.7-2.8 1-.6 2.2-.3 2.8.7L9 14.5V11z"/></svg></button>
             <button onclick="openSettings()" id="ctlSettings" aria-label="Playback settings" title="Settings: speed, volume, sleep timer, servers" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 grid place-items-center"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10"/><circle cx="17" cy="7" r="2.2"/><path d="M20 17H10"/><circle cx="7" cy="17" r="2.2"/></svg></button>
             <button id="ctlFs" onclick="ctlFullscreen()" aria-label="Fullscreen" title="Fullscreen" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 grid place-items-center"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg></button>
           </div>
@@ -1304,6 +1320,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <div class="px-5 pb-3">
         <p class="text-xs text-gray-400 font-bold mb-1.5">WATCHING (<span id="partyCount">0</span>)</p>
         <div id="partyPeople" class="flex flex-wrap gap-2"></div>
+        <p id="partyHint" class="hidden mt-2 text-[11px] text-gray-400 leading-tight"></p>
       </div>
       <div id="partyHostRow" class="hidden px-5 pb-3 flex flex-wrap items-center gap-2 text-xs text-gray-300">
         <label class="flex items-center gap-1.5"><input id="partyCtlToggle" type="checkbox" onchange="partyToggleCtl()" class="accent-teal-400"> Guests control playback</label>
@@ -1541,6 +1558,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <p id="avHStyle" class="text-[11px] font-bold text-gray-500 tracking-widest mb-2">STYLING &amp; SYNC</p>
     <div id="avStyle" class="mb-3"></div>
     <div id="avCapPreview" class="rounded-xl bg-black/60 border border-white/10 py-3 px-4 text-center mb-4">Caption preview</div>
+    <button onclick="reloadKeepPos()" class="w-full h-11 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold" title="Reload this source keeping your position - clears stuck ads, overlays and error panels">Reload player (keep position)</button>
   </div>
 </div>
 
@@ -1595,6 +1613,9 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 /* Popup-ads safety net for our own page (iframe popups are blocked by sandbox above) */
 (function(){
   try {
+    // touch-first devices whose pointer media lies ("fine") still get the
+    // tap-through toggle - the button must never be unreachable
+    try { if (navigator.maxTouchPoints > 0) document.body.classList.add("touch-capable"); } catch(e){}
     const _open = window.open;
     window.open = function(url, ...rest){
       // allow only player-origin navigations triggered by user on our buttons; block the rest
@@ -1715,6 +1736,27 @@ function dirOf(e){
    driving the player use the \u{1F3AF} handoff instead. Pointer-events:none, so it
    never blocks a real tap on phone/desktop. */
 window._cursor = { on: false, x: 0, y: 0, gx: 0, gy: 0, el: null, dirs: new Set(), speed: 0, raf: 0, last: 0 };
+/* TOUCH-THROUGH: phones/tablets can't click the provider's own buttons
+   (Quality & Server, Audio & Subtitles, ad close) while the tap layer owns
+   taps - this stands the layer down on demand and floats a way back. */
+function tapThruToggle(){
+  window._tapThru = !window._tapThru;
+  try { tapLayerSync(); } catch(e){}
+  const back = document.getElementById("tapThruBack");
+  if (back) back.classList.toggle("hidden", !window._tapThru);
+  const ws = document.getElementById("watchStatus");
+  if (ws) ws.textContent = window._tapThru
+    ? "Touch-through ON \u{2014} taps reach this player's own buttons. \u{270B} Our controls brings our bar back."
+    : "";
+  clearTimeout(window._tapThruT);
+  if (window._tapThru) {
+    window._tapThruT = setTimeout(() => {
+      if (!window._tapThru) return;
+      tapThruToggle();
+      try { toast("Touch-through ended \u{2014} our controls are back"); } catch(e){}
+    }, 60000);
+  }
+}
 function cursorToggle(){
   const c = window._cursor;
   c.on = !c.on;
@@ -3928,10 +3970,19 @@ async function openWatch(type, id, s=1, e=1, t=0){
     // CineSrc as their fallback — never the other way around. Movies/TV open
     // on CineSrc.
     let def = anime ? "anipm" : watchState.ko ? "vidbolt" : "cinesrc";
+    // in a Watch Party the ROOM's source ("server") wins: everyone opens on
+    // the same mirror or the cuts drift apart immediately
+    try {
+      const roomSrc = (typeof PARTY !== "undefined" && PARTY.roomSource) ? PARTY.roomSource() : "";
+      if (roomSrc && MIRRORS.some(x => x.id === roomSrc) && mirrorAllowed(roomSrc)) def = roomSrc;
+    } catch(e){}
     if (!MIRRORS.some(x => x.id === def) || !mirrorAllowed(def)) def = watchState.ko ? "cinesrc" : "cinesrc";
     mirror = def;
     updateMirrorUI(); paintMirrors();
   } catch(e){ mirror = watchState.ko ? "cinesrc" : mirror; }
+  window._lastLoadAt = Date.now(); // restart the sync clock: provider settle noise after a load is dropped
+  window._reassertCount = 0; window._reassertAt = 0; // fresh room-reassert budget per open
+  window._perfLoadAt = Date.now(); window._perfSeen = false; window._stallCount = 0; // fresh stall budget per open
   loadStoredSubs(); // auto-attach this title's remembered subtitle file
   wyzAutoSubs(); // none remembered? fetch the best match silently (English default)
   // late anime catch (deep links / cold continue entries): metadata now proves
@@ -3967,8 +4018,7 @@ async function openWatch(type, id, s=1, e=1, t=0){
     document.getElementById("wAudio").textContent = (window._anipmTracks && safeLabel(window._anipmTracks.lang, ""))
       ? (safeLabel(window._anipmTracks.lang, "").toUpperCase() + " track") : "Default";
     document.getElementById("wQual").textContent = qualityChipLabel();
-    document.getElementById("wEngine").textContent = ((MIRRORS.find(x => x.id === mirror) || {}).name || mirror) + " \u{00B7} "
-      + (document.getElementById("player").hasAttribute("sandbox") ? "Sandboxed" : "Raw");
+    paintEngineLabel();
   } catch(e){}
   try { paintWatchListBtn(); } catch(e){}
   try {
@@ -4223,6 +4273,10 @@ function epWatchInfo(s, e){
 }
 function maybeResumePrompt(){
   try {
+    // Watch Party: nobody inside a room is ever asked - join AND reload land
+    // straight in the video at the ROOM's timeline (syncToRoom does the math).
+    // Only solo watching keeps the Continue / Start over prompt.
+    try { if (typeof PARTY !== "undefined" && PARTY.inRoom && PARTY.inRoom()) return false; } catch(e){}
     if ((watchState.t || 0) > 0) return false; // explicit t (Continue row) wins
     if (mirror === "trailer") return false;
     const pos = savedPosFor(watchState.type, watchState.id, watchState.s, watchState.e);
@@ -4311,6 +4365,22 @@ function adoptProviderEpisode(sIn, eIn){
   if (!pastSyncGrace()) return false; // settling noise within 8s of our load/boot
   const count = seasonEpisodeCount(s);
   if (count > 0 && e > count) return false; // outside the real season range
+  // Watch Party: participants never follow provider-internal navigation -
+  // the HOST drives episodes. The provider frame self-advanced anyway (its
+  // own auto-next): snap BACK to the room's episode instead of diverging.
+  try {
+    if (PARTY.suppressAutoAdvance()) {
+      const nowA = Date.now();
+      window._reassertCount = (window._reassertCount || 0) + 1;
+      if (window._reassertCount <= 2 && nowA - (window._reassertAt || 0) >= 8000) {
+        window._reassertAt = nowA;
+        window._lastLoadAt = nowA;
+        loadPlayer();
+        setTimeout(() => { try { PARTY.syncNow(); } catch(e){} }, 800);
+      }
+      return false;
+    }
+  } catch(e){}
   watchState.s = s; watchState.e = e;
   window._lastLoadAt = Date.now();
   return true;
@@ -4601,7 +4671,18 @@ function qDropAuto(){
       return true;
     }
     const order = ["", "1080", "720", "480"];
-    const cur = QLEVELS[qIdx].v;
+    let cur = QLEVELS[qIdx].v;
+    // VidBolt knows its REAL running level: stepping from the blind "Auto"
+    // rung used to pin the very quality it was stuttering on (the first
+    // "fix" did nothing but wait 90 more seconds)
+    try {
+      if (mirror === "vidbolt" && window._boltActualQ) {
+        const aq = String(window._boltActualQ);
+        if (/1080/i.test(aq)) cur = "1080";
+        else if (/720/i.test(aq)) cur = "720";
+        else if (/480/i.test(aq)) cur = "480";
+      }
+    } catch(e){}
     const i = order.indexOf(cur);
     const nxt = order[Math.min(order.length - 1, i < 0 ? 1 : i + 1)];
     if (nxt === cur) return false; // already at the floor
@@ -4720,10 +4801,12 @@ function mirrorHealth(){
   const now = Date.now();
   if (_mirrorHealth.map && now - _mirrorHealth.at < 5 * 60 * 1000) return Promise.resolve(_mirrorHealth.map);
   if (_mirrorHealth.busy) return _mirrorHealth.busy;
+  const _t0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
   _mirrorHealth.busy = fetch(TMDB_BASE.replace(/\/api\/tmdb\/3$/, "/api/mirror-health") + "?_=" + now, { cache: "no-store" })
     .then(r => r.ok ? r.json() : null)
     .then(j => {
       _mirrorHealth.busy = null;
+      _mirrorHealth.rtt = Math.round(((typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now()) - _t0);
       if (j && j.mirrors) { _mirrorHealth.map = j.mirrors; _mirrorHealth.at = now; }
       return _mirrorHealth.map;
     })
@@ -4737,6 +4820,67 @@ function mirrorLooksDown(id){
     // usually still plays inside a real player - only hard failures count.
     return !!h && (h.status === 0 || h.status >= 500);
   } catch(e){ return false; }
+}
+/* ---- honest network + server performance (the buffering triage) ----
+   A 200 Mbps line that still buffers means the SOURCE is struggling, not the
+   connection - degrading the picture forever is the wrong fix there. We
+   measure what we honestly can (browser connection API + our own health
+   fetch latency) and remember how each server treats THIS viewer. */
+function netProbe(){
+  const out = { known: false, fast: false, slow: false, mbps: 0 };
+  try {
+    const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (c && typeof c.downlink === "number" && c.downlink > 0) {
+      out.known = true;
+      out.mbps = c.downlink;
+      const t = String(c.effectiveType || "");
+      out.slow = c.downlink < 1.5 || t === "2g" || t === "slow-2g" || t === "3g";
+      out.fast = c.downlink >= 5 && !out.slow;
+    }
+  } catch(e){}
+  if (!out.known && typeof _mirrorHealth.rtt === "number") {
+    // no connection API: the measured latency of our last health fetch is
+    // the best honest signal we have
+    out.known = true;
+    out.fast = _mirrorHealth.rtt < 900;
+    out.slow = _mirrorHealth.rtt > 2500;
+  }
+  return out;
+}
+function perfKey(id){ return "sb:srvperf:" + id; }
+function perfGet(id){
+  try { return JSON.parse(localStorage.getItem(perfKey(id)) || "null"); } catch(e){ return null; }
+}
+function perfSave(id, p){
+  try {
+    if (p.stalls >= 2 || (p.runs || 0) >= 2) localStorage.setItem(perfKey(id), JSON.stringify(p));
+  } catch(e){}
+}
+function perfRecordStart(id, ms){
+  try {
+    if (!id || !(ms >= 0) || ms > 300000) return;
+    const p = perfGet(id) || { stalls: 0, runs: 0, start: 0 };
+    p.runs = (p.runs || 0) + 1;
+    p.start = p.start ? Math.round(p.start * 0.6 + ms * 0.4) : Math.round(ms);
+    perfSave(id, p);
+  } catch(e){}
+}
+function perfRecordStall(id){
+  try {
+    const p = perfGet(id) || { stalls: 0, runs: 0, start: 0 };
+    p.stalls = (p.stalls || 0) + 1;
+    perfSave(id, p);
+  } catch(e){}
+}
+function perfLabel(id){
+  try {
+    if (mirrorLooksDown(id)) return "down";
+    const p = perfGet(id);
+    if (!p) return "";
+    if ((p.stalls || 0) >= 2) return "struggles here";
+    if ((p.runs || 0) >= 2 && p.start != null && p.start < 6000) return "fast for you";
+    return "";
+  } catch(e){ return ""; }
 }
 /* If the current server is confirmed down, hop once to a healthy one with an
    honest message; if none are healthy, say so instead of staying silent. */
@@ -4760,6 +4904,7 @@ function guardMirrorHealth(){
         window._healthHopped = true;
         toast(stuckFallbackName(mirror) + " is having server trouble right now (502/down) - moved you to " + stuckFallbackName(pick) + ".");
         mirror = pick;
+        try { PARTY.onLocalMirror(pick, true); } catch(e){} // the room follows the host's heal
         updateMirrorUI();
         paintMirrors();
         loadPlayer();
@@ -4836,7 +4981,11 @@ function midPlayRescue(reason){
       if (at > 5) { watchState.t = at; resumeAt = -1; } // resume where it died
       setMirror(fb, true);
       const ws = document.getElementById("watchStatus");
-      if (ws) ws.textContent = reason + " \u2014 moved you to " + nm + ", resuming at " + fmtT(at) + ".";
+      const net = netProbe();
+      const why = (net.known && net.fast)
+        ? "Your connection looks fast \u{2014} this server is struggling"
+        : reason;
+      if (ws) ws.textContent = why + " \u{2014} moved you to " + nm + ", resuming at " + fmtT(at) + ".";
       return;
     }
     stuckRecommend(reason, nm);
@@ -4918,10 +5067,13 @@ function armStuckWatchdogs(){
     }, _aTV ? 45000 : 18000);
     window._watchdog2 = setTimeout(() => {
       if (pairStarted() || (mirror !== "vidbolt" && mirror !== "vidzen" && mirror !== "vidcore")) return;
+      // VidBolt: one shield-less retry first - a player that refuses the
+      // sandbox sits black and the old blanket raw mode used to hide that
+      if (mirror === "vidbolt" && boltSandboxProbe()) return;
       if (window._autoHopped || !autoSwitchOn()) { stuckRecommend(`${nm} stayed stuck`, fbn); return; }
       window._autoHopped = true;
       const wsb = document.getElementById("watchStatus");
-      if (wsb) wsb.textContent = `${nm} stayed stuck — moved you to ${fbn}. \u{21C4} Source anytime to go back.`;
+      if (wsb) wsb.textContent = `${nm} stayed stuck \u{2014} moved you to ${fbn}. \u{21C4} Source anytime to go back.`;
       setMirror(fb, true);
     }, _aTV ? 90000 : 35000);
     return;
@@ -5038,6 +5190,7 @@ function loadPlayer(){
     // a title that already earned its unsandboxed retry keeps it across
     // episode reloads (no 8s dark wait every episode); new title = re-probe
     if (window._anipmRawFor !== watchState.id) { window._anipmRaw = false; window._anipmRawFor = watchState.id; }
+    if (window._boltRawFor !== watchState.id) { window._boltRaw = false; window._boltRawFor = watchState.id; }
     // slow TV boxes can take a minute just to get going — TV gets 30s/60s
     // before we retry or heal, so a merely-loading player is never yanked
     armStuckWatchdogs();
@@ -5134,7 +5287,7 @@ function loadPlayer(){
       if (mirror === "vidbolt") boltSend({ type: "play" });
       else if (mirror === "vidcore") coreSend("play");
       else zenSend({ type: "play" });
-    }, document.body.classList.contains("tv-mode") ? 10000 : 6000);
+    }, document.body.classList.contains("tv-mode") ? 10000 : 3000);
   }
   // fallback: hide spinner even if the player never fires ready
   // (ad-blocked network etc.) — slow TV boxes get longer before we nudge
@@ -5229,7 +5382,9 @@ function toggleShield(){
   const f = document.getElementById("player");
   // Shield ON = sandbox without popups/top-navigation (this is what kills the
   // resume-click ad popups on CineSrc and every tolerant mirror). OFF = allow
-  // popups (only if a server breaks).
+  // popups (only if a server breaks). Turning it back ON retries the sandbox
+  // even on a source that once refused it (per-title raw flags reset).
+  if (on) { window._boltRaw = false; window._anipmRaw = false; }
   f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-modals");
   reloadKeepPos();
 }
@@ -5275,6 +5430,8 @@ function goHome(ev){
   document.getElementById("watchView").classList.add("hidden");
   document.getElementById("homeView").classList.remove("hidden");
   stopPlayerNow(); // about:blank - src="" never unloaded the frame (audio kept playing)
+  window._tapThru = false; clearTimeout(window._tapThruT);
+  try { const tp = document.getElementById("tapThruBack"); if (tp) tp.classList.add("hidden"); } catch(e){}
   try { tapLayerSync(); } catch(e){} // leaving the player disengages the tap layer
   syncMobileNav();
   showRows();
@@ -5569,13 +5726,14 @@ function renderList(){
   function tapLayerSync(){
     // the tap layer serves OUR driven bar only: engaged while watching with
     // the bar on screen (driven mirrors); coordinated mirrors need the
-    // touches for their own player, so it stands down there entirely
+    // touches for their own player, so it stands down there entirely. The
+    // touch-through toggle (phones/tablets) stands it down on demand too.
     try {
       const box = document.getElementById("playerBox");
       const bar = document.getElementById("ctlBar");
       const watching = !document.getElementById("watchView").classList.contains("hidden");
       const driven = bar && !bar.classList.contains("hidden");
-      if (box) box.classList.toggle("tap-catch", !!(watching && driven));
+      if (box) box.classList.toggle("tap-catch", !!(watching && driven && !window._tapThru));
     } catch(e){}
   }
 
@@ -5686,7 +5844,15 @@ function ctlPaint(){
     if (b) b.textContent = rate + "\u00D7";
   }
   if (L.cur !== cur || L.dur !== dur) {
-    if (L.cur !== cur) window._lastProgAt = Date.now(); // stall watchdog feeds
+    if (L.cur !== cur) {
+      // first real progress after a load = the honest start time for THIS
+      // server on THIS viewer's connection (feeds "fast for you" labels)
+      if (!window._perfSeen) {
+        window._perfSeen = true;
+        try { perfRecordStart(mirror, Date.now() - (window._perfLoadAt || Date.now())); } catch(e){}
+      }
+      window._lastProgAt = Date.now(); // stall watchdog feeds
+    }
     L.cur = cur; L.dur = dur;
     const cEl = document.getElementById("ctlCur");
     if (cEl) cEl.textContent = fmtT(cur);
@@ -6011,11 +6177,39 @@ function hideSubTip(forever){
 /* Shared mid-playback recovery: first lower quality and resume in-place;
    after the 480p floor, retire the stalled source and offer/hop to a mirror. */
 function recoverMidPlayStall(reason){
+  window._stallCount = (window._stallCount || 0) + 1;
+  perfRecordStall(mirror);
+  const net = netProbe();
+  // honest triage: a FAST line with repeated stalls on this server is a
+  // SOURCE problem - stop degrading the picture and move to a proven server
+  // (the last one that played smoothly). A SLOW line gets the quality ladder:
+  // that IS the right fix for a slow network, and we say so.
+  if (net.known && net.fast && (window._stallCount || 0) >= 2 && autoSwitchOn()) {
+    midPlayRescue("This server keeps stalling on your fast connection");
+    return;
+  }
   if (qDropAuto()) {
-    resumeAt = Math.max(0, Math.floor(pState.cur || 0));
-    loadPlayer();
+    // LIVE recovery: mirrors with a real quality API switch rendition in
+    // place and a seek-nudge re-primes the buffer - a full player reload
+    // after every stall used to cost more loading than the stall itself.
+    // Only a mirror whose quality needs a reload actually reloads.
+    const at = Math.max(0, Math.floor(pState.cur || 0));
+    if (mirror === "anipm") {
+      try { anipmSend("seek", { time: at }); anipmSend("play"); } catch(e){}
+    } else if (mirror === "vidbolt") {
+      try { boltSeekTo(at); boltSend({ type: "play" }); } catch(e){}
+    } else if (mirror === "vidzen") {
+      try { zenSeekTo(at); zenSend({ type: "play" }); } catch(e){}
+    } else if (mirror === "vidcore") {
+      try { coreSend("seek", { time: at }); coreSend("play"); } catch(e){}
+    } else {
+      resumeAt = at;
+      loadPlayer();
+    }
     const ws = document.getElementById("watchStatus");
-    if (ws) ws.textContent = "Playback stalled - retrying at lower quality.";
+    if (ws) ws.textContent = (net.known && net.slow)
+      ? "Your network looks slow right now \u{2014} dropped quality one step to keep it smooth."
+      : "Playback stalled \u{2014} dropped quality one step to keep it smooth. Pick any quality in A/V.";
     return;
   }
   midPlayRescue(reason);
@@ -6039,7 +6233,11 @@ setInterval(() => {
       return;
     }
     const lp = window._lastProgAt || 0;
-    if (!lp || Date.now() - lp < 25000) return;
+    // live-quality mirrors recover in-place (no reload): react to a freeze
+    // sooner. Reload-based recovery keeps the patient window - reloading a
+    // player on a false alarm costs more than the stall.
+    const frozenNeed = (mirror === "vidbolt" || mirror === "anipm" || mirror === "vidzen" || mirror === "vidcore") ? 15000 : 25000;
+    if (!lp || Date.now() - lp < frozenNeed) return;
     window._lastProgAt = Date.now(); // one rescue per window
     recoverMidPlayStall("Playback froze on this source");
   } catch(e){}
@@ -6083,7 +6281,8 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
 let panelOpener = null;
 function openSettings(){
   // native fullscreen can't show page panels: cinema keeps video big instead
-  try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+  // (_fsNative must be cleared FIRST or _fsSync tears cinema down with the exit)
+  try { if (document.fullscreenElement || document.webkitFullscreenElement) { window._fsNative = false; document.exitFullscreen(); } } catch(e){}
   if (!document.body.classList.contains("video-fs")
       && !document.getElementById("watchView").classList.contains("hidden")
       && document.body.classList.contains("tv-mode")) enterVideoFs();
@@ -6096,7 +6295,7 @@ function openSettings(){
 }
 async function openEpisodes(){
   if (watchState.type !== "tv") return;
-  try { if (document.fullscreenElement) document.exitFullscreen(); } catch(e){}
+  try { if (document.fullscreenElement || document.webkitFullscreenElement) { window._fsNative = false; document.exitFullscreen(); } } catch(e){}
   if (!document.body.classList.contains("video-fs")
       && !document.getElementById("watchView").classList.contains("hidden")
       && document.body.classList.contains("tv-mode")) enterVideoFs();
@@ -6276,7 +6475,9 @@ function forgetServer(){
    there); the rest use their own player entirely.
    NO_SANDBOX members load UNSANDBOXED (see applyMirrorSandbox): Ad Shield is
    off there by necessity, use Brave/uBlock for in-stream ads. All other
-   mirrors stay sandboxed. */
+   mirrors stay sandboxed. VidBolt is shield-first now: sandboxed while it
+   starts (its popups and modal ads die there), with ONE honest raw retry if
+   the player refuses the sandbox (window._boltRaw). */
 const MIRRORS = [
   { id: "cinesrc", name: "CineSrc" },
   { id: "vidlink", name: "VidLink" },
@@ -6298,7 +6499,7 @@ const MIRRORS = [
    frame). Everything else — INCLUDING our own CineSrc/VidZen, which sail
    through sandbox — carries the sandbox popup-block whenever Ad Shield is
    on: that is the website-side ad shield that killed the resume popups. */
-const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm", "vidrift", "vidbolt"]);
+const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm", "vidrift"]);
 /* TV-safe lineup helpers (TV_REMOTE_OK / IS_TV_DEVICE live in CONFIG above):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
@@ -6686,8 +6887,10 @@ function setMirror(m, auto){  if (m === "trailer" && !trailerKey) {
   mirror = m;
   if (m === "anipm" && !auto) { window._anipmRetryKey = ""; window._anipmRetryCount = 0; window._anipmGestureBlocked = false; }
   if (m === "vidbolt" && !auto) { window._boltRetryKey = ""; window._boltRetryCount = 0; }
-  // manual hops reset the one-heal guard (auto-heals must never ping-pong)
-  if (!auto) window._autoHopped = false;
+  // manual hops reset the one-heal guard (auto-heals must never ping-pong);
+  // a manual pick also re-arms the HEALTH hop budget - one burned health hop
+  // must never leave a title unhealable after the user picks a new server
+  if (!auto) { window._autoHopped = false; window._healthHopped = false; }
   // auto-heals never rewrite the saved preference (or every movie after
   // would open on the fallback mirror)
   if (m !== "trailer" && !auto) { try { localStorage.setItem("streambox_mirror", m); } catch(e){} }
@@ -6796,9 +6999,9 @@ function updateMirrorUI(){
       return;
     }
     if (mirror === "vidbolt") {
-      document.getElementById("watchStatus").textContent = watchState.anime
-        ? "VidBolt: our bar drives play/seek/skip · A/V holds servers, quality + subtitles · no Ad Shield (player refuses sandbox)"
-        : "VidBolt: our bar drives play/seek/skip · A/V holds servers, quality + subtitles · no Ad Shield (player refuses sandbox)";
+      document.getElementById("watchStatus").textContent = window._boltRaw
+        ? "VidBolt: our bar drives play/seek/skip — A/V holds servers, quality + subtitles — Ad Shield off for this source (it refused the sandbox)"
+        : "VidBolt: our bar drives play/seek/skip — A/V holds servers, quality + subtitles — Ad Shield on (its popups stay blocked)";
       return;
     }
     document.getElementById("watchStatus").textContent = NO_SANDBOX.has(mirror)
@@ -6821,21 +7024,54 @@ function applyMirrorSandbox(){
   // AniPM earned an unsandboxed retry (stage-1 probe): keep it off on reloads
   if (mirror === "anipm" && window._anipmRaw) {
     f.removeAttribute("sandbox");
+    try { paintEngineLabel(); } catch(e){}
+    return;
+  }
+  // VidBolt: shield-first - the same one-shot raw retry it earns only after a
+  // sandboxed start fails (window._boltRaw, per title)
+  if (mirror === "vidbolt" && window._boltRaw) {
+    f.removeAttribute("sandbox");
+    try { paintEngineLabel(); } catch(e){}
     return;
   }
   if (NO_SANDBOX.has(mirror)) {
     // our players + sandbox-refusing pages stay raw — the request filter is
     // the shield here, never the sandbox attribute
     f.removeAttribute("sandbox");
+    try { paintEngineLabel(); } catch(e){}
     return;
   }
   const on = sh ? sh.checked : true;
   f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-modals");
+  try { paintEngineLabel(); } catch(e){}
+}
+/* the engine label must always tell the TRUTH about the live frame state
+   (it used to paint "Sandboxed" from the static attr before the policy ran) */
+function paintEngineLabel(){
+  const el = document.getElementById("wEngine");
+  if (!el) return;
+  try {
+    const f = document.getElementById("player");
+    el.textContent = ((MIRRORS.find(x => x.id === mirror) || {}).name || mirror || "—") + " \u{00B7} "
+      + (f && f.hasAttribute("sandbox") ? "Sandboxed" : "Raw");
+  } catch(e){}
 }
 function paintMirrors(){
   const row = document.getElementById("mirrorRow");
   if (!row) return;
   row.innerHTML = "";
+  // live server status arrives async: repaint ONCE when fresh data lands
+  // (a cached resolve must never re-trigger the fetch-check loop)
+  if (!window._mhp) {
+    window._mhp = true;
+    const at0 = _mirrorHealth.at;
+    try {
+      mirrorHealth().then(() => {
+        window._mhp = false;
+        if (_mirrorHealth.at !== at0) { try { paintMirrors(); } catch(e){} }
+      }).catch(() => { window._mhp = false; });
+    } catch(e){ window._mhp = false; }
+  }
   const head = (t) => {
     const p = document.createElement("p");
     p.className = "w-full text-[11px] font-black tracking-[.18em] text-teal-300 mt-1";
@@ -6844,9 +7080,12 @@ function paintMirrors(){
   };
   const mk = (id, label, enabled, hint) => {
     const b = document.createElement("button");
-    b.textContent = label;
+    const st = perfLabel(id);
+    b.textContent = st ? label + " \u{00B7} " + st : label;
     b.disabled = !enabled;
-    if (hint) b.title = hint;
+    b.title = (hint ? hint + " \u{00B7} " : "") + (st === "down" ? "server error right now"
+      : st === "struggles here" ? "buffered repeatedly on your connection"
+      : st === "fast for you" ? "started fast and played smoothly for you" : "no data yet");
     b.className = "px-4 h-10 rounded-full text-sm font-bold " + (!enabled
       ? "bg-white/5 text-gray-600"
       : (mirror === id ? "bg-teal-500" : "bg-white/10 hover:bg-white/20"));
@@ -8458,6 +8697,9 @@ function boltArmStartRetry(delay){
     if (document.getElementById("watchView").classList.contains("hidden")) return; // left the player
     if (mirror !== "vidbolt" || window._boltProgress
         || [watchState.type, watchState.id, watchState.s, watchState.e].join(":") !== key) return;
+    // one shield-less retry before any reload/hop: a player that refuses the
+    // sandbox sits black and retries only repeat the refusal
+    if (boltSandboxProbe()) return;
     const used = window._boltRetryCount || 0;
     if (used < 2) {
       window._boltRetryCount = used + 1;
@@ -8478,6 +8720,26 @@ function boltArmStartRetry(delay){
     if (ws) ws.textContent = `VidBolt stayed loading after two retries — moving to ${nm}.`;
     setMirror(fb, true);
   }, delay);
+}
+function boltSandboxProbe(){
+  // VidBolt earned a shield-less retry: on players/networks that refuse the
+  // sandbox the frame sits black forever (the old blanket raw mode hid this).
+  // ONE probe per title: drop the sandbox for this source and reload keeping
+  // position - honest copy, ad hosts still filtered app-wide on the APK.
+  try {
+    if (mirror !== "vidbolt" || window._boltRaw) return false;
+    const f = document.getElementById("player");
+    if (!f || !f.hasAttribute("sandbox")) return false;
+    window._boltRaw = true;
+    f.removeAttribute("sandbox");
+    const at = Math.max(0, Math.floor(pState.cur || window._boltStartAt || 0));
+    if (watchState.anime) { watchState.t = at; resumeAt = -1; }
+    else { resumeAt = at; watchState.t = 0; }
+    const ws = document.getElementById("watchStatus");
+    if (ws) ws.textContent = "Retrying VidBolt without the sandbox \u{2014} ad hosts stay filtered app-wide; popup blocking is off for this source.";
+    loadPlayer();
+    return true;
+  } catch(e){ return false; }
 }
 function boltSend(msg){
   try {
@@ -9045,7 +9307,7 @@ async function loadVidboltAnime(){
     if (mirror !== "vidbolt" || watchState.id !== id) return;
     if (window._cinePlaying || window._boltStarted) return;
     boltSend({ type: "play" });
-  }, document.body.classList.contains("tv-mode") ? 10000 : 6000);
+  }, document.body.classList.contains("tv-mode") ? 10000 : 3000);
   armTapHint();
 }
 function anipmArmStartRetry(delay){
@@ -9337,6 +9599,9 @@ function openAV(){
   // (its player owns audio/subs/quality — we only hop mirrors there)
   if (mirror !== "anipm" && mirror !== "vidbolt") return;
   try { panelOpener = document.activeElement; } catch(e){}
+  // native fullscreen can't show page panels (the sheet rendered BEHIND the
+  // fullscreen element = a dead button): cinema keeps video big instead
+  try { if (document.fullscreenElement || document.webkitFullscreenElement) { window._fsNative = false; document.exitFullscreen(); } } catch(e){}
   document.getElementById("avSheet").classList.remove("hidden");
   document.body.classList.add("modal-open");
   paintAV(); // after unhide — it guards on visibility
@@ -9826,10 +10091,15 @@ const PARTY = (() => {
         // S.pw is the password the USER typed - the server snapshot never
         // echoes it back (S.room._pw was dead plumbing and password rooms
         // locked their own owner out on the second reconnect)
+        // ONE join per connection: a second join on the same socket is how
+        // ghost seats used to multiply on older hubs
+        S._joinSentOn = ws;
         send({ t: "join", name: displayName(), code: S.room.code, token: S.token, password: S.pw || "" });
       } else if (S.pending) {
         // a create/join parked while the handshake was slow
-        const p = S.pending; S.pending = null; send(p);
+        const p = S.pending; S.pending = null;
+        if (p.t === "join") S._joinSentOn = ws;
+        send(p);
       }
       clearInterval(S.hbT);
       S.hbT = setInterval(() => send({ t: "heartbeat", clientTs: Date.now() }), CFG.HEARTBEAT);
@@ -9908,6 +10178,9 @@ const PARTY = (() => {
       }
       case "room": {
         S.room = m.room;
+        S.rejoinTries = 0; // a fresh seat restarts the retry budget
+        S._repairAt = 0;
+        S._lastRelayedPaused = (m.room.playback && m.room.playback.status !== "playing");
         // identity rule that survives BOTH hub generations: on a REATTACH our
         // stored resume token is the seat identity - never let a response
         // rotate it (older hubs echo the per-connection token there, which
@@ -10037,6 +10310,21 @@ const PARTY = (() => {
           paint();
         }
         return;
+      case "source":
+        // room-wide mirror ("server") switch: follow it (auto flag so our own
+        // setMirror never echoes it back to the room)
+        if (!S.room) return;
+        S.room.source = m.mirror || "";
+        paint();
+        try {
+          if (m.mirror && m.mirror !== mirror && typeof mirrorAllowed === "function" && mirrorAllowed(m.mirror)) {
+            S._srcApplying = true;
+            setMirror(m.mirror, true);
+            S._srcApplying = false;
+            toast("The room switched to " + (typeof stuckFallbackName === "function" ? stuckFallbackName(m.mirror) : m.mirror));
+          }
+        } catch(e){}
+        return;
       case "kicked":
         // `kicked` is personal: only the named target tears down. (Older
         // servers broadcast it to the whole room - one kick used to evict
@@ -10057,8 +10345,13 @@ const PARTY = (() => {
           return;
         }
         if (m.notice === "rejoin" && S.room) {
-          // seat expired while we were away: reattach by resume token
-          send({ t: "join", name: displayName(), code: S.room.code, token: S.token, password: S.pw || "" });
+          // seat expired while we were away: reattach by resume token - but
+          // only once per connection (a repeat notice on a socket that already
+          // joined is stale; the not_in_room repair covers a real lost seat)
+          if (S._joinSentOn !== S.ws) {
+            S._joinSentOn = S.ws;
+            send({ t: "join", name: displayName(), code: S.room.code, token: S.token, password: S.pw || "" });
+          }
           return;
         }
         if (m.notice === "room_gone") {
@@ -10081,7 +10374,53 @@ const PARTY = (() => {
           not_in_room: "You're not in the room anymore.",
           room_limit: "Too many rooms right now - try again in a few minutes.",
         };
+        // an old hub answering `bad_message` to an additive message (source)
+        // is a capability gap, not a user error - never surface it
+        if (m.error === "bad_message" && Date.now() - (S._additiveAt || 0) < 2500) return;
+        if (m.error === "not_in_room") {
+          // our seat vanished server-side (swept while we thought we were in):
+          // repair once by resume token; if the repair didn't take, say so
+          const nowR = Date.now();
+          if (S._repairAt && nowR - S._repairAt < 5000) {
+            teardownRoom();
+            paint();
+            toast("Couldn't rejoin the party \u{2014} it ended or you were removed");
+            return;
+          }
+          if (S.room) {
+            S._repairAt = nowR;
+            S._joinSentOn = null;
+            send({ t: "join", name: displayName(), code: S.room.code, token: S.token, password: S.pw || "" });
+          }
+          return;
+        }
         if (m.for === "join") {
+          if (S.room) {
+            // this was a REJOIN - never leave the client stuck on CONNECTING
+            if (m.error === "conflict") {
+              // the server says this connection already holds a seat
+              S.status = "in-room"; paint(); return;
+            }
+            if (m.error === "full" || m.error === "rate_limited") {
+              // retryable: ghost-filled rooms heal, rate limits expire
+              S.rejoinTries = (S.rejoinTries || 0) + 1;
+              if (S.rejoinTries <= 5) {
+                S.status = "reconnecting"; paint();
+                clearTimeout(S.rejoinT);
+                S.rejoinT = setTimeout(() => {
+                  if (!S.room) return;
+                  S._joinSentOn = null;
+                  send({ t: "join", name: displayName(), code: S.room.code, token: S.token, password: S.pw || "" });
+                }, Math.min(15000, 1500 * S.rejoinTries));
+                return;
+              }
+            }
+            // terminal for this room: clean up honestly instead of zombying
+            teardownRoom();
+            paint();
+            toast(map[m.error] || "Couldn't rejoin the party");
+            return;
+          }
           if (m.error === "wrong_password") showJoinPw(true);
           toast(map[m.error] || m.error);
         } else if (m.for === "chat") {
@@ -10104,8 +10443,13 @@ const PARTY = (() => {
   function suppressLocalEcho(){ return Date.now() < S.suppressUntil; }
 
   function onLocalPlayPause(){
-    if (!inRoom() || !canControl() || suppressLocalEcho()) return;
+    // a DELIBERATE press always reaches the room - the echo window guards
+    // provider events, never the user's own hands. A quick pause->play used to
+    // be swallowed by the echo of the first press and then force-reverted by
+    // the room's stale state ("whatever we want, it yanks us back").
+    if (!inRoom() || !canControl()) return;
     S._localSentAt = Date.now();
+    S._lastRelayedPaused = (typeof pState !== "undefined") && !!pState.paused;
     send({ t: "playback", action: (typeof pState !== "undefined" && pState.paused) ? "pause" : "play",
       position: (typeof pState !== "undefined" ? (pState.cur || 0) : 0), sessionVersion: S.room.playback.sessionVersion });
   }
@@ -10121,10 +10465,29 @@ const PARTY = (() => {
     if (!inRoom() || !canControl()) return;
     if (suppressLocalEcho()) return;
     if (Date.now() < (S._localSentAt || 0) + 1500) return;
-    onLocalPlayPause();
+    // relay only USER intent, confirmed: a provider machine pause/resume
+    // (buffer stall, flaky embed) flaps inside a beat - waiting 1.2s and
+    // re-checking lets those cancel themselves instead of pausing the room
+    const pausedNow = (typeof pState !== "undefined") && !!pState.paused;
+    clearTimeout(S._relayT);
+    S._relayT = setTimeout(() => {
+      try {
+        if (!inRoom() || !canControl()) return;
+        if (suppressLocalEcho()) return;
+        if (Date.now() < (S._localSentAt || 0) + 1500) return;
+        const still = (typeof pState !== "undefined") && !!pState.paused;
+        if (still === S._lastRelayedPaused) return; // the room already knows
+        // a burst of machine pauses = the source is struggling, not the
+        // viewer: never pause the whole room for it
+        if (still && (window._pauseBurst || []).length >= 2 && Date.now() - (window._userPauseAt || 0) > 4000) return;
+        onLocalPlayPause();
+      } catch(e){}
+    }, 1200);
   }
   function onLocalSeek(t){
-    if (!inRoom() || !canControl() || suppressLocalEcho()) return;
+    // deliberate seeks (bar drag, skip pills, -10/+30) always reach the room
+    if (!inRoom() || !canControl()) return;
+    S._localSentAt = Date.now();
     send({ t: "playback", action: "seek", position: Math.max(0, Math.floor(t || 0)), sessionVersion: S.room.playback.sessionVersion });
   }
   function detectContentChange(){
@@ -10144,6 +10507,52 @@ const PARTY = (() => {
     }
   }
   function contentKeyOf(c){ return c ? `${c.type}/${c.tmdbId}/${c.season}/${c.episode}` : ""; }
+
+  /* ---- peer observability (additive sync_report: dur + source) ---- */
+  let _reportAt = 0;
+  function sourceName(){
+    try { return (MIRRORS.find(x => x.id === mirror) || {}).name || (mirror || ""); } catch(e){ return mirror || ""; }
+  }
+  function reportPeerState(){
+    if (!inRoom()) return;
+    const now = Date.now();
+    if (now - (_reportAt || 0) < 4000) return;
+    _reportAt = now;
+    let pos = 0, dur = 0, paused = true;
+    try { pos = Math.floor(pState.cur || 0); dur = Math.floor(pState.dur || 0); paused = !!pState.paused; } catch(e){}
+    send({ t: "sync_report", position: pos, paused, dur, source: sourceName() });
+  }
+  function cutMismatch(){
+    // honest approximate mode: the room clock assumes ONE cut. Sub vs dub (or
+    // two mirrors after a hop) = different runtimes - different stories at the
+    // same timestamp. Detect it, admit it, stop fighting it.
+    try {
+      const host = (S.room && S.room.participants || []).find(p => p.host);
+      const hd = host && Number(host.dur) || 0;
+      const mine = (typeof pState !== "undefined") ? (Number(pState.dur) || 0) : 0;
+      if (!hd || !mine) return false;
+      return Math.abs(hd - mine) > 60 || Math.abs(hd - mine) > 0.05 * Math.max(hd, mine);
+    } catch(e){ return false; }
+  }
+  function sourceMismatch(){
+    try {
+      const want = (S.room && S.room.source) || "";
+      return !!(want && mirror && want !== mirror);
+    } catch(e){ return false; }
+  }
+  /* room-wide source ("server") switch: manual picks by controllers and the
+     HOST's own heals move the whole room; a non-host's auto-heal stays local */
+  function onLocalMirror(m, auto){
+    if (!inRoom() || !canControl()) return;
+    if (S._srcApplying) return; // following the room's own switch - never echo back
+    if (auto && !isHost()) return;
+    if (!m || m === "trailer") return;
+    S._additiveAt = Date.now(); // old hubs answer bad_message: capability gap, not an error
+    try { S.room.source = m; } catch(e){}
+    send({ t: "source", mirror: m });
+  }
+  function roomSource(){ return (S.room && S.room.source) || ""; }
+  function syncNow(){ try { syncToRoom(); } catch(e){} }
 
   function applyContent(c, silent){
     if (!c) return;
@@ -10223,7 +10632,11 @@ const PARTY = (() => {
       }
       return;
     }
-    S.suppressUntil = Date.now() + 1500;
+    // own echo (the hub broadcasts back to the sender) must never suppress
+    // the user's NEXT press - only remote-driven changes may. Without this a
+    // pause->play within ~1.5s was dropped and the room force-reverted it.
+    if (Date.now() >= (S._localSentAt || 0) + 1200) S.suppressUntil = Date.now() + 1500;
+    if (action === "play" || action === "pause") S._lastRelayedPaused = (action === "pause");
     const target = expectedPos();
     try {
       if (action === "play") {
@@ -10252,6 +10665,7 @@ const PARTY = (() => {
     // and corrections into it are pointless - returning re-syncs via syncToRoom
     try { if (document.getElementById("watchView").classList.contains("hidden")) return; } catch(e){}
     detectContentChange();
+    try { reportPeerState(); } catch(e){}
     const a = adapter();
     if (a.cap === "coordinated" || !a.seek) return;
     const pb = S.room.playback;
@@ -10270,6 +10684,10 @@ const PARTY = (() => {
     const nowS = serverNow();
     if ((pb.updatedAt || 0) > nowS) return; // scheduled start: hold the gate
     if (typeof pState !== "undefined" && pState.seeking) return;
+    // fresh load / episode switch: syncToRoom lands it - correcting against
+    // the PREVIOUS episode's room timeline used to seek the new player to the
+    // old episode's end (clamped -> `ended` -> the room lurched a whole step)
+    if (!pastSyncGrace()) return;
     // a LOCAL pause on a bridge with no pause API is a deliberate user action
     // (the player itself is the only pause control) - correcting drift there
     // would force-resume them every few seconds. Never yank a paused viewer.
@@ -10278,6 +10696,22 @@ const PARTY = (() => {
     S.lastDrift = Math.round(drift * 1000);
     const mag = Math.abs(drift);
     if (mag < CFG.SYNC_NUDGE) return;
+    // different cuts (sub vs dub, two mirrors after a hop): the timelines do
+    // not line up second-for-second and chasing them is a fight the math can
+    // never win. Bridge only BIG gaps - gently, and never into our own
+    // end-zone (clamping at the end fires `ended` and chaos).
+    if (cutMismatch()) {
+      if (mag < 15) return;
+      const myDur = (typeof pState !== "undefined" ? (pState.dur || 0) : 0);
+      if (myDur > 0 && a.pos() > myDur - 20) return;
+      const nowC = Date.now();
+      if (nowC - S.lastCorrect < CFG.SYNC_MIN_GAP) return;
+      S.lastCorrect = nowC;
+      try {
+        if (a.seek) a.seek(myDur > 0 ? Math.min(expectedPos() + 0.25, myDur - 15) : expectedPos() + 0.25);
+      } catch(e){}
+      return;
+    }
     const now = Date.now();
     if (now - S.lastCorrect < CFG.SYNC_MIN_GAP) return; // never a correction loop
     S.lastCorrect = now;
@@ -10345,6 +10779,16 @@ const PARTY = (() => {
     S.unread = 0;
     S.lastContentKey = "";
     S.pw = ""; // the room password dies with the room
+    S.token = ""; // a dead room's resume token must never haunt the next join
+    S.rejoinTries = 0;
+    S._repairAt = 0;
+    S._joinSentOn = null;
+    S.want = false; // out of the room: no pending reconnect may resurrect it
+    clearTimeout(S.rejoinT);
+    clearTimeout(S.nextRetry);
+    clearInterval(S.hbT); // heartbeats stop with the room (the old leak pinged every 20s forever)
+    try { if (S.ws) S.ws.close(); } catch(e){}
+    S.ws = null;
   }
 
   /* ---- UI ---- */
@@ -10421,6 +10865,20 @@ const PARTY = (() => {
       }
       box.appendChild(chip);
     });
+    // honest sync hints (house rule: admit the limits, never fake precision)
+    const hint = el("partyHint");
+    if (hint) {
+      const msgs = [];
+      try {
+        if (cutMismatch()) msgs.push("Different cut/audio (sub vs dub) \u{2014} position sync is approximate. Pause and episodes still follow.");
+        if (sourceMismatch()) {
+          const nmOf = (x) => { try { return (MIRRORS.find(y => y.id === x) || {}).name || x; } catch(e){ return x; } };
+          msgs.push("The room is on " + nmOf(roomSource()) + " \u{2014} you're on " + nmOf(mirror) + ". Match the source for tight sync.");
+        }
+      } catch(e){}
+      if (msgs.length) { hint.textContent = msgs.join(" "); hint.classList.remove("hidden"); }
+      else hint.classList.add("hidden");
+    }
   }
   function paintChat(msg){
     const log = el("partyChatLog");
@@ -10591,6 +11049,7 @@ const PARTY = (() => {
     toggleCtl(){ if (isHost()) send({ t: "settings", allowControl: el("partyCtlToggle").checked }); },
     toggleChat(){ if (isHost()) send({ t: "settings", chatEnabled: el("partyChatToggle").checked }); },
     inRoom, isHost, suppressAutoAdvance, onLocalPlayPause, onLocalSeek, onProviderPlayState, detectContentChange,
+    onLocalMirror, roomSource, syncNow, cutMismatch, sourceMismatch, sourceName,
     state: S,
   };
 })();
@@ -10678,6 +11137,10 @@ ctlSeekRel = function(d){ const r = _partySeekRel.apply(this, arguments); try { 
 // resync guidance): wrapping it catches every local seek path
 const _partyMirrorSeek = mirrorSeek;
 mirrorSeek = function(t){ const r = _partyMirrorSeek.apply(this, arguments); try { PARTY.onLocalSeek(t); } catch(e){} return r; };
+// a mirror ("server") switch in a room moves the WHOLE room: manual picks and
+// the host's own heals broadcast; following the room's switch never echoes back
+const _partySetMirror = setMirror;
+setMirror = function(m, auto){ const r = _partySetMirror.apply(this, arguments); try { PARTY.onLocalMirror(m, auto); } catch(e){} return r; };
 PARTY.boot();
 
 // deep-link support: watch.html style ?type=tv&id=1396&s=1&e=1
