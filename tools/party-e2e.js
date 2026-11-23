@@ -311,7 +311,35 @@ const SAMPLE_DRIFT = `
     const aPos3 = await A.ev(`window.__fakePos()`);
     check(Math.abs(bPos2 - aPos3) < 6, "reconnected guest re-landed on the live timeline");
 
-    /* ---------- 10. DRIFT DISTRIBUTION (4 clients, 45s of playback) ---------- */
+    /* ---------- 12. MEDIA VERSION: host intent reaches guests (dub/sub bug) ---------- */
+    // simulate AniPM surfaces on both pages (the adapter's anipmSend is a
+    // silent no-op without a frame; _anipmTracks is the real state object)
+    await A.ev(`mirror = "anipm"; window._anipmTracks = { lang: "sub", qualities: [], quality: "Auto", subTracks: null }; PARTY.syncMediaUp(); "ok"`);
+    await sleep(800);
+    const hostMedia = await A.ev(`PARTY.state.room.media && PARTY.state.room.media.audio`);
+    check(hostMedia === "sub", "host's intended version (Japanese/sub) is authoritative in room state");
+    // the guest's own player would default to DUB (the reported bug)
+    const guestBefore = await B.ev(`mirror = "anipm"; window._anipmTracks = { lang: "dub", qualities: [], quality: "Auto", subTracks: null }; window._anipmTracks.lang`);
+    check(guestBefore === "dub", "guest's local default is dub (the mismatch waiting to happen)");
+    await B.ev(`PARTY.applyMediaIntent(true); "applied"`);
+    const guestAfter = await B.ev(`window._anipmTracks.lang`);
+    check(guestAfter === "sub", "guest LOADED THE HOST'S VERSION (dub/sub mismatch fixed: " + guestBefore + " -> " + guestAfter + ")");
+    // episode change preserves the intended version (3.5)
+    await A.ev(`PARTY.onLocalOpenWatch("tv", 1396, 1, 3); "switch"`);
+    await sleep(2500);
+    const mediaAfterEp = await B.ev(`PARTY.state.room.media && PARTY.state.room.media.audio`);
+    check(mediaAfterEp === "sub", "episode change keeps the intended audio (nobody defaults to dub)");
+    // personal deviation stays personal (3.7) and never overwrites the room
+    await B.ev(`PARTY.state._mediaApplying = 0; window._anipmTracks.lang = "dub"; PARTY.onLocalMediaChange(); "personal"`);
+    await sleep(800);
+    const personal = await B.ev(`PARTY.state.personalMedia === true`);
+    const roomStill = await A.ev(`PARTY.state.room.media.audio`);
+    check(personal === true && roomStill === "sub", "personal language choice stays local - the room version is untouched");
+    const matched = await B.ev(`PARTY.matchHost(); window._anipmTracks.lang`);
+    check(matched === "sub", "Match Host Version returns the participant to the intended version");
+    await A.ev(`mirror = "cinesrc"; "back"`); await B.ev(`mirror = "cinesrc"; "back"`);
+
+    /* ---------- 13. DRIFT DISTRIBUTION (4 clients, 45s of playback) ---------- */
     for (const n of ["A", "B", "C", "S"]) clients[n].samples = [];
     for (let i = 0; i < 90; i++) {
       for (const n of ["A", "B", "C", "S"]) {

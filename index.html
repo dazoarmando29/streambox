@@ -748,6 +748,22 @@
     background: rgba(255,255,255,.08); font-size: 13px; line-height: 1.45; word-break: break-word; }
   .pp-msg.me { margin-left: auto; text-align: right; } .pp-msg.me .who { color: #94a3b8; }
   .pp-msg.me .txt { background: rgba(0,240,181,.16); }
+  /* social layer: replies, spoilers, scene timestamps, reactions, health */
+  .pp-msg .q { display: inline-block; margin-top: 2px; padding: 3px 9px; border-radius: 10px;
+    background: rgba(255,255,255,.05); font-size: 10px; color: #9fb0c4; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pp-msg .txt.spoiler { filter: blur(5px); cursor: pointer; user-select: none; }
+  .pp-msg .txt.spoiler:hover { filter: blur(3px); }
+  .pp-jump { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 99px;
+    background: rgba(0,240,181,.18); color: #7DF5DC; font-size: 10px; font-weight: 800;
+    min-height: 22px; cursor: pointer; border: 0; }
+  .pp-jump:hover { background: rgba(0,240,181,.32); }
+  .pp-react { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 99px;
+    background: rgba(255,255,255,.08); font-size: 10px; }
+  .pp-health { margin-left: 6px; font-size: 9px; font-weight: 800; letter-spacing: .05em;
+    color: #7DF5DC; opacity: .85; }
+  .pp-chip.off .pp-health { color: #fbbf24; }
+  #partySocial .rounded-2xl { border: 1px solid rgba(255,255,255,.07); }
   .pp-sys { text-align: center; font-size: 10px; color: #7A8798; letter-spacing: .03em; }
   #partyQuick button { padding: 8px 14px; border-radius: 99px; background: rgba(255,255,255,.08);
     font-size: 12px; font-weight: 600; min-height: 44px; }
@@ -1328,11 +1344,13 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <label class="flex items-center gap-1.5" title="Pause the party when a viewer buffers (auto-resumes when they catch up)"><input id="partyWaitToggle" type="checkbox" onchange="partyToggleWait()" class="accent-teal-400"> Wait for everyone</label>
         <label class="flex items-center gap-1.5 ml-auto"><input id="partyChatToggle" type="checkbox" onchange="partyToggleChat()" class="accent-teal-400"> Chat</label>
       </div>
+      <div id="partySocial" class="px-5 pb-3 space-y-2"></div>
       <div id="partyChatWrap" class="border-t border-white/10">
         <div id="partyChatLog" class="p-4 space-y-2 max-h-52 overflow-y-auto"></div>
         <div id="partyQuick" class="px-4 pb-2 flex flex-wrap gap-2"></div>
         <div class="flex gap-2 p-4 pt-0">
           <input id="partyChatInput" maxlength="300" placeholder="Say something..." class="flex-1 bg-white/[0.06] border border-white/10 rounded-full px-4 py-2.5 text-sm outline-none focus:border-teal-400/60">
+          <button id="partySpoilerBtn" onclick="partyToggleSpoiler()" aria-label="Mark as spoiler" title="Spoiler" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">\u{1F576}</button>
           <button onclick="partySendChat()" class="bg-teal-500 hover:bg-teal-300 text-gray-950 font-bold px-5 rounded-full text-sm">Send</button>
         </div>
       </div>
@@ -6597,6 +6615,17 @@ function koAutoPick(){
   try {
     if (!isKDrama() || mirror !== "vidbolt") return;
     if (window._koAuto === false) return;
+    // in a Watch Party the HOST's intended audio/subs win over the house
+    // Tagalog-first defaults (the reported dub/sub mismatch class)
+    try {
+      const want = (typeof PARTY !== "undefined" && PARTY.mediaIntent) ? PARTY.mediaIntent() : null;
+      const personal = (typeof PARTY !== "undefined" && PARTY.state) ? !!PARTY.state.personalMedia : false;
+      if (want && !personal && (want.audio || want.subs != null) && (!want.mirror || want.mirror === "vidbolt")) {
+        window._koAutoDone = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
+        PARTY.applyMediaIntent(false);
+        return;
+      }
+    } catch(e){}
     const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
     if (window._koAutoDone === bk) return;
     const opts = (((window._boltPanels || {})[bk]) || []).filter(o => o && typeof o === "object" && o.option != null);
@@ -6632,6 +6661,8 @@ function koBootAsk(){
   try {
     if (!isKDrama() || mirror !== "vidbolt") return;
     if (window._koAuto === false) return;
+    // a party's intended version outranks the Tagalog house default
+    try { if (typeof PARTY !== "undefined" && PARTY.inRoom && PARTY.inRoom() && !PARTY.state.personalMedia && PARTY.mediaIntent()) return; } catch(e){}
     boltMobileOption("audio", "Tagalog"); // documented audio option; no-ops when absent
   } catch(e){}
 }
@@ -6657,6 +6688,8 @@ function koTagalogSweep(){
   try {
     if (!isKDrama() || mirror !== "vidbolt") return;
     if (window._koAuto === false) return;
+    // a party's intended version outranks the Tagalog sweep
+    try { if (typeof PARTY !== "undefined" && PARTY.inRoom && PARTY.inRoom() && !PARTY.state.personalMedia && PARTY.mediaIntent()) return; } catch(e){}
     const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
     if (window._koSweepKey === bk) return;
     const opts = (((window._boltPanels || {})[bk]) || []).filter(o => o && typeof o === "object" && o.option != null);
@@ -7871,10 +7904,14 @@ function renderStyleControls(box, withSync){
     ${withSync ? `<div class="flex flex-wrap items-center gap-2">
       <span class="text-xs text-gray-400">Sync</span>
       <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
-        <button data-cap="off-" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none" aria-label="Captions earlier">-</button>
+        <button data-cap="off--" class="w-9 h-9 rounded-full hover:bg-white/20 text-sm leading-none" aria-label="Captions 0.5s earlier">&#8722;&#8722;</button>
+        <button data-cap="off-" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none" aria-label="Captions 0.1s earlier">&#8722;</button>
         <span data-cap="offLabel" class="text-xs font-bold min-w-[52px] text-center"></span>
-        <button data-cap="off+" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none" aria-label="Captions later">+</button>
+        <button data-cap="off+" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none" aria-label="Captions 0.1s later">+</button>
+        <button data-cap="off++" class="w-9 h-9 rounded-full hover:bg-white/20 text-sm leading-none" aria-label="Captions 0.5s later">++</button>
+        <button data-cap="offReset" class="h-9 px-3 rounded-full hover:bg-white/20 text-xs font-bold" aria-label="Reset subtitle delay">Reset</button>
       </div>
+      <span class="text-[10px] text-gray-500">100 ms steps · saved per episode</span>
     </div>` : ""}`;
   box.querySelectorAll("[data-cap]").forEach(b => {
     const k = b.getAttribute("data-cap");
@@ -7882,8 +7919,11 @@ function renderStyleControls(box, withSync){
     else if (k === "size+") b.onclick = () => capSizeStep(2);
     else if (k === "color") b.onclick = () => capColorStep();
     else if (k === "bg") b.onclick = () => capBgStep();
-    else if (k === "off-") b.onclick = () => subOffsetStep(-0.5);
-    else if (k === "off+") b.onclick = () => subOffsetStep(0.5);
+    else if (k === "off--") b.onclick = () => subOffsetStep(-0.5);
+    else if (k === "off-") b.onclick = () => subOffsetStep(-0.1);
+    else if (k === "off+") b.onclick = () => subOffsetStep(0.1);
+    else if (k === "off++") b.onclick = () => subOffsetStep(0.5);
+    else if (k === "offReset") b.onclick = () => subOffsetReset();
   });
   paintCapStyleUI();
 }
@@ -7920,6 +7960,13 @@ function subOffsetStep(d){
   subFile.offset = Math.round(((subFile.offset || 0) + d) * 10) / 10;
   if (subFile.offset > 30) subFile.offset = 30;
   if (subFile.offset < -30) subFile.offset = -30;
+  persistSubs();
+  paintSubsUI();
+  paintCaps(true);
+}
+function subOffsetReset(){
+  if (!subFile) { subStatus("Load a subtitle file first."); return; }
+  subFile.offset = 0;
   persistSubs();
   paintSubsUI();
   paintCaps(true);
@@ -8843,6 +8890,15 @@ window.addEventListener("message", (event)=>{
       if (Array.isArray(d.options) && d.options.length) {
         const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
         window._boltPanels[bk] = d.options;
+        // party media version: the provider's real option list just arrived -
+        // this is THE moment to select the host's intended audio/subtitles
+        // (their own identifiers, verbatim) instead of local defaults
+        try {
+          if (typeof PARTY !== "undefined" && PARTY.inRoom && PARTY.inRoom() && !PARTY.state.personalMedia && PARTY.mediaIntent()) {
+            PARTY.applyMediaIntent(false);
+          }
+          if (typeof PARTY !== "undefined" && PARTY.syncMediaUp) setTimeout(() => { try { PARTY.syncMediaUp(); } catch(e){} }, 600);
+        } catch(e){}
         // the rows carry their own selected flags = the REAL running quality
         try {
           const sel = d.options.find(o => o && String(o.option) === "quality" && (o.selected === true || o.selected === "true"));
@@ -9399,8 +9455,17 @@ async function loadAnipmPlayer(){
   }
   // same entry = combined run (absolute numbering); a new entry = per-season
   const ep = (watchState.anime && route.abs) ? animeAbsEp() : Math.max(1, watchState.e || 1);
-  // house-rule dub (Dragon Ball \u{2192} Faulconer English) or sub default
-  const lang0 = animeLangDefault(titleOf(currentItem || {}));
+  // MEDIA VERSION: in a Watch Party the HOST's intended dub/sub is
+  // authoritative (the reported bug: each client silently loaded its own
+  // house default - host on Japanese, guest on English dub). Only outside a
+  // party - or after a deliberate personal deviation - does the house rule
+  // (e.g. Dragon Ball -> Faulconer English) pick the version.
+  let lang0 = animeLangDefault(titleOf(currentItem || {}));
+  try {
+    const want = (typeof PARTY !== "undefined" && PARTY.mediaIntent) ? PARTY.mediaIntent() : null;
+    const personal = (typeof PARTY !== "undefined" && PARTY.state) ? !!PARTY.state.personalMedia : false;
+    if (want && want.audio && !personal && (!want.mirror || want.mirror === "anipm")) lang0 = want.audio;
+  } catch(e){}
   window._anipmTracks.lang = lang0;
   // first-class embed options (per their SDK): our accent, auto-next/episode
   // skip follow Settings, and resume rides ?start= (no seek race on load)
@@ -9425,6 +9490,9 @@ async function loadAnipmPlayer(){
   armTapHint(); // browsers may need a real in-player gesture; never silently wait
   if (!window._anipmTracks.lang) window._anipmTracks.lang = "sub";
   setTimeout(anipmHello, 800);
+  // the loaded version becomes the party's authoritative intent when the
+  // viewer owns it (host/co-host); personal picks never broadcast
+  try { if (typeof PARTY !== "undefined" && PARTY.syncMediaUp) PARTY.syncMediaUp(); } catch(e){}
   // mapped-id transparency (see loadVidboltAnime): the id on screen names
   // exactly what the player was asked for
   window._aniPlayId = ids.mal ? ("MAL " + ids.mal) : ("AniList " + ids.ani);
@@ -9557,6 +9625,9 @@ window.addEventListener("message", (event)=>{
     case "languagechange":
       if (d.lang) window._anipmTracks.lang = d.lang;
       else if (d.language) window._anipmTracks.lang = d.language;
+      // a real provider language change = party media intent (host) or a
+      // personal deviation (guest); echo-guarded inside
+      try { PARTY.onLocalMediaChange(); } catch(e){}
       paintAV(); break;
     case "autoplayblocked": {
       // TV gets an audible play kick instead of sitting black; on phones and
@@ -9704,6 +9775,7 @@ function paintBoltAV(){
         // optimistic selected mark (their bundle answers picks with no event)
         try { opts.forEach(x => { if (x.option === o.option) x.selected = (x === o); }); } catch(e){}
         window._koAuto = false; // a manual pick stands the K-drama auto down
+        try { PARTY.onLocalMediaChange(); } catch(e){} // host: intent · guest: personal
         if (o.option === "subtitles") {
           // their track pick: remember the value + hand the screen to them
           // (their captions render in their frame; ours would double it)
@@ -9737,6 +9809,7 @@ function paintAV(){
     audio.appendChild(avPill((lang === v ? "\u{25CF} " : "") + label, lang === v, () => {
       window._anipmTracks.lang = v;
       anipmSend("setLanguage", { lang: v });
+      try { PARTY.onLocalMediaChange(); } catch(e){} // host: intent · guest: personal
       paintAV();
     }));
   });
@@ -9748,6 +9821,7 @@ function paintAV(){
       const isCur = lang === String(label).toLowerCase();
       audio.appendChild(avPill((isCur ? "\u{25CF} " : "") + label, isCur, () => {
         anipmSend("setLanguage", { lang: label });
+        try { PARTY.onLocalMediaChange(); } catch(e){} // host: intent · guest: personal
         paintAV();
       }));
     });
@@ -9765,6 +9839,7 @@ function paintAV(){
   subs.appendChild(avPill((off ? "\u{25CF} " : "") + "Off", off, () => {
     window._anipmSubs = false; subSource = "theirs";
     anipmSend("setSubtitles", { enabled: false }); paintAV(); paintSubsBtn(); paintCaps(true);
+    try { PARTY.onLocalMediaChange(); } catch(e){} // host: intent · guest: personal
   }));
   const tracks = Array.isArray(T.subTracks) ? T.subTracks : null;
   if (tracks && tracks.length) {
@@ -9784,12 +9859,14 @@ function paintAV(){
         // floats with the bar like CineSrc; otherwise their in-frame text
         if (!loadProviderTrack(t, label)) subSource = "theirs";
         paintAV(); paintSubsBtn(); paintCaps(true);
+        try { PARTY.onLocalMediaChange(); } catch(e){} // host: intent · guest: personal
       }));
     });
   } else {
     subs.appendChild(avPill((!off ? "\u{25CF} " : "") + "On", !off, () => {
       window._anipmSubs = true; subSource = "theirs";
       anipmSend("setSubtitles", { enabled: true }); paintAV(); paintSubsBtn(); paintCaps(true);
+      try { PARTY.onLocalMediaChange(); } catch(e){} // host: intent · guest: personal
     }));
   }
   const qual = document.getElementById("avQuality"); qual.innerHTML = "";
@@ -10065,6 +10142,12 @@ const PARTY = (() => {
     _syncT: null,      // syncToRoom retry timer
     _pstateAt: 0, _lastSt: "",   // player-state report throttle + dedupe
     _bufStallAt: 0, _stallShown: 0, _stalls: 0, _stallHintAt: 0,
+    // media version (dub/sub/audio): the HOST's intended config lives in
+    // S.room.media; personalMedia = this participant deliberately deviated
+    // (their choice is respected until the next episode - never broadcast)
+    personalMedia: false,
+    _mediaApplying: 0, // suppress window: applying the room version must never echo back
+    _mediaSentAt: 0,
   };
 
   /* ---- adapter registry: what each mirror can REALLY do (audit-verified) ---- */
@@ -10171,6 +10254,134 @@ const PARTY = (() => {
     if (sv) payload.sv = sv;
     if (S.proto >= 2) send(payload);
     else if (st === "buffering") send({ t: "playback", action: "buffer", sessionVersion: sv || undefined }); // legacy hub
+  }
+
+  /* ---- authoritative media version (dub/sub/audio/subtitle) ----
+     The ROOM holds the host's intended version (provider-native identifiers:
+     AniPM lang segment, VidBolt panel option labels/values). Guests load THAT
+     first - local defaults may never silently replace it. After joining, a
+     participant may deliberately pick their own compatible version (kept
+     locally, never broadcast); "Match Host Version" returns them to it. */
+  function mediaIntent(){ return (S.room && S.room.media) || null; }
+
+  /* What THIS player is actually configured for (detected, never guessed). */
+  function currentMediaConfig(){
+    const cfg = { mirror: (typeof mirror !== "undefined" ? mirror : "") || "" };
+    try {
+      if (mirror === "anipm") {
+        if (window._anipmTracks && window._anipmTracks.lang) cfg.audio = String(window._anipmTracks.lang);
+        cfg.subsOn = typeof subsOn !== "undefined" ? !!subsOn : false;
+        if (cfg.subsOn && typeof subFile !== "undefined" && subFile && subFile.lang) cfg.subsLang = String(subFile.lang);
+      } else if (mirror === "vidbolt") {
+        const sel = boltSelectedAV();
+        if (sel.audio) cfg.audio = sel.audio;
+        if (sel.subs) cfg.subs = sel.subs;
+        cfg.subsOn = typeof subsOn !== "undefined" ? !!subsOn : false;
+      } else {
+        cfg.subsOn = typeof subsOn !== "undefined" ? !!subsOn : false;
+        if (cfg.subsOn && typeof subFile !== "undefined" && subFile && subFile.lang) cfg.subsLang = String(subFile.lang);
+      }
+    } catch(e){}
+    return cfg;
+  }
+
+  /* VidBolt: the currently SELECTED audio/subtitle option labels from the
+     provider's own panel cache (their identifiers, verbatim). */
+  function boltSelectedAV(){
+    try {
+      const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
+      const opts = (((window._boltPanels || {})[bk]) || []).filter((o) => o && typeof o === "object" && o.option != null);
+      const au = opts.find((o) => o.option === "audio" && o.selected);
+      const su = opts.find((o) => o.option === "subtitles" && o.selected);
+      return { audio: au ? String(au.label || au.value) : "", subs: su ? String(su.label || su.value) : "" };
+    } catch(e){ return { audio: "", subs: "" }; }
+  }
+
+  /* Host/co-host changed the intended version -> make it authoritative. */
+  function reportMedia(){
+    if (!inRoom() || !canControlMedia()) return;
+    if (Date.now() - (S._mediaSentAt || 0) < 400) return; // coalesce bursts
+    S._mediaSentAt = Date.now();
+    const cfg = currentMediaConfig();
+    cfg.variant = cfg.variant || (watchState.id ? (watchState.type + ":" + watchState.id + "/" + (watchState.s || 1) + ":" + (watchState.e || 1)) : "");
+    send({ t: "media", media: cfg });
+  }
+  function canControlMedia(){
+    if (!S.room) return false;
+    if (isHost()) return true;
+    return (S.room.cohosts || []).includes(S.selfId);
+  }
+
+  /* Apply the room's intended version to THIS player. `announce` surfaces an
+     honest warning when the intended variant is unavailable - we NEVER
+     silently substitute a different dub/sub. */
+  function applyMediaIntent(announce){
+    const want = mediaIntent();
+    if (!want) return;
+    S._mediaApplying = Date.now() + 3000;
+    try {
+      if (want.mirror && mirror && want.mirror !== mirror) {
+        if (announce) {
+          toast("The host is watching on " + want.mirror + " \u{2014} match the source for the same version");
+        }
+      }
+      if (mirror === "anipm" && want.audio && window._anipmTracks) {
+        // AniPM: the lang segment/command IS the dub/sub selector
+        if (window._anipmTracks.lang !== want.audio) {
+          try { anipmSend("setLanguage", { lang: want.audio }); } catch(e){}
+          window._anipmTracks.lang = want.audio;
+        }
+        if (want.subsOn != null) {
+          try {
+            if (want.subsOn) anipmSend("setSubtitles", { enabled: true });
+            else anipmSend("setSubtitles", { enabled: false });
+          } catch(e){}
+        }
+        if (announce) toast("Matched the host's version \u{2713} (" + want.audio + ")");
+      } else if (mirror === "vidbolt" && (want.audio || want.subs != null)) {
+        const applied = boltApplyMediaIntent(want, announce);
+        if (!applied && announce) {
+          sysMsg("This server has no '" + (want.audio || want.subs) + "' option - open A/V to pick a compatible version");
+        }
+      } else if (want.subsOn != null && typeof subsOn !== "undefined") {
+        subsOn = !!want.subsOn;
+        try { paintSubsBtn(); paintCaps(true); } catch(e){}
+      }
+    } catch(e){}
+    try { paintMediaMatch(); } catch(e){}
+  }
+
+  /* VidBolt: find the provider option matching the intended label/value and
+     pick it VERBATIM through their own command. Missing option = honest
+     mismatch, never a silent substitute. */
+  function boltApplyMediaIntent(want, announce){
+    try {
+      const bk = `${watchState.type}/${watchState.id}/${watchState.s || 0}/${watchState.e || 0}`;
+      const opts = (((window._boltPanels || {})[bk]) || []).filter((o) => o && typeof o === "object" && o.option != null);
+      let ok = true;
+      if (want.audio) {
+        const au = opts.find((o) => o.option === "audio" && (String(o.label) === want.audio || String(o.value) === want.audio));
+        if (au) { window._koAuto = false; boltMobileOption(au.option, au.value); }
+        else ok = false;
+      }
+      if (want.subs != null) {
+        const su = opts.find((o) => o.option === "subtitles" && (String(o.label) === want.subs || String(o.value) === want.subs));
+        if (su) { window._koAuto = false; boltMobileOption(su.option, su.value); }
+        else ok = false;
+      }
+      return ok;
+    } catch(e){ return false; }
+  }
+
+  /* "Match Host Version": drop the personal deviation and re-apply. */
+  function matchHostVersion(){
+    S.personalMedia = false;
+    applyMediaIntent(true);
+    toast("Following the host's version \u{2713}");
+  }
+
+  function requestLabel(a){
+    return { pause: "Pause", rewind: "Rewind 15s", skip_intro: "Skip intro", next_episode: "Next episode", change_episode: "Change episode" }[a] || a;
   }
 
   /* Buffering UI: a clear "Buffering - catching up" state while stalled and
@@ -10436,6 +10647,95 @@ const PARTY = (() => {
           if (m.position != null) p.position = m.position;
         }
         paintPeople();
+        return;
+      }
+      case "media": {
+        // the HOST's intended media version (dub/sub/audio/subtitle) - every
+        // participant loads THIS first; local defaults never win over it
+        if (!S.room) return;
+        S.room.media = m.media || null;
+        if (!S.personalMedia) {
+          try { applyMediaIntent(true); } catch(e){}
+        }
+        try { paintMediaMatch(); } catch(e){}
+        return;
+      }
+      case "role": {
+        if (!S.room) return;
+        S.room.cohosts = (S.room.cohosts || []).filter((x) => x !== m.participantId);
+        if (m.role === "cohost") (S.room.cohosts = S.room.cohosts || []).push(m.participantId);
+        const pp = (S.room.participants || []).find((x) => x.id === m.participantId);
+        if (pp) pp.role = m.role;
+        if (m.participantId === S.selfId) {
+          sysMsg(m.role === "cohost" ? "You are now a co-host" : "You are now a participant");
+        }
+        paintPeople();
+        return;
+      }
+      case "request": {
+        // playback requests surface to the host/co-hosts (approve in panel)
+        if (!S.room) return;
+        S.room.requests = S.room.requests || [];
+        if (!S.room.requests.some((r) => r.id === (m.request && m.request.id))) S.room.requests.push(m.request);
+        if (canControl()) {
+          toast((m.request.from || "Someone") + " requests: " + requestLabel(m.request.action));
+        }
+        try { paintRequests(); } catch(e){}
+        return;
+      }
+      case "request_reply": {
+        if (!S.room) return;
+        S.room.requests = (S.room.requests || []).filter((r) => r.id !== m.requestId);
+        try { paintRequests(); } catch(e){}
+        if (m.approverId === S.selfId && m.approved && m.request) {
+          // episode-class approvals execute on the APPROVER's client (only it
+          // has the episode data + authority); timeline actions already ran
+          // server-side
+          if (m.request.action === "next_episode") {
+            try { nextEpisode(1); } catch(e){}
+          } else if (m.request.action === "change_episode") {
+            const ep = Math.floor(Number(m.request.position) || 0);
+            if (watchState.type === "tv" && ep > 0 && ep !== watchState.e) {
+              try { watchState.e = ep; subsRefreshForEpisode(); applyEpisodeSwitch(); } catch(e){}
+            }
+          }
+        }
+        if (m.requesterId === S.selfId) {
+          sysMsg(m.approved ? "Request approved \u{2713}" : "Request declined");
+        }
+        return;
+      }
+      case "react": {
+        if (!m.emoji) return;
+        try { floatReaction(m.emoji, m.name); } catch(e){}
+        if (m.msgId) {
+          try {
+            const c = (S.chat || []).find((x) => x.id === m.msgId);
+            if (c) { c.reactions = c.reactions || {}; c.reactions[m.emoji] = (c.reactions[m.emoji] || 0) + 1; paintChat(); }
+          } catch(e){}
+        }
+        return;
+      }
+      case "queue": {
+        if (!S.room) return;
+        S.room.queue = S.room.queue || [];
+        if (m.op === "add" && m.item) {
+          if (!S.room.queue.some((x) => x.id === m.item.id)) S.room.queue.push(m.item);
+        } else if (m.op === "clear") {
+          S.room.queue = [];
+        } else if (m.item) {
+          const i = S.room.queue.findIndex((x) => x.id === m.item.id);
+          if (m.op === "remove" || m.op === "approve") { if (i >= 0) S.room.queue.splice(i, 1); }
+          else if (i >= 0) S.room.queue[i] = m.item;
+        }
+        try { paintQueue(); } catch(e){}
+        return;
+      }
+      case "intermission": {
+        if (!S.room) return;
+        S.room.intermission = m.op === "start" ? { until: m.until, seconds: m.seconds, by: m.by } : null;
+        try { paintIntermission(); } catch(e){}
+        sysMsg(m.op === "start" ? ("Break started by " + (m.by || "host") + " \u{2615}") : "Break over \u{25B6}");
         return;
       }
       case "chat": {
@@ -11098,6 +11398,7 @@ const PARTY = (() => {
   function el(id){ return document.getElementById(id); }
   function paint(){
     try {
+      try { paintSocial(); } catch(e){}
       const pill = el("partySyncPill");
       const a = adapter();
       const capTxt = { full: "FULL SYNC", partial: "PARTIAL SYNC", coordinated: "COORDINATED START" }[a.cap] || "";
@@ -11114,8 +11415,7 @@ const PARTY = (() => {
       // the HEADER door shows the live room at a glance (you browse away from
       // the player and forget the room is still running - a real night)
       const hb = el("headerPartyBtn");
-      if (hb) {
-        hb.classList.toggle("ring-2", inRoom());
+      if (hb) {        hb.classList.toggle("ring-2", inRoom());
         hb.classList.toggle("ring-teal-400", inRoom());
         hb.title = inRoom()
           ? ("Watch Party " + (S.room.code || "") + " - tap to open the room")
@@ -11149,6 +11449,20 @@ const PARTY = (() => {
       paintChat(null);
     } catch(e){}
   }
+  /* Feature 1: real-time sync health - measured from peer-reported positions
+     vs the authoritative timeline (never invented labels) */
+  function healthOf(p){
+    if (!p.connected) return "Reconnecting";
+    if (p.buffering) return "Buffering";
+    if (p.pstate === "loading") return "Catching Up";
+    if (p.pstate === "error") return "Unsupported";
+    try {
+      const a = adapter();
+      if (a.cap === "coordinated") return "Manual Sync";
+      const drift = Math.abs((Number(p.position) || 0) - expectedPos());
+      return drift < 2 ? "In Sync" : "Catching Up";
+    } catch(e){ return ""; }
+  }
   function paintPeople(){
     const box = el("partyPeople");
     if (!box || !S.room) return;
@@ -11159,8 +11473,18 @@ const PARTY = (() => {
       chip.setAttribute("data-focusable", "1");
       chip.tabIndex = 0;
       const nm = escapeHtml(p.name || "Guest");
-      chip.innerHTML = `<span class="dot"></span>${nm}${p.id === S.room.hostId ? " \u{2605}" : ""}${p.id === S.selfId ? " (you)" : ""}${p.muted ? " \u{1F507}" : ""}${p.buffering ? " \u{23F3}" : ""}${p.pstate === "loading" ? " \u{1F504}" : ""}${p.pstate === "error" ? " \u{26A0}" : ""}`;
+      const roleMark = p.id === S.room.hostId ? " \u{2605}" : ((S.room.cohosts || []).includes(p.id) ? " \u{2606}" : "");
+      // Feature 1: real-time sync health per participant (measured, honest)
+      const health = healthOf(p);
+      chip.innerHTML = `<span class="dot"></span>${nm}${roleMark}${p.id === S.selfId ? " (you)" : ""}${p.muted ? " \u{1F507}" : ""}`
+        + `<span class="pp-health">${escapeHtml(health)}</span>`;
       if (isHost() && p.id !== S.selfId) {
+        const isCo = (S.room.cohosts || []).includes(p.id);
+        const rb = document.createElement("button");
+        rb.textContent = isCo ? "\u{2606}" : "\u{2605}";
+        rb.title = isCo ? "Demote " + (p.name || "guest") : "Make co-host";
+        rb.onclick = (e) => { e.stopPropagation(); send({ t: "role", targetId: p.id, role: isCo ? "participant" : "cohost" }); };
+        chip.appendChild(rb);
         const kb = document.createElement("button");
         kb.textContent = "\u{2715}";
         kb.title = "Remove " + (p.name || "guest");
@@ -11206,7 +11530,18 @@ const PARTY = (() => {
     d.dataset.mid = m.id;
     const t = new Date(m.ts || Date.now());
     const hh = String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
-    d.innerHTML = `<div class="who">${escapeHtml(m.name || "?")} \u{00B7} ${hh}</div><div class="txt">${escapeHtml(m.text || "")}</div>`;
+    const q = m.replyTo ? ((S.chat || []).find((x) => x.id === m.replyTo) || null) : null;
+    const posChip = (m.pos != null)
+      ? `<button class="pp-jump" onclick="partyJump(${Math.floor(m.pos)})" title="Jump the room here">\u{23F1} ${fmtT(Math.floor(m.pos))}</button>`
+      : "";
+    const reacts = m.reactions ? Object.entries(m.reactions).map(([k, v]) => `<span class="pp-react">${escapeHtml(k)} ${escapeHtml(String(v))}</span>`).join("") : "";
+    d.innerHTML = `<div class="who">${escapeHtml(m.name || "?")} \u{00B7} ${hh} ${posChip}${reacts}</div>`
+      + (q ? `<div class="q">${escapeHtml((q.name || "?") + ": " + String(q.text || "").slice(0, 40))}</div>` : "")
+      + `<div class="txt${m.spoiler ? " spoiler" : ""}">${escapeHtml(m.text || "")}</div>`;
+    if (m.spoiler) {
+      const tx = d.querySelector(".txt");
+      if (tx) tx.onclick = (e) => e.currentTarget.classList.remove("spoiler");
+    }
     return d;
   }
   function sysMsg(text){
@@ -11223,8 +11558,34 @@ const PARTY = (() => {
     const input = el("partyChatInput");
     const t = (text != null ? text : (input ? input.value : "")).slice(0, CFG.CHAT_MAX).trim();
     if (!t || !inRoom()) return;
-    send({ t: "chat", text: t });
+    const msg = { t: "chat", text: t };
+    if (S._chatSpoiler) {
+      msg.spoiler = true; S._chatSpoiler = false;
+      try { el("partySpoilerBtn").classList.remove("bg-amber-500"); } catch(e){}
+    }
+    if (S._chatReply) { msg.replyTo = S._chatReply; S._chatReply = ""; try { input.placeholder = "Say something..."; } catch(e){} }
+    // scene position: timestamped comments (Feature 7) + spoiler-safe joining
+    try { msg.pos = Math.max(0, Math.floor(pState.cur || 0)); } catch(e){}
+    send(msg);
     if (input) input.value = "";
+  }
+  function toggleSpoiler(){
+    S._chatSpoiler = !S._chatSpoiler;
+    try { el("partySpoilerBtn").classList.toggle("bg-amber-500", !!S._chatSpoiler); } catch(e){}
+  }
+  function replyTo(id){
+    S._chatReply = id;
+    try { const i = el("partyChatInput"); if (i) { i.placeholder = "Replying\u2026"; i.focus(); } } catch(e){}
+  }
+  /* Scene timestamp jump: respects Watch Party playback permissions - only a
+     controller moves the ROOM; everyone else is told honestly. */
+  function jumpTo(pos){
+    if (!inRoom()) return;
+    if (canControl()) {
+      try { mirrorSeek(pos); } catch(e){}
+    } else {
+      toast("Only the host (or a controller) can jump the room here");
+    }
   }
   function showJoinPw(show){
     const p = el("partyJoinPw");
@@ -11274,6 +11635,122 @@ const PARTY = (() => {
   }
   function inviteUrl(){
     return location.origin + location.pathname + "?party=" + (S.room ? S.room.code : "");
+  }
+
+  /* ---- social layer UI: media match, requests, queue, reactions, break ---- */
+  function paintSocial(){
+    const box = el("partySocial");
+    if (!box) return;
+    if (!inRoom()) { box.innerHTML = ""; return; }
+    const parts = [];
+    /* Feature 3: Media Match panel (detected facts only - never guessed) */
+    try {
+      const want = mediaIntent() || {};
+      const mine = currentMediaConfig();
+      const mismatch = !!(want.audio && mine.audio && want.audio !== mine.audio && !S.personalMedia);
+      const capTxt = { full: "full sync", partial: "partial (no pause API)", coordinated: "coordinated start only" }[(adapter() || {}).cap] || "";
+      parts.push(`<div class="rounded-2xl bg-white/5 p-3 text-xs">
+        <div class="font-black text-gray-300 mb-1">MEDIA MATCH</div>
+        <div class="space-y-0.5">
+          <div>Episode: <b>${escapeHtml(String(watchState.type === "tv" ? "S" + (watchState.s || 1) + " E" + (watchState.e || 1) : "Movie"))}</b></div>
+          <div>Host version: <b>${escapeHtml(want.audio || "not shared")}${want.subs ? " / " + escapeHtml(want.subs) : ""}${want.subsOn === false ? " (subs off)" : ""}</b></div>
+          <div>This player: <b>${escapeHtml(mine.audio || mine.subs || "default")}</b></div>
+          <div>Source: <b>${escapeHtml(mine.mirror || "?")}</b> (${escapeHtml(capTxt)})</div>
+          ${mismatch ? `<div class="text-amber-300 mt-1">Version mismatch - the host is on <b>${escapeHtml(want.audio)}</b>.</div>` : ""}
+          ${S.personalMedia ? `<div class="text-teal-300 mt-1">You chose your own version (personal).</div>` : ""}
+        </div>
+        <div class="flex gap-2 mt-2">
+          <button onclick="PARTY.matchHost()" class="px-3 py-1.5 rounded-full bg-teal-500 text-[#0B111E] font-bold">Match Host Version</button>
+          <button onclick="PARTY.toggleDiag()" class="px-3 py-1.5 rounded-full bg-white/10 font-bold">Diagnostics</button>
+        </div>
+        ${S._diag ? `<div class="mt-2 space-y-0.5 text-gray-400">
+          <div>rtt ${escapeHtml(String(S.rtt || 0))}ms · clock offset ${escapeHtml(String(S.offset || 0))}ms · drift ${escapeHtml(((S.lastDrift || 0) / 1000).toFixed(2))}s</div>
+          ${(S.room.participants || []).map((p) => `<div>${escapeHtml(p.name)}: ${escapeHtml(String(Math.round((p.position || 0))))}s ${p.buffering ? "· buffering" : ""} ${escapeHtml(p.pstate || "")}</div>`).join("")}
+        </div>` : ""}
+      </div>`);
+    } catch(e){}
+    /* Feature 5: playback requests (host/co-host approve) */
+    try {
+      const reqs = S.room.requests || [];
+      if (reqs.length) {
+        parts.push(`<div class="rounded-2xl bg-white/5 p-3 text-xs">
+          <div class="font-black text-gray-300 mb-1">REQUESTS</div>
+          ${reqs.map((r) => `<div class="flex items-center gap-2 py-1">
+            <span class="flex-1">${escapeHtml(r.from || "?")}: <b>${escapeHtml(requestLabel(r.action))}</b></span>
+            ${canControl() ? `<button onclick="PARTY.replyRequest('${escapeHtml(r.id)}',true)" class="px-2 py-1 rounded-full bg-teal-500 text-[#0B111E] font-bold">Approve</button>
+            <button onclick="PARTY.replyRequest('${escapeHtml(r.id)}',false)" class="px-2 py-1 rounded-full bg-white/10 font-bold">Decline</button>` : ""}
+          </div>`).join("")}
+        </div>`);
+      } else if (!canControl()) {
+        parts.push(`<div class="rounded-2xl bg-white/5 p-3 text-xs">
+          <div class="font-black text-gray-300 mb-1">REQUESTS</div>
+          <div class="flex flex-wrap gap-2">
+            ${["pause", "rewind", "skip_intro", "next_episode"].map((a) => `<button onclick="PARTY.sendRequest('${a}')" class="px-3 py-1.5 rounded-full bg-white/10 font-bold">${escapeHtml(requestLabel(a))}</button>`).join("")}
+          </div>
+        </div>`);
+      }
+    } catch(e){}
+    /* Feature 9: shared queue */
+    try {
+      const q = S.room.queue || [];
+      parts.push(`<div class="rounded-2xl bg-white/5 p-3 text-xs">
+        <div class="font-black text-gray-300 mb-1">UP NEXT QUEUE</div>
+        ${q.length ? q.map((it) => `<div class="flex items-center gap-2 py-1">
+          <span class="flex-1">${escapeHtml(it.title || (it.type === "tv" ? "S" + it.season + " E" + it.episode : "Movie"))} <span class="text-gray-500">by ${escapeHtml(it.by || "?")} · ${escapeHtml(String(it.votes || 0))} votes</span></span>
+          <button onclick="PARTY.queueOp('vote','${escapeHtml(it.id)}')" class="px-2 py-1 rounded-full bg-white/10 font-bold">\u{1F44D}</button>
+          ${canControl() ? `<button onclick="PARTY.queueOp('approve','${escapeHtml(it.id)}')" class="px-2 py-1 rounded-full bg-teal-500 text-[#0B111E] font-bold">Play</button>` : ""}
+        </div>`).join("") : `<div class="text-gray-500">Nothing queued.</div>`}
+        <div class="flex flex-wrap gap-2 mt-2">
+          <button onclick="PARTY.queueAddNext()" class="px-3 py-1.5 rounded-full bg-white/10 font-bold">+ Suggest next episode</button>
+          ${canControl() && q.length ? `<button onclick="PARTY.queueOp('clear')" class="px-3 py-1.5 rounded-full bg-white/10 font-bold">Clear</button>` : ""}
+        </div>
+      </div>`);
+    } catch(e){}
+    /* Feature 6 + 11 + 12: reactions, mode presets, break, lock */
+    parts.push(`<div class="rounded-2xl bg-white/5 p-3 text-xs">
+      <div class="flex flex-wrap gap-2 items-center">
+        ${["laugh", "surprise", "love", "shock", "applause"].map((e2) => `<button onclick="PARTY.react('${e2}')" aria-label="React ${e2}" class="w-10 h-10 rounded-full bg-white/10 text-lg">${{laugh:"\u{1F602}",surprise:"\u{1F62E}",love:"\u{2764}","shock":"\u{1F631}",applause:"\u{1F44F}"}[e2]}</button>`).join("")}
+        <label class="flex items-center gap-1 ml-auto"><input id="partyReactOn" type="checkbox" ${S.reactOn !== false ? "checked" : ""} onchange="PARTY.toggleReact()" class="accent-teal-400"> Reactions</label>
+      </div>
+      ${canControl() ? `<div class="flex flex-wrap gap-2 mt-2">
+        <select id="partyPreset" onchange="PARTY.applyPreset(this.value)" class="px-2 py-1.5 rounded-full bg-white/10 font-bold">
+          <option value="">Party mode\u2026</option>
+          <option value="casual">Casual Party</option>
+          <option value="strict">Strict Sync</option>
+          <option value="anime">Anime Night</option>
+          <option value="movie">Movie Night</option>
+        </select>
+        <button onclick="PARTY.intermission('start')" class="px-3 py-1.5 rounded-full bg-white/10 font-bold">\u{2615} Start break (5 min)</button>
+        ${isHost() ? `<button onclick="PARTY.toggleLock()" class="px-3 py-1.5 rounded-full ${S.room.locked ? "bg-amber-500 text-black" : "bg-white/10"} font-bold">${S.room.locked ? "\u{1F512} Locked" : "\u{1F513} Lock room"}</button>` : ""}
+      </div>` : ""}
+      ${S.room.intermission ? `<div class="mt-2 text-teal-300 font-bold">\u{2615} Break \u{2014} back in ${escapeHtml(String(Math.max(0, Math.round(((S.room.intermission.until || 0) - serverNow()) / 1000))))}s</div>` : ""}
+    </div>`);
+    box.innerHTML = parts.join("");
+  }
+  function paintMediaMatch(){ try { paintSocial(); } catch(e){} }
+  function paintRequests(){ try { paintSocial(); } catch(e){} }
+  function paintQueue(){ try { paintSocial(); } catch(e){} }
+  function paintIntermission(){ try { paintSocial(); } catch(e){} }
+
+  /* Feature 6: floating reactions (subtle, short, away from subtitles -
+     bottom strip only; respects the reduced-motion preference) */
+  function floatReaction(emoji, who){
+    if (S.reactOn === false) return;
+    const map = { laugh: "\u{1F602}", surprise: "\u{1F62E}", love: "\u{2764}", shock: "\u{1F631}", applause: "\u{1F44F}" };
+    const ch = map[emoji] || emoji;
+    try {
+      const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const d = document.createElement("div");
+      d.textContent = ch + (who ? " " + who : "");
+      d.style.cssText = "position:fixed;left:50%;bottom:16%;transform:translateX(-50%);z-index:120;font-size:28px;pointer-events:none;opacity:.95;" + (reduce ? "" : "transition:all 1.6s ease-out;");
+      document.body.appendChild(d);
+      if (!reduce) {
+        requestAnimationFrame(() => { d.style.bottom = "28%"; d.style.opacity = "0"; });
+        setTimeout(() => d.remove(), 1800);
+      } else {
+        setTimeout(() => d.remove(), 1200);
+      }
+    } catch(e){}
   }
 
   /* ---- timers + boot ---- */
@@ -11374,6 +11851,85 @@ const PARTY = (() => {
     onLocalOpenWatch, onLocalMirror, roomSource, syncNow, cutMismatch, sourceMismatch, sourceName,
     onPlayerRecreate: playerRecreated,
     reportState,
+    /* media version (Phase 2) */
+    mediaIntent, currentMediaConfig, applyMediaIntent,
+    matchHost(){ try { matchHostVersion(); } catch(e){} },
+    toggleDiag(){ S._diag = !S._diag; paintSocial(); },
+    /* owner-only: push the loaded version up as the party's intent */
+    syncMediaUp(){ if (canControlMedia()) reportMedia(); },
+    /* chat: replies, spoilers, scene timestamps (Feature 7) */
+    jumpTo, toggleSpoiler, replyTo,
+    /* provider hooks: a deliberate local audio/subtitle change */
+    onLocalMediaChange(){
+      if (!inRoom()) return;
+      if (Date.now() < (S._mediaApplying || 0)) return; // echo of applying the room version
+      if (canControlMedia()) { reportMedia(); }
+      else {
+        S.personalMedia = true; // a guest's personal choice - kept local, never broadcast
+        try { paintSocial(); } catch(e){}
+      }
+    },
+    /* playback requests */
+    sendRequest(action){
+      if (!inRoom()) return;
+      const payload = { t: "request", action };
+      if (action === "skip_intro" || action === "rewind") {
+        try { payload.position = Math.floor(pState.cur || 0) + (action === "skip_intro" ? 30 : 0); } catch(e){}
+      } else if (action === "change_episode") {
+        payload.position = (watchState.e || 1) + 1;
+      }
+      send(payload);
+      toast("Request sent to the host");
+    },
+    replyRequest(id, approved){ if (inRoom() && canControl()) send({ t: "request_reply", requestId: id, approved: !!approved }); },
+    /* reactions + chat */
+    react(emoji){ if (inRoom()) { send({ t: "react", emoji }); floatReaction(emoji, "you"); } },
+    toggleReact(){ try { S.reactOn = el("partyReactOn").checked; } catch(e){ S.reactOn = true; } },
+    /* shared queue */
+    queueOp(op, itemId){
+      if (!inRoom()) return;
+      if (op === "add") return;
+      send({ t: "queue", op, itemId });
+    },
+    queueAddNext(){
+      if (!inRoom()) return;
+      try {
+        const isTv = watchState.type === "tv";
+        send({ t: "queue", op: "add", item: {
+          type: isTv ? "tv" : "movie",
+          tmdbId: watchState.id || 0,
+          season: isTv ? (watchState.s || 1) : 1,
+          episode: isTv ? (watchState.e || 1) + 1 : 1,
+          title: isTv ? ("S" + (watchState.s || 1) + " E" + ((watchState.e || 1) + 1)) : "Movie",
+        }});
+      } catch(e){}
+    },
+    /* party modes (Feature 11 presets) */
+    applyPreset(kind){
+      if (!inRoom() || !canControl()) return;
+      const P = {
+        casual: { waitMode: "move", allowControl: true },
+        strict: { waitMode: "everyone", allowControl: false, holdTimeoutMs: 30000 },
+        anime: { waitMode: "move", allowControl: true },
+        movie: { waitMode: "everyone", allowControl: false },
+      }[kind];
+      if (!P) return;
+      send({ t: "settings", ...P });
+      S.reactOn = kind !== "movie";
+      try { paintSocial(); } catch(e){}
+      toast("Party mode: " + kind);
+    },
+    /* group intermission */
+    intermission(op){
+      if (!inRoom() || !canControl()) return;
+      send({ t: "intermission", op, seconds: 300 });
+    },
+    toggleLock(){
+      if (!inRoom() || !isHost()) return;
+      send({ t: "settings", locked: !S.room.locked });
+    },
+    /* role management (host) */
+    setRole(targetId, role){ if (inRoom() && isHost()) send({ t: "role", targetId, role }); },
     state: S,
   };
 })();
@@ -11450,6 +12006,8 @@ function partyEndRoom(){ PARTY.endRoom(); }
 function partyToggleCtl(){ PARTY.toggleCtl(); }
 function partyToggleChat(){ PARTY.toggleChat(); }
 function partyToggleWait(){ PARTY.toggleWait(); }
+function partyToggleSpoiler(){ try { PARTY.toggleSpoiler(); } catch(e){} }
+function partyJump(pos){ try { PARTY.jumpTo(pos); } catch(e){} }
 function partySendChat(){ PARTY.sendChat(); }
 
 /* playback hooks: wrap the two local entry points (function reassignment keeps

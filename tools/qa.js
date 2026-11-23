@@ -1550,9 +1550,14 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   try { rooms = read("party-server/rooms.js"); proto = read("party-server/protocol.js"); } catch (e) {}
   if (!rooms) bad("party-server/rooms.js missing");
   else {
-    const gates = (rooms.match(/room\.hostId !== participantId/g) || []).length;
-    if (gates >= 4 && /allowControl/.test(rooms))
-      ok("the party server enforces host gates on playback/content/kick/mute/settings (" + gates + " checks)");
+    // every privileged command routes through a server-side gate: the classic
+    // host checks OR the role/permission helpers (_canControl/_roleOf)
+    const hostGates = (rooms.match(/room\.hostId !== participantId/g) || []).length;
+    const roleGates = (rooms.match(/this\._canControl\(room, part/g) || []).length
+      + (rooms.match(/this\._roleOf\(room, participantId\)/g) || []).length
+      + (rooms.match(/room\.hostId !== participantId/g) || []).length;
+    if (roleGates >= 6 && /allowControl/.test(rooms) && /_canControl/.test(rooms))
+      ok("the party server enforces role/permission gates server-side (" + roleGates + " checks, incl. " + hostGates + " host-only)");
     else bad("rooms.js must permission-check every privileged command server-side");
     if (/CODE_ATTEMPT_MAX/.test(proto) && /CHAT_RATE_MAX/.test(proto) && /MSG_MAX/.test(proto))
       ok("rate limits are defined for code guessing, chat, and messages");
