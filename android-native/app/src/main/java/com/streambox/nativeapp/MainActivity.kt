@@ -58,11 +58,14 @@ class MainActivity : ComponentActivity() {
 
     private fun isTvDevice(): Boolean {
         return try {
-            if (packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)) true
-            else {
-                val um = getSystemService(UI_MODE_SERVICE) as UiModeManager
-                um.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
-            }
+            // UI MODE is the primary signal. FEATURE_LEANBACK alone is NOT
+            // proof of a TV: several phone system images advertise leanback
+            // (an emulator quirk that handed phones the 10-foot UI). Leanback
+            // only counts when the device also has no touchscreen (boxes).
+            val um = getSystemService(UI_MODE_SERVICE) as UiModeManager
+            if (um.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION) true
+            else packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+                && !packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
         } catch (e: Exception) {
             false
         }

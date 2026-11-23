@@ -250,7 +250,7 @@ fun StreamBoxApp() {
         // 0.70 perf: the cinematic beat is 700ms now - the old 1200ms was
         // pure waiting on a weak TV box (the splash overlay animates the
         // whole time). The catalog still warms behind it from t=0.
-        delay(700)
+        delay(350)
         splashDone = true
         val v = BuildConfig.VERSION_NAME
         val prev = Store.lastSeenVersion(appCtx)
@@ -342,11 +342,14 @@ fun StreamBoxApp() {
     MaterialTheme(colorScheme = StreamColors) {
         CompositionLocalProvider(
             LocalTextStyle provides TextStyle(fontFamily = DisplayFont),
-            // The default ripple/hover indication draws its bounded state
-            // layer as a SQUARE plate behind round buttons on TV (0.34 bug
-            // report). Every target here carries its own ring/glow, so the
-            // default indication is switched off app-wide.
-            LocalIndication provides NoIndication,
+            // TV: the default ripple/hover indication draws its bounded state
+            // layer as a SQUARE plate behind round buttons (0.34 bug report);
+            // every TV target carries its own ring/glow, so indication is
+            // switched off there. Touch devices KEEP press feedback - an
+            // unbounded ripple (no square plate) so the UI responds to taps
+            // instead of feeling dead.
+            LocalIndication provides if (AppEnv.isTv) NoIndication
+                else androidx.compose.material3.ripple(bounded = false),
         ) {
         // The splash is an OVERLAY over the live tree (0.52 speed pass):
         // the catalog starts fetching at t=0 behind it, so the boot fade

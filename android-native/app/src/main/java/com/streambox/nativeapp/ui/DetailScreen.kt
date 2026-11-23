@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.streambox.nativeapp.ui
 
 import android.content.Intent
@@ -403,30 +405,37 @@ fun DetailScreen(
                         }
                     }
                     // CTA row (design pack series-details): PLAY + My List +
-                    // Trailer side by side - never stacked full-width.
+                    // Trailer side by side - never stacked full-width on TV.
+                    // PHONE: the 4-across weighted strip clipped every label
+                    // at 360dp - one full-width primary + wrapping secondaries
+                    // (the website's icon+label button language).
                     Spacer(modifier = Modifier.height(14.dp))
+                    val playLabel = when {
+                        rp != null && title.type != "movie" -> "Resume S" + rp.season + " E" + rp.episode
+                        rp != null -> "Resume Movie"
+                        title.type == "movie" -> "Play Movie"
+                        else -> "Play S" + season + " E" + episode
+                    }
+                    val doPlay = {
+                        if (title.type != "anime" || mapping != "loading") {
+                            if (rp != null) {
+                                onPlay(rp.season, rp.episode, ids?.mal, ids?.ani, langFor)
+                            } else {
+                                onPlay(season, episode, ids?.mal, ids?.ani, langFor)
+                            }
+                        }
+                    }
+                    if (big) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (det.aired) {
                             PillButton(
-                                when {
-                                    rp != null && title.type != "movie" ->
-                                        "Resume S" + rp.season + " E" + rp.episode
-                                    rp != null -> "Resume Movie"
-                                    title.type == "movie" -> "Play Movie"
-                                    else -> "Play S" + season + " E" + episode
-                                },
+                                playLabel,
                                 big,
                                 accent = true,
                                 icon = Icons.Filled.PlayArrow,
                                 modifier = Modifier.weight(1.4f),
                             ) {
-                                if (title.type != "anime" || mapping != "loading") {
-                                    if (rp != null) {
-                                        onPlay(rp.season, rp.episode, ids?.mal, ids?.ani, langFor)
-                                    } else {
-                                        onPlay(season, episode, ids?.mal, ids?.ani, langFor)
-                                    }
-                                }
+                                doPlay()
                             }
                         } else {
                             // Not out yet (Avengers: Doomsday case): a Coming
@@ -467,6 +476,37 @@ fun DetailScreen(
                         } else {
                             PillButton("Back", big, icon = Icons.AutoMirrored.Filled.ArrowBack, modifier = Modifier.weight(1f)) {
                                 onBack()
+                            }
+                        }
+                    }
+                    } else {
+                        if (det.aired) {
+                            PillButton(playLabel, big, accent = true, icon = Icons.Filled.PlayArrow,
+                                modifier = Modifier.fillMaxWidth()) { doPlay() }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(46.dp)
+                                    .background(Pill, RoundedCornerShape(50)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("COMING SOON", color = Amber, fontWeight = FontWeight.Black,
+                                    fontSize = 14.sp, letterSpacing = 2.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        WrapRow {
+                            PillButton(if (inList) "In My List" else "My List", big,
+                                icon = if (inList) Icons.Filled.Check else Icons.Filled.Add) {
+                                Store.toggleList(ctx, title)
+                                inList = Store.inList(ctx, title.type, title.id)
+                            }
+                            PillButton("Watch Party", big, icon = Icons.Filled.People) { onParty() }
+                            if (trailer != null) {
+                                PillButton("Trailer", big, icon = Icons.Filled.PlayArrow) { openTrailer(ctx, trailer.key) }
+                            } else {
+                                PillButton("Back", big, icon = Icons.AutoMirrored.Filled.ArrowBack) { onBack() }
                             }
                         }
                     }
@@ -682,8 +722,11 @@ fun DetailScreen(
                     }
                 }
             }
-            items(episodes) { ep ->
+            items(episodes, key = { it.n }, contentType = { "ep" }) { ep ->
                 val cur = p != null && p.season == season && p.episode == ep.n
+                // memoized per row: the maxOfOrNull finale check used to walk
+                // the WHOLE season for every row on every recomposition
+                val finaleN = remember(episodes) { episodes.maxOfOrNull { it.n } ?: -1 }
                 EpisodeRow(
                     ep = ep,
                     big = big,
@@ -691,7 +734,7 @@ fun DetailScreen(
                     savedCur = if (cur) p!!.cur else 0f,
                     savedDur = if (cur) p!!.dur else 0f,
                     tickMs = tickMs,
-                    finale = ep.n == (episodes.maxOfOrNull { it.n } ?: -1),
+                    finale = ep.n == finaleN,
                     anime = title.type == "anime" || title.isAnime,
                 ) {
                     episode = ep.n
@@ -1327,4 +1370,17 @@ private fun GlassCircle(size: Dp, icon: androidx.compose.ui.graphics.vector.Imag
     ) {
         Icon(icon, contentDescription = cd, tint = Color.White, modifier = Modifier.size(size * 0.42f))
     }
+}
+
+/** Phone action rows WRAP instead of crushing four weighted pills into one
+    clipped line at 360dp. TV keeps its single weighted row (unchanged). */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun WrapRow(content: @Composable androidx.compose.foundation.layout.FlowRowScope.() -> Unit) {
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+        content = content,
+    )
 }

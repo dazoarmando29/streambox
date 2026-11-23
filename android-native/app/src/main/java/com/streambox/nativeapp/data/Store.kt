@@ -113,12 +113,24 @@ object Store {
         done = o.optBoolean("done", false),
     )
 
+    // Parsed-store caches keyed by the RAW string: the player reads
+    // progressList on every recomposition and every 5s save, and Home reads
+    // listItems on render - the SharedPreferences JSON re-parse was the
+    // hottest accidental main-thread cost in the app. Writes go through the
+    // same functions and the raw-string key self-invalidates the cache.
+    @Volatile private var progCache: Pair<String, List<Progress>>? = null
+    @Volatile private var listCache: Pair<String, List<Title>>? = null
+
     fun progressList(ctx: Context): List<Progress> {
         return try {
-            val arr = JSONArray(prefs(ctx).getString(K_PROGRESS, "[]") ?: "[]")
-            (0 until arr.length()).mapNotNull { i ->
+            val raw = prefs(ctx).getString(K_PROGRESS, "[]") ?: "[]"
+            progCache?.let { if (it.first == raw) return it.second }
+            val arr = JSONArray(raw)
+            val list = (0 until arr.length()).mapNotNull { i ->
                 arr.optJSONObject(i)?.let { progressFrom(it) }
             }.sortedByDescending { it.at }
+            progCache = raw to list
+            list
         } catch (e: Exception) {
             listOf()
         }
@@ -146,10 +158,14 @@ object Store {
 
     fun listItems(ctx: Context): List<Title> {
         return try {
-            val arr = JSONArray(prefs(ctx).getString(K_LIST, "[]") ?: "[]")
-            (0 until arr.length()).mapNotNull { i ->
+            val raw = prefs(ctx).getString(K_LIST, "[]") ?: "[]"
+            listCache?.let { if (it.first == raw) return it.second }
+            val arr = JSONArray(raw)
+            val list = (0 until arr.length()).mapNotNull { i ->
                 arr.optJSONObject(i)?.let { titleFrom(it) }
             }
+            listCache = raw to list
+            list
         } catch (e: Exception) {
             listOf()
         }

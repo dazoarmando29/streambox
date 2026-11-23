@@ -1505,15 +1505,19 @@ fun PlayerScreen(
     // WebView boot hardcoded 0f so Continue Watching silently restarted
     // the title. Opening a different episode than the saved one starts it
     // fresh; anime rides the same seam (anipm carries start= in its URL).
-    val resumeAt = run {
-        val sp = Store.progressList(ctx).firstOrNull { it.type == title.type && it.id == title.id }
-        // a finished title must never boot at its credits: the same guard the
-        // Episodes sheet uses (done flag + the 95% tail) - without it Play on a
-        // watched episode opened on the last seconds and froze / auto-advanced
-        if (sp != null && !sp.done && sp.cur > 5f &&
-            (title.type == "movie" || (sp.season == season && sp.episode == episode)) &&
-            !(sp.dur > 0 && sp.cur >= sp.dur * 0.95f)
-        ) sp.cur else 0f
+    // remember()'d: this used to re-read the store on EVERY recomposition
+    // of the player body (multiple times a second during playback).
+    val resumeAt = remember(title.type, title.id, season, episode) {
+        run {
+            val sp = Store.progressList(ctx).firstOrNull { it.type == title.type && it.id == title.id }
+            // a finished title must never boot at its credits: the same guard the
+            // Episodes sheet uses (done flag + the 95% tail) - without it Play on a
+            // watched episode opened on the last seconds and froze / auto-advanced
+            if (sp != null && !sp.done && sp.cur > 5f &&
+                (title.type == "movie" || (sp.season == season && sp.episode == episode)) &&
+                !(sp.dur > 0 && sp.cur >= sp.dur * 0.95f)
+            ) sp.cur else 0f
+        }
     }
 
     // CineSrc quality pick ("" = Auto): rides the embed URL, so a change
@@ -2617,7 +2621,9 @@ fun PlayerScreen(
     // open-ended credits range is the manual "Next Episode" pill, and the
     // chaining happens through auto-next at ended (so post-credits scenes
     // always survive). Toggle lives in the Episodes sheet, per device.
-    LaunchedEffect(pm.cur, hit, pm.autoSkip) {
+    LaunchedEffect(hit, pm.autoSkip, pm.playing) {
+        // keyed on the RANGE + toggle + play state only: pm.cur changes ~4Hz
+        // and used to restart this effect four times a second for nothing
         val h = hit
         if (pm.autoSkip && pm.playing && h != null && h.end != null && h.kind != "credits") {
             val key = pm.epSeason.toString() + ":" + pm.epNumber + ":" + h.kind + ":" + h.end
@@ -4818,12 +4824,8 @@ private fun BarTimeline(
                 fontWeight = FontWeight.Bold,
                 fontSize = if (big) 15.sp else 12.sp,
             )
-            Text(
-                "  (" + fmt(dur) + ")",
-                color = Dim,
-                fontWeight = FontWeight.Bold,
-                fontSize = if (big) 12.sp else 10.sp,
-            )
+            // (the total duration already lives in the time row's left side -
+            // the old second "(total)" copy here was pure noise)
         }
         if (legend.isNotEmpty()) {
             Text(
@@ -5036,7 +5038,7 @@ private fun OptRow(
                     chip,
                     color = if (active) Accent else Dim,
                     fontWeight = FontWeight.Black,
-                    fontSize = 8.sp,
+                    fontSize = 10.sp,
                     letterSpacing = 1.sp,
                 )
             }
@@ -5173,7 +5175,7 @@ private fun QuickEpCard(
                         else -> Soft
                     },
                     fontWeight = FontWeight.Black,
-                    fontSize = 8.sp,
+                    fontSize = 10.sp,
                     letterSpacing = 1.sp,
                 )
             }

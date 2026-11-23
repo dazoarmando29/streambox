@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.streambox.nativeapp.ui
 
 import androidx.compose.foundation.background
@@ -234,7 +236,13 @@ private fun Room(
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 10.dp)) {
+        // phone: these rows WRAP (the 5-pill strip clipped at 360dp); TV fits
+        // them on one line and sees no change
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 10.dp),
+        ) {
             PillButton("Copy Invite", big, accent = false, onClick = onCopyInvite)
             PillButton("Copy Code", big, accent = false, onClick = onCopyCode)
             PillButton("Resync", big, accent = false, onClick = onResync)
@@ -271,7 +279,11 @@ private fun Room(
                     items(room.chat, key = { it.id }) { m -> ChatRow(big, m, room.selfId) }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
                 QUICK.forEach { q ->
                     PillButton(q, big, accent = false, onClick = { onQuick(q) })
                 }

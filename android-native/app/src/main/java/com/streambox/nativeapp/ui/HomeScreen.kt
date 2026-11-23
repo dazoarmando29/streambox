@@ -2009,7 +2009,7 @@ private fun TvLegend() {
         Spacer(modifier = Modifier.weight(1f))
         Text(
             "STREAMBOX 10-FOOT UI",
-            color = Color(0xFF3B4A63),
+            color = Dim,
             fontWeight = FontWeight.Bold,
             fontSize = 10.sp,
             letterSpacing = 1.5.sp,
@@ -2017,7 +2017,7 @@ private fun TvLegend() {
         Spacer(modifier = Modifier.width(12.dp))
         Text(
             "v" + com.streambox.nativeapp.BuildConfig.VERSION_NAME,
-            color = Color(0xFF3B4A63),
+            color = Dim,
             fontWeight = FontWeight.Bold,
             fontSize = 11.sp,
             letterSpacing = 1.5.sp,
