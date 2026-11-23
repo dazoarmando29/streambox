@@ -54,8 +54,12 @@ const LIMITS = {
   RECENT_SEAT_MS: 5 * 60 * 1000,
   CHAT_HISTORY: 50,
   MAX_ROOMS: 200,
-  CREATE_WINDOW_MS: 60 * 60 * 1000,
-  CREATE_MAX: 3,
+  // per-IP room creation: aligned with party-server/server.js (5/min) - the
+  // old 3/hour blocked households behind one NAT from starting parties (and
+  // diverged from the Node reference). Mass-creation stays bounded by
+  // MAX_ROOMS + empty-room TTL + the code-guessing lockout.
+  CREATE_WINDOW_MS: 60 * 1000,
+  CREATE_MAX: 5,
 };
 
 const START_DELAY_MS = LIMITS.START_DELAY_MS; // fallback gate: episode changes start together on the server clock
@@ -266,7 +270,7 @@ export class PartyHub {
         if (m0.roomId) return this.send(ws, { t: "error", error: "conflict" });
         // per-IP create budget + a global room cap: unbounded creates let one
         // attacker fill the hub's memory and evict EVERY legit party
-        if (!this.createLim.allow(m0.ip || m0.id)) return this.send(ws, { t: "error", error: "rate_limited" });
+        if (!this.createLim.allow(m0.ip || m0.id)) return this.send(ws, { t: "error", error: "rate_limited", for: "create" });
         if (this.rooms.size >= LIMITS.MAX_ROOMS) return this.send(ws, { t: "error", error: "full" });
         m0.name = cleanName(m.name);
         const room = await this.createRoom(m0, m);
