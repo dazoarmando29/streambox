@@ -56,6 +56,7 @@ function createPartyServer(opts = {}) {
         msg: new RateLimiter(LIMITS.MSG_WINDOW_MS, LIMITS.MSG_MAX),
         chat: new RateLimiter(LIMITS.CHAT_WINDOW_MS, LIMITS.CHAT_RATE_MAX),
         sync: new RateLimiter(LIMITS.SYNC_REPORT_MIN_MS * 3, 3),
+        pstate: new RateLimiter(LIMITS.PSTATE_WINDOW_MS, LIMITS.PSTATE_MAX),
       };
     }
     return p._lim;
@@ -88,7 +89,7 @@ function createPartyServer(opts = {}) {
       roomId: "",
     };
 
-    send(ws, { t: "welcome", participantId: p.id, token: p.token, serverTs: Date.now() });
+    send(ws, { t: "welcome", participantId: p.id, token: p.token, serverTs: Date.now(), proto: 2 });
 
     ws.on("message", (data, isBinary) => {
       if (isBinary) { send(ws, { t: "error", error: "bad_message" }); return; }
@@ -231,7 +232,17 @@ function createPartyServer(opts = {}) {
         }
         case "sync_report": {
           if (!lim.sync.allow("s", Date.now())) return; // drop silently
-          rooms.syncReport(p.roomId, p.id, m.position, m.paused, m.dur, m.source);
+          const r = rooms.syncReport(p.roomId, p.id, m);
+          if (r && r.events && r.events.length) broadcast(p.roomId, r.events);
+          break;
+        }
+        case "pstate": {
+          // readiness + buffering channel: fast (own limiter), and it DRIVES
+          // room behavior (transition scheduling, wait-for-everyone holds)
+          if (!lim.pstate.allow("p", Date.now())) return; // drop silently
+          const r = rooms.pstate(p.roomId, p.id, m);
+          if (r.error) { send(ws, { t: "error", error: r.error, for: "pstate" }); return; }
+          broadcast(p.roomId, r.events || []);
           break;
         }
         case "source": {
@@ -271,12 +282,23 @@ function createPartyServer(opts = {}) {
   }, 10000);
   if (sweepTimer.unref) sweepTimer.unref();
 
+  // deadline tick: coordinated starts and wait-for-everyone holds resolve on
+  // time even when nobody sends traffic (correctness still never depends on
+  // timers alone - every command re-evaluates lazily too)
+  const tickTimer = setInterval(() => {
+    for (const batch of rooms.tick()) {
+      broadcast(batch.roomId, batch.events);
+    }
+  }, 2000);
+  if (tickTimer.unref) tickTimer.unref();
+
   return {
     server,
     rooms,
     listen(port, cb) { return server.listen(port, cb); },
     close(cb) {
       clearInterval(sweepTimer);
+      clearInterval(tickTimer);
       for (const c of wss.clients) { try { c.terminate(); } catch (e) {} }
       wss.close();
       server.close(cb);

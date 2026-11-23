@@ -7,7 +7,7 @@
   "engines": { "node": ">=18" },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/party.test.js"
+    "test": "node --test test/party.test.js test/sync-reliability.test.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

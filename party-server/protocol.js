@@ -17,6 +17,20 @@ const LIMITS = {
   CHAT_WINDOW_MS: 10000,
   CHAT_RATE_MAX: 6,
   SYNC_REPORT_MIN_MS: 4000,
+  // player-state reports (loading/ready/buffering/...) move fast but stay bounded
+  PSTATE_WINDOW_MS: 5000,
+  PSTATE_MAX: 12,
+  // coordinated episode transitions (readiness-gated shared start)
+  START_DELAY_MS: 8000,        // fallback gate: room starts this long after a content change AT THE LATEST
+  TRANSITION_MIN_MS: 3000,     // loading reports may arrive this long before a start can be scheduled
+  START_COUNTDOWN_MS: 2500,    // countdown baked into a readiness-scheduled start
+  READY_TIMEOUT_DEFAULT_MS: 8000,
+  READY_TIMEOUT_MIN_MS: 4000,
+  READY_TIMEOUT_MAX_MS: 120000,
+  // wait-for-everyone buffering holds
+  HOLD_TIMEOUT_DEFAULT_MS: 20000,
+  HOLD_TIMEOUT_MIN_MS: 5000,
+  HOLD_TIMEOUT_MAX_MS: 120000,
   // join-by-code guessing: per-remote-address
   CODE_ATTEMPT_WINDOW_MS: 5 * 60 * 1000,
   CODE_ATTEMPT_MAX: 12,
@@ -42,7 +56,7 @@ const CLIENT_MSGS = new Set([
   "hello", "create", "join", "leave", "end",
   "playback", "content", "chat", "resync",
   "kick", "mute", "settings", "heartbeat", "sync_report",
-  "source",
+  "source", "pstate",
 ]);
 
 // server -> client message types
@@ -50,6 +64,7 @@ const SERVER_MSGS = new Set([
   "welcome", "room", "room_state", "playback", "content", "chat",
   "peer_joined", "peer_left", "host_changed", "settings", "kicked",
   "room_ended", "error", "heartbeat", "notice", "source",
+  "peer_state", "schedule",
 ]);
 
 const ERROR_CODES = new Set([
@@ -59,6 +74,14 @@ const ERROR_CODES = new Set([
 
 const PLAYBACK_ACTIONS = new Set(["play", "pause", "seek", "rate", "ended", "buffer"]);
 const ROOM_STATUSES = new Set(["waiting", "loading", "ready", "playing", "paused", "ended", "error"]);
+/* Per-participant player states (requirement: track each controllable player,
+   never collapse the room into one status). "recovered" = was buffering and is
+   playable again; "error"/"disconnected" never block the room. */
+const PSTATE_VALUES = new Set(["loading", "ready", "playing", "paused", "buffering", "recovered", "error", "disconnected"]);
+/* Player states that must NOT hold back a readiness-scheduled start or a
+   wait-for-everyone hold release (a dead source must never trap the room). */
+const PSTATE_BLOCKING = new Set(["loading", "buffering"]);
+const WAIT_MODES = new Set(["move", "everyone"]);
 
 function isStr(v, min, max) {
   return typeof v === "string" && v.length >= min && v.length <= max;
@@ -191,6 +214,24 @@ function validateClientMsg(raw, inRoom) {
       if (m.allowControl != null) msg.allowControl = m.allowControl === true;
       if (m.chatEnabled != null) msg.chatEnabled = m.chatEnabled === true;
       if (m.roomName != null) msg.roomName = cleanText(m.roomName, LIMITS.ROOM_NAME_MAX);
+      // buffering policy: "move" (default - party keeps moving) | "everyone"
+      // (host-enabled hold-until-ready, bounded by a timeout + host override)
+      if (m.waitMode != null) {
+        const wm = String(m.waitMode) === "everyone" ? "everyone" : "move";
+        msg.waitMode = wm;
+      }
+      if (m.readyTimeoutMs != null) {
+        const rt = parseInt(m.readyTimeoutMs, 10);
+        if (Number.isFinite(rt)) {
+          msg.readyTimeoutMs = Math.min(LIMITS.READY_TIMEOUT_MAX_MS, Math.max(LIMITS.READY_TIMEOUT_MIN_MS, rt));
+        }
+      }
+      if (m.holdTimeoutMs != null) {
+        const ht = parseInt(m.holdTimeoutMs, 10);
+        if (Number.isFinite(ht)) {
+          msg.holdTimeoutMs = Math.min(LIMITS.HOLD_TIMEOUT_MAX_MS, Math.max(LIMITS.HOLD_TIMEOUT_MIN_MS, ht));
+        }
+      }
       return { ok: true, msg };
     }
     case "heartbeat":
@@ -211,6 +252,37 @@ function validateClientMsg(raw, inRoom) {
         const s = cleanText(m.source, 24);
         if (s) msg.source = s;
       }
+      // session stamp + player state ride along when a newer client reports:
+      // a report stamped for a previous episode must not mark anyone "ready"
+      // for the current one (stale-readiness guard).
+      if (m.sv != null) {
+        const sv = parseInt(m.sv, 10);
+        if (Number.isFinite(sv) && sv >= 1) msg.sv = sv;
+      }
+      if (m.st != null && PSTATE_VALUES.has(m.st)) msg.st = m.st;
+      return { ok: true, msg };
+    }
+    case "pstate": {
+      // explicit player-state report (loading/ready/buffering/...). This is the
+      // readiness + buffering channel: fast, rate-limited separately.
+      if (!PSTATE_VALUES.has(m.st)) return { ok: false, error: "bad_message" };
+      const msg = { t, st: m.st };
+      if (m.position != null) {
+        const p = Number(m.position);
+        if (Number.isFinite(p) && p >= 0 && p <= 24 * 3600) msg.position = p;
+      }
+      if (m.dur != null) {
+        const d = Number(m.dur);
+        if (Number.isFinite(d) && d > 0 && d <= 24 * 3600) msg.dur = d;
+      }
+      if (m.source != null) {
+        const s = cleanText(m.source, 24);
+        if (s) msg.source = s;
+      }
+      if (m.sv != null) {
+        const sv = parseInt(m.sv, 10);
+        if (Number.isFinite(sv) && sv >= 1) msg.sv = sv;
+      }
       return { ok: true, msg };
     }
     case "source": {
@@ -226,4 +298,65 @@ function validateClientMsg(raw, inRoom) {
   }
 }
 
-module.exports = { LIMITS, CODE_ALPHABET, CODE_LEN, CODE_RE, CLIENT_MSGS, SERVER_MSGS, ERROR_CODES, PLAYBACK_ACTIONS, ROOM_STATUSES, cleanText, cleanName, expectedPosition, validateClientMsg };
+/* ---- shared drift-correction planner (clients copy this verbatim) ---- */
+
+/* Pure decision function for drift correction. The website's driftTick() calls
+   this exact logic (kept byte-identical; QA lock verifies the copy). Policy:
+   - buffering / seeking / unready players are NEVER fought
+   - a player held before a scheduled start is never corrected
+   - tiny drift: ignore; moderate: gentle rate nudge when genuinely supported;
+     large: one controlled seek; seek-only bridges: rare large-gap seeks
+   - a cooldown between corrections makes correction loops impossible
+   - never seek into the credits/end zone or across known different cuts
+   Returns { action: "none"|"nudge"|"seek", rate?, restoreMs?, reason }. */
+function planCorrection(o) {
+  const cfg = Object.assign({
+    nudgeAt: 0.2,        // seconds of drift before a gentle rate nudge
+    seekAt: 1.5,         // seconds of drift before a controlled hard seek
+    seekOnlyAt: 1.2,     // seek-only bridges: seek when past this
+    minGapMs: 2500,      // min ms between corrections (no correction loops)
+    rateStep: 0.10,      // 10% rate nudge
+    restoreCapMs: 8000,  // max ms before restoring rate to 1
+    endZoneSec: 20,      // never hard-seek within the last N seconds
+    cutBridgeAt: 15,     // different cuts: only bridge gaps at/above this
+  }, o.cfg || {});
+  const drift = Number(o.drift) || 0;
+  const mag = Math.abs(drift);
+  if (!o.canSeek) return { action: "none", reason: "unsupported" };
+  if (o.buffering) return { action: "none", reason: "buffering" };
+  if (o.seeking) return { action: "none", reason: "seeking" };
+  if (o.ready === false) return { action: "none", reason: "not_ready" };
+  if (o.gateAt && o.serverNowMs != null && o.gateAt > o.serverNowMs) {
+    return { action: "none", reason: "gate" };
+  }
+  if (mag < cfg.nudgeAt) return { action: "none", reason: "in_band" };
+  if (o.cutMismatch && mag < cfg.cutBridgeAt) return { action: "none", reason: "cut_mismatch" };
+  const nowMs = o.nowMs || 0;
+  if (o.lastCorrectMs && nowMs - o.lastCorrectMs < cfg.minGapMs) {
+    return { action: "none", reason: "cooldown" };
+  }
+  if (mag >= cfg.seekAt) {
+    // controlled seek - but never into the end zone (credits would jump)
+    if (o.dur && o.pos != null && o.pos > o.dur - cfg.endZoneSec) {
+      return { action: "none", reason: "end_zone" };
+    }
+    return { action: "seek", reason: "large_drift" };
+  }
+  if (o.canRate) {
+    const rate = drift > 0 ? 1 - cfg.rateStep : 1 + cfg.rateStep;
+    return {
+      action: "nudge",
+      rate,
+      restoreMs: Math.min(cfg.restoreCapMs, Math.round(mag / cfg.rateStep * 1000)),
+      reason: "moderate_drift",
+    };
+  }
+  if (mag > cfg.seekOnlyAt) return { action: "seek", reason: "seek_only_bridge" };
+  return { action: "none", reason: "below_seek_only_floor" };
+}
+
+module.exports = {
+  LIMITS, CODE_ALPHABET, CODE_LEN, CODE_RE, CLIENT_MSGS, SERVER_MSGS, ERROR_CODES,
+  PLAYBACK_ACTIONS, ROOM_STATUSES, PSTATE_VALUES, PSTATE_BLOCKING, WAIT_MODES,
+  cleanText, cleanName, expectedPosition, planCorrection, validateClientMsg,
+};
