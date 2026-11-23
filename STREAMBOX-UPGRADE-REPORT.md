@@ -56,8 +56,8 @@ Companion documents: `WATCH-PARTY-RELIABILITY-REPORT.md` (Phase 1 deep-dive), `A
 
 | File | Why |
 |---|---|
-| `backend/src/party.js` | PartyHub DO: v2 parity (transitions/holds/pstate, heartbeat liveness, hashed passwords, sync limiters, `room_ended`→host, `proto:2`) + **v2.1 parity (media/roles/requests/react/queue/intermission) — see D8 status** |
-| `backend/test-party-parity.mjs` | Dispatch-level DO harness (15 v2 scenarios + v2.1 additions) |
+| `backend/src/party.js` | PartyHub DO: v2 parity (transitions/holds/pstate, heartbeat liveness, hashed passwords, sync limiters, `room_ended`→host, `proto:2`) + **v2.1 parity (media/roles/requests/react/queue/intermission, locked rooms, chat social fields) — verified 26/26** |
+| `backend/test-party-parity.mjs` | Dispatch-level DO harness: **26 scenarios** (v2 + v2.1) |
 
 *Untouched but audited:* `sw.js` (healthy), `manifest.webmanifest`, WebView `android/` (inherits website), `android-native/` (legacy-path compatible), `android-tv/`.
 
@@ -69,7 +69,7 @@ Companion documents: `WATCH-PARTY-RELIABILITY-REPORT.md` (Phase 1 deep-dive), `A
 |---|---|
 | Server suites: `party.test.js` (35 legacy) + `sync-reliability.test.js` (37) + `party-features.test.js` (17) | **89/89** |
 | Real-browser E2E (2-4 Edge pages × real WebSockets × real party-server × controllable adapter) | **27/27** |
-| DO parity harness (`test-party-parity.mjs`) | 15/15 (v2) + v2.1 additions (see D8) |
+| DO parity harness (`test-party-parity.mjs`, dispatch-level with pinned clock) | **26/26** (15 v2 + 11 v2.1) — independently re-run after line-review |
 | Site QA gate (~162 invariants) | 0 failures, 0 warnings |
 | `responsive-test.js` (320→3840px × 5 screens) | 0 failing screens, 0 compact-target warnings |
 | `click-test.js` | 15/15 |
