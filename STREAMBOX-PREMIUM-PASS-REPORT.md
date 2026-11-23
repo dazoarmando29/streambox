@@ -18,7 +18,9 @@ Test conditions for every number below: Windows dev machine, headless Edge (Chro
 
 ## 2. Android TV Redesign Summary
 
-**Verified on emulator `tv_1080p_36` (Android TV 10, 1080p):** launcher + banner present, `?tv=1` per-device derivation, tv-mode 10-foot layout (large type, poster rows with focus rings, remote-safe margins), D-pad navigation through the site's existing spatial engine (Up/Down rows, Left/Right cards, OK open, Back cascade, media keys wired to play/pause), TV-safe server list, remote-first player bar (56px targets, floating Skip pill D-pad-reachable).
+**What the TV experience is:** the wrapper renders the website's `?tv=1` per-device layout (10-foot type, poster rows with focus rings, remote-safe margins) driven by the site's spatial D-pad engine (Up/Down rows, Left/Right cards, OK open, Back cascade, media-key bridge to play/pause); the `android-tv/` project is the native Compose alternative (Media3 for direct streams, WebView for embed mirrors).
+
+**Verified this pass:** TV layout + remote-safe geometry via `responsive-test` at 1920×1080 and 3840×2160 (0 failing screens, 0 overflow, targets ≥40px); the android-tv project's Kotlin fixes compile (BUILD SUCCESSFUL, 75.6s); wrapper TV manifest/launcher/banner config audited (LEANBACK_LAUNCHER + banner + `leanback required=false`, TV detection by FEATURE_LEANBACK/UI_MODE). ⚠️ **The `tv_1080p_36` emulator failed to fully boot in this environment** (process starts, never registers with adb within 15+ min under software GPU) — so **no TV-emulator screenshots or live D-pad keyevent runs were captured this pass** (previous rounds' TV claims likewise rest on code-level + layout-geometry verification). Physical TV/box testing remains required (§11).
 
 **This pass fixed (android-tv project + shared layers):**
 - `WebPlaybackScreen.kt` — **renderer-crash recovery** (`onRenderProcessGone` → destroy + `webGen` re-key + reload, the proven wrapper/native pattern), **mixed-content/UA hardening deferred** (documented), **teardown fixed** (removeView + destroy; the pointless `about:blank` load removed).
@@ -70,7 +72,7 @@ Startup note (honest): `TotalTime` measures the splash's first frame; the full l
 ## 7. Before/After Screenshots
 
 - **Android emulator:** `sb-android-before/phone-home-before.png` vs `sb-android-after/phone-home-after.png` (Medium_Phone_API_37, same build pipeline, only the fixes differ).
-- **TV emulator (`tv_1080p_36`):** launcher/home + D-pad focus movement + player — captured in this pass (see §11).
+- **TV emulator (`tv_1080p_36`):** NOT captured — the AVD failed to register/boot in this environment (software GPU, 15+ min). TV visuals rest on `responsive-test`'s 1080p/4K viewports and code-level verification; a physical TV pass is listed in §11.
 - **Website phone/tablet screens** (7 screens × 4 viewports, before/after): `mobile-ui-shots/` from the previous round — unchanged and still accurate.
 
 ## 8. Performance Benchmark Comparison
@@ -103,7 +105,7 @@ Both wrapper flavors sign with the committed preview key (install-over-previous 
 
 **Emulators used (clearly labeled — not physical devices):**
 - `Medium_Phone_API_37.0` (Android 17/API 37 x86_64): wrapper Full APK — cold starts ×3 before/after, `dumpsys meminfo`, launcher screenshot, launch/splash/MainActivity path verified via `ActivityTaskManager` logcat.
-- `tv_1080p_36` (Android TV 10, 1080p): wrapper in TV mode — launcher banner, 10-foot home, D-pad keyevents (Up/Down/Left/Right/OK/Back) exercised, focus rings verified in screenshots.
+- `tv_1080p_36` (Android TV 10, 1080p): attempted for TV home + D-pad keyevent capture — **the AVD never finished booting in this environment** (registered as running but not adb-online after 15+ min, software GPU). TV verification therefore = layout geometry (responsive-test 1080p/4K screens) + code-level D-pad/remote review + the android-tv build. Not claimed as device-tested.
 - Headless Edge (Chromium): all web metrics + full regression suites.
 
 **Regression suites (final state):** site QA gate **0 failures** · `click-test` **15/15** · `responsive-test` **0 failing screens** (320→3840px, incl. TV 1080p/4K screens) · **Watch Party E2E 27/27** · `party-server` suites **89/89** · PartyHub DO parity **26/26** (unchanged this pass).
