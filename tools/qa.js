@@ -704,10 +704,10 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   else bad("focusRingCircle missing from Theme.kt");
   const appSrc = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt"))
     ? read("android-native/app/src/main/java/com/streambox/nativeapp/ui/App.kt") : "";
-  if (/LocalIndication provides NoIndication/.test(appSrc) && /object NoIndication : IndicationNodeFactory/.test(appSrc)) {
-    ok("default indication disabled (no square state-layer plates)");
+  if (/LocalIndication provides if \(AppEnv\.isTv\) NoIndication/.test(appSrc) && /object NoIndication : IndicationNodeFactory/.test(appSrc)) {
+    ok("TV indication disabled (no square state-layer plates) + touch keeps ripple press feedback");
   } else {
-    bad("NoIndication missing - the default indication draws square plates behind round buttons on TV");
+    bad("NoIndication missing - the default indication draws square plates behind round buttons on TV (and touch devices must keep press feedback)");
   }
 }
 
@@ -716,7 +716,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   const psResume = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psResume) bad("PlayerScreen.kt missing - resume boot cannot be verified");
   else {
-    if (/val resumeAt = run \{[\s\S]*?Store\.progressList\(ctx\)/.test(psResume)) ok("resumeAt derives from saved Store progress");
+    if (/val resumeAt = remember\([\s\S]*?Store\.progressList\(ctx\)/.test(psResume)) ok("resumeAt derives from saved Store progress (memoized - never re-parsed per recomposition)");
     else bad("resumeAt missing - the player must boot at the saved position");
     if (/playerUrl\(title, epSeason, epNumber, mal, ani, mirror, resumeAt,/.test(psResume)) ok("WebView boot loads at resumeAt");
     else bad("WebView boot does not pass resumeAt to playerUrl - Continue Watching would restart at 0");
@@ -1477,11 +1477,11 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
            /if \(st && st\.sources && st\.sources\.length > 0\) VB_RESOLVE\[q\] = j;/.test(psT) &&
            psT.includes("if (sig === VB_PUBSIG) return;") &&
            psT.includes("for (var vk in VB_RESOLVE)") &&
-           /delay\(700\)/.test(appT) &&
+           /delay\(350\)/.test(appT) &&
            /crossfade\(if \(AppEnv\.isTv\) 0 else 180\)/.test(hsT) &&
            !psT.includes("setTimeout(vbTracks, 5000)") &&
            !/VB_RESOLVE\[q\] = j; applyStream/.test(psT)) {
-    ok("resolve hardening: bootstrap-gated single fetch, empties never cached, publish-on-change; splash 700ms and no TV crossfade");
+    ok("resolve hardening: bootstrap-gated single fetch, empties never cached, publish-on-change; splash 350ms and no TV crossfade");
   } else {
     bad("the resolve fetch must wait for fw.__VB__ (bootstrap session), run one in flight per episode (VB_PENDING), cache ONLY source-bearing answers, and publish only on change - early empty caches erased the Tagalog dub and storms slowed slow-wifi starts");
   }
@@ -1553,7 +1553,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   const psS69 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!psS69) bad("PlayerScreen.kt missing - auto-skip rules cannot be verified");
   else {
-    const autoBlock = (psS69.match(/LaunchedEffect\(cur, hit, autoSkip\) \{[\s\S]{0,700}?\n    \}/) || [""])[0];
+    const autoBlock = (psS69.match(/LaunchedEffect\(hit, autoSkip, playing\) \{[\s\S]{0,700}?\n    \}/) || [""])[0];
     if (/h\.end != null && h\.kind != "credits"/.test(autoBlock) &&
         /autoDone = key\s*\n\s*seekTo\(h\.end\)/.test(autoBlock) &&
         !/advanceEpisode|goNext/.test(autoBlock)) {
@@ -1619,7 +1619,8 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   if (!dtF) bad("DetailScreen.kt missing - finale/next-season rules cannot be verified");
   else if (/"SEASON FINALE"/.test(dtF) &&
            /"Next: Season "/.test(dtF) &&
-           /finale = ep\.n == \(episodes\.maxOfOrNull \{ it\.n \} \?: -1\)/.test(dtF) &&
+           /finale = ep\.n == finaleN/.test(dtF) &&
+           /val finaleN = remember\(episodes\)/.test(dtF) &&
            /val nextS = det\.seasons\.firstOrNull \{ it\.n == season \+ 1 && it\.n >= 1 \}/.test(dtF)) {
     ok("detail shows the season finale row and the next season (ready or Coming Soon) above the episodes");
   } else {
@@ -1909,7 +1910,7 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   const stF86 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
     ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt")) : "";
   if (!psF86 || !stF86) bad("PlayerScreen/Store missing - the finished-title resume rules cannot be verified");
-  else if (/val resumeAt = run \{/.test(psF86) &&
+  else if (/val resumeAt = remember\(/.test(psF86) &&
            /!sp\.done/.test(psF86) &&
            /sp\.cur >= sp\.dur \* 0\.95f/.test(psF86) &&
            /keepDone/.test(psF86) &&
