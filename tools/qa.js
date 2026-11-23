@@ -1946,10 +1946,19 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (/function capNow\s*\(\)/.test(html) && /capNow\(\) \+ \(subFile\.offset/.test(html) && /\}, 150\);/.test(html))
     ok("captions extrapolate between timeupdates and repaint on the 150ms ticker (no more late subtitles)");
   else bad("paintCaps must use capNow() extrapolation + the 150ms caption ticker");
-  // drift: room-paused enforcement + fast enough nudges
-  if (/SYNC_NUDGE: 0\.2/.test(html) && /0\.9 : 1\.1/.test(html) && /pb\.status === "paused" && !a\.paused\(\)/.test(html))
-    ok("drift correction: room-pause enforced locally, 10% nudges, 3s cadence (the 'slight desync' fix)");
-  else bad("driftTick must enforce the room's pause on controllers and use the faster nudge/cadence");
+  // drift: room-paused enforcement + the shared correction planner
+  if (/SYNC_NUDGE: 0\.2/.test(html) && /nudgeAt: CFG\.SYNC_NUDGE/.test(html) && /pb\.status === "paused" && !a\.paused\(\)/.test(html))
+    ok("drift correction: room-pause enforced locally, shared planner driven by CFG (the 'slight desync' fix)");
+  else bad("driftTick must enforce the room's pause on controllers and drive planCorrection from CFG.SYNC_*");
+  // the client's correction planner must be BYTE-IDENTICAL to the tested
+  // server copy in party-server/protocol.js - one policy, one source of truth
+  const pp = html.match(/function planCorrection\(o\) \{[\s\S]*?\n  \}/);
+  let serverPP = "";
+  try { serverPP = require("fs").readFileSync(require("path").resolve(__dirname, "..", "party-server", "protocol.js"), "utf8").match(/function planCorrection\(o\) \{[\s\S]*?\n\}/); } catch(e){}
+  const norm = (s) => (s || "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "").replace(/\s+/g, " ").trim();
+  if (pp && serverPP && norm(pp[0]) === norm(serverPP[0]))
+    ok("planCorrection is byte-identical to the tested party-server copy");
+  else bad("the inline planCorrection copy must match party-server/protocol.js (QA lock keeps the shared policy in sync)");
 }
 
 /* ---------- 159. browse never sticks, browsing stops the video, party QoL ---------- */

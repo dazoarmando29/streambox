@@ -1324,6 +1324,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       </div>
       <div id="partyHostRow" class="hidden px-5 pb-3 flex flex-wrap items-center gap-2 text-xs text-gray-300">
         <label class="flex items-center gap-1.5"><input id="partyCtlToggle" type="checkbox" onchange="partyToggleCtl()" class="accent-teal-400"> Guests control playback</label>
+        <label class="flex items-center gap-1.5" title="Pause the party when a viewer buffers (auto-resumes when they catch up)"><input id="partyWaitToggle" type="checkbox" onchange="partyToggleWait()" class="accent-teal-400"> Wait for everyone</label>
         <label class="flex items-center gap-1.5 ml-auto"><input id="partyChatToggle" type="checkbox" onchange="partyToggleChat()" class="accent-teal-400"> Chat</label>
       </div>
       <div id="partyChatWrap" class="border-t border-white/10">
@@ -1435,13 +1436,17 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     </div>
 
     <div id="panePlayback">
+      <div id="speedBlock">
       <p class="text-xs text-gray-400 font-bold mb-2">SPEED</p>
       <div id="speedRow" class="flex flex-wrap gap-2 mb-5"></div>
+      </div>
+      <div id="volBlock">
       <p class="text-xs text-gray-400 font-bold mb-2">VOLUME <span id="volLabel" class="text-gray-200 ml-1">100%</span></p>
       <div class="flex items-center gap-2 mb-5">
         <button onclick="volStep(-0.1)" aria-label="Volume down" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-xl">−</button>
         <button onclick="volStep(0.1)" aria-label="Volume up" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-xl">+</button>
         <button onclick="ctlMuteToggle()" class="h-11 px-4 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Mute</button>
+      </div>
       </div>
       <p class="text-xs text-gray-400 font-bold mb-2">SLEEP TIMER <span id="sleepLabel" class="text-gray-200 ml-1">Off</span></p>
       <div id="sleepRow" class="flex flex-wrap gap-2 mb-3"></div>
@@ -6272,6 +6277,7 @@ function ctlPollStop(){ clearInterval(window._ctlPoll); }
     else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: t });
     else if (mirror === "vidbolt") boltSeekTo(t);
     else if (mirror === "vidzen") zenSeekTo(t);
+    else if (mirror === "vidcore") coreSend("seek", { time: t }); // was dead: fell through to sendCmd (CineSrc-only)
     else sendCmd("seek", [t]);
     try { PARTY.onLocalSeek(t); } catch(e){}
   });
@@ -6332,14 +6338,22 @@ function setTab(name){
 }
 /* speed presets */
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+/* which mirrors can REALLY honor speed / volume commands (audit-verified:
+   cinesrc + anipm confirm with events; vidbolt/vidzen/vidcore/vidrift have
+   blind-or-no volume/rate APIs - dead controls hide instead of lying) */
+function speedCapable(){ return mirror === "cinesrc" || mirror === "anipm"; }
+function volCapable(){ return mirror === "cinesrc" || mirror === "anipm"; }
 function speedSet(r){
   pState.rate = r;
-  sendCmd("setPlaybackRate", [r]);
+  if (mirror === "anipm") anipmSend("setPlaybackRate", { rate: r });
+  else sendCmd("setPlaybackRate", [r]); // cinesrc (no-op elsewhere)
   ctlPaint(); paintSpeed();
 }
 function paintSpeed(){
   const row = document.getElementById("speedRow");
   if (!row) return;
+  const blk = document.getElementById("speedBlock");
+  if (blk) blk.classList.toggle("hidden", !speedCapable());
   row.innerHTML = "";
   SPEEDS.forEach(r => {
     const b = document.createElement("button");
@@ -6364,6 +6378,8 @@ function volStep(d){
 function paintVol(){
   const el = document.getElementById("volLabel");
   if (el) el.textContent = Math.round((pState.vol == null ? 1 : pState.vol) * 100) + "%";
+  const blk = document.getElementById("volBlock");
+  if (blk) blk.classList.toggle("hidden", !volCapable());
 }
 function volFlash(){
   // big readable % on the video itself (watchStatus sits below, hidden in cinema)
@@ -6432,6 +6448,7 @@ function sleepTick(){
       if (mirror === "anipm") anipmSend("pause");
       else if (mirror === "vidzen") zenSend({ type: "pause" });
       else if (mirror === "vidbolt") boltSend({ type: "pause" });
+      else if (mirror === "vidcore") coreSend("pause"); // was missing: claimed pause, never paused
       else sendCmd("pause");
       pState.paused = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){}
       if (ws) ws.textContent = "\u{1F634} Sleep timer — playback paused";
@@ -6450,6 +6467,7 @@ function applySleepOnEnd(){
   else if (mirror === "anipm") anipmSend("pause");
   else if (mirror === "vidzen") zenSend({ type: "pause" });
   else if (mirror === "vidbolt") boltSend({ type: "pause" });
+  else if (mirror === "vidcore") coreSend("pause");
   else sendCmd("pause");
   pState.paused = true; ctlPaint(); try { PARTY.onProviderPlayState(); } catch(e){}
   const ws = document.getElementById("watchStatus");
@@ -8238,7 +8256,7 @@ async function fetchIntroRanges(){
    playhead sits inside a known intro, on mirrors we can drive. */
 function introHit(){
   if (watchState.type !== "tv") return null; // TV shows + anime only — never movies
-  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt") return null;
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt" && mirror !== "vidcore") return null;
   const cur = pState.cur || 0;
   return _introRanges.find(r => cur >= r.start && cur < r.end - 1) || null;
 }
@@ -8250,6 +8268,7 @@ function mirrorSeek(t){
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: tt });
   else if (mirror === "vidbolt") boltSkipTo(tt);
   else if (mirror === "vidzen") zenSeekTo(tt);
+  else if (mirror === "vidcore") coreSend("seek", { time: tt }); // VidCore HAS a seek API - use it
   else if (mirror === "anipm") anipmSend("seek", { time: tt });
 }
 function skipIntroNow(){
@@ -8265,7 +8284,7 @@ function skipIntroNow(){
    pill only appears while the playhead sits inside a submitted recap. */
 function recapHit(){
   if (watchState.type !== "tv") return null; // TV shows + anime only — never movies
-  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt") return null;
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt" && mirror !== "vidcore") return null;
   const cur = pState.cur || 0;
   return _recapRanges.find(r => cur >= r.start && cur < r.end - 1) || null;
 }
@@ -8306,7 +8325,7 @@ function finaleInfo(){
 }
 function outroHit(){
   if (watchState.type !== "tv") return null; // same gates as intros
-  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt") return null;
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt" && mirror !== "vidcore") return null;
   const cur = pState.cur || 0;
   // TAIL guard: credits/preview ranges only count in the tail (start > 10s
   // AND start >= dur/2) — an early "credits" range never shows Next Episode
@@ -8381,7 +8400,7 @@ function paintSkipPill(){
   }
 }
 function autoSkipIntro(){
-  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt") return;
+  if (mirror !== "cinesrc" && mirror !== "vidrift" && mirror !== "vidzen" && mirror !== "anipm" && mirror !== "vidbolt" && mirror !== "vidcore") return;
   try { if (!document.getElementById("optAutoskip").checked) return; } catch(e){ return; }
   const cur = pState.cur || 0;
   const hit = _introRanges.find(r => cur >= r.start && cur < r.end - 1);
@@ -8393,6 +8412,7 @@ function autoSkipIntro(){
   else if (mirror === "vidrift") vidriftSend({ type: "vidrift:resume", currentTime: Math.floor(hit.end) });
   else if (mirror === "vidbolt") boltSkipTo(hit.end);
   else if (mirror === "vidzen") zenSeekTo(hit.end);
+  else if (mirror === "vidcore") coreSend("seek", { time: Math.floor(hit.end) });
   else if (mirror === "anipm") anipmSend("seek", { time: Math.floor(hit.end) });
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = "Intro skipped \u{2713}";
@@ -10015,6 +10035,12 @@ const PARTY = (() => {
     SYNC_INTERVAL: 2000,  // drift check cadence (events also realign instantly)
     SYNC_MIN_GAP: 2500,   // min ms between corrections (no correction loops)
     HEARTBEAT: 20000,     // clock sync + liveness
+    // buffering + readiness (protocol v2): player-state reports are cheap and
+    // drive coordinated episode starts + wait-for-everyone holds
+    PSTATE_MIN_GAP: 600,  // min ms between unchanged player-state reports
+    SYNC_READY_TRIES: 60, // syncToRoom waits up to 30s for a slow player (60 x 500ms)
+    STALL_UI_MS: 1200,    // a stall this long shows "Buffering - catching up"
+    STALL_HINT_MS: 15000, // a stall this long earns an actionable hint
     CHAT_MAX: 300,
     QUICK: ["Hello!", "Ready!", "One sec", "LOL", "Brb", "Bye!"],
   };
@@ -10026,6 +10052,13 @@ const PARTY = (() => {
     suppressUntil: 0, lastContentKey: "", lastCorrect: 0,
     chat: [], unread: 0, panelOpen: false,
     hbT: null, driftT: null,
+    proto: 1,          // hub protocol generation (welcome.proto; 1 = legacy hub)
+    _connEpoch: 0,     // bumped per socket: stale callbacks can never touch newer state
+    _rateT: null,      // pending playback-rate restore (NEVER outlives its player)
+    _gateT: null,      // scheduled-start timer
+    _syncT: null,      // syncToRoom retry timer
+    _pstateAt: 0, _lastSt: "",   // player-state report throttle + dedupe
+    _bufStallAt: 0, _stallShown: 0, _stalls: 0, _stallHintAt: 0,
   };
 
   /* ---- adapter registry: what each mirror can REALLY do (audit-verified) ---- */
@@ -10062,6 +10095,95 @@ const PARTY = (() => {
     return Math.max(0, p + ((serverNow() - (pb.updatedAt || serverNow())) / 1000) * (Number(pb.rate) || 1));
   }
 
+  /* ---- shared drift-correction planner (kept byte-identical to
+     party-server/protocol.js planCorrection - QA lock 139 verifies) ---- */
+  function planCorrection(o) {
+    const cfg = Object.assign({
+      nudgeAt: 0.2,        // seconds of drift before a gentle rate nudge
+      seekAt: 1.5,         // seconds of drift before a controlled hard seek
+      seekOnlyAt: 1.2,     // seek-only bridges: seek when past this
+      minGapMs: 2500,      // min ms between corrections (no correction loops)
+      rateStep: 0.10,      // 10% rate nudge
+      restoreCapMs: 8000,  // max ms before restoring rate to 1
+      endZoneSec: 20,      // never hard-seek within the last N seconds
+      cutBridgeAt: 15,     // different cuts: only bridge gaps at/above this
+    }, o.cfg || {});
+    const drift = Number(o.drift) || 0;
+    const mag = Math.abs(drift);
+    if (!o.canSeek) return { action: "none", reason: "unsupported" };
+    if (o.buffering) return { action: "none", reason: "buffering" };
+    if (o.seeking) return { action: "none", reason: "seeking" };
+    if (o.ready === false) return { action: "none", reason: "not_ready" };
+    if (o.gateAt && o.serverNowMs != null && o.gateAt > o.serverNowMs) {
+      return { action: "none", reason: "gate" };
+    }
+    if (mag < cfg.nudgeAt) return { action: "none", reason: "in_band" };
+    if (o.cutMismatch && mag < cfg.cutBridgeAt) return { action: "none", reason: "cut_mismatch" };
+    const nowMs = o.nowMs || 0;
+    if (o.lastCorrectMs && nowMs - o.lastCorrectMs < cfg.minGapMs) {
+      return { action: "none", reason: "cooldown" };
+    }
+    if (mag >= cfg.seekAt) {
+      // controlled seek - but never into the end zone (credits would jump)
+      if (o.dur && o.pos != null && o.pos > o.dur - cfg.endZoneSec) {
+        return { action: "none", reason: "end_zone" };
+      }
+      return { action: "seek", reason: "large_drift" };
+    }
+    if (o.canRate) {
+      const rate = drift > 0 ? 1 - cfg.rateStep : 1 + cfg.rateStep;
+      return {
+        action: "nudge",
+        rate,
+        restoreMs: Math.min(cfg.restoreCapMs, Math.round(mag / cfg.rateStep * 1000)),
+        reason: "moderate_drift",
+      };
+    }
+    if (mag > cfg.seekOnlyAt) return { action: "seek", reason: "seek_only_bridge" };
+    return { action: "none", reason: "below_seek_only_floor" };
+  }
+
+  /* ---- player-state reporting (readiness + buffering channel) ----
+     Each controllable player reports ITS state (loading/ready/playing/paused/
+     buffering/recovered/error) - never one status for the whole room. Legacy
+     hubs (proto 1) don't know `pstate`; we stay silent there and fall back to
+     the classic deadline gate (identical behavior to before). */
+  function reportState(st, opts = {}){
+    if (!inRoom()) return;
+    const now = Date.now();
+    const changed = st !== S._lastSt;
+    if (!changed && !opts.force && now - (S._pstateAt || 0) < CFG.PSTATE_MIN_GAP) return;
+    S._lastSt = st; S._pstateAt = now;
+    const a = adapter();
+    const payload = {
+      t: "pstate", st,
+      position: Math.max(0, Math.floor(a.pos())),
+      dur: Math.max(0, Math.floor(a.dur())),
+      source: sourceName(),
+    };
+    const sv = S.room && S.room.playback ? S.room.playback.sessionVersion : null;
+    if (sv) payload.sv = sv;
+    if (S.proto >= 2) send(payload);
+    else if (st === "buffering") send({ t: "playback", action: "buffer", sessionVersion: sv || undefined }); // legacy hub
+  }
+
+  /* Buffering UI: a clear "Buffering - catching up" state while stalled and
+     one clean catch-up seek when playback becomes possible again. */
+  function bufPill(show, text){
+    let el = document.getElementById("bufPill");
+    if (!show) { if (el) el.classList.add("hidden"); return; }
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "bufPill";
+      el.className = "fixed left-1/2 -translate-x-1/2 bottom-28 z-[80] glass px-4 py-2 rounded-full text-sm font-semibold flex items-center gap-2";
+      el.style.pointerEvents = "none";
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '<span class="inline-block w-3 h-3 rounded-full bg-amber-400 animate-pulse"></span><span></span>';
+    el.querySelectorAll("span")[1].textContent = text || "Buffering \u2014 catching up";
+    el.classList.remove("hidden");
+  }
+
   /* ---- transport: one connection, backoff + jitter, heartbeat ---- */
   function send(obj){
     if (S.ws && S.ws.readyState === 1) { try { S.ws.send(JSON.stringify(obj)); } catch(e){} }
@@ -10083,7 +10205,11 @@ const PARTY = (() => {
     let ws;
     try { ws = new WebSocket(url); } catch(e){ retry(); return; }
     S.ws = ws;
+    // connection generation: every callback below is stamped with it, so a
+    // dead socket's late callbacks can NEVER overwrite a newer connection
+    const epoch = ++S._connEpoch;
     ws.onopen = () => {
+      if (S._connEpoch !== epoch) { try { ws.close(); } catch(e){} return; }
       S.reconnects = 0;
       send({ t: "hello", name: displayName() });
       if (S.room) {
@@ -10106,12 +10232,14 @@ const PARTY = (() => {
       send({ t: "heartbeat", clientTs: Date.now() });
     };
     ws.onmessage = (e) => {
+      if (S._connEpoch !== epoch) return; // stale socket - its messages are history
       let m;
       try { m = JSON.parse(e.data); } catch(err){ return; }
       try { handle(m); } catch(err){}
     };
     ws.onclose = () => {
       if (S.ws !== ws) return; // a stale close must never kill a newer socket's heartbeat
+      if (S._connEpoch !== epoch) return;
       clearInterval(S.hbT);
       S.ws = null;
       if (S.want && (S.room || S.pending)) { S.status = "reconnecting"; retry(); }
@@ -10150,6 +10278,7 @@ const PARTY = (() => {
         // reconnect); the `room` response is the authority on identity
         if (!S.selfId) S.selfId = m.participantId || S.selfId;
         if (!S.token) S.token = m.token || S.token;
+        S.proto = m.proto || 1; // hub protocol generation (pstate/schedule = 2)
         return;
       case "heartbeat": {
         // NTP-lite: one server stamp, symmetric-latency assumption (documented)
@@ -10237,14 +10366,30 @@ const PARTY = (() => {
         S.chat = (m.room.chat || S.chat).slice();
         S.lastSeq = (m.room.playback && m.room.playback.seq) || S.lastSeq;
         S.room.chat = S.chat;
+        if (m.room.gate !== undefined) S.room.gate = m.room.gate;
+        if (m.room.hold !== undefined) S.room.hold = m.room.hold;
+        if (m.room.waitMode) S.room.waitMode = m.room.waitMode;
         paint();
+        // reconcile the PLAYER against the fresh authoritative state (this is
+        // what repairs a client that missed events during a network blip)
+        syncToRoom();
         return;
       }
       case "playback": {
         if (!S.room) return;
         if (m.seq && m.seq <= S.lastSeq) return; // stale
+        // a gap in the seq stream means we MISSED events (packet loss / sleep):
+        // reconcile from the authoritative snapshot instead of guessing
+        if (m.seq && S.lastSeq && m.seq > S.lastSeq + 1) { send({ t: "resync" }); }
+        // events stamped for a previous episode/session are history
+        if (m.sessionVersion && S.room.playback && S.room.playback.sessionVersion
+            && m.sessionVersion < S.room.playback.sessionVersion) return;
         S.lastSeq = m.seq || S.lastSeq;
         S.room.playback = { ...(S.room.playback || {}), ...(m.state || {}), seq: m.seq };
+        if (m.hold !== undefined) S.room.hold = m.hold;
+        if (m.auto && m.action === "pause" && m.hold) {
+          sysMsg("Waiting for " + (m.hold.waiting || 1) + " viewer" + ((m.hold.waiting || 1) > 1 ? "s" : "") + " to catch up\u2026");
+        }
         applyPlayback(m.action, m.state || {});
         paint();
         return;
@@ -10252,11 +10397,39 @@ const PARTY = (() => {
       case "content": {
         if (!S.room) return;
         if (m.seq && m.seq <= S.lastSeq) return;
+        if (m.seq && S.lastSeq && m.seq > S.lastSeq + 1) { send({ t: "resync" }); }
         S.lastSeq = m.seq || S.lastSeq;
         S.room.playback = { ...(S.room.playback || {}), ...(m.state || {}), seq: m.seq };
         S.room.content = m.content;
         applyContent(m.content, false);
         paint();
+        return;
+      }
+      case "schedule": {
+        // coordinated episode start (protocol v2): the server scheduled the
+        // shared start after readiness quorum / timeout / host override
+        if (!S.room) return;
+        S.room.gate = { phase: m.phase, startAt: m.startAt, deadline: m.deadline, ready: m.ready };
+        if (m.phase === "loading") {
+          sysMsg("Starting soon \u2014 waiting for players to load (" + (m.ready || 0) + "/" + (m.total || 0) + ")");
+        } else if (m.phase === "scheduled" && m.startAt) {
+          const secs = Math.max(0, Math.round((m.startAt - serverNow()) / 1000));
+          sysMsg(m.reason === "host_override" ? "Host started playback" : "Starting together in " + secs + "s");
+        }
+        // fold the (possibly updated) gate into our start timer
+        syncToRoom();
+        return;
+      }
+      case "peer_state": {
+        if (!S.room || !m.participantId) return;
+        const list = S.room.participants || (S.room.participants = []);
+        const p = list.find((x) => x.id === m.participantId);
+        if (p) {
+          p.pstate = m.st || p.pstate;
+          p.buffering = !!m.buffering;
+          if (m.position != null) p.position = m.position;
+        }
+        paintPeople();
         return;
       }
       case "chat": {
@@ -10358,6 +10531,12 @@ const PARTY = (() => {
           teardownRoom();
           paint();
           toast("The Watch Party is no longer available");
+          return;
+        }
+        if (m.notice === "hold_released") {
+          // wait-for-everyone timeout: the party moved on without the stuck viewer
+          sysMsg("Starting without the stalled viewer - they'll catch up when ready");
+          toast("The party is moving on - slow viewers will catch up");
           return;
         }
         return;
@@ -10520,7 +10699,12 @@ const PARTY = (() => {
     _reportAt = now;
     let pos = 0, dur = 0, paused = true;
     try { pos = Math.floor(pState.cur || 0); dur = Math.floor(pState.dur || 0); paused = !!pState.paused; } catch(e){}
-    send({ t: "sync_report", position: pos, paused, dur, source: sourceName() });
+    const msg = { t: "sync_report", position: pos, paused, dur, source: sourceName() };
+    // session stamp: a report for the previous episode must never mark this
+    // participant "ready" for the current one (additive - old hubs ignore it)
+    const sv = S.room && S.room.playback ? S.room.playback.sessionVersion : 0;
+    if (sv) { msg.sv = sv; msg.st = S._lastSt || (paused ? "paused" : "playing"); }
+    send(msg);
   }
   function cutMismatch(){
     // honest approximate mode: the room clock assumes ONE cut. Sub vs dub (or
@@ -10558,6 +10742,11 @@ const PARTY = (() => {
     if (!c) return;
     S.lastContentKey = contentKeyOf(c);
     S.suppressUntil = Date.now() + 4000;
+    // an episode change cancels EVERYTHING pending from the old episode:
+    // rate-restore nudges, gate timers, sync retries - a stale timer must
+    // never touch the NEW player instance
+    invalidateSyncWork();
+    reportState("loading", { force: true });
     try {
       const cur = `${watchState.type}/${watchState.id}/${watchState.s || 1}/${watchState.e || 1}`;
       if (cur !== S.lastContentKey) {
@@ -10567,7 +10756,30 @@ const PARTY = (() => {
     } catch(e){}
     // land on the room timeline once THIS player is actually ready (joiners
     // used to open the video and stay at 00:00 until some later event)
-    setTimeout(() => { try { syncToRoom(); } catch(e){} }, 800);
+    S._syncT = setTimeout(() => { try { syncToRoom(); } catch(e){} }, 800);
+  }
+
+  /* Cancel every pending sync-side timer tied to the CURRENT episode/room.
+     Called on episode change and room exit - never from a mid-episode player
+     recreate (that must not cancel the pending join sync). */
+  function invalidateSyncWork(){
+    S._loadGen = (S._loadGen || 0) + 1;
+    if (S._rateT) { clearTimeout(S._rateT); S._rateT = null; }
+    if (S._syncT) { clearTimeout(S._syncT); S._syncT = null; }
+    clearTimeout(_gateT); _gateT = 0;
+    S._bufStallAt = 0;
+    S._lastCur = undefined;
+    bufPill(false);
+  }
+
+  /* The player instance was recreated (mirror switch, quality reload): the
+     pending rate-restore timer is stamped for the OLD bridge and must never
+     touch the new one - invalidate it and reset stall bookkeeping. */
+  function playerRecreated(){
+    if (S._rateT) { clearTimeout(S._rateT); S._rateT = null; }
+    S._bufStallAt = 0;
+    S._lastCur = undefined;
+    bufPill(false);
   }
 
   let _gateT = 0;
@@ -10592,20 +10804,34 @@ const PARTY = (() => {
       }
       return;
     }
+    const gen = S._loadGen || 0;
     const ready = (typeof pState !== "undefined") && ((pState.dur || 0) > 0 || (a.pos() || 0) > 0);
-    if (!ready && (tries || 0) < 24) {
-      setTimeout(() => syncToRoom((tries || 0) + 1), 500); // player still loading
+    if (!ready) {
+      if ((tries || 0) < CFG.SYNC_READY_TRIES) {
+        // a slow connection can take 20s+ to produce a playable frame - keep
+        // waiting (the authoritative position is recomputed on EVERY attempt,
+        // so we land on the LIVE timeline, never the stale snapshot)
+        S._syncT = setTimeout(() => {
+          if ((S._loadGen || 0) !== gen) return; // episode/player changed - drop it
+          try { syncToRoom((tries || 0) + 1); } catch(e){}
+        }, 500);
+        return;
+      }
+      // never got ready: honest, actionable state instead of silence
+      reportState("error", { force: true });
+      sysMsg("This source hasn't loaded - press Resync when it's ready, or switch to a synced source");
       return;
     }
     const gateAt = pb && pb.updatedAt ? pb.updatedAt : 0;
     if (pb && pb.status === "playing" && gateAt > serverNow()) {
       // scheduled start: hold until the gate, then everyone plays together
       try { if (!a.paused() && a.pause) a.pause(); } catch(e){}
+      reportState("ready", { force: true });
       scheduleGate();
       return;
     }
     S.suppressUntil = Date.now() + 1500;
-    const target = expectedPos();
+    const target = expectedPos(); // authoritative position at APPLY time
     try {
       if (pb.status === "playing") {
         if (a.paused() && a.play) a.play();
@@ -10614,12 +10840,17 @@ const PARTY = (() => {
         if (!a.paused() && a.pause) a.pause();
         if (a.seek && Math.abs(a.pos() - target) > 0.6) a.seek(target);
       }
+      reportState(pb.status === "playing" ? "playing" : "paused", { force: true });
+      S.lastCorrect = Date.now(); // this landing WAS a correction
     } catch(e){}
   }
 
   function applyPlayback(action, st){
     const a = adapter();
     const pb = S.room && S.room.playback;
+    // a room-driven action supersedes any pending local rate nudge - an old
+    // restore timer must never fight the room's newer intent
+    if (S._rateT) { clearTimeout(S._rateT); S._rateT = null; }
     const gateAt = pb && pb.updatedAt ? pb.updatedAt : 0;
     if (pb && pb.status === "playing" && gateAt > serverNow() + 300) {
       scheduleGate(); // scheduled start - hold everyone at the gate
@@ -10642,12 +10873,27 @@ const PARTY = (() => {
       if (action === "play") {
         if (a.paused() && a.play) a.play();
         if (Math.abs(a.pos() - target) > 0.35 && a.seek) a.seek(target + 0.25);
+        reportState("playing", { force: true });
       } else if (action === "pause") {
         if (!a.paused() && a.pause) a.pause();
         if (Math.abs(a.pos() - target) > 0.35 && a.seek) a.seek(target);
+        reportState("paused", { force: true });
       } else if (action === "seek") {
         if (a.seek) a.seek(target + 0.25);
       }
+    } catch(e){}
+    // CONFIRM the player actually performed the action (a dropped postMessage
+    // used to leave one device drifting while the UI claimed compliance) -
+    // one quiet retry, never a loop
+    try {
+      const gen = S._loadGen || 0;
+      setTimeout(() => {
+        if (!inRoom() || (S._loadGen || 0) !== gen) return;
+        const a2 = adapter();
+        if (a2.cap === "coordinated" || !a2.seek) return;
+        if (action === "pause" && !a2.paused() && a2.pause && !suppressLocalEcho()) a2.pause();
+        else if (action === "play" && a2.paused() && a2.play && !suppressLocalEcho()) a2.play();
+      }, 900);
     } catch(e){}
     // realign RIGHT after every room event (still MIN_GAP-guarded inside):
     // "watching together" means an event lands within a beat, not at the
@@ -10655,10 +10901,11 @@ const PARTY = (() => {
     try { driftTick(); } catch(e){}
   }
 
-  /* Drift correction: subtle 4% rate nudges for small drift, one clean seek
-     only for big drift - and NEVER before the scheduled-start gate opens.
-     Seek-only bridges (no rate control) correct rarely and gently instead of
-     seeking every tick (the old "constant seeking" bug). */
+  /* Drift correction through the SHARED planner (identical policy to
+     party-server/protocol.js planCorrection): tiny drift is ignored, moderate
+     drift gets a gentle rate nudge (with a properly invalidated restore
+     timer), large drift gets ONE controlled seek - and a stalled/seeking/
+     gated player is NEVER fought. Seek-only bridges correct rarely. */
   function driftTick(){
     if (!inRoom()) return;
     // never drive a hidden player: browsing away parks the frame (about:blank)
@@ -10692,40 +10939,86 @@ const PARTY = (() => {
     // (the player itself is the only pause control) - correcting drift there
     // would force-resume them every few seconds. Never yank a paused viewer.
     if (a.paused() && a.cap === "partial") return;
-    const drift = a.pos() - expectedPos();
-    S.lastDrift = Math.round(drift * 1000);
-    const mag = Math.abs(drift);
-    if (mag < CFG.SYNC_NUDGE) return;
-    // different cuts (sub vs dub, two mirrors after a hop): the timelines do
-    // not line up second-for-second and chasing them is a fight the math can
-    // never win. Bridge only BIG gaps - gently, and never into our own
-    // end-zone (clamping at the end fires `ended` and chaos).
-    if (cutMismatch()) {
-      if (mag < 15) return;
-      const myDur = (typeof pState !== "undefined" ? (pState.dur || 0) : 0);
-      if (myDur > 0 && a.pos() > myDur - 20) return;
-      const nowC = Date.now();
-      if (nowC - S.lastCorrect < CFG.SYNC_MIN_GAP) return;
-      S.lastCorrect = nowC;
-      try {
-        if (a.seek) a.seek(myDur > 0 ? Math.min(expectedPos() + 0.25, myDur - 15) : expectedPos() + 0.25);
-      } catch(e){}
-      return;
+
+    // ---- real buffering detection (a stalled clock while the room plays) ----
+    const cur = a.pos();
+    const nowWall = Date.now();
+    if (S._lastCur === cur && !a.paused()) {
+      if (!S._bufStallAt) S._bufStallAt = nowWall;
+    } else {
+      if (S._bufStallAt) {
+        // RECOVERED from a stall: catch up with ONE clean seek once playable
+        S._bufStallAt = 0;
+        bufPill(false);
+        reportState("recovered", { force: true });
+        S._stalls = (S._stalls || 0) + 1;
+        const behind = expectedPos() - cur;
+        if (behind > 0.35) {
+          if (nowWall - S.lastCorrect >= CFG.SYNC_MIN_GAP) {
+            S.lastCorrect = nowWall;
+            try { if (a.seek) a.seek(expectedPos() + 0.25); } catch(e){}
+          }
+        }
+        // sustained trouble: offer the practical remedy (this is a network
+        // limitation, not something sync code can erase)
+        if (S._stalls >= 3 && nowWall - (S._stallHintAt || 0) > 10 * 60_000) {
+          S._stallHintAt = nowWall;
+          sysMsg("Your connection keeps stalling - try a lower quality (gear icon) or switch to a synced source");
+        }
+      }
+      S._lastCur = cur;
+      S._lastCurAt = nowWall;
     }
-    const now = Date.now();
-    if (now - S.lastCorrect < CFG.SYNC_MIN_GAP) return; // never a correction loop
-    S.lastCorrect = now;
+    if (S._bufStallAt) {
+      const stallMs = nowWall - S._bufStallAt;
+      if (stallMs >= CFG.STALL_UI_MS) bufPill(true, stallMs > CFG.STALL_HINT_MS ? "Still buffering \u2014 check your connection" : "Buffering \u2014 catching up");
+      reportState("buffering");
+      return; // NEVER fight a stalled player - no seeks into unavailable data
+    }
+    if (S._lastSt === "buffering") reportState("playing");
+
+    const drift = cur - expectedPos();
+    S.lastDrift = Math.round(drift * 1000);
+    // cut/duration mismatch between mirrors: visible, never blindly aligned
+    const cut = cutMismatch();
+    const myDur = (typeof pState !== "undefined" ? (pState.dur || 0) : 0);
+    const d = planCorrection({
+      drift,
+      canSeek: !!a.seek,
+      canRate: !!a.rate,
+      ready: true,
+      buffering: false,
+      seeking: false,
+      gateAt: pb.updatedAt || 0,
+      serverNowMs: nowS,
+      nowMs: nowWall,
+      lastCorrectMs: S.lastCorrect,
+      pos: cur,
+      dur: myDur,
+      cutMismatch: cut,
+      // CFG stays THE tuning point for field adjustment
+      cfg: { nudgeAt: CFG.SYNC_NUDGE, seekAt: CFG.SYNC_SEEK, minGapMs: CFG.SYNC_MIN_GAP },
+    });
+    if (d.action === "none") return;
+    S.lastCorrect = nowWall;
     try {
-      if (mag >= CFG.SYNC_SEEK) {
-        a.seek(expectedPos() + 0.25); // big drift: one clean seek
-      } else if (a.rate) {
-        // subtle nudge in the right direction, then restore the rate.
-        // 10% closes 1s of drift in ~10s (the old 4% took 25s - "a slight
-        // not in synchronize" was exactly that slow catch-up)
-        a.rate(drift > 0 ? 0.9 : 1.1);
-        setTimeout(() => { try { const a2 = adapter(); if (a2.rate) a2.rate(1); } catch(e){} }, Math.min(8000, Math.round(mag / 0.10 * 1000)));
-      } else if (mag > 1.2) {
-        a.seek(expectedPos() + 0.25); // no rate control: correct gently, rarely
+      if (d.action === "seek") {
+        // different cuts: clamp away from the end-zone (clamping fires `ended`)
+        if (cut && myDur > 0) a.seek(Math.min(expectedPos() + 0.25, myDur - 15));
+        else a.seek(expectedPos() + 0.25);
+        if (S._rateT) { clearTimeout(S._rateT); S._rateT = null; }
+      } else if (d.action === "nudge") {
+        a.rate(d.rate);
+        // pending rate restore: stamped with the player generation so it can
+        // NEVER fire against a recreated/new-episode player, and cancelled on
+        // source change / episode change / leave (invalidateSyncWork)
+        if (S._rateT) clearTimeout(S._rateT);
+        const gen = S._loadGen || 0;
+        S._rateT = setTimeout(() => {
+          S._rateT = null;
+          if ((S._loadGen || 0) !== gen || !inRoom()) return;
+          try { const a2 = adapter(); if (a2.rate) a2.rate(1); } catch(e){}
+        }, d.restoreMs || 4000);
       }
     } catch(e){}
   }
@@ -10773,6 +11066,9 @@ const PARTY = (() => {
   function teardownRoom(){
     try { sessionStorage.removeItem("sb_party"); } catch(e){}
     S.pending = null; // a parked create/join must never fire after leaving
+    // every pending sync-side timer dies with the room: rate-restore nudges,
+    // gate timers, sync retries - none may outlive the player they were for
+    invalidateSyncWork();
     S.room = null;
     S.status = "idle";
     S.chat = [];
@@ -10783,6 +11079,7 @@ const PARTY = (() => {
     S.rejoinTries = 0;
     S._repairAt = 0;
     S._joinSentOn = null;
+    S._lastSt = ""; S._bufStallAt = 0;
     S.want = false; // out of the room: no pending reconnect may resurrect it
     clearTimeout(S.rejoinT);
     clearTimeout(S.nextRetry);
@@ -10834,6 +11131,7 @@ const PARTY = (() => {
       if (isHost()) {
         el("partyCtlToggle").checked = !!room.allowControl;
         el("partyChatToggle").checked = room.chatEnabled !== false;
+        if (el("partyWaitToggle")) el("partyWaitToggle").checked = room.waitMode === "everyone";
       }
       el("partyChatWrap").classList.toggle("hidden", room.chatEnabled === false);
       el("partyNotice").textContent = a.cap === "coordinated"
@@ -10855,7 +11153,7 @@ const PARTY = (() => {
       chip.setAttribute("data-focusable", "1");
       chip.tabIndex = 0;
       const nm = escapeHtml(p.name || "Guest");
-      chip.innerHTML = `<span class="dot"></span>${nm}${p.id === S.room.hostId ? " \u{2605}" : ""}${p.id === S.selfId ? " (you)" : ""}${p.muted ? " \u{1F507}" : ""}`;
+      chip.innerHTML = `<span class="dot"></span>${nm}${p.id === S.room.hostId ? " \u{2605}" : ""}${p.id === S.selfId ? " (you)" : ""}${p.muted ? " \u{1F507}" : ""}${p.buffering ? " \u{23F3}" : ""}${p.pstate === "loading" ? " \u{1F504}" : ""}${p.pstate === "error" ? " \u{26A0}" : ""}`;
       if (isHost() && p.id !== S.selfId) {
         const kb = document.createElement("button");
         kb.textContent = "\u{2715}";
@@ -10992,7 +11290,24 @@ const PARTY = (() => {
     // visibility / app-resume: liveness ping, never a second connection
     try {
       document.addEventListener("visibilitychange", () => {
-        if (!document.hidden && inRoom()) send({ t: "heartbeat", clientTs: Date.now() });
+        if (!document.hidden && inRoom()) {
+          send({ t: "heartbeat", clientTs: Date.now() });
+          // background timer throttling froze driftTick - re-sync against a
+          // FRESH snapshot instead of trusting whatever we last applied
+          send({ t: "resync" });
+          try { syncToRoom(); } catch(e){}
+        }
+      }, { passive: true });
+    } catch(e){}
+    // network change (Wi-Fi -> cellular): the socket may be dead without a
+    // close event - force the reconnect NOW instead of waiting out the backoff
+    try {
+      window.addEventListener("online", () => {
+        if (!inRoom() && !S.pending) return;
+        if (S.ws && S.ws.readyState === 1) return;
+        S.reconnects = 0; // fresh network = fresh budget
+        clearTimeout(S.nextRetry);
+        connect();
       }, { passive: true });
     } catch(e){}
   }
@@ -11048,8 +11363,11 @@ const PARTY = (() => {
     copyCode(){ if (S.room) copy(S.room.code, "Room code"); },
     toggleCtl(){ if (isHost()) send({ t: "settings", allowControl: el("partyCtlToggle").checked }); },
     toggleChat(){ if (isHost()) send({ t: "settings", chatEnabled: el("partyChatToggle").checked }); },
+    toggleWait(){ if (isHost()) send({ t: "settings", waitMode: el("partyWaitToggle").checked ? "everyone" : "move" }); },
     inRoom, isHost, suppressAutoAdvance, onLocalPlayPause, onLocalSeek, onProviderPlayState, detectContentChange,
     onLocalMirror, roomSource, syncNow, cutMismatch, sourceMismatch, sourceName,
+    onPlayerRecreate: playerRecreated,
+    reportState,
     state: S,
   };
 })();
@@ -11125,6 +11443,7 @@ function partyLeave(){ PARTY.leave(); }
 function partyEndRoom(){ PARTY.endRoom(); }
 function partyToggleCtl(){ PARTY.toggleCtl(); }
 function partyToggleChat(){ PARTY.toggleChat(); }
+function partyToggleWait(){ PARTY.toggleWait(); }
 function partySendChat(){ PARTY.sendChat(); }
 
 /* playback hooks: wrap the two local entry points (function reassignment keeps
@@ -11141,6 +11460,11 @@ mirrorSeek = function(t){ const r = _partyMirrorSeek.apply(this, arguments); try
 // the host's own heals broadcast; following the room's switch never echoes back
 const _partySetMirror = setMirror;
 setMirror = function(m, auto){ const r = _partySetMirror.apply(this, arguments); try { PARTY.onLocalMirror(m, auto); } catch(e){} return r; };
+// every player (re)creation ends the life of the previous instance's timers:
+// a pending rate-restore nudge is stamped for the OLD bridge and must never
+// touch the new player (episode switch, mirror switch, quality reload)
+const _partyLoadPlayer = loadPlayer;
+loadPlayer = function(){ const r = _partyLoadPlayer.apply(this, arguments); try { PARTY.onPlayerRecreate(); } catch(e){} return r; };
 PARTY.boot();
 
 // deep-link support: watch.html style ?type=tv&id=1396&s=1&e=1
