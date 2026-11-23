@@ -14,7 +14,16 @@
      - settings clamps + hold release on switching back to "move"
      - alarm-driven deadline enforcement (the DO's tick)
      - heartbeat-only liveness, hashed passwords, rate limiters
-     - the `end` broadcast reaching the host too */
+     - the `end` broadcast reaching the host too
+
+   Plus the protocol v2.1 social layer (the party-features.test.js contract):
+     - authoritative media version (propagation, guest denial, persistence)
+     - host/co-host roles + granular guest permissions (server-enforced)
+     - playback requests (server-side approval execution, approver routing)
+     - chat replies/spoiler/scene positions + reactions and their budget
+     - shared queue (suggest/vote/approve -> canonical episode, server-side)
+     - locked rooms (fresh joins rejected, resume tokens still reattach)
+     - group intermission (bounded countdown, auto-resume on the alarm) */
 
 import assert from "node:assert/strict";
 import { PartyHub } from "./src/party.js";
@@ -28,6 +37,8 @@ Date.now = () => clock.t;
    possible, pinned here where the wire does not echo them back. */
 const TRANSITION_MIN_MS = 3000;
 const START_COUNTDOWN_MS = 2500;
+const MEDIA_FIELDS = 48;
+const CHAT_RATE_MAX = 6; // reactions share the chat budget
 
 /* ---------- fake DO state + fake WebSockets ---------- */
 
@@ -128,7 +139,8 @@ async function runAll() {
       failed++;
       console.log("  FAIL " + name);
       console.log("       " + ((e && e.message) || e));
-      if (e && e.stack) console.log(String(e.stack).split("\n").slice(1, 4).join("\n"));
+      // multi-line assert messages flood stack previews: show the frames only
+      if (e && e.stack) console.log(String(e.stack).split("\n").filter((l) => l.trim().startsWith("at ")).slice(0, 3).join("\n"));
     }
   }
   console.log("\n" + passed + " passed, " + failed + " failed");
@@ -495,6 +507,417 @@ test("sync_report has its own limiter and clamps invalid positions leniently", a
   await send(hub, g1, { t: "sync_report", position: 88, paused: false });
   assert.strictEqual(pos(), 77, "4th report in the window is dropped silently");
   assert.strictEqual(take(g1).filter((x) => x.t === "error").length, 0);
+});
+
+/* ==================== protocol v2.1: media + social layer ==================== */
+
+test("media: intended version reaches joiners, guests denied, survives content changes", async () => {
+  const env = mkEnv();
+  const ctx = await makeParty(env, 2);
+  const { hub, host, g1 } = { ...ctx.people, ...ctx };
+
+  // host watches Japanese audio + English subs on AniPM (provider identifiers)
+  await send(hub, host, { t: "media", media: { mirror: "anipm", variant: "mal:5114/ep:5", audio: "sub", subs: "en", subsOn: true } });
+  const ev = of(take(host), "media")[0];
+  assert.ok(ev, "media change broadcasts");
+  assert.strictEqual(ev.media.audio, "sub");
+  assert.strictEqual(ev.media.subsOn, true);
+  assert.strictEqual(ev.media.by, "Host");
+  assert.strictEqual(ev.actor, "Host");
+  // a late joiner's snapshot carries the intended version
+  const late = connect(env, "Late");
+  await send(hub, late, { t: "join", name: "Late", code: ctx.code });
+  const snap = take(late).find((x) => x.t === "room").room;
+  assert.strictEqual(snap.media.mirror, "anipm");
+  assert.strictEqual(snap.media.audio, "sub", "intended audio reaches the joiner");
+  assert.strictEqual(snap.media.subs, "en");
+  assert.strictEqual(snap.media.subsOn, true);
+  // a guest can never set the party's media version
+  take(g1);
+  await send(hub, g1, { t: "media", media: { mirror: "anipm", audio: "dub" } });
+  const err = take(g1).find((x) => x.t === "error");
+  assert.ok(err && err.error === "unauthorized" && err.for === "media", "guest media is refused");
+  assert.strictEqual(ctx.snap().media.audio, "sub", "the party version is untouched");
+  // episode changes preserve the intended version (it survives session bumps)
+  await send(hub, host, { t: "content", type: "tv", tmdbId: 42, season: 1, episode: 5 });
+  take(host);
+  assert.strictEqual(ctx.snap().media.audio, "sub", "content changes never reset the media version");
+  // and the reverse: host switches to English dub - everyone follows
+  await send(hub, host, { t: "media", media: { mirror: "anipm", variant: "mal:5114/ep:5", audio: "dub", subs: "off", subsOn: false } });
+  assert.strictEqual(of(take(host), "media")[0].media.audio, "dub");
+  assert.strictEqual(ctx.snap().media.subsOn, false);
+});
+
+test("media values are opaque provider identifiers; garbage collapses to a rejection", async () => {
+  const env = mkEnv();
+  const ctx = await makeParty(env, 2);
+  const { hub, host } = { ...ctx.people, ...ctx };
+
+  // VidBolt panel identifiers (label + value) are preserved exactly
+  await send(hub, host, { t: "media", media: { mirror: "vidbolt", variant: "audio:3|subs:1", audio: "Tagalog", subs: "English" } });
+  const m = of(take(host), "media")[0].media;
+  assert.strictEqual(m.audio, "Tagalog");
+  assert.strictEqual(m.variant, "audio:3|subs:1");
+  // garbage collapses to bad_message instead of inventing state
+  await send(hub, host, { t: "media", media: {} });
+  const err = take(host).find((x) => x.t === "error");
+  assert.ok(err && err.error === "bad_message" && err.for === "media");
+  assert.strictEqual(ctx.snap().media.variant, "audio:3|subs:1", "the previous version survives garbage");
+  // long junk is capped at the field limit
+  await send(hub, host, { t: "media", media: { audio: "x".repeat(200) } });
+  assert.strictEqual(of(take(host), "media")[0].media.audio, "x".repeat(MEDIA_FIELDS), "field capped");
+});
+
+test("co-host gates: promotion grants control, demotion removes it, co-hosts cannot kick co-hosts", async () => {
+  const env = mkEnv();
+  const ctx = await makeParty(env, 3);
+  const { hub, host, g1, g2 } = { ...ctx.people, ...ctx };
+
+  // a plain guest cannot control (allowControl off)
+  await send(hub, g1, { t: "playback", action: "play" });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized");
+  // host promotes g1 to co-host
+  await send(hub, host, { t: "role", targetId: ctx.ids.g1, role: "cohost" });
+  const evs = take(host);
+  assert.strictEqual(of(evs, "role")[0].role, "cohost");
+  assert.strictEqual(of(evs, "role")[0].participantId, ctx.ids.g1);
+  assert.strictEqual(of(evs, "role")[0].actor, "G1", "the role event names the TARGET (rooms.js parity)");
+  const upd = of(evs, "peer_joined").find((x) => x.updated);
+  assert.strictEqual(upd.participant.role, "cohost", "the role rides the peer update");
+  assert.ok(ctx.snap().cohosts.includes(ctx.ids.g1));
+  // co-host can drive playback, change episodes and set the media version
+  await send(hub, g1, { t: "playback", action: "play", position: 10, sessionVersion: 1 });
+  assert.strictEqual(of(take(g1), "playback").length, 1, "co-host playback works");
+  await send(hub, g1, { t: "content", type: "tv", tmdbId: 42, season: 1, episode: 2 });
+  assert.strictEqual(of(take(g1), "content").length, 1, "co-host episode change works");
+  await send(hub, g1, { t: "media", media: { mirror: "anipm", audio: "sub" } });
+  assert.strictEqual(of(take(g1), "media").length, 1, "co-host media works");
+  // co-host can moderate - but never the host or another co-host
+  await send(hub, host, { t: "role", targetId: ctx.ids.g2, role: "cohost" });
+  take(host); take(g1); take(g2);
+  await send(hub, g1, { t: "kick", targetId: ctx.ids.g2 });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized", "co-host cannot kick a co-host");
+  await send(hub, g1, { t: "mute", targetId: ctx.ids.g2, muted: true });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized", "co-host cannot mute a co-host");
+  // the host can - and the kick also drops the co-host role
+  await send(hub, host, { t: "kick", targetId: ctx.ids.g2 });
+  assert.strictEqual(of(take(g2), "kicked")[0].targetId, ctx.ids.g2, "kicked reaches ONLY the target");
+  assert.strictEqual(of(take(host), "peer_left")[0].reason, "kicked");
+  assert.ok(!ctx.snap().cohosts.includes(ctx.ids.g2), "a kick drops the role too");
+  // demote: control is gone
+  await send(hub, host, { t: "role", targetId: ctx.ids.g1, role: "participant" });
+  take(host); take(g1);
+  await send(hub, g1, { t: "playback", action: "play" });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized", "demotion removes control");
+  assert.ok(!ctx.snap().cohosts.includes(ctx.ids.g1));
+  // only the host manages roles
+  await send(hub, g1, { t: "role", targetId: ctx.ids.host, role: "participant" });
+  const err = take(g1).find((x) => x.t === "error");
+  assert.ok(err && err.error === "unauthorized" && err.for === "role");
+});
+
+test("granular guest permissions gate each action class (seek denied / episode granted)", async () => {
+  const env = mkEnv();
+  const ctx = await makeParty(env, 2, { allowControl: true });
+  const { hub, host, g1 } = { ...ctx.people, ...ctx };
+
+  // defaults: play class allowed for guests, episode changes are not
+  await send(hub, g1, { t: "playback", action: "play", position: 5, sessionVersion: 1 });
+  assert.strictEqual(of(take(g1), "playback").length, 1, "play class allowed by default");
+  await send(hub, g1, { t: "content", type: "tv", tmdbId: 42, season: 1, episode: 3 });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized", "episode class denied by default");
+  // host grants episode rights + disables seeking (host-only matrix)
+  await send(hub, host, { t: "settings", perms: { episode: true, seek: false } });
+  const sev = of(take(host), "settings")[0];
+  assert.strictEqual(sev.perms.episode, true);
+  assert.strictEqual(sev.perms.seek, false);
+  take(g1);
+  await send(hub, g1, { t: "content", type: "tv", tmdbId: 42, season: 1, episode: 3 });
+  assert.strictEqual(of(take(g1), "content").length, 1, "granted episode authority works");
+  await send(hub, g1, { t: "playback", action: "seek", position: 90 });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized", "seek class denied");
+  await send(hub, g1, { t: "playback", action: "pause" });
+  assert.strictEqual(of(take(g1), "playback").length, 1, "play/pause class still allowed");
+  // guests can never edit the permission matrix
+  await send(hub, g1, { t: "settings", perms: { episode: false } });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized");
+  assert.strictEqual(ctx.snap().perms.episode, true, "the matrix is untouched");
+});
+
+test("requests: approval pauses the room server-side; episode moves are broadcast-only", async () => {
+  const env = mkEnv();
+  const ctx = await makeParty(env, 2);
+  const { hub, host, g1 } = { ...ctx.people, ...ctx };
+
+  await send(hub, host, { t: "playback", action: "play", position: 100, sessionVersion: 1 });
+  take(host); take(g1);
+  advance(ctx, 30_000);
+  // guest asks for a pause (the requester can NEVER pause directly)
+  await send(hub, g1, { t: "request", action: "pause", note: "phone call" });
+  const q = of(take(host), "request")[0].request;
+  assert.strictEqual(q.id, "q1");
+  assert.strictEqual(q.from, "G1");
+  assert.strictEqual(q.fromId, ctx.ids.g1);
+  assert.strictEqual(q.action, "pause");
+  assert.strictEqual(q.note, "phone call");
+  await send(hub, g1, { t: "playback", action: "pause" });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized", "the requester cannot pause directly");
+  // host approval pauses the room SERVER-side
+  await send(hub, host, { t: "request_reply", requestId: q.id, approved: true });
+  const evs = take(g1);
+  const rep = of(evs, "request_reply")[0];
+  assert.strictEqual(rep.approved, true);
+  assert.strictEqual(rep.requesterId, ctx.ids.g1);
+  assert.strictEqual(rep.approverId, ctx.ids.host);
+  assert.strictEqual(rep.request.action, "pause");
+  const pause = of(evs, "playback")[0];
+  assert.ok(pause && pause.action === "pause" && pause.actor === "G1 (approved)");
+  assert.strictEqual(ctx.snap().playback.status, "paused", "approval executed by the SERVER");
+  // decline path: no state change
+  await send(hub, g1, { t: "request", action: "rewind", position: 120 });
+  const q2 = of(take(host), "request")[0].request;
+  const before = ctx.snap().playback.position;
+  await send(hub, host, { t: "request_reply", requestId: q2.id, approved: false });
+  assert.strictEqual(of(take(g1), "request_reply")[0].approved, false);
+  assert.strictEqual(ctx.snap().playback.position, before, "a declined request never moves the timeline");
+  // next-episode approvals are broadcast with the APPROVER id (their client
+  // executes the content change - the server cannot know episode data)
+  await send(hub, g1, { t: "request", action: "next_episode" });
+  const q3 = of(take(host), "request")[0].request;
+  await send(hub, host, { t: "request_reply", requestId: q3.id, approved: true });
+  const evs2 = take(g1);
+  const rep2 = of(evs2, "request_reply")[0];
+  assert.strictEqual(rep2.approverId, ctx.ids.host);
+  assert.strictEqual(rep2.request.action, "next_episode");
+  assert.strictEqual(of(evs2, "playback").length, 0, "no fake timeline action for an episode move");
+  // only host/co-host may approve
+  await send(hub, g1, { t: "request", action: "pause" });
+  const q4 = of(take(host), "request")[0].request;
+  await send(hub, g1, { t: "request_reply", requestId: q4.id, approved: true });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized");
+  // pending requests are capped (q4 is still pending: a refused reply keeps it)
+  for (let i = 0; i < 7; i++) await send(hub, g1, { t: "request", action: "rewind" });
+  await send(hub, g1, { t: "request", action: "rewind" });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "rate_limited", "pending requests are capped");
+});
+
+test("queue: suggest + vote + host approval becomes the canonical episode (server-side)", async () => {
+  const env = mkEnv();
+  const ctx = await makeParty(env, 3);
+  const { hub, host, g1, g2 } = { ...ctx.people, ...ctx };
+
+  await send(hub, g1, { t: "queue", op: "add", item: { type: "tv", tmdbId: 42, season: 1, episode: 8, title: "Next up" } });
+  const item = of(take(host), "queue")[0].item;
+  assert.strictEqual(item.votes, 1, "suggester auto-votes");
+  assert.strictEqual(item.title, "Next up");
+  await send(hub, g2, { t: "queue", op: "vote", itemId: item.id });
+  assert.strictEqual(of(take(host), "queue")[0].item.votes, 2);
+  // guest approval is refused (canonical playback needs episode authority)
+  await send(hub, g1, { t: "queue", op: "approve", itemId: item.id });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized");
+  // host approval executes the content change SERVER-side
+  await send(hub, host, { t: "queue", op: "approve", itemId: item.id });
+  const evs = take(g1);
+  assert.strictEqual(of(evs, "queue")[0].op, "approve");
+  const contentEv = of(evs, "content")[0];
+  assert.ok(contentEv, "approval produced the content transition");
+  assert.strictEqual(contentEv.content.episode, 8);
+  assert.strictEqual(ctx.snap().queue.length, 0, "approved item leaves the queue");
+  take(host); take(g1); take(g2); // drop the approval broadcast copies
+  // removal rules: creator can remove own; others need perms.queue
+  await send(hub, g1, { t: "queue", op: "add", item: { type: "movie", tmdbId: 7, title: "Film" } });
+  const item2 = of(take(host), "queue")[0].item;
+  take(g1); take(g2);
+  await send(hub, g2, { t: "queue", op: "remove", itemId: item2.id });
+  assert.strictEqual(take(g2).find((x) => x.t === "error").error, "unauthorized");
+  await send(hub, g1, { t: "queue", op: "remove", itemId: item2.id });
+  assert.strictEqual(of(take(g1), "queue")[0].op, "remove");
+  // clear needs host/co-host/queue-perm
+  await send(hub, g1, { t: "queue", op: "add", item: { type: "movie", tmdbId: 9, title: "B" } });
+  take(host); take(g1);
+  await send(hub, g1, { t: "queue", op: "clear" });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized", "clear needs queue authority");
+  await send(hub, host, { t: "queue", op: "clear" });
+  assert.strictEqual(of(take(host), "queue")[0].op, "clear");
+  assert.strictEqual(ctx.snap().queue.length, 0);
+});
+
+test("locked rooms reject fresh joins but a resume token still reattaches", async () => {
+  const env = mkEnv();
+  const ctx = await makeParty(env, 2);
+  const { hub, host, g1 } = { ...ctx.people, ...ctx };
+
+  await send(hub, host, { t: "media", media: { mirror: "anipm", audio: "sub" } });
+  await send(hub, host, { t: "settings", locked: true });
+  const sev = of(take(host), "settings")[0];
+  assert.strictEqual(sev.locked, true);
+  assert.ok(sev.perms && typeof sev.perms === "object", "settings carry the permission matrix");
+  assert.strictEqual(ctx.snap().locked, true);
+  // a stranger cannot enter
+  const stranger = connect(env, "Stranger");
+  await send(hub, stranger, { t: "join", name: "Stranger", code: ctx.code });
+  const err = take(stranger)[0];
+  assert.ok(err && err.error === "closed" && err.for === "join", "door is locked");
+  // but a returning participant keeps their seat via the resume token
+  await hub.webSocketClose(g1);
+  const back = connect(env, "Back");
+  await send(hub, back, { t: "join", name: "G1", code: ctx.code, token: g1.meta.token });
+  const roomMsg = take(back).find((x) => x.t === "room");
+  assert.ok(roomMsg, "the token reattaches through the locked door");
+  assert.strictEqual(roomMsg.reattached, true);
+  assert.strictEqual(roomMsg.room.selfId, ctx.ids.g1, "same seat identity");
+  assert.strictEqual(roomMsg.room.media.audio, "sub", "recovery restores the intended media version");
+  // unlocking re-opens the door
+  await send(hub, host, { t: "settings", locked: false });
+  assert.strictEqual(of(take(host), "settings")[0].locked, false);
+  const stranger2 = connect(env, "Stranger2");
+  await send(hub, stranger2, { t: "join", name: "S2", code: ctx.code });
+  assert.ok(take(stranger2).find((x) => x.t === "room"), "unlocked room accepts fresh joins");
+});
+
+test("intermission: pauses with a countdown, guests blocked, auto-resumes on the alarm", async () => {
+  const env = mkEnv();
+  const ctx = await makeParty(env, 2);
+  const { hub, host, g1 } = { ...ctx.people, ...ctx };
+
+  await send(hub, host, { t: "playback", action: "play", position: 100, sessionVersion: 1 });
+  take(host); take(g1);
+  advance(ctx, 60_000);
+  await send(hub, host, { t: "intermission", op: "start", seconds: 120 });
+  const evs = take(g1);
+  const start = of(evs, "intermission")[0];
+  assert.strictEqual(start.op, "start");
+  assert.strictEqual(start.seconds, 120);
+  assert.strictEqual(start.by, "Host");
+  const pause = of(evs, "playback")[0];
+  assert.ok(pause && pause.action === "pause" && pause.actor === "Host (break)");
+  assert.strictEqual(ctx.snap().playback.status, "paused", "the break pauses the room");
+  const until = ctx.room().intermission.until;
+  assert.ok(until > clock.t, "late joiners see the break countdown");
+  assert.strictEqual(ctx.snap().intermission.until, until);
+  // a participant cannot start/end breaks (policy permission)
+  await send(hub, g1, { t: "intermission", op: "end" });
+  const err = take(g1).find((x) => x.t === "error");
+  assert.ok(err && err.error === "unauthorized" && err.for === "intermission");
+  // the alarm is armed at the countdown deadline once it is close
+  clock.t = until - 5000;
+  await send(hub, host, { t: "heartbeat", clientTs: 0 });
+  await send(hub, g1, { t: "heartbeat", clientTs: 0 });
+  await hub.alarm();
+  assert.strictEqual(env.alarms.at(-1), until, "armAlarm targets the intermission expiry");
+  // ...and the break ends on time even if nobody presses anything
+  take(host); take(g1);
+  clock.t = until + 1000;
+  await send(hub, host, { t: "heartbeat", clientTs: 0 });
+  await send(hub, g1, { t: "heartbeat", clientTs: 0 });
+  await hub.alarm();
+  const evs2 = take(g1);
+  const playEv = of(evs2, "playback")[0];
+  assert.ok(playEv && playEv.action === "play" && playEv.actor === "Party");
+  assert.strictEqual(playEv.state.updatedAt, clock.t + 500, "resume carries the tiny shared gate");
+  assert.strictEqual(of(evs2, "intermission")[0].by, "timeout", "auto-resume is honest about the reason");
+  assert.strictEqual(ctx.snap().playback.status, "playing", "a forgotten break can never freeze the room");
+  assert.strictEqual(ctx.snap().intermission, null);
+  take(host); // drain host's copy of the auto-resume broadcast
+  // seconds clamp to the 30..900 bounds
+  await send(hub, host, { t: "intermission", op: "start", seconds: 5 });
+  assert.strictEqual(of(take(host), "intermission")[0].seconds, 30, "seconds clamped to the floor");
+  await send(hub, host, { t: "intermission", op: "start", seconds: 5000 });
+  assert.strictEqual(of(take(host), "intermission")[0].seconds, 900, "seconds clamped to the ceiling");
+  // host can end early
+  await send(hub, host, { t: "intermission", op: "end" });
+  const evs3 = take(host);
+  const early = of(evs3, "intermission")[0];
+  assert.ok(early && early.op === "end" && early.by === "Host");
+  const resume = of(evs3, "playback")[0];
+  assert.ok(resume && resume.action === "play" && resume.actor === "Host (break over)");
+  assert.strictEqual(resume.state.updatedAt, clock.t + 500);
+});
+
+test("chat carries replyTo/spoiler/pos (validated, additive)", async () => {
+  const env = mkEnv();
+  const ctx = await makeParty(env, 2);
+  const { hub, host, g1 } = { ...ctx.people, ...ctx };
+
+  await send(hub, g1, { t: "chat", text: "that twist!", pos: 1250.9, spoiler: true });
+  const msg = of(take(host), "chat")[0].msg;
+  assert.strictEqual(msg.text, "that twist!");
+  assert.strictEqual(msg.pos, 1250, "scene position recorded (floored)");
+  assert.strictEqual(msg.spoiler, true);
+  take(g1); // drain g1's copy of its own broadcast
+  await send(hub, host, { t: "chat", text: "ikr", replyTo: msg.id });
+  const reply = of(take(g1), "chat")[0].msg;
+  assert.strictEqual(reply.replyTo, msg.id);
+  take(host); // drain host's copy of its own broadcast
+  // out-of-range/unknown values are dropped, never invented
+  await send(hub, g1, { t: "chat", text: "ok", replyTo: "x".repeat(30), spoiler: "yes", pos: -5 });
+  const plain = of(take(host), "chat")[0].msg;
+  assert.strictEqual(plain.replyTo, undefined, "an over-long replyTo is dropped");
+  assert.strictEqual(plain.spoiler, undefined, "spoiler must be exactly true");
+  assert.strictEqual(plain.pos, undefined, "an invalid position is dropped");
+  // the social fields persist in the room history
+  const hist = ctx.snap().chat;
+  assert.strictEqual(hist[0].spoiler, true);
+  assert.strictEqual(hist[1].replyTo, msg.id);
+  // muted users still cannot chat (unchanged gate)
+  await send(hub, host, { t: "mute", targetId: ctx.ids.g1, muted: true });
+  take(g1);
+  await send(hub, g1, { t: "chat", text: "muted" });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "unauthorized");
+});
+
+test("reactions broadcast with message identity; muted blocked; over-limit dropped silently", async () => {
+  const env = mkEnv();
+  const ctx = await makeParty(env, 3);
+  const { hub, host, g1, g2 } = { ...ctx.people, ...ctx };
+
+  await send(hub, g1, { t: "react", emoji: "laugh", msgId: "m1" });
+  const ev = of(take(host), "react")[0];
+  assert.strictEqual(ev.emoji, "laugh");
+  assert.strictEqual(ev.name, "G1");
+  assert.strictEqual(ev.fromId, ctx.ids.g1);
+  assert.strictEqual(ev.msgId, "m1");
+  assert.ok(typeof ev.ts === "number");
+  // burst reactions carry no msgId (null on the wire)
+  await send(hub, g1, { t: "react", emoji: "love" });
+  assert.strictEqual(of(take(host), "react")[0].msgId, null);
+  // unknown emoji rejected; a msgId variant requires REACTIONS membership
+  await send(hub, g1, { t: "react", emoji: "bogus" });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "bad_message");
+  await send(hub, g1, { t: "react", emoji: "bogus", msgId: "m2" });
+  assert.strictEqual(take(g1).find((x) => x.t === "error").error, "bad_message", "a msgId variant still requires a known emoji");
+  // muted users cannot react
+  await send(hub, host, { t: "mute", targetId: ctx.ids.g2, muted: true });
+  take(g2);
+  await send(hub, g2, { t: "react", emoji: "love" });
+  const err = take(g2).find((x) => x.t === "error");
+  assert.ok(err && err.error === "unauthorized" && err.for === "react");
+  // reactions share the chat limiter: over budget is dropped SILENTLY
+  take(host); take(g1); take(g2);
+  for (let i = 0; i < CHAT_RATE_MAX + 2; i++) await send(hub, host, { t: "react", emoji: "applause" });
+  const evs = take(host);
+  assert.strictEqual(of(evs, "react").length, CHAT_RATE_MAX, "the burst budget passes");
+  assert.strictEqual(of(evs, "error").length, 0, "over-limit reactions drop silently");
+});
+
+test("snapshot carries the v2.1 layer (media/cohosts/perms/locked/queue/requests/intermission + roles)", async () => {
+  const env = mkEnv();
+  const ctx = await makeParty(env, 2);
+  const snap = ctx.snap();
+  assert.strictEqual(snap.media, null);
+  assert.deepStrictEqual(snap.cohosts, []);
+  assert.deepStrictEqual(snap.perms, { play: true, seek: true, episode: false, queue: false, moderate: false, policy: false });
+  assert.strictEqual(snap.locked, false);
+  assert.deepStrictEqual(snap.queue, []);
+  assert.deepStrictEqual(snap.requests, []);
+  assert.strictEqual(snap.intermission, null);
+  assert.strictEqual(snap.participants.find((p) => p.id === ctx.ids.host).role, "host");
+  assert.strictEqual(snap.participants.find((p) => p.id === ctx.ids.g1).role, "participant");
+  // the additive fields ride the SAME snapshot shape as the v2.0 layer
+  assert.strictEqual(snap.waitMode, "move");
+  assert.strictEqual(snap.gate, null);
+  assert.strictEqual(snap.hold, null);
+  assert.strictEqual(snap.playback.status, "waiting");
 });
 
 await runAll();
