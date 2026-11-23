@@ -11,7 +11,7 @@ import android.view.View;
     Also the streambox://party/CODE deep-link entry (keeps MainActivity
     exported=false): the code rides along as an intent extra. */
 public class SplashActivity extends Activity {
-    private static final long DELAY_MS = 1400;
+    private static final long DELAY_MS = 400;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean handedOff;
     private String partyCode;

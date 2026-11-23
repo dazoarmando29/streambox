@@ -39,6 +39,9 @@ public class MainActivity extends Activity {
     private WebView web;
     private WebChromeClient chromeClient;
     private View fullscreenView;
+    /** battery-aware wake: becomes true once the site proves the
+        sb:awake/sb:sleep title channel (then wake is playback-scoped) */
+    private boolean wakeManaged;
     private WebChromeClient.CustomViewCallback fullscreenCallback;
     // static: recreate() builds a NEW activity instance - an instance flag
     // would read false there and restoreState could resurrect the crash page
@@ -135,13 +138,42 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         readPartyIntent();
         // Fresh-start guarantee: once per app version, wipe the WebView's
-        // CACHE layers + service worker BEFORE creating the WebView, so the
-        // first launch after every update can never serve stale pages. User
-        // data (Local Storage: watch progress, My List, PIN, settings;
-        // IndexedDB; cookies) is preserved across updates.
-        freshStartIfNewVersion();
-        wipeUpdateLeftovers(); // the installer needs the file alive while it works; leftovers never pile up
+        // CACHE layers + service worker BEFORE the first load, so the first
+        // launch after every update can never serve stale pages. User data
+        // (Local Storage: watch progress, My List, PIN, settings; IndexedDB;
+        // Session Storage; cookies) is preserved across updates.
+        // The recursive deletes run OFF the main thread (they used to block
+        // onCreate - hundreds of file ops on eMMC sticks = ANR risk); the
+        // first load still WAITS for them, so the ordering guarantee holds.
+        // Screen stays on while watching (players must never sleep mid-video).
+        // Battery-aware: when the site supports the sb:awake/sb:sleep title
+        // channel, wake becomes playback-scoped instead of always-on.
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        String verNow;
+        try {
+            verNow = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            verNow = "0";
+        }
+        final String verFinal = verNow != null ? verNow : "0";
+        boolean needsFresh = !verFinal.equals(
+                getSharedPreferences("streambox", MODE_PRIVATE).getString("fresh_cleared_for", ""));
+        if (!needsFresh) {
+            // common path: nothing to wipe - the tiny update-leftover sweep
+            // is fire-and-forget and never gates the first load (the load
+            // itself happens at the end of onCreate, after the WebView is
+            // fully configured)
+            new Thread(() -> wipeUpdateLeftovers(), "sb-wipe").start();
+        } else {
+            new Thread(() -> {
+                freshStartIfNewVersion();
+                wipeUpdateLeftovers();
+                runOnUiThread(() -> {
+                    if (web != null) firstLoad(savedInstanceState);
+                });
+            }, "sb-freshstart").start();
+        }
 
         FrameLayout root = new FrameLayout(this);
         web = new WebView(this);
@@ -169,8 +201,8 @@ public class MainActivity extends Activity {
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
         web.requestFocus();
-        // explicit hardware layer: video + page composite on the GPU, not the CPU
-        web.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        // (no forced LAYER_TYPE_HARDWARE: WebView already composites on the
+        // GPU; the extra offscreen layer just costs VRAM on 1GB TV sticks)
 
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
@@ -377,6 +409,15 @@ public class MainActivity extends Activity {
                         setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
                     } else if (title != null && title.startsWith("sb:portrait")) {
                         setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                    } else if (title != null && title.startsWith("sb:awake")) {
+                        // battery-aware wake: the site pings while media plays;
+                        // once it proves the channel, browsing no longer keeps
+                        // the screen on (old sites never ping -> always-on)
+                        wakeManaged = true;
+                        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    } else if (title != null && title.startsWith("sb:sleep")) {
+                        wakeManaged = true;
+                        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                     }
                 } catch (Exception ignored) {}
                 super.onReceivedTitle(view, title);
@@ -396,6 +437,13 @@ public class MainActivity extends Activity {
             }
         });
 
+        if (!needsFresh) firstLoad(savedInstanceState);
+    }
+
+    /* First load (or restore) of the site - runs once the fresh-start wipe is
+       done so an update can never race a stale service worker. */
+    private void firstLoad(Bundle savedInstanceState) {
+        if (web == null) return;
         boolean crashed = webviewCrashed;
         webviewCrashed = false; // one-shot: the next recreate restores normally
         if (!crashed && savedInstanceState != null && web.restoreState(savedInstanceState) != null) {
@@ -424,7 +472,9 @@ public class MainActivity extends Activity {
         // caches + the service worker (registration AND its CacheStorage):
         // deleting "Service Worker" is what guarantees no stale page/script
         // can survive an update; everything else here is rebuildable cache.
-        for (String d : new String[] {"Cache", "Code Cache", "GPUCache", "Service Worker", "Session Storage"}) {
+        // Session Storage is NOT wiped any more - it can carry live session
+        // state (party handshakes) and is user data, not cache.
+        for (String d : new String[] {"Cache", "Code Cache", "GPUCache", "Service Worker"}) {
             deleteRecursive(new java.io.File(wv, d));
         }
         deleteRecursive(getCacheDir());
@@ -583,6 +633,9 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        // leave HTML5 fullscreen the contract way first (the custom view must
+        // be detached + its callback hidden before the decor dies)
+        try { hideFullscreen(); } catch (Exception ignored) {}
         if (web != null) { web.destroy(); web = null; }
         super.onDestroy();
     }

@@ -6,7 +6,7 @@ const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png",
 // Only the shell statics are cache-first. Everything else same-origin (the
 // version.txt poll carries a cache-buster every visit) must ride the network:
 // caching those keyed-by-URL grows the cache forever and can pin stale copies.
-const STATIC_OK = new Set(["manifest.webmanifest", "icon-192.png", "icon-512.png"]);
+const STATIC_OK = new Set(["manifest.webmanifest", "icon-192.png", "icon-512.png", "tailwind.css"]);
 
 function offline() {
   return new Response("Offline", {

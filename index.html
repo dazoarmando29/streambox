@@ -35,7 +35,12 @@
 <link rel="dns-prefetch" href="https://graphql.anilist.co">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<!-- fonts load NON-blocking (print media swap): first paint never waits on
+     the font CSS; the type swaps in when ready. Weights trimmed to the two
+     display faces + the four text faces actually rendered. -->
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"></noscript>
 <style>
   * { scrollbar-width: thin; scrollbar-color: #00F0B5 #111; }
   ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
@@ -133,6 +138,11 @@
   #updateBar, #healthBar { padding-top: calc(.625rem + env(safe-area-inset-top, 0px)); }
   /* fixed backgrounds repaint every scroll frame (TV jank): calm + TV scroll */
   body.calm, body.tv-mode { background-attachment: scroll; }
+  /* touch devices too: iOS/Android repaint a fixed gradient on EVERY scroll
+     frame - the same paint cost the calm mode already opted out of */
+  @media (max-width: 767px), (pointer: coarse) {
+    body { background-attachment: scroll; }
+  }
   /* Motion Clarity + Judder Reduction (Settings): tunes how much our own UI
      eases between states. Cannot touch the film's frames (those live inside
      a cross-origin player — your TV's own Motion setting handles those). */
@@ -2092,6 +2102,7 @@ let watchState = { type:"movie", id:null, s:1, e:1 };
    detail re-read the same discover pages constantly; season/detail calls keep
    the tighter TTL so episode status never goes stale. */
 const _mem = new Map();
+const _pending = new Map(); // in-flight requests keyed by URL (hover-prefetch + click used to race)
 function tmdb(path){
   const sep = path.includes("?") ? "&" : "?";
   const url = `${TMDB_BASE}${path}${sep}language=en-US`;
@@ -2102,7 +2113,10 @@ function tmdb(path){
     const raw = sessionStorage.getItem("sb:" + url);
     if (raw) { const c = JSON.parse(raw); if (now - c.t < TTL) { _mem.set(url, c); return Promise.resolve(c.d); } }
   } catch(e){}
-  return fetch(url).then(r => {
+  // request dedup: one fetch per URL no matter how many callers race it
+  const inflight = _pending.get(url);
+  if (inflight) return inflight;
+  const p = fetch(url).then(r => {
     // never cache an error body: a transient 502 used to land in _mem AND
     // sessionStorage as catalog data and poison rows for the whole TTL
     if (!r.ok) throw new Error("http " + r.status);
@@ -2112,9 +2126,13 @@ function tmdb(path){
     // bounded cache: detail+credits payloads are 20-100KB - evict FIFO
     if (_mem.size >= 48) { const k = _mem.keys().next().value; if (k !== undefined) _mem.delete(k); }
     _mem.set(url, c);
-    try { sessionStorage.setItem("sb:" + url, JSON.stringify(c)); } catch(e){}
+    // the sessionStorage mirror stringifies up to ~100KB - off the critical
+    // path (it used to run synchronously right before the detail modal paint)
+    setTimeout(() => { try { sessionStorage.setItem("sb:" + url, JSON.stringify(c)); } catch(e){} }, 0);
     return d;
-  });
+  }).finally(() => { _pending.delete(url); });
+  _pending.set(url, p);
+  return p;
 }
 /* Worker feed cache (same 30-min TTL + cap): the AniList genre feed re-walks
    on every Anime tab visit. */
@@ -2205,6 +2223,9 @@ async function init(){
   const rows = document.getElementById("rows");
   // beauty: shimmer placeholders so the page never looks broken while loading
   rows.innerHTML = skeletonRow("Trending Now") + skeletonRow("Popular Movies");
+  // perceived startup: the shell + skeletons are the first meaningful paint -
+  // the splash leaves NOW instead of waiting a full catalog round trip
+  hideSplash();
   try {
     // Progressive catalog: hero + first row ASAP (TVs on slow Wi-Fi feel
     // instant), remaining rows stream in behind. One code path for web/phone/TV.
@@ -2226,18 +2247,18 @@ async function init(){
         if (first) first.focus({ preventScroll: true });
       }, 400);
     }
-    // Below-the-fold rows load after first paint (fail soft, row by row)
+    // Below-the-fold rows: all four fetches START NOW (overlapped) but append
+    // in order, so the layout is identical while slow links gain ~3 RTTs
     const rest = [
       ["/movie/popular", "Popular Movies", "movie"],
       ["/tv/popular", "Popular TV Shows", "tv"],
       ["/movie/top_rated", "Top Rated Movies", "movie"],
       ["/tv/top_rated", "Top Rated TV", "tv"]
     ];
-    for (const [path, title, forceType] of rest) {
-      try {
-        const d = await withTimeout(tmdb(path), 15000, "catalog-row");
-        if (d && d.results) rows.appendChild(makeRow(title, d.results, forceType));
-      } catch(rowErr) { /* one row failing never kills the page */ }
+    const pending = rest.map(([path]) => withTimeout(tmdb(path), 15000, "catalog-row").catch(() => null));
+    for (let i = 0; i < rest.length; i++) {
+      const d = await pending[i];
+      if (d && d.results) rows.appendChild(makeRow(rest[i][1], d.results, rest[i][2]));
     }
     paintAllRowArrows();
     window._initRunning = false;
@@ -3132,9 +3153,13 @@ function setHero(i){
   const x = heroItems[i]; if(!x) return;
   const type = x.media_type === "tv" ? "tv" : "movie";
   // backdrop may be missing/broken on some items: fall back to poster, else hide art (text stays)
-  // TV decodes w1280 slowly: w780 there (gradient + text cover the difference)
+  // TV decodes w1280 slowly: w780 there (gradient + text cover the difference).
+  // Phones get a srcset ladder: w780 on narrow screens saves ~200KB off the
+  // LCP image; desktops keep the sharp w1280.
   const tvPic = document.body.classList.contains("tv-mode");
   const bg = x.backdrop_path ? IMG(x.backdrop_path, tvPic ? "w780" : "w1280") : (x.poster_path ? IMG(x.poster_path,"w780") : "");
+  const bgSet = (x.backdrop_path && !tvPic)
+    ? `${IMG(x.backdrop_path, "w780")} 780w, ${IMG(x.backdrop_path, "w1280")} 1280w` : "";
   const year = (x.release_date || x.first_air_date || "").slice(0, 4);
   const genres = genreNames(x, type);
   const saved = inList(type, x.id);
@@ -3147,7 +3172,7 @@ function setHero(i){
     if (ae && ae.closest && ae.closest("#hero")) fIdx = [...document.querySelectorAll("#hero button")].indexOf(ae);
   } catch(e){}
   document.getElementById("hero").innerHTML = `
-    ${bg ? `<img src="${escapeHtml(bg)}" fetchpriority="high" decoding="async" onerror="this.style.display='none'" class="absolute inset-0 w-full h-full object-cover">` : ""}
+    ${bg ? `<img src="${escapeHtml(bg)}" ${bgSet ? `srcset="${escapeHtml(bgSet)}" sizes="100vw"` : ""} fetchpriority="high" decoding="async" onerror="this.style.display='none'" class="absolute inset-0 w-full h-full object-cover">` : ""}
     <div class="absolute inset-0 hero-gradient"></div>
     <div class="relative px-4 md:px-10 pb-16 max-w-2xl">
       <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-teal-400/20 border border-teal-400/60 text-teal-300 text-xs font-bold tracking-wider mb-4 uppercase shadow-lg backdrop-blur-md"><span class="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>#${i+1} Trending \u{00B7} ${type === "tv" ? "TV" : "Movie"}</span>
@@ -3160,9 +3185,9 @@ function setHero(i){
       </div>
       <p class="text-sm text-gray-300 mt-4 line-clamp-3 leading-relaxed drop-shadow">${escapeHtml(x.overview||"")}</p>
       <div class="flex flex-wrap gap-3 mt-6 items-center">
-        <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold text-base flex items-center gap-2.5 shadow-lg shadow-teal-400/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200">\u{25B6} Watch</button>
-        <button onclick='openDetail("${type}",${x.id})' class="h-12 px-7 rounded-full glass-pill text-white hover:bg-white/15 font-semibold text-base flex items-center gap-2 border border-white/20 hover:border-white/40 transition-all">\u{24D8} Details</button>
-        <button onclick="heroListToggle()" title="${saved ? "Remove from My List" : "Add to My List"}" aria-label="${saved ? "Remove from My List" : "Add to My List"}" class="w-12 h-12 rounded-full glass-pill ${saved ? "text-teal-300 border-teal-400/50" : "text-gray-300 hover:text-teal-300 hover:border-teal-400/40"} flex items-center justify-center transition-all text-lg">${saved ? "\u{2665}" : "\u{2661}"}</button>
+        <button onmouseenter="preconnectCinesrc()" onclick='openDetail("${type}",${x.id})' class="h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold text-base flex items-center gap-2.5 shadow-lg shadow-teal-400/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"><svg class="ico ico-sm"><use href="#i-play"/></svg>Watch</button>
+        <button onclick='openDetail("${type}",${x.id})' class="h-12 px-7 rounded-full glass-pill text-white hover:bg-white/15 font-semibold text-base flex items-center gap-2 border border-white/20 hover:border-white/40 transition-all"><svg class="ico ico-sm"><use href="#i-info"/></svg>Details</button>
+        <button onclick="heroListToggle()" title="${saved ? "Remove from My List" : "Add to My List"}" aria-label="${saved ? "Remove from My List" : "Add to My List"}" class="w-12 h-12 rounded-full glass-pill ${saved ? "text-teal-300 border-teal-400/50" : "text-gray-300 hover:text-teal-300 hover:border-teal-400/40"} flex items-center justify-center transition-all"><svg class="ico"><use href="#i-${saved ? "check" : "plus"}"/></svg></button>
       </div>
     </div>`;
   if (fIdx >= 0) {
@@ -3401,9 +3426,13 @@ async function getAdultKwIds(){
   // keyword tags tell the truth). Looked up live once, then cached.
   if (adultKwIds) return adultKwIds;
   const acc = [];
+  const qs = ["hentai", "ecchi", "erotic", "softcore", "adult animation", "erotica", "animated porn"];
   try {
-    for (const q of ["hentai", "ecchi", "erotic", "softcore", "adult animation", "erotica", "animated porn"]) {
-      const d = await tmdb(`/search/keyword?query=${encodeURIComponent(q)}&page=1`);
+    // all 7 lookups start at once (was 7 sequential round trips on the first
+    // Anime visit); any failure still means "never cache a failed sweep"
+    const all = await Promise.all(qs.map(q => tmdb(`/search/keyword?query=${encodeURIComponent(q)}&page=1`)));
+    for (let qi = 0; qi < qs.length; qi++) {
+      const q = qs[qi], d = all[qi];
       ((d && d.results) || []).forEach(r => {
         const n = (r.name || "").toLowerCase();
         if ((n === q || n === "hentai adaptation") && r.id && !acc.includes(r.id)) acc.push(r.id);
@@ -4016,13 +4045,15 @@ async function openDetail(type, id){
     modalSeasons = (d.seasons||[]).filter(s=>s.season_number>0);
     modalSeasonIdx = 0;
     updateModalSeasonLabel();
-    await loadModalEpisodes();
   } else sWrap.classList.add("hidden");
   if (my !== detailReq) return; // user backed out (or opened another title) during the load - never pop a stale modal
   document.getElementById("modal").classList.remove("hidden");
   document.body.classList.add("modal-open");
   // Netflix-style: land focus on the primary action so remotes work instantly
   setTimeout(()=>{ const w = document.getElementById("mWatch"); if (w) w.focus(); }, 60);
+  // episode cards STREAM IN behind the open modal (the open used to wait a
+  // second network round trip before anything was visible)
+  if (type === "tv") { try { await loadModalEpisodes(); } catch(e){} }
 }
 function updateModalSeasonLabel(){
   // design-pack season chips (Season 1 / Season 2 (2025) / ...)
@@ -4142,6 +4173,9 @@ async function openWatch(type, id, s=1, e=1, t=0){
   const stillMine = () => owKey === window._owSeq
     && !document.getElementById("watchView").classList.contains("hidden");
   document.body.classList.add("watch-on");
+  // battery-aware APK wake: while the watch view is open the screen stays on
+  // (the shell switches to playback-scoped wake once it sees this channel)
+  try { sbTitlePing("sb:awake"); } catch(e){}
   const anime = detectAnime(type, id);
   watchState = { type, id, s, e, t: Math.max(0, Math.floor(t || 0)), anime };
   try { saveWatchSession(); } catch(e){} // tab-switch survival: the player comes back
@@ -4479,9 +4513,21 @@ function hideUpNext(){
 /* Resume prompt logic: reads OUR saved progress (the same store the Continue
    row uses). Explicit t (Continue row / reload) skips the ask; the player's
    own prompt stays disabled everywhere (continueprompt=false). */
+/* one parsed copy per store revision - episode lists re-read this up to 24x
+   per drawer open and each read used to JSON.parse the whole store */
+let _contCache = { raw: null, arr: [] };
+function continueList(){
+  try {
+    const raw = localStorage.getItem("streambox_continue") || "[]";
+    if (_contCache.raw === raw) return _contCache.arr;
+    const arr = JSON.parse(raw);
+    _contCache = { raw, arr: Array.isArray(arr) ? arr : [] };
+    return _contCache.arr;
+  } catch(e){ return []; }
+}
 function savedPosFor(type, id, s, e){
   try {
-    const arr = JSON.parse(localStorage.getItem("streambox_continue") || "[]");
+    const arr = continueList();
     const it = arr.find(x => x.type === type && x.id === id && (x.s || 1) === (s || 1) && (x.e || 1) === (e || 1));
     if (!it) return 0;
     const pos = Math.floor(it.pos || 0), dur = Math.floor(it.dur || 0);
@@ -4494,7 +4540,7 @@ function epWatchInfo(s, e){
   // our saved Continue progress for THIS episode — feeds the pinned status
   // column (Xm left / NEW Xm left). null = not started or finished.
   try {
-    const arr = JSON.parse(localStorage.getItem("streambox_continue") || "[]");
+    const arr = continueList();
     const it = arr.find(x => x.type === "tv" && x.id === watchState.id && (x.s || 1) === (s || 1) && (x.e || 1) === (e || 1));
     if (!it) return null;
     const pos = Math.floor(it.pos || 0), dur = Math.floor(it.dur || 0);
@@ -5641,6 +5687,8 @@ function goHome(ev){
   try { hideUpNext(); } catch(e){}
   try { clearWatchSession(); } catch(e){} // leaving the player clears the session
   document.body.classList.remove("watch-on");
+  // back to browsing: the APK shell may let the screen sleep again
+  try { sbTitlePing("sb:sleep"); } catch(e){}
   paintNav("navHome");
   ctlPollStop();
   clearTimeout(window._tipT);
@@ -8261,13 +8309,21 @@ function paintCaps(force){
     // overlay — the old full-bleed band read as a broken player bar
     ov.innerHTML = html ? `<span class="cap-pill">${html}</span>` : "";
   }
+  // cheap last-state guard: the 150ms ticker + ctlPaint call this constantly -
+  // skip the class/style/apply work while NOTHING visible changed (text,
+  // position, style and float state all identical)
+  const floatNow = subsOn && subFile && subFile.cues && subFile.cues.length && !pState.paused;
+  const tailKey = html + "|" + ((subFile && subFile.pos) || "bottom") + "|" + (capStyle.size || 18)
+    + (capStyle.color || "") + "|" + (capStyle.bg || "") + "|" + (floatNow ? 1 : 0);
+  if (!force && ov.dataset.tk === tailKey) return;
+  ov.dataset.tk = tailKey;
   ov.style.display = html ? "block" : "none";
   ov.classList.remove("cap-bottom", "cap-center", "cap-top");
   ov.classList.add("cap-" + ((subFile && subFile.pos) || "bottom"));
   const pill = ov.querySelector(".cap-pill");
   if (pill) applyCapStyle(pill);
   // float when playing, settle when paused/minimized
-  if (subsOn && subFile && subFile.cues && subFile.cues.length && !pState.paused) {
+  if (floatNow) {
     ov.classList.add("floating");
   } else {
     ov.classList.remove("floating");
@@ -8646,6 +8702,14 @@ function skipPillNow(){
   skipOutroNow();
 }
 function paintSkipPill(){
+  // fast path: no intro/recap/outro data for THIS episode means the floating
+  // pill can only be hidden - skip the three range scans that ctlPaint and
+  // the tickers would otherwise run several times a second
+  {
+    const fl0 = document.getElementById("skipFloat");
+    if (!_introRanges.length && !_recapRanges.length && !_outroRanges.length
+        && fl0 && fl0.classList.contains("hidden")) return;
+  }
   const r = introHit();
   const rc = recapHit();
   // loaded-gate: an intro starting at 0:00 matches a fresh cur=0 while the
