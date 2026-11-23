@@ -137,11 +137,14 @@ object Party {
     fun init(context: Context) {
         if (ctx != null) return
         ctx = context.applicationContext
-        // drift + content-diff tick (only runs while in a room)
+        // drift + content-diff tick (the BODY only means anything in a room):
+        // while idle there is no 2s wakeup - a slow re-check notices a room
+        // opening and the fast cadence resumes on its own
         val tick = object : Runnable {
             override fun run() {
-                try { tick() } catch (e: Exception) {}
-                main.postDelayed(this, SYNC_INTERVAL)
+                val inRoom = room.value != null
+                if (inRoom) { try { tick() } catch (e: Exception) {} }
+                main.postDelayed(this, if (inRoom) SYNC_INTERVAL else 30_000L)
             }
         }
         tickRunnable = tick

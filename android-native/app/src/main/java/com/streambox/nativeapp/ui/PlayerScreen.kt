@@ -2998,7 +2998,46 @@ fun PlayerScreen(
                             return true
                         }
                     }
-                    webChromeClient = WebChromeClient()
+                    webChromeClient = object : WebChromeClient() {
+                        // embeds asking for HTML5 fullscreen used to get a bare
+                        // client - no fullscreen surface at all (letterboxed
+                        // video). Same contract the WebView wrapper honours.
+                        private var customView: android.view.View? = null
+                        private var customCb: CustomViewCallback? = null
+
+                        override fun onShowCustomView(view: android.view.View?, callback: CustomViewCallback?) {
+                            if (customView != null) { callback?.onCustomViewHidden(); return }
+                            customView = view
+                            customCb = callback
+                            try {
+                                val act = view?.context as? android.app.Activity
+                                    ?: pm.web?.context as? android.app.Activity
+                                val decor = act?.window?.decorView as? android.widget.FrameLayout ?: return
+                                decor.addView(view, android.widget.FrameLayout.LayoutParams(
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+                                act.window.decorView.systemUiVisibility = (
+                                    android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                    or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                                    or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+                            } catch (e: Exception) {}
+                        }
+
+                        override fun onHideCustomView() {
+                            try {
+                                val act = customView?.context as? android.app.Activity
+                                    ?: pm.web?.context as? android.app.Activity
+                                val decor = act?.window?.decorView as? android.widget.FrameLayout
+                                customView?.let { decor?.removeView(it) }
+                            } catch (e: Exception) {}
+                            customView = null
+                            try { customCb?.onCustomViewHidden() } catch (e: Exception) {}
+                            customCb = null
+                        }
+                    }
                     addJavascriptInterface(SBBridge({ t, j ->
                         if (t == "timeupdate") {
                             val tn = System.currentTimeMillis()
