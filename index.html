@@ -514,11 +514,12 @@
     #ctlRemain { display: none; }
     #btnRow { gap: 5px; row-gap: 5px; justify-content: center; }
     /* the global a11y rule (button min 44px) clamps even !important widths -
-       exempt the compact phone bar or nothing can shrink */
-    #btnRow > button { height: 34px !important; min-height: 34px !important; min-width: 0 !important; padding: 0 8px !important; font-size: 11px; }
-    #btnRow #ctlSettings, #btnRow #ctlFs { width: 34px !important; min-width: 34px !important; padding: 0 !important; }
+       exempt the compact phone bar or nothing can shrink; floor stays 40px so
+       every target is thumb-reachable (the 34px floor failed real touch) */
+    #btnRow > button { height: 40px !important; min-height: 40px !important; min-width: 40px !important; padding: 0 10px !important; font-size: 11px; }
+    #btnRow #ctlSettings, #btnRow #ctlFs { width: 40px !important; min-width: 40px !important; padding: 0 !important; }
     #btnRow > button svg { width: 16px; height: 16px; }
-    #ctlPlay { width: 36px !important; min-width: 36px !important; height: 36px !important; min-height: 36px !important; }
+    #ctlPlay { width: 40px !important; min-width: 40px !important; height: 40px !important; min-height: 40px !important; }
     /* ONE slim row of essentials (YouTube-inline pattern): play, -10/+30,
        CC, settings, fullscreen. Speed / quality / mute live in the settings
        sheet (and the quality pills in the card below) - the old 10-button
