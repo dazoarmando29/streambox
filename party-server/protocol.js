@@ -31,6 +31,14 @@ const LIMITS = {
   HOLD_TIMEOUT_DEFAULT_MS: 20000,
   HOLD_TIMEOUT_MIN_MS: 5000,
   HOLD_TIMEOUT_MAX_MS: 120000,
+  // party social layer bounds
+  MEDIA_FIELDS: 48,        // per-field cap for media version identifiers
+  QUEUE_MAX: 12,
+  PENDING_REQUESTS_MAX: 8,
+  REACT_WINDOW_MS: 10000,
+  REACT_MAX: 20,
+  INTERMISSION_MAX_MS: 15 * 60 * 1000,
+  INVITE_TTL_MAX_MS: 7 * 24 * 60 * 60 * 1000,
   // join-by-code guessing: per-remote-address
   CODE_ATTEMPT_WINDOW_MS: 5 * 60 * 1000,
   CODE_ATTEMPT_MAX: 12,
@@ -57,6 +65,8 @@ const CLIENT_MSGS = new Set([
   "playback", "content", "chat", "resync",
   "kick", "mute", "settings", "heartbeat", "sync_report",
   "source", "pstate",
+  // protocol v2.1: authoritative media version + party social layer
+  "media", "role", "request", "request_reply", "react", "queue", "intermission",
 ]);
 
 // server -> client message types
@@ -65,6 +75,7 @@ const SERVER_MSGS = new Set([
   "peer_joined", "peer_left", "host_changed", "settings", "kicked",
   "room_ended", "error", "heartbeat", "notice", "source",
   "peer_state", "schedule",
+  "media", "role", "request", "request_reply", "react", "queue", "intermission",
 ]);
 
 const ERROR_CODES = new Set([
@@ -82,6 +93,15 @@ const PSTATE_VALUES = new Set(["loading", "ready", "playing", "paused", "bufferi
    wait-for-everyone hold release (a dead source must never trap the room). */
 const PSTATE_BLOCKING = new Set(["loading", "buffering"]);
 const WAIT_MODES = new Set(["move", "everyone"]);
+/* Roles: host owns the room; co-host shares playback/episode/moderation;
+   everyone else is a participant (gated by allowControl + per-guest perms). */
+const ROLES = new Set(["host", "cohost", "participant"]);
+/* Granular guest permissions (server-enforced; co-hosts bypass, host only
+   does host-only ops: end/roles/lock/settings). */
+const PERM_KEYS = ["play", "seek", "episode", "queue", "moderate", "policy"];
+const REACTIONS = new Set(["laugh", "surprise", "love", "shock", "applause"]);
+const REQUEST_ACTIONS = new Set(["pause", "rewind", "skip_intro", "next_episode", "change_episode"]);
+const QUEUE_OPS = new Set(["add", "vote", "approve", "remove", "clear"]);
 
 function isStr(v, min, max) {
   return typeof v === "string" && v.length >= min && v.length <= max;
@@ -101,6 +121,24 @@ function cleanText(s, max) {
 
 function cleanName(s) {
   return cleanText(s, LIMITS.NAME_MAX) || "Guest";
+}
+
+/* Authoritative media-version config. Fields are OPAQUE PROVIDER identifiers
+   (the labels/values the provider itself reports - AniPM lang segment, VidBolt
+   panel option values) - never guessed languages, never signed media URLs.
+   "compat" is advisory: what the sender knows about availability. */
+function cleanMedia(m) {
+  if (!m || typeof m !== "object") return null;
+  const out = {};
+  const F = LIMITS.MEDIA_FIELDS;
+  for (const k of ["mirror", "variant", "audio", "subs", "subsLang", "release"]) {
+    if (m[k] != null) {
+      const v = cleanText(String(m[k]), F);
+      if (v) out[k] = v;
+    }
+  }
+  if (m.subsOn != null) out.subsOn = m.subsOn === true;
+  return Object.keys(out).length ? out : null;
 }
 
 /* Authoritative position at server time `now`: playback.position was the
@@ -202,7 +240,13 @@ function validateClientMsg(raw, inRoom) {
     case "chat": {
       const text = cleanText(m.text, LIMITS.CHAT_MAX);
       if (!text) return { ok: false, error: "bad_message" };
-      return { ok: true, msg: { t, text } };
+      const msg = { t, text };
+      // additive social fields (old hubs/clients ignore them)
+      if (isStr(m.replyTo, 1, 24)) msg.replyTo = m.replyTo;
+      if (m.spoiler === true) msg.spoiler = true;
+      const pos = Number(m.pos);
+      if (Number.isFinite(pos) && pos >= 0 && pos <= 24 * 3600) msg.pos = Math.floor(pos);
+      return { ok: true, msg };
     }
     case "kick":
     case "mute": {
@@ -231,6 +275,12 @@ function validateClientMsg(raw, inRoom) {
         if (Number.isFinite(ht)) {
           msg.holdTimeoutMs = Math.min(LIMITS.HOLD_TIMEOUT_MAX_MS, Math.max(LIMITS.HOLD_TIMEOUT_MIN_MS, ht));
         }
+      }
+      if (m.locked != null) msg.locked = m.locked === true;
+      if (m.perms != null && typeof m.perms === "object") {
+        const perms = {};
+        for (const k of PERM_KEYS) if (m.perms[k] != null) perms[k] = m.perms[k] === true;
+        if (Object.keys(perms).length) msg.perms = perms;
       }
       return { ok: true, msg };
     }
@@ -292,6 +342,67 @@ function validateClientMsg(raw, inRoom) {
       const mirror = cleanText(m.mirror, 24);
       if (!mirror) return { ok: false, error: "bad_message" };
       return { ok: true, msg: { t, mirror } };
+    }
+    case "media": {
+      // AUTHORITATIVE media version: the host's intended source variant
+      // (dub/sub, audio track, subtitle track, provider variant id). This is
+      // what every participant loads FIRST - local defaults never win over it.
+      // Values are opaque provider identifiers (labels/values the provider
+      // itself reports) - never signed media URLs.
+      return { ok: true, msg: { t, media: cleanMedia(m.media) } };
+    }
+    case "role": {
+      if (!isStr(m.targetId, 1, 64)) return { ok: false, error: "bad_message" };
+      const role = m.role === "cohost" ? "cohost" : "participant";
+      return { ok: true, msg: { t, targetId: m.targetId, role } };
+    }
+    case "request": {
+      if (!REQUEST_ACTIONS.has(m.action)) return { ok: false, error: "bad_message" };
+      const msg = { t, action: m.action };
+      const p = Number(m.position);
+      if (Number.isFinite(p) && p >= 0 && p <= 24 * 3600) msg.position = Math.floor(p);
+      if (isStr(m.note, 1, 80)) msg.note = cleanText(m.note, 80);
+      return { ok: true, msg };
+    }
+    case "request_reply": {
+      if (!isStr(m.requestId, 1, 24)) return { ok: false, error: "bad_message" };
+      return { ok: true, msg: { t, requestId: m.requestId, approved: m.approved === true } };
+    }
+    case "react": {
+      // lightweight live reactions (burst) or message emoji reactions
+      if (isStr(m.msgId, 1, 24) && REACTIONS.has(m.emoji)) {
+        return { ok: true, msg: { t, msgId: m.msgId, emoji: m.emoji } };
+      }
+      if (!REACTIONS.has(m.emoji)) return { ok: false, error: "bad_message" };
+      return { ok: true, msg: { t, emoji: m.emoji } };
+    }
+    case "queue": {
+      if (!QUEUE_OPS.has(m.op)) return { ok: false, error: "bad_message" };
+      const msg = { t, op: m.op };
+      if (m.op === "add") {
+        const type = m.item && m.item.type === "movie" ? "movie" : "tv";
+        const id = m.item && parseInt(m.item.tmdbId, 10);
+        if (!Number.isFinite(id) || id <= 0) return { ok: false, error: "bad_message" };
+        msg.item = {
+          type,
+          tmdbId: id,
+          season: Math.max(1, parseInt(m.item.season, 10) || 1),
+          episode: Math.max(1, parseInt(m.item.episode, 10) || 1),
+          title: cleanText(m.item.title || "", 60),
+        };
+      } else if (isStr(m.itemId, 1, 24)) {
+        msg.itemId = m.itemId;
+      }
+      return { ok: true, msg };
+    }
+    case "intermission": {
+      const op = m.op === "end" ? "end" : "start";
+      const msg = { t, op };
+      if (op === "start") {
+        const sec = parseInt(m.seconds, 10);
+        msg.seconds = Math.min(900, Math.max(30, Number.isFinite(sec) ? sec : 300));
+      }
+      return { ok: true, msg };
     }
     default:
       return { ok: false, error: "bad_message" };
@@ -358,5 +469,6 @@ function planCorrection(o) {
 module.exports = {
   LIMITS, CODE_ALPHABET, CODE_LEN, CODE_RE, CLIENT_MSGS, SERVER_MSGS, ERROR_CODES,
   PLAYBACK_ACTIONS, ROOM_STATUSES, PSTATE_VALUES, PSTATE_BLOCKING, WAIT_MODES,
-  cleanText, cleanName, expectedPosition, planCorrection, validateClientMsg,
+  ROLES, PERM_KEYS, REACTIONS, REQUEST_ACTIONS, QUEUE_OPS,
+  cleanText, cleanName, cleanMedia, expectedPosition, planCorrection, validateClientMsg,
 };

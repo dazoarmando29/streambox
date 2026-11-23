@@ -7,7 +7,7 @@
 const crypto = require("crypto");
 const {
   LIMITS, CODE_ALPHABET, CODE_LEN, CODE_RE,
-  cleanText, cleanName, expectedPosition, PSTATE_BLOCKING, WAIT_MODES,
+  cleanText, cleanName, cleanMedia, expectedPosition, PSTATE_BLOCKING, WAIT_MODES,
 } = require("./protocol");
 
 const START_DELAY_MS = LIMITS.START_DELAY_MS; // fallback gate: episode changes start together on the server clock
@@ -92,6 +92,19 @@ class RoomManager {
       holdTimeoutMs: LIMITS.HOLD_TIMEOUT_DEFAULT_MS,
       gate: null,  // coordinated episode transition (see content())
       hold: null,  // wait-for-everyone buffering hold (see _maybeCreateHold())
+      // AUTHORITATIVE media version (dub/sub/audio/subtitle/variant): what
+      // every participant loads FIRST. Local defaults never win over this.
+      media: null,
+      // roles + granular guest permissions (server-enforced)
+      cohosts: new Set(),
+      perms: { play: true, seek: true, episode: false, queue: false, moderate: false, policy: false },
+      locked: false, // locked rooms accept no NEW joins (invites stop working)
+      // social layer
+      requests: new Map(), // requestId -> { id, fromId, from, action, position, note, at }
+      requestSeq: 0,
+      queue: [],           // { id, type, tmdbId, season, episode, title, by, votes: Set }
+      queueSeq: 0,
+      intermission: null,  // { until, seconds, by }
       participants: new Map(),
       chat: [],
       chatSeq: 0,
@@ -177,6 +190,9 @@ class RoomManager {
     if (room.passwordHash && hashPassword(password || "", room.passwordSalt) !== room.passwordHash) {
       return { error: "wrong_password" };
     }
+    // locked rooms accept no NEW members (invites stop working) - returning
+    // participants keep reattaching via their tokens above
+    if (room.locked) return { error: "closed" };
     const connectedCount = [...room.participants.values()].filter((x) => x.connected).length;
     if (connectedCount >= room.maxParticipants) return { error: "full" };
     room.participants.set(p.id, this._mkParticipant(p, now, false));
@@ -227,7 +243,8 @@ class RoomManager {
     if (!room || room.ended) return { error: "not_found" };
     const part = room.participants.get(participantId);
     if (!part || !part.connected) return { error: "not_in_room" };
-    if (room.hostId !== participantId && !room.allowControl) return { error: "unauthorized" };
+    const kind = msg.action === "seek" ? "seek" : msg.action === "rate" ? "rate" : "play";
+    if (!this._canControl(room, part, kind)) return { error: "unauthorized" };
     // stale guard: a playback action stamped for a previous episode/session
     // must never affect the current one
     if (msg.sessionVersion != null && msg.sessionVersion !== room.playback.sessionVersion) {
@@ -320,7 +337,7 @@ class RoomManager {
     if (!room || room.ended) return { error: "not_found" };
     const part = room.participants.get(participantId);
     if (!part || !part.connected) return { error: "not_in_room" };
-    if (room.hostId !== participantId) return { error: "unauthorized" }; // episode change is host-only
+    if (!this._canControl(room, part, "episode")) return { error: "unauthorized" }; // host/cohost/permed
     const now = this.now();
     room.content = { type: msg.type, tmdbId: msg.tmdbId, season: msg.season, episode: msg.episode };
     // Coordinated episode-transition lifecycle:
@@ -371,28 +388,36 @@ class RoomManager {
     return { events };
   }
 
-  chat(roomId, participantId, text) {
+  chat(roomId, participantId, msg) {
     const room = this.rooms.get(roomId);
     if (!room || room.ended) return { error: "not_found" };
     const part = room.participants.get(participantId);
     if (!part || !part.connected) return { error: "not_in_room" };
     if (!room.chatEnabled) return { error: "unauthorized" };
     if (part.muted) return { error: "unauthorized" };
-    const clean = cleanText(text, LIMITS.CHAT_MAX);
+    const clean = cleanText(msg.text, LIMITS.CHAT_MAX);
     if (!clean) return { error: "bad_message" };
     room.chatSeq += 1;
-    const msg = { id: "m" + room.chatSeq, from: participantId, name: part.name, text: clean, ts: this.now() };
-    room.chat.push(msg);
+    const out = { id: "m" + room.chatSeq, from: participantId, name: part.name, text: clean, ts: this.now() };
+    // additive social fields: replies, spoiler flag, scene position
+    if (msg.replyTo) out.replyTo = msg.replyTo;
+    if (msg.spoiler === true) out.spoiler = true;
+    if (msg.pos != null) out.pos = msg.pos;
+    room.chat.push(out);
     if (room.chat.length > LIMITS.CHAT_HISTORY) room.chat.shift();
     room.lastActivityAt = this.now();
-    return { events: [{ t: "chat", msg }] };
+    return { events: [{ t: "chat", msg: out }] };
   }
 
   kick(roomId, participantId, targetId) {
     const room = this.rooms.get(roomId);
     if (!room || room.ended) return { error: "not_found" };
-    if (room.hostId !== participantId) return { error: "unauthorized" };
+    const role = this._roleOf(room, participantId);
+    if (role === "participant") return { error: "unauthorized" };
     if (targetId === room.hostId || !room.participants.has(targetId)) return { error: "bad_message" };
+    // a co-host can never remove another co-host (only the host manages roles)
+    if (role === "cohost" && room.cohosts.has(targetId)) return { error: "unauthorized" };
+    room.cohosts.delete(targetId);
     // `kicked` goes ONLY to the target - the room just hears the leave.
     // Broadcasting "kicked" to everyone used to tear down every client.
     return {
@@ -404,9 +429,11 @@ class RoomManager {
   mute(roomId, participantId, targetId, muted) {
     const room = this.rooms.get(roomId);
     if (!room || room.ended) return { error: "not_found" };
-    if (room.hostId !== participantId) return { error: "unauthorized" };
+    const role = this._roleOf(room, participantId);
+    if (role === "participant") return { error: "unauthorized" };
     const target = room.participants.get(targetId);
     if (!target || targetId === room.hostId) return { error: "bad_message" };
+    if (role === "cohost" && room.cohosts.has(targetId)) return { error: "unauthorized" };
     target.muted = muted === true;
     return {
       events: [{ t: "peer_joined", participant: this._pub(target), room: room.id, updated: true }],
@@ -416,18 +443,26 @@ class RoomManager {
   settings(roomId, participantId, patch) {
     const room = this.rooms.get(roomId);
     if (!room || room.ended) return { error: "not_found" };
-    if (room.hostId !== participantId) return { error: "unauthorized" };
+    const role = this._roleOf(room, participantId);
+    if (role === "participant") return { error: "unauthorized" }; // host + co-host manage the room
     if (patch.allowControl != null) room.allowControl = patch.allowControl === true;
     if (patch.chatEnabled != null) room.chatEnabled = patch.chatEnabled === true;
     if (patch.roomName) room.name = patch.roomName;
+    // host-only fields: locking the door and the guest permission matrix
+    if (role === "host") {
+      if (patch.locked != null) room.locked = patch.locked === true;
+      if (patch.perms != null && typeof patch.perms === "object") {
+        for (const k of Object.keys(room.perms)) {
+          if (patch.perms[k] != null) room.perms[k] = patch.perms[k] === true;
+        }
+      }
+    }
+    const ev = () => ({ t: "settings", room: room.id, allowControl: room.allowControl, chatEnabled: room.chatEnabled, roomName: room.name, waitMode: room.waitMode, readyTimeoutMs: room.readyTimeoutMs, holdTimeoutMs: room.holdTimeoutMs, locked: room.locked, perms: { ...room.perms } });
     if (patch.waitMode != null && WAIT_MODES.has(patch.waitMode)) {
       room.waitMode = patch.waitMode;
       // leaving wait-for-everyone releases any active hold immediately
       if (room.waitMode === "move" && room.hold) {
-        const evs = this._releaseHold(room, this.now(), "ready");
-        return {
-          events: [{ t: "settings", room: room.id, allowControl: room.allowControl, chatEnabled: room.chatEnabled, roomName: room.name, waitMode: room.waitMode, readyTimeoutMs: room.readyTimeoutMs, holdTimeoutMs: room.holdTimeoutMs }, ...evs],
-        };
+        return { events: [ev(), ...this._releaseHold(room, this.now(), "ready")] };
       }
     }
     if (patch.readyTimeoutMs != null && Number.isFinite(patch.readyTimeoutMs)) {
@@ -436,9 +471,7 @@ class RoomManager {
     if (patch.holdTimeoutMs != null && Number.isFinite(patch.holdTimeoutMs)) {
       room.holdTimeoutMs = Math.min(LIMITS.HOLD_TIMEOUT_MAX_MS, Math.max(LIMITS.HOLD_TIMEOUT_MIN_MS, patch.holdTimeoutMs));
     }
-    return {
-      events: [{ t: "settings", room: room.id, allowControl: room.allowControl, chatEnabled: room.chatEnabled, roomName: room.name, waitMode: room.waitMode, readyTimeoutMs: room.readyTimeoutMs, holdTimeoutMs: room.holdTimeoutMs }],
-    };
+    return { events: [ev()] };
   }
 
   heartbeat(participantId, clientTs) {
@@ -532,6 +565,241 @@ class RoomManager {
     const room = this.rooms.get(roomId);
     if (!room) return { error: "not_found" };
     return { events: [{ t: "room_state", room: this.snapshot(room, participantId) }] };
+  }
+
+  /* ---- authoritative media version (dub/sub/audio/subtitle/variant) ----
+     The HOST's intended version lives in room state; every participant loads
+     it FIRST. Local defaults (per-client heuristics, stored prefs) must never
+     silently replace an explicit party selection. Values are the provider's
+     own identifiers (AniPM lang segment, VidBolt panel option values) - never
+     guessed language names, never expiring media URLs. */
+  media(roomId, participantId, media) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    const part = room.participants.get(participantId);
+    if (!part || !part.connected) return { error: "not_in_room" };
+    const role = this._roleOf(room, participantId);
+    if (role === "participant") return { error: "unauthorized" };
+    // sanitize HERE too (defense in depth - the transport already validates)
+    const clean = cleanMedia(media);
+    if (!clean) return { error: "bad_message" };
+    room.media = { ...clean, by: part.name, at: this.now() };
+    room.lastActivityAt = this.now();
+    return { events: [{ t: "media", room: room.id, media: room.media, actor: part.name }] };
+  }
+
+  /* ---- roles: host promotes/demotes co-hosts (host-only) ---- */
+  role(roomId, participantId, targetId, role) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    if (room.hostId !== participantId) return { error: "unauthorized" };
+    if (targetId === room.hostId || !room.participants.has(targetId)) return { error: "bad_message" };
+    if (role === "cohost") room.cohosts.add(targetId);
+    else room.cohosts.delete(targetId);
+    room.lastActivityAt = this.now();
+    const target = room.participants.get(targetId);
+    return {
+      events: [
+        { t: "role", room: room.id, participantId: targetId, role: this._roleOf(room, targetId), actor: target.name },
+        { t: "peer_joined", room: room.id, participant: { ...this._pub(target), host: targetId === room.hostId, role: this._roleOf(room, targetId) }, updated: true },
+      ],
+    };
+  }
+
+  /* ---- playback requests (guest asks, host/co-host approves) ---- */
+  request(roomId, participantId, msg) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    const part = room.participants.get(participantId);
+    if (!part || !part.connected) return { error: "not_in_room" };
+    if (room.requests.size >= LIMITS.PENDING_REQUESTS_MAX) return { error: "rate_limited" };
+    room.requestSeq += 1;
+    const req = {
+      id: "q" + room.requestSeq,
+      fromId: participantId, from: part.name,
+      action: msg.action, position: msg.position, note: msg.note || "",
+      at: this.now(),
+    };
+    room.requests.set(req.id, req);
+    room.lastActivityAt = this.now();
+    return { events: [{ t: "request", room: room.id, request: req }] };
+  }
+
+  requestReply(roomId, participantId, msg) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    const part = room.participants.get(participantId);
+    if (!part || !part.connected) return { error: "not_in_room" };
+    const role = this._roleOf(room, participantId);
+    if (role === "participant") return { error: "unauthorized" };
+    const req = room.requests.get(msg.requestId);
+    if (!req) return { error: "not_found" };
+    room.requests.delete(msg.requestId);
+    const now = this.now();
+    const events = [{
+      t: "request_reply", room: room.id, requestId: req.id,
+      approved: msg.approved === true, request: req,
+      requesterId: req.fromId, approverId: participantId, approver: part.name,
+    }];
+    if (msg.approved === true) {
+      // server-side execution where the server CAN execute (pause/rewind/
+      // skip-intro are pure timeline actions). Episode moves need content
+      // data only the clients have - the APPROVER's client executes those
+      // (the reply event carries approverId; only that client acts).
+      const pb = room.playback;
+      this._sweepGate(room, now);
+      if (req.action === "pause") {
+        events.push(...this._applyAuthoritative(room, "pause", expectedPosition(pb, now), req.from + " (approved)", now));
+      } else if (req.action === "rewind") {
+        const base = req.position != null ? req.position : expectedPosition(pb, now);
+        events.push(...this._applyAuthoritative(room, "seek", Math.max(0, base - 15), req.from + " (approved)", now));
+      } else if (req.action === "skip_intro") {
+        if (req.position != null && req.position > expectedPosition(pb, now)) {
+          events.push(...this._applyAuthoritative(room, "seek", req.position, req.from + " (approved)", now));
+        }
+      }
+    }
+    room.lastActivityAt = now;
+    return { events };
+  }
+
+  /* timeline actions the server performs on approval/intermission - never
+     gated by the requester's own permissions (the approval IS the authority) */
+  _applyAuthoritative(room, action, position, actor, now) {
+    const pb = room.playback;
+    if (pb.status === "ended") return [];
+    if (action === "pause") {
+      pb.status = "paused";
+      pb.position = position != null ? position : expectedPosition(pb, now);
+    } else {
+      pb.position = position;
+    }
+    pb.updatedAt = now;
+    pb.seq += 1;
+    return [{
+      t: "playback", seq: pb.seq, sessionVersion: pb.sessionVersion, actor,
+      action: action === "pause" ? "pause" : "seek",
+      state: this._pbState(room, now),
+    }];
+  }
+
+  /* ---- live reactions (lightweight, rate-limited at the transport) ---- */
+  react(roomId, participantId, msg) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    const part = room.participants.get(participantId);
+    if (!part || !part.connected) return { error: "not_in_room" };
+    if (part.muted) return { error: "unauthorized" };
+    room.lastActivityAt = this.now();
+    return {
+      events: [{
+        t: "react", room: room.id, emoji: msg.emoji,
+        fromId: participantId, name: part.name, msgId: msg.msgId || null, ts: this.now(),
+      }],
+    };
+  }
+
+  /* ---- shared watch queue (suggest / vote / host-approved playback) ---- */
+  queue(roomId, participantId, msg) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    const part = room.participants.get(participantId);
+    if (!part || !part.connected) return { error: "not_in_room" };
+    const role = this._roleOf(room, participantId);
+    const now = this.now();
+    // approving a queue item CHANGES canonical playback - that takes episode
+    // authority (host/co-host/permed); plain queue management takes perms.queue
+    const canApprove = role !== "participant" || room.perms.episode === true;
+    const canManage = role !== "participant" || room.perms.queue === true;
+    const events = [];
+    switch (msg.op) {
+      case "add": {
+        if (room.queue.length >= LIMITS.QUEUE_MAX) return { error: "rate_limited" };
+        room.queueSeq += 1;
+        const item = { ...msg.item, id: "qi" + room.queueSeq, by: part.name, byId: participantId, votes: new Set([participantId]) };
+        room.queue.push(item);
+        events.push({ t: "queue", room: room.id, op: "add", item: this._queuePub(item) });
+        break;
+      }
+      case "vote": {
+        const item = room.queue.find((x) => x.id === msg.itemId);
+        if (!item) return { error: "not_found" };
+        item.votes.add(participantId);
+        events.push({ t: "queue", room: room.id, op: "vote", item: this._queuePub(item) });
+        break;
+      }
+      case "approve": {
+        if (!canApprove) return { error: "unauthorized" };
+        const item = room.queue.find((x) => x.id === msg.itemId);
+        if (!item) return { error: "not_found" };
+        room.queue = room.queue.filter((x) => x.id !== msg.itemId);
+        events.push({ t: "queue", room: room.id, op: "approve", item: this._queuePub(item) });
+        // approval = an authorized content change - executed SERVER-side so
+        // canonical playback never depends on which client happens to act
+        const r = this.content(roomId, participantId, { type: item.type, tmdbId: item.tmdbId, season: item.season, episode: item.episode });
+        if (r.error) return r;
+        events.push(...r.events);
+        return { events };
+      }
+      case "remove": {
+        const item = room.queue.find((x) => x.id === msg.itemId);
+        if (!item) return { error: "not_found" };
+        if (role === "participant" && item.byId !== participantId && !canManage) return { error: "unauthorized" };
+        room.queue = room.queue.filter((x) => x.id !== msg.itemId);
+        events.push({ t: "queue", room: room.id, op: "remove", item: this._queuePub(item) });
+        break;
+      }
+      case "clear": {
+        if (role === "participant" && !canManage) return { error: "unauthorized" };
+        room.queue = [];
+        events.push({ t: "queue", room: room.id, op: "clear" });
+        break;
+      }
+      default:
+        return { error: "bad_message" };
+    }
+    room.lastActivityAt = now;
+    return { events };
+  }
+
+  _queuePub(item) {
+    return {
+      id: item.id, type: item.type, tmdbId: item.tmdbId,
+      season: item.season, episode: item.episode, title: item.title || "",
+      by: item.by, votes: item.votes ? item.votes.size : 0,
+    };
+  }
+
+  /* ---- group intermission (shared break with a bounded countdown) ---- */
+  intermission(roomId, participantId, msg) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    const part = room.participants.get(participantId);
+    if (!part || !part.connected) return { error: "not_in_room" };
+    const role = this._roleOf(room, participantId);
+    if (role === "participant" && room.perms.policy !== true) return { error: "unauthorized" };
+    const now = this.now();
+    const events = [];
+    if (msg.op === "start") {
+      const seconds = Math.min(900, Math.max(30, msg.seconds || 300));
+      room.intermission = { until: now + seconds * 1000, seconds, by: part.name };
+      if (room.playback.status === "playing") {
+        events.push(...this._applyAuthoritative(room, "pause", expectedPosition(room.playback, now), part.name + " (break)", now));
+      }
+      events.push({ t: "intermission", room: room.id, op: "start", seconds, until: room.intermission.until, by: part.name });
+    } else {
+      room.intermission = null;
+      if (room.playback.status === "paused") {
+        const pb = room.playback;
+        pb.status = "playing";
+        pb.updatedAt = now + 500;
+        pb.seq += 1;
+        events.push({ t: "playback", seq: pb.seq, sessionVersion: pb.sessionVersion, actor: part.name + " (break over)", action: "play", state: this._pbState(room, now) });
+      }
+      events.push({ t: "intermission", room: room.id, op: "end", by: part.name });
+    }
+    room.lastActivityAt = now;
+    return { events };
   }
 
   markSeen(roomId, participantId, conn) {
@@ -768,6 +1036,19 @@ class RoomManager {
         ...this._maybeScheduleStart(room, now),
         ...this._maybeReleaseHold(room, now),
       ];
+      // an intermission countdown that ran out resumes the party by itself
+      // (bounded - a forgotten break can never freeze the room)
+      if (room.intermission && now >= room.intermission.until) {
+        room.intermission = null;
+        const pb = room.playback;
+        if (pb.status === "paused") {
+          pb.status = "playing";
+          pb.updatedAt = now + 500;
+          pb.seq += 1;
+          evs.push({ t: "playback", seq: pb.seq, sessionVersion: pb.sessionVersion, actor: "Party", action: "play", state: this._pbState(room, now) });
+        }
+        evs.push({ t: "intermission", room: room.id, op: "end", by: "timeout" });
+      }
       if (evs.length) out.push({ roomId: room.id, events: evs });
     }
     return out;
@@ -780,6 +1061,27 @@ class RoomManager {
     if (gate && gate.phase === "scheduled" && gate.startAt != null && now >= gate.startAt) {
       gate.phase = "live";
     }
+  }
+
+  /* ---- roles + permissions (server-enforced) ---- */
+
+  _roleOf(room, participantId) {
+    if (room.hostId === participantId) return "host";
+    if (room.cohosts && room.cohosts.has(participantId)) return "cohost";
+    return "participant";
+  }
+
+  /* Hosts + co-hosts control playback/episodes; guests need allowControl AND
+     the granular permission for that class of action. Host-only ops (end,
+     roles, lock) are checked separately. */
+  _canControl(room, part, kind) {
+    const role = this._roleOf(room, part.id);
+    if (role !== "participant") return true;
+    if (!room.allowControl) return false;
+    if (kind === "play" || kind === "rate") return room.perms.play !== false;
+    if (kind === "seek") return room.perms.seek !== false;
+    if (kind === "episode") return room.perms.episode === true;
+    return false;
   }
 
   _mkParticipant(p, now, isHost) {
@@ -853,6 +1155,17 @@ class RoomManager {
       chatEnabled: room.chatEnabled,
       content: room.content,
       source: room.source || "",
+      // AUTHORITATIVE media version (dub/sub/audio/subtitle/variant) - what
+      // every participant should load first (additive)
+      media: room.media || null,
+      // roles + permissions + door state (additive)
+      cohosts: room.cohosts ? [...room.cohosts] : [],
+      perms: { ...room.perms },
+      locked: !!room.locked,
+      // social layer (additive)
+      queue: (room.queue || []).map((x) => this._queuePub(x)),
+      requests: [...(room.requests || new Map()).values()],
+      intermission: room.intermission || null,
       // buffering policy + coordinated-transition state (additive)
       waitMode: room.waitMode || "move",
       readyTimeoutMs: room.readyTimeoutMs || LIMITS.READY_TIMEOUT_DEFAULT_MS,
@@ -868,7 +1181,7 @@ class RoomManager {
         ...this._pbState(room, now),
         seq: room.playback.seq,
       },
-      participants: [...room.participants.values()].map((p) => ({ ...this._pub(p), host: p.id === room.hostId })),
+      participants: [...room.participants.values()].map((p) => ({ ...this._pub(p), host: p.id === room.hostId, role: this._roleOf(room, p.id) })),
       chat: room.chat.slice(-LIMITS.CHAT_HISTORY),
       serverTs: now,
     };

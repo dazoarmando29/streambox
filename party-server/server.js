@@ -191,8 +191,51 @@ function createPartyServer(opts = {}) {
         }
         case "chat": {
           if (!lim.chat.allow("c", Date.now())) { send(ws, { t: "error", error: "rate_limited", for: "chat" }); return; }
-          const r = rooms.chat(p.roomId, p.id, m.text);
+          const r = rooms.chat(p.roomId, p.id, m);
           if (r.error) { send(ws, { t: "error", error: r.error, for: "chat" }); return; }
+          broadcast(p.roomId, r.events || []);
+          break;
+        }
+        case "media": {
+          const r = rooms.media(p.roomId, p.id, m.media);
+          if (r.error) { send(ws, { t: "error", error: r.error, for: "media" }); return; }
+          broadcast(p.roomId, r.events || []);
+          break;
+        }
+        case "role": {
+          const r = rooms.role(p.roomId, p.id, m.targetId, m.role);
+          if (r.error) { send(ws, { t: "error", error: r.error, for: "role" }); return; }
+          broadcast(p.roomId, r.events || []);
+          break;
+        }
+        case "request": {
+          const r = rooms.request(p.roomId, p.id, m);
+          if (r.error) { send(ws, { t: "error", error: r.error, for: "request" }); return; }
+          broadcast(p.roomId, r.events || []);
+          break;
+        }
+        case "request_reply": {
+          const r = rooms.requestReply(p.roomId, p.id, m);
+          if (r.error) { send(ws, { t: "error", error: r.error, for: "request_reply" }); return; }
+          broadcast(p.roomId, r.events || []);
+          break;
+        }
+        case "react": {
+          if (!lim.chat.allow("r", Date.now())) return; // reactions share the chat budget, dropped silently
+          const r = rooms.react(p.roomId, p.id, m);
+          if (r.error) { send(ws, { t: "error", error: r.error, for: "react" }); return; }
+          broadcast(p.roomId, r.events || []);
+          break;
+        }
+        case "queue": {
+          const r = rooms.queue(p.roomId, p.id, m);
+          if (r.error) { send(ws, { t: "error", error: r.error, for: "queue" }); return; }
+          broadcast(p.roomId, r.events || []);
+          break;
+        }
+        case "intermission": {
+          const r = rooms.intermission(p.roomId, p.id, m);
+          if (r.error) { send(ws, { t: "error", error: r.error, for: "intermission" }); return; }
           broadcast(p.roomId, r.events || []);
           break;
         }
