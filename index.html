@@ -7756,6 +7756,18 @@ function setSubs(o, remember = true){
     try { localStorage.setItem(subStorageKey(), JSON.stringify(o)); pruneSubCaches(); }
     catch(e){ subStatus("Loaded, but too big to remember on this device."); }
   }
+  // release/cut compatibility (priority 5 in the matching order): a file whose
+  // timeline disagrees with this video is probably a different cut - SAY SO
+  // instead of silently mistiming every line
+  try {
+    if (o && o.cues && o.cues.length && pState && pState.dur > 0) {
+      const last = o.cues[o.cues.length - 1];
+      const endT = (last && (last.end != null ? last.end : last.start)) || 0;
+      if (endT > pState.dur + 180 || endT < pState.dur * 0.5) {
+        subStatus("Heads up: this subtitle file's timeline (" + fmtT(Math.floor(endT)) + ") doesn't match this video (" + fmtT(Math.floor(pState.dur)) + ") - likely a different release/cut. Use the Sync nudges if lines drift.");
+      }
+    }
+  } catch(e){}
   paintSubsUI();
   paintCaps(true);
 }
@@ -10539,6 +10551,10 @@ const PARTY = (() => {
         S.lastContentKey = contentKeyOf(m.room.content);
         S.chat = (m.room.chat || []).slice();
         S.unread = 0;
+        // spoiler-safe joining: someone landing deep into an episode gets
+        // future-scene chat hidden by default (reveal per message)
+        S._spoilerSafe = !!(m.room.playback && (m.room.playback.position || 0) > 300);
+        S._revealedMsgs = new Set();
         try { sessionStorage.setItem("sb_party", JSON.stringify({ code: m.room.code, roomId: m.room.roomId, token: S.token, name: displayName(), pw: S.pw || "" })); } catch(e){}
         if (m.room.content) applyContent(m.room.content, true);
         paint();
@@ -11528,6 +11544,24 @@ const PARTY = (() => {
     const mine = m.from === S.selfId;
     d.className = "pp-msg" + (mine ? " me" : "");
     d.dataset.mid = m.id;
+    // Spoiler-safe joining: comments stamped AHEAD of where I am are hidden
+    // until I get there (or tap to reveal) - future scene info never leaks
+    try {
+      const shown = S._revealedMsgs && S._revealedMsgs.has(m.id);
+      if (S._spoilerSafe && !mine && m.pos != null && m.pos > expectedPos() + 60 && !shown) {
+        const hid = document.createElement("div");
+        hid.className = "txt";
+        hid.style.cssText = "opacity:.55;font-style:italic;cursor:pointer;";
+        hid.textContent = "\u{1F576} Message hidden (ahead of you) - tap to show";
+        hid.onclick = () => {
+          S._revealedMsgs = S._revealedMsgs || new Set();
+          S._revealedMsgs.add(m.id);
+          paintChat();
+        };
+        d.appendChild(hid);
+        return d;
+      }
+    } catch(e){}
     const t = new Date(m.ts || Date.now());
     const hh = String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
     const q = m.replyTo ? ((S.chat || []).find((x) => x.id === m.replyTo) || null) : null;
