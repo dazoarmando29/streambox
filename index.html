@@ -11365,7 +11365,7 @@ const PARTY = (() => {
     toggleChat(){ if (isHost()) send({ t: "settings", chatEnabled: el("partyChatToggle").checked }); },
     toggleWait(){ if (isHost()) send({ t: "settings", waitMode: el("partyWaitToggle").checked ? "everyone" : "move" }); },
     inRoom, isHost, suppressAutoAdvance, onLocalPlayPause, onLocalSeek, onProviderPlayState, detectContentChange,
-    onLocalMirror, roomSource, syncNow, cutMismatch, sourceMismatch, sourceName,
+    onLocalOpenWatch, onLocalMirror, roomSource, syncNow, cutMismatch, sourceMismatch, sourceName,
     onPlayerRecreate: playerRecreated,
     reportState,
     state: S,
