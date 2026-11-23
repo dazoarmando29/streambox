@@ -20,6 +20,21 @@ const LIMITS = {
   MSG_MAX: 60,
   CHAT_WINDOW_MS: 10000,
   CHAT_RATE_MAX: 6,
+  SYNC_REPORT_MIN_MS: 4000,
+  // player-state reports (loading/ready/buffering/...) move fast but stay bounded
+  PSTATE_WINDOW_MS: 5000,
+  PSTATE_MAX: 12,
+  // coordinated episode transitions (readiness-gated shared start)
+  START_DELAY_MS: 8000,        // fallback gate: room starts this long after a content change AT THE LATEST
+  TRANSITION_MIN_MS: 3000,     // loading reports may arrive this long before a start can be scheduled
+  START_COUNTDOWN_MS: 2500,    // countdown baked into a readiness-scheduled start
+  READY_TIMEOUT_DEFAULT_MS: 8000,
+  READY_TIMEOUT_MIN_MS: 4000,
+  READY_TIMEOUT_MAX_MS: 120000,
+  // wait-for-everyone buffering holds
+  HOLD_TIMEOUT_DEFAULT_MS: 20000,
+  HOLD_TIMEOUT_MIN_MS: 5000,
+  HOLD_TIMEOUT_MAX_MS: 120000,
   CODE_ATTEMPT_WINDOW_MS: 5 * 60 * 1000,
   CODE_ATTEMPT_MAX: 12,
   HOST_GRACE_MS: 60 * 1000,
@@ -35,9 +50,20 @@ const LIMITS = {
   CREATE_MAX: 3,
 };
 
-const START_DELAY_MS = 8000; // episode changes start together on the server clock
+const START_DELAY_MS = LIMITS.START_DELAY_MS; // fallback gate: episode changes start together on the server clock
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/;
+
+/* Per-participant player states (never one status for the whole room).
+   "recovered" = was buffering and is playable again; "error"/"disconnected"
+   never block the room. */
+const PSTATE_VALUES = new Set(["loading", "ready", "playing", "paused", "buffering", "recovered", "error", "disconnected"]);
+/* Player states that must NOT hold back a readiness-scheduled start or a
+   wait-for-everyone hold release (a dead source must never trap the room). */
+const PSTATE_BLOCKING = new Set(["loading", "buffering"]);
+// buffering policy: "move" (default - party keeps moving) | "everyone"
+// (host-enabled hold-until-ready, bounded by a timeout + host override)
+const WAIT_MODES = new Set(["move", "everyone"]);
 
 function cleanText(s, max) {
   if (typeof s !== "string") return "";
@@ -57,6 +83,22 @@ function uid(prefix) {
   let s = "";
   for (const x of b) s += String.fromCharCode(48 + (x % 74));
   return prefix + btoa(s).replace(/[+/=]/g, "") + Date.now().toString(36);
+}
+
+function randHex(n) {
+  const b = crypto.getRandomValues(new Uint8Array(n));
+  let s = "";
+  for (const x of b) s += x.toString(16).padStart(2, "0");
+  return s;
+}
+
+/* password check mirrors party-server rooms.js hashPassword: sha256 of
+   salt + "\0" + password, per-room salt (async here - Workers only ship the
+   WebCrypto async digests, the digest INPUT is identical) */
+async function hashPassword(password, salt) {
+  const data = new TextEncoder().encode(salt + "\u0000" + password);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 class Lim {
@@ -80,7 +122,7 @@ export class PartyHub {
     this.byCode = new Map();  // code -> roomId
     this.codeTries = new Lim(LIMITS.CODE_ATTEMPT_WINDOW_MS, LIMITS.CODE_ATTEMPT_MAX);
     this.createLim = new Lim(LIMITS.CREATE_WINDOW_MS, LIMITS.CREATE_MAX);
-    this.msgLim = new Map();  // participantId -> { msg, chat }
+    this.msgLim = new Map();  // participantId -> { msg, chat, sync, pstate }
   }
 
   /* ---------- transport ---------- */
@@ -103,7 +145,8 @@ export class PartyHub {
     const meta = { id: uid("p"), token: uid("tok"), name: "Guest", roomId: "", ip, cid: uid("c") };
     server.serializeAttachment(meta);
     this.state.acceptWebSocket(server);
-    this.send(server, { t: "welcome", participantId: meta.id, token: meta.token, serverTs: Date.now() });
+    // proto: 2 marks the readiness-gated protocol (pstate/schedule/gate fields)
+    this.send(server, { t: "welcome", participantId: meta.id, token: meta.token, serverTs: Date.now(), proto: 2 });
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -156,6 +199,10 @@ export class PartyHub {
     const allowIn = ["hello", "create", "join", "heartbeat"];
     if (!inRoom && !allowIn.includes(m.t)) return this.send(ws, { t: "error", error: "not_in_room" });
 
+    // refresh liveness for any traffic (party-server markSeen) - a
+    // heartbeat-only client must never be evicted as stale. cid-guarded: a
+    // replaced ghost socket never refreshes the live seat
+    if (m0.roomId) this.markSeen(m0.roomId, m0.id, m0);
     // a REPLACED ghost socket (this seat already moved to a newer connection)
     // must never drive the room - drop its leftover traffic entirely
     if (m0.roomId && m.t !== "join" && m.t !== "heartbeat") {
@@ -183,7 +230,7 @@ export class PartyHub {
         if (!this.createLim.allow(m0.ip || m0.id)) return this.send(ws, { t: "error", error: "rate_limited" });
         if (this.rooms.size >= LIMITS.MAX_ROOMS) return this.send(ws, { t: "error", error: "full" });
         m0.name = cleanName(m.name);
-        const room = this.createRoom(m0, m);
+        const room = await this.createRoom(m0, m);
         m0.roomId = room.id;
         ws.serializeAttachment(m0);
         this.send(ws, { t: "room", room: this.snapshot(room, m0.id), token: m0.token });
@@ -195,7 +242,7 @@ export class PartyHub {
         if (already) return this.send(ws, { t: "error", error: "conflict" });
         m0.name = cleanName(m.name);
         const code = typeof m.code === "string" ? m.code.trim().toUpperCase() : "";
-        const r = this.joinRoom(m0, code, typeof m.password === "string" ? m.password : "",
+        const r = await this.joinRoom(m0, code, typeof m.password === "string" ? m.password : "",
           typeof m.token === "string" ? m.token : "");
         if (r.error) return this.send(ws, { t: "error", error: r.error, for: "join" });
         m0.roomId = r.room.id;
@@ -228,72 +275,46 @@ export class PartyHub {
       }
       case "end": {
         const room = this.rooms.get(m0.roomId);
-        if (!room) return this.send(ws, { t: "error", error: "not_found" });
-        if (room.hostId !== m0.id) return this.send(ws, { t: "error", error: "unauthorized" });
-        room.ended = true;
+        const r = this.end(m0.roomId, m0.id);
+        if (r.error) return this.send(ws, { t: "error", error: r.error });
         const rid = m0.roomId;
+        // broadcast BEFORE detaching: the host who ends the room must ALSO
+        // hear room_ended (party-server broadcasts to everyone incl. sender)
+        this.broadcast(rid, r.events);
         m0.roomId = ""; ws.serializeAttachment(m0);
-        this.broadcast(rid, [{ t: "room_ended", roomId: rid, reason: "host_ended" }]);
-        this.dropRoom(room);
+        if (room) this.dropRoom(room);
         return;
       }
       case "playback": {
-        const room = this.rooms.get(m0.roomId);
-        if (!room || room.ended) return this.send(ws, { t: "error", error: "not_found", for: "playback" });
-        const part = room.participants.get(m0.id);
-        if (!part) return this.send(ws, { t: "error", error: "not_in_room", for: "playback" });
-        if (room.hostId !== m0.id && !room.allowControl) return this.send(ws, { t: "error", error: "unauthorized", for: "playback" });
-        const sv = m.sessionVersion != null ? parseInt(m.sessionVersion, 10) : null;
-        if (sv != null && sv !== room.playback.sessionVersion) return this.send(ws, { t: "notice", notice: "stale_playback" });
-        const action = String(m.action || "");
-        const now = Date.now();
-        const pb = room.playback;
-        const cur = expectedPosition(pb, now);
-        const pos = m.position != null ? Number(m.position) : null;
-        if (pos != null && (!Number.isFinite(pos) || pos < 0 || pos > 24 * 3600)) return this.send(ws, { t: "error", error: "bad_message" });
-        if (action === "play") { pb.status = "playing"; pb.position = pos != null ? pos : cur; }
-        else if (action === "pause") { pb.status = "paused"; pb.position = pos != null ? pos : cur; }
-        else if (action === "seek") {
-          if (pos == null) return this.send(ws, { t: "error", error: "bad_message" });
-          pb.position = pos;
-        } else if (action === "rate") {
-          const r = Number(m.rate);
-          if (!Number.isFinite(r) || r < 0.25 || r > 3) return this.send(ws, { t: "error", error: "bad_message" });
-          pb.position = cur; pb.rate = r;
-        } else if (action === "ended") { pb.status = "ended"; pb.position = cur; }
-        else if (action === "buffer") {
-          // participant-side buffering notice: state unchanged, no broadcast
-          // (protocol parity with party-server: never answered bad_message)
-          part.buffering = true;
-          return;
+        const r = this.playback(m0.roomId, m0.id, m);
+        if (r.error) {
+          // wire shape preserved: validation failures stay bare, room-state
+          // failures carry for:"playback"
+          return this.send(ws, r.error === "bad_message"
+            ? { t: "error", error: r.error }
+            : { t: "error", error: r.error, for: "playback" });
         }
-        else return this.send(ws, { t: "error", error: "bad_message" });
-        pb.updatedAt = now;
-        pb.seq += 1;
-        part.buffering = false;
-        this.broadcast(m0.roomId, [{
-          t: "playback", seq: pb.seq, sessionVersion: pb.sessionVersion,
-          actor: part.name, action, state: this.pbState(room, now),
-        }]);
+        if (r.stale) return this.send(ws, { t: "notice", notice: "stale_playback" });
+        if (r.events && r.events.length) this.broadcast(m0.roomId, r.events);
+        this.armAlarm();
         return;
       }
       case "content": {
-        const room = this.rooms.get(m0.roomId);
-        if (!room || room.ended) return this.send(ws, { t: "error", error: "not_found", for: "content" });
-        if (room.hostId !== m0.id) return this.send(ws, { t: "error", error: "unauthorized", for: "content" });
         const type = m.type === "movie" ? "movie" : "tv";
         const id = parseInt(m.tmdbId, 10);
         if (!Number.isFinite(id) || id <= 0) return this.send(ws, { t: "error", error: "bad_message" });
-        const now = Date.now();
-        room.content = { type, tmdbId: id, season: Math.max(1, parseInt(m.season, 10) || 1), episode: Math.max(1, parseInt(m.episode, 10) || 1) };
-        // Scheduled start: everyone begins at startAt on the SERVER clock
-        // (updatedAt lands in the future; expectedPosition clamps to 0 until
-        // then) - no more different start times per device.
-        room.playback = { status: "playing", position: 0, rate: 1, updatedAt: now + START_DELAY_MS, sessionVersion: room.playback.sessionVersion + 1, seq: room.playback.seq + 1 };
-        this.broadcast(m0.roomId, [{
-          t: "content", seq: room.playback.seq, sessionVersion: room.playback.sessionVersion,
-          actor: (room.participants.get(m0.id) || {}).name || "", content: room.content, state: this.pbState(room, now),
-        }]);
+        const r = this.content(m0.roomId, m0.id, {
+          type, tmdbId: id,
+          season: Math.max(1, parseInt(m.season, 10) || 1),
+          episode: Math.max(1, parseInt(m.episode, 10) || 1),
+        });
+        if (r.error) {
+          return this.send(ws, r.error === "bad_message"
+            ? { t: "error", error: r.error }
+            : { t: "error", error: r.error, for: "content" });
+        }
+        this.broadcast(m0.roomId, r.events);
+        this.armAlarm();
         return;
       }
       case "chat": {
@@ -345,13 +366,26 @@ export class PartyHub {
         return;
       }
       case "settings": {
-        const room = this.rooms.get(m0.roomId);
-        if (!room || room.ended) return this.send(ws, { t: "error", error: "not_found" });
-        if (room.hostId !== m0.id) return this.send(ws, { t: "error", error: "unauthorized" });
-        if (m.allowControl != null) room.allowControl = m.allowControl === true;
-        if (m.chatEnabled != null) room.chatEnabled = m.chatEnabled === true;
-        if (m.roomName) room.name = cleanText(m.roomName, LIMITS.ROOM_NAME_MAX);
-        this.broadcast(m0.roomId, [{ t: "settings", room: room.id, allowControl: room.allowControl, chatEnabled: room.chatEnabled, roomName: room.name }]);
+        // normalized like party-server protocol.js settings (additive fields)
+        const patch = {};
+        if (m.allowControl != null) patch.allowControl = m.allowControl === true;
+        if (m.chatEnabled != null) patch.chatEnabled = m.chatEnabled === true;
+        if (m.roomName != null) patch.roomName = cleanText(m.roomName, LIMITS.ROOM_NAME_MAX);
+        // buffering policy: "move" (default - party keeps moving) | "everyone"
+        // (host-enabled hold-until-ready, bounded by a timeout + host override)
+        if (m.waitMode != null) patch.waitMode = String(m.waitMode) === "everyone" ? "everyone" : "move";
+        if (m.readyTimeoutMs != null) {
+          const rt = parseInt(m.readyTimeoutMs, 10);
+          if (Number.isFinite(rt)) patch.readyTimeoutMs = Math.min(LIMITS.READY_TIMEOUT_MAX_MS, Math.max(LIMITS.READY_TIMEOUT_MIN_MS, rt));
+        }
+        if (m.holdTimeoutMs != null) {
+          const ht = parseInt(m.holdTimeoutMs, 10);
+          if (Number.isFinite(ht)) patch.holdTimeoutMs = Math.min(LIMITS.HOLD_TIMEOUT_MAX_MS, Math.max(LIMITS.HOLD_TIMEOUT_MIN_MS, ht));
+        }
+        const r = this.settings(m0.roomId, m0.id, patch);
+        if (r.error) return this.send(ws, { t: "error", error: r.error });
+        if (r.events && r.events.length) this.broadcast(m0.roomId, r.events);
+        this.armAlarm();
         return;
       }
       case "resync": {
@@ -361,23 +395,43 @@ export class PartyHub {
         return;
       }
       case "sync_report": {
-        const room = this.rooms.get(m0.roomId);
-        const part = room && room.participants.get(m0.id);
-        if (part) {
-          // clamp like party-server/protocol.js (negatives/Infinity never enter room state)
-          const pos = Number(m.position);
-          part.position = Number.isFinite(pos) && pos >= 0 && pos <= 24 * 3600 ? pos : 0;
-          part.paused = m.paused === true;
-          part.buffering = false;
-          // additive: duration + source name let members see real peer state
-          // and detect different cuts (sub vs dub / two mirrors)
-          const dur = Number(m.dur);
-          if (Number.isFinite(dur) && dur > 0 && dur <= 24 * 3600) part.dur = dur;
-          const src = cleanText(m.source != null ? String(m.source) : "", 24);
-          if (src) part.source = src;
-          part.lastSeen = Date.now();
-          room.lastActivityAt = part.lastSeen;
+        // own limiter (party-server lim.sync): reports are observability, a
+        // flood is dropped silently
+        if (!lim.sync.allow("s", Date.now())) return; // drop silently
+        const r = this.syncReport(m0.roomId, m0.id, m);
+        if (r && r.events && r.events.length) {
+          this.broadcast(m0.roomId, r.events);
+          this.armAlarm();
         }
+        return;
+      }
+      case "pstate": {
+        // readiness + buffering channel (party-server lim.pstate): fast, and
+        // it DRIVES room behavior (transition scheduling, holds)
+        if (!PSTATE_VALUES.has(m.st)) return this.send(ws, { t: "error", error: "bad_message" });
+        if (!lim.pstate.allow("p", Date.now())) return; // drop silently
+        // normalized exactly like party-server protocol.js `pstate`
+        const msg = { t: "pstate", st: m.st };
+        if (m.position != null) {
+          const p = Number(m.position);
+          if (Number.isFinite(p) && p >= 0 && p <= 24 * 3600) msg.position = p;
+        }
+        if (m.dur != null) {
+          const d = Number(m.dur);
+          if (Number.isFinite(d) && d > 0 && d <= 24 * 3600) msg.dur = d;
+        }
+        if (m.source != null) {
+          const s = cleanText(m.source, 24);
+          if (s) msg.source = s;
+        }
+        if (m.sv != null) {
+          const sv = parseInt(m.sv, 10);
+          if (Number.isFinite(sv) && sv >= 1) msg.sv = sv;
+        }
+        const r = this.pstate(m0.roomId, m0.id, msg);
+        if (r.error) return this.send(ws, { t: "error", error: r.error, for: "pstate" });
+        if (r.events && r.events.length) this.broadcast(m0.roomId, r.events);
+        this.armAlarm();
         return;
       }
       case "source": {
@@ -418,6 +472,7 @@ export class PartyHub {
     if (part.cid && m.cid && part.cid !== m.cid) return;
     part.connected = false;
     part.lastSeen = Date.now();
+    part.pstate = "disconnected"; // a dead player never blocks the room
     if (room.hostId === m.id) room.hostDisconnectedAt = part.lastSeen;
     this.broadcast(m.roomId, [{ t: "peer_joined", room: room.id, participant: { ...this.pub(part, room), host: m.id === room.hostId }, updated: true }], m.id);
     this.armAlarm();
@@ -429,8 +484,27 @@ export class PartyHub {
 
   limFor(id) {
     let l = this.msgLim.get(id);
-    if (!l) { l = { msg: new Lim(LIMITS.MSG_WINDOW_MS, LIMITS.MSG_MAX), chat: new Lim(LIMITS.CHAT_WINDOW_MS, LIMITS.CHAT_RATE_MAX) }; this.msgLim.set(id, l); }
+    if (!l) {
+      l = {
+        msg: new Lim(LIMITS.MSG_WINDOW_MS, LIMITS.MSG_MAX),
+        chat: new Lim(LIMITS.CHAT_WINDOW_MS, LIMITS.CHAT_RATE_MAX),
+        sync: new Lim(LIMITS.SYNC_REPORT_MIN_MS * 3, 3),
+        pstate: new Lim(LIMITS.PSTATE_WINDOW_MS, LIMITS.PSTATE_MAX),
+      };
+      this.msgLim.set(id, l);
+    }
     return l;
+  }
+
+  /* any traffic refreshes liveness (party-server markSeen) */
+  markSeen(roomId, participantId, meta) {
+    const room = this.rooms.get(roomId);
+    const part = room && room.participants.get(participantId);
+    if (!part) return;
+    // a REPLACED ghost socket's leftover traffic never refreshes the live seat
+    if (meta && part.cid && meta.cid && part.cid !== meta.cid) return;
+    part.lastSeen = Date.now();
+    part.connected = true;
   }
 
   makeCode() {
@@ -443,13 +517,13 @@ export class PartyHub {
     throw new Error("code space exhausted");
   }
 
-  createRoom(host, m) {
+  async createRoom(host, m) {
     const now = Date.now();
     const code = this.makeCode();
     const room = {
       id: uid("r"), code,
       name: cleanText(m.roomName, LIMITS.ROOM_NAME_MAX) || `${host.name}'s party`,
-      password: typeof m.password === "string" && m.password ? String(m.password).slice(0, 64) : "",
+      passwordHash: "", passwordSalt: "", // per-room salt (party-server rooms.js)
       maxParticipants: Math.min(LIMITS.MAX_PARTICIPANTS, Math.max(2, parseInt(m.maxParticipants, 10) || LIMITS.DEFAULT_PARTICIPANTS)),
       allowControl: m.allowControl === true,
       chatEnabled: m.chatEnabled !== false,
@@ -457,18 +531,30 @@ export class PartyHub {
       content: null,
       source: "", // room-wide mirror ("server") - follows the last controller switch
       playback: { status: "waiting", position: 0, rate: 1, updatedAt: now, sessionVersion: 1, seq: 0 },
+      // buffering policy: "move" (default) keeps the party moving when one
+      // viewer stalls; "everyone" (host-enabled) holds shared playback until
+      // required participants recover - bounded by holdTimeoutMs + host override
+      waitMode: "move",
+      readyTimeoutMs: LIMITS.READY_TIMEOUT_DEFAULT_MS,
+      holdTimeoutMs: LIMITS.HOLD_TIMEOUT_DEFAULT_MS,
+      gate: null,  // coordinated episode transition (see content())
+      hold: null,  // wait-for-everyone buffering hold (see _maybeCreateHold())
       participants: new Map(),
       recentSeats: new Map(),
       chat: [], chatSeq: 0,
       createdAt: now, lastActivityAt: now, hostDisconnectedAt: 0, ended: false,
     };
+    if (typeof m.password === "string" && m.password) {
+      room.passwordSalt = randHex(8);
+      room.passwordHash = await hashPassword(String(m.password).slice(0, 64), room.passwordSalt);
+    }
     room.participants.set(host.id, this.mkPart(host, now));
     this.rooms.set(room.id, room);
     this.byCode.set(code, room.id);
     return room;
   }
 
-  joinRoom(p, code, password, token) {
+  async joinRoom(p, code, password, token) {
     const now = Date.now();
     if (code && !this.codeTries.allow(p.ip || p.id, now)) return { error: "rate_limited" };
     if (!CODE_RE.test(code)) return { error: "not_found" };
@@ -515,7 +601,7 @@ export class PartyHub {
         return { room, reattached: saved.id, token, events };
       }
     }
-    if (room.password && password !== room.password) return { error: "wrong_password" };
+    if (room.passwordHash && (await hashPassword(password || "", room.passwordSalt)) !== room.passwordHash) return { error: "wrong_password" };
     const connected = [...room.participants.values()].filter((x) => x.connected).length;
     if (connected >= room.maxParticipants) return { error: "full" };
     room.participants.set(p.id, this.mkPart(p, now));
@@ -523,7 +609,12 @@ export class PartyHub {
   }
 
   mkPart(p, now) {
-    return { id: p.id, name: cleanName(p.name), token: p.token, cid: p.cid || "", joinedAt: now, lastSeen: now, connected: true, muted: false, buffering: false, position: 0, paused: true, dur: 0, source: "" };
+    return {
+      id: p.id, name: cleanName(p.name), token: p.token, cid: p.cid || "",
+      joinedAt: now, lastSeen: now, connected: true, muted: false, buffering: false, position: 0, paused: true, dur: 0, source: "",
+      // per-participant player state (never one status for the whole room)
+      pstate: "ready", pstateSv: 0,
+    };
   }
 
   removeParticipant(roomId, participantId, reason) {
@@ -552,11 +643,468 @@ export class PartyHub {
     return false;
   }
 
-  pub(part, room) {
-    return { id: part.id, name: part.name, connected: part.connected, muted: part.muted, buffering: part.buffering, position: part.position, paused: part.paused, dur: part.dur || 0, source: part.source || "" };
+  /* ---------- room state machine (1:1 port of party-server rooms.js) ---------- */
+
+  /* host-initiated room close: the room object survives long enough for the
+     broadcast to reach EVERYONE - the host who pressed end hears room_ended */
+  end(roomId, participantId) {
+    const room = this.rooms.get(roomId);
+    if (!room) return { error: "not_found" };
+    if (room.hostId !== participantId) return { error: "unauthorized" };
+    room.ended = true;
+    return { events: [{ t: "room_ended", roomId: room.id, reason: "host_ended" }] };
   }
 
-  pbState(room, now) {
+  /* playback command (party-server rooms.js playback()): the server is
+     authoritative - every command is validated and permission-checked HERE.
+     msg = raw client message ({action, position, rate, sessionVersion}).
+     Returns { error } | { stale: true } | { buffered, events } | { events }. */
+  playback(roomId, participantId, msg) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    const part = room.participants.get(participantId);
+    if (!part || !part.connected) return { error: "not_in_room" };
+    if (room.hostId !== participantId && !room.allowControl) return { error: "unauthorized" };
+    // stale guard: a playback action stamped for a previous episode/session
+    // must never affect the current one
+    const sv = msg.sessionVersion != null ? parseInt(msg.sessionVersion, 10) : null;
+    if (sv != null && sv !== room.playback.sessionVersion) return { stale: true };
+    const pos = msg.position != null ? Number(msg.position) : null;
+    if (pos != null && (!Number.isFinite(pos) || pos < 0 || pos > 24 * 3600)) return { error: "bad_message" };
+    const action = String(msg.action || "");
+    const now = Date.now();
+    this._sweepGate(room, now);
+    const pb = room.playback;
+    const cur = expectedPosition(pb, now);
+    const events = [];
+    switch (action) {
+      case "play":
+        // host/controller override: a play always releases a wait hold and
+        // ends a pending transition (nobody waits forever)
+        if (room.hold) events.push(...this._releaseHold(room, now, "override"));
+        if (room.gate && room.gate.phase === "loading") {
+          events.push(...this._finalizeStart(room, now + 500, "host_override"));
+        }
+        pb.status = "playing";
+        pb.position = pos != null ? pos : cur;
+        part.pstate = "playing";
+        break;
+      case "pause":
+        if (room.hold) events.push(...this._releaseHold(room, now, "override"));
+        // pausing during a pending transition cancels the shared start: the
+        // room stays paused at the gate position until someone plays
+        if (room.gate && room.gate.phase !== "live") {
+          room.gate.phase = "live";
+          room.gate.startAt = null;
+        }
+        pb.status = "paused";
+        pb.position = pos != null ? pos : cur;
+        part.pstate = "paused";
+        break;
+      case "seek":
+        if (pos == null) return { error: "bad_message" };
+        // a seek during a pending transition is a host override of the gate too
+        if (room.gate && room.gate.phase === "loading" && pos > 0) {
+          events.push(...this._finalizeStart(room, now, "host_override"));
+        }
+        pb.position = pos;
+        break;
+      case "rate": {
+        const r = Number(msg.rate);
+        if (!Number.isFinite(r) || r < 0.25 || r > 3) return { error: "bad_message" };
+        pb.position = cur;
+        pb.rate = r;
+        break;
+      }
+      case "ended":
+        // stale completion: an episode that already ended (or one from a
+        // previous session) must NEVER advance the room twice
+        if (pb.status === "ended") return { events: [] };
+        if (room.gate && room.gate.phase !== "live") return { stale: true };
+        pb.status = "ended";
+        pb.position = cur;
+        part.pstate = "paused";
+        break;
+      case "buffer":
+        // participant-side buffering notice: the room timeline is untouched
+        // (default policy) - but the state is tracked per participant and a
+        // wait-for-everyone room holds here
+        part.buffering = true;
+        part.pstate = "buffering";
+        part.lastSeen = now;
+        events.push({ t: "peer_state", room: room.id, participantId, st: "buffering", buffering: true, position: part.position, ts: now });
+        if (room.waitMode === "everyone" && pb.status === "playing") {
+          events.push(...this._maybeCreateHold(room, participantId, now));
+        }
+        return { buffered: true, events };
+      default:
+        return { error: "bad_message" };
+    }
+    pb.updatedAt = now;
+    pb.seq += 1;
+    room.lastActivityAt = now;
+    part.buffering = false;
+    events.push({
+      t: "playback",
+      seq: pb.seq,
+      sessionVersion: pb.sessionVersion,
+      actor: part.name,
+      action,
+      state: this._pbState(room, now),
+    });
+    events.push(...this._maybeReleaseHold(room, now));
+    return { events };
+  }
+
+  /* episode change (host-only) - coordinated transition, ported 1:1 from
+     party-server rooms.js content(). Lifecycle:
+       1. new content session (sessionVersion+1) - every earlier event is stale
+       2. clients unload the old episode and start loading the new one,
+          reporting player state (loading -> ready) per participant
+       3. when the reported blockers are done - or the readiness timeout
+          expires - the shared start is scheduled on the SERVER clock
+       4. slow/late participants catch up to the room timeline once ready
+     The initial gate (updatedAt in the future) doubles as the fallback for
+     older clients that know nothing of readiness: they hold at 00:00 until
+     the gate exactly as before. The finalized gate is re-broadcast as a
+     second `content` event (same identity) which every client generation
+     folds into its existing gate logic (no reload - same content key). */
+  content(roomId, participantId, msg) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    const part = room.participants.get(participantId);
+    if (!part || !part.connected) return { error: "not_in_room" };
+    if (room.hostId !== participantId) return { error: "unauthorized" }; // episode change is host-only
+    const now = Date.now();
+    this._sweepGate(room, now); // lazy deadline enforcement (the gate is replaced below anyway)
+    room.content = { type: msg.type, tmdbId: msg.tmdbId, season: msg.season, episode: msg.episode };
+    const timeout = Math.min(LIMITS.READY_TIMEOUT_MAX_MS,
+      Math.max(LIMITS.READY_TIMEOUT_MIN_MS, room.readyTimeoutMs || LIMITS.READY_TIMEOUT_DEFAULT_MS));
+    // the shared gate lands on the SERVER clock: updatedAt in the future keeps
+    // expectedPosition clamped at 0 until the room starts together
+    room.playback = {
+      status: "playing", position: 0, rate: 1, updatedAt: now + timeout,
+      sessionVersion: room.playback.sessionVersion + 1,
+      seq: room.playback.seq + 1,
+    };
+    room.gate = {
+      phase: "loading",
+      sessionVersion: room.playback.sessionVersion,
+      earliest: now + LIMITS.TRANSITION_MIN_MS,
+      deadline: now + timeout,
+      startAt: null,
+      ready: new Set(),
+    };
+    room.hold = null; // an episode change cancels any buffering hold
+    room.lastActivityAt = now;
+    const events = [{
+      t: "content",
+      seq: room.playback.seq,
+      sessionVersion: room.playback.sessionVersion,
+      actor: part.name,
+      content: room.content,
+      state: this._pbState(room, now),
+    }, this._scheduleEvent(room, now, "content")];
+    // everyone still around implicitly reloads the new episode: their old
+    // "ready"/"playing" was for the previous one. Until they report for THIS
+    // sessionVersion they are loading (and only a session-stamped "loading" or
+    // "buffering" report can hold back the shared start - a silent legacy
+    // client never blocks the room; it catches up after the gate).
+    for (const p of room.participants.values()) {
+      if (p.connected && p.pstateSv !== room.playback.sessionVersion) p.pstate = "loading";
+    }
+    return { events };
+  }
+
+  /* room settings (host-only) - party-server rooms.js settings(): the
+     buffering policy + the two timeouts ride the same event */
+  settings(roomId, participantId, patch) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    if (room.hostId !== participantId) return { error: "unauthorized" };
+    if (patch.allowControl != null) room.allowControl = patch.allowControl === true;
+    if (patch.chatEnabled != null) room.chatEnabled = patch.chatEnabled === true;
+    if (patch.roomName) room.name = patch.roomName;
+    if (patch.waitMode != null && WAIT_MODES.has(patch.waitMode)) {
+      room.waitMode = patch.waitMode;
+      // leaving wait-for-everyone releases any active hold immediately
+      if (room.waitMode === "move" && room.hold) {
+        const evs = this._releaseHold(room, Date.now(), "ready");
+        return {
+          events: [{ t: "settings", room: room.id, allowControl: room.allowControl, chatEnabled: room.chatEnabled, roomName: room.name, waitMode: room.waitMode, readyTimeoutMs: room.readyTimeoutMs, holdTimeoutMs: room.holdTimeoutMs }, ...evs],
+        };
+      }
+    }
+    if (patch.readyTimeoutMs != null && Number.isFinite(patch.readyTimeoutMs)) {
+      room.readyTimeoutMs = Math.min(LIMITS.READY_TIMEOUT_MAX_MS, Math.max(LIMITS.READY_TIMEOUT_MIN_MS, patch.readyTimeoutMs));
+    }
+    if (patch.holdTimeoutMs != null && Number.isFinite(patch.holdTimeoutMs)) {
+      room.holdTimeoutMs = Math.min(LIMITS.HOLD_TIMEOUT_MAX_MS, Math.max(LIMITS.HOLD_TIMEOUT_MIN_MS, patch.holdTimeoutMs));
+    }
+    return {
+      events: [{ t: "settings", room: room.id, allowControl: room.allowControl, chatEnabled: room.chatEnabled, roomName: room.name, waitMode: room.waitMode, readyTimeoutMs: room.readyTimeoutMs, holdTimeoutMs: room.holdTimeoutMs }],
+    };
+  }
+
+  /* periodic client drift report - observability only, never rebroadcast.
+     NOTE divergence from party-server protocol.js: an invalid position is
+     CLAMPED to 0 here (deployed old clients send junk and relied on that),
+     while party-server rejects the whole message. */
+  syncReport(roomId, participantId, msg) {
+    const room = this.rooms.get(roomId);
+    if (!room) return { error: "not_found" };
+    const part = room.participants.get(participantId);
+    if (!part) return { error: "not_in_room" };
+    const pos = Number(msg.position);
+    part.position = Number.isFinite(pos) && pos >= 0 && pos <= 24 * 3600 ? pos : 0;
+    part.paused = msg.paused === true;
+    part.buffering = false;
+    // additive: duration + source name let members see real peer state and
+    // detect different cuts (sub vs dub / two mirrors)
+    const dur = Number(msg.dur);
+    if (Number.isFinite(dur) && dur > 0 && dur <= 24 * 3600) part.dur = dur;
+    const src = cleanText(msg.source != null ? String(msg.source) : "", 24);
+    if (src) part.source = src;
+    // additive: session stamp + player state ride along when a newer client
+    // reports - a report stamped for a previous episode must not mark anyone
+    // "ready" for the current one (stale-readiness guard)
+    const pmsg = { position: part.position, paused: part.paused };
+    if (Number.isFinite(dur) && dur > 0 && dur <= 24 * 3600) pmsg.dur = dur;
+    if (src) pmsg.source = src;
+    if (msg.sv != null) {
+      const sv = parseInt(msg.sv, 10);
+      if (Number.isFinite(sv) && sv >= 1) pmsg.sv = sv;
+    }
+    if (msg.st != null && PSTATE_VALUES.has(msg.st)) pmsg.st = msg.st;
+    if (pmsg.st) {
+      // the readiness + buffering channel rides the report: same handler
+      return this.pstate(roomId, participantId, pmsg);
+    }
+    part.lastSeen = Date.now();
+    room.lastActivityAt = part.lastSeen;
+    return { events: [] }; // reports are observability only - never rebroadcast
+  }
+
+  /* Player-state channel (readiness + buffering) - ported 1:1 from
+     party-server rooms.js pstate(). This is what makes episode starts
+     coordinated and slow networks recoverable: every controllable player
+     reports loading/ready/playing/paused/buffering/recovered/error per
+     PARTICIPANT (never one status for the room), and the room reacts:
+     - a transition blocks on real "loading"/"buffering" only, bounded by the
+       readiness timeout so a dead client can never trap the party
+     - wait-for-everyone rooms hold the shared timeline for buffering viewers,
+       released when they recover, when the hold times out, or by host override */
+  pstate(roomId, participantId, msg) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.ended) return { error: "not_found" };
+    const part = room.participants.get(participantId);
+    if (!part || !part.connected) return { error: "not_in_room" };
+    const now = Date.now();
+    this._sweepGate(room, now);
+    const st = msg.st;
+    part.lastSeen = now;
+    room.lastActivityAt = now;
+    if (msg.position != null && Number.isFinite(msg.position)) part.position = msg.position;
+    if (msg.dur != null && Number.isFinite(msg.dur) && msg.dur > 0) part.dur = msg.dur;
+    if (msg.source) part.source = String(msg.source).slice(0, 24);
+    const changed = part.pstate !== st;
+    part.pstate = st;
+    part.pstateSv = msg.sv != null ? msg.sv : part.pstateSv;
+    part.buffering = st === "buffering";
+    if (st === "playing" || st === "paused") part.paused = st === "paused";
+    // readiness signal for the CURRENT transition
+    if (room.gate && room.gate.phase !== "live" && part.pstateSv === room.gate.sessionVersion) {
+      if (st === "ready" || st === "playing" || st === "paused" || st === "recovered") {
+        room.gate.ready.add(participantId);
+      }
+    }
+    const events = [];
+    if (changed) events.push({ t: "peer_state", room: room.id, participantId, st, buffering: part.buffering, position: part.position, ts: now });
+    // wait-for-everyone: a real stall holds the shared timeline
+    if (st === "buffering" && room.waitMode === "everyone" && room.playback.status === "playing") {
+      events.push(...this._maybeCreateHold(room, participantId, now));
+    }
+    events.push(...this._maybeReleaseHold(room, now));
+    events.push(...this._maybeScheduleStart(room, now));
+    return { events };
+  }
+
+  /* ---- coordinated transitions + buffering holds (rooms.js helpers) ---- */
+
+  /* Wait-for-everyone: hold the shared timeline for a participant whose player
+     stalled. The room pauses at the authoritative position (never the stalled
+     player's outdated timestamp), bounded by holdTimeoutMs and host override. */
+  _maybeCreateHold(room, partId, now) {
+    if (room.hold) {
+      room.hold.for.add(partId);
+      return [];
+    }
+    const pb = room.playback;
+    if (pb.status !== "playing") return [];
+    const holdMs = Math.min(LIMITS.HOLD_TIMEOUT_MAX_MS,
+      Math.max(LIMITS.HOLD_TIMEOUT_MIN_MS, room.holdTimeoutMs || LIMITS.HOLD_TIMEOUT_DEFAULT_MS));
+    room.hold = { for: new Set([partId]), until: now + holdMs, auto: true };
+    pb.position = expectedPosition(pb, now);
+    pb.status = "paused";
+    pb.updatedAt = now;
+    pb.seq += 1;
+    return [{
+      t: "playback",
+      seq: pb.seq,
+      sessionVersion: pb.sessionVersion,
+      actor: "Party",
+      action: "pause",
+      auto: true,
+      hold: this._holdState(room, now),
+      state: this._pbState(room, now),
+    }];
+  }
+
+  _releaseHold(room, now, reason) {
+    const hold = room.hold;
+    room.hold = null;
+    const pb = room.playback;
+    if (pb.status !== "paused") return [];
+    pb.status = "playing";
+    pb.updatedAt = now + 500; // tiny shared resume gate - everyone unfreezes together
+    pb.seq += 1;
+    const events = [{
+      t: "playback",
+      seq: pb.seq,
+      sessionVersion: pb.sessionVersion,
+      actor: "Party",
+      action: "play",
+      auto: true,
+      hold: null,
+      state: this._pbState(room, now),
+    }];
+    if (reason === "timeout" && hold) {
+      // honest heads-up: the party started without whoever is still stuck
+      events.push({ t: "notice", notice: "hold_released", waiting: hold.for.size });
+    }
+    return events;
+  }
+
+  /* Release the hold when everyone it waits for recovered, or the timeout hit
+     (whichever first). Dead/disconnected sources never trap the room. */
+  _maybeReleaseHold(room, now) {
+    if (!room.hold) return [];
+    const blockers = [...room.hold.for].filter((id) => {
+      const p = room.participants.get(id);
+      return p && p.connected && PSTATE_BLOCKING.has(p.pstate);
+    });
+    if (blockers.length === 0) return this._releaseHold(room, now, "ready");
+    if (now >= room.hold.until) return this._releaseHold(room, now, "timeout");
+    return [];
+  }
+
+  /* Readiness-gated shared start. Finalizes when the session-stamped blockers
+     are done (at least one positive ready signal required - so a room of
+     legacy clients that never report keeps the classic deadline behavior),
+     or when the readiness timeout expires. Never runs twice. */
+  _maybeScheduleStart(room, now = Date.now()) {
+    const gate = room.gate;
+    if (!gate || gate.phase !== "loading") return [];
+    const blockers = [];
+    for (const [id, p] of room.participants) {
+      if (!p.connected) continue;
+      if (p.pstateSv === gate.sessionVersion && PSTATE_BLOCKING.has(p.pstate)) blockers.push(id);
+    }
+    if (now >= gate.deadline) {
+      return this._finalizeStart(room, now, "timeout");
+    }
+    if (now >= gate.earliest && blockers.length === 0 && gate.ready.size > 0) {
+      return this._finalizeStart(room, now + LIMITS.START_COUNTDOWN_MS, "ready");
+    }
+    return [];
+  }
+
+  _finalizeStart(room, startAt, reason) {
+    const gate = room.gate;
+    if (!gate || gate.phase === "live") return [];
+    const now = Date.now();
+    gate.phase = "scheduled";
+    gate.startAt = startAt;
+    gate.reason = reason;
+    const pb = room.playback;
+    // shared gate on the SERVER clock: updatedAt lands in the future,
+    // expectedPosition clamps to 0 until then (unchanged shared math)
+    pb.updatedAt = startAt;
+    pb.status = "playing";
+    pb.position = 0;
+    pb.seq += 1;
+    return [
+      // re-broadcast the SAME content with the finalized gate: every client
+      // generation folds this into its gate logic (same content key = no
+      // reload, just a re-armed start timer)
+      {
+        t: "content",
+        seq: pb.seq,
+        sessionVersion: pb.sessionVersion,
+        actor: "Party",
+        content: room.content,
+        state: this._pbState(room, startAt > now ? startAt : now),
+      },
+      this._scheduleEvent(room, startAt > now ? startAt : now, reason),
+    ];
+  }
+
+  _scheduleEvent(room, now, reason) {
+    const gate = room.gate;
+    return {
+      t: "schedule",
+      room: room.id,
+      sessionVersion: room.playback.sessionVersion,
+      phase: gate ? gate.phase : "live",
+      startAt: gate ? gate.startAt : null,
+      deadline: gate ? gate.deadline : null,
+      ready: gate ? gate.ready.size : 0,
+      total: [...room.participants.values()].filter((p) => p.connected).length,
+      reason: reason || null,
+    };
+  }
+
+  _holdState(room, now) {
+    if (!room.hold) return null;
+    return { until: room.hold.until, waiting: room.hold.for.size };
+  }
+
+  /* A scheduled gate becomes "live" the moment its start time is behind us -
+     otherwise a legit episode-end later in the session would look stale. */
+  _sweepGate(room, now) {
+    const gate = room.gate;
+    if (gate && gate.phase === "scheduled" && gate.startAt != null && now >= gate.startAt) {
+      gate.phase = "live";
+    }
+  }
+
+  /* deadline tick (party-server rooms.js tick()): transitions + holds resolve
+     on the alarm AND lazily on every command - correctness never depends on a
+     bare timer alone. Returns { roomId, events }[] batches like the Node
+     manager so the caller broadcasts them. */
+  tick(now = Date.now()) {
+    const out = [];
+    for (const room of this.rooms.values()) {
+      if (room.ended) continue;
+      this._sweepGate(room, now);
+      const evs = [
+        ...this._maybeScheduleStart(room, now),
+        ...this._maybeReleaseHold(room, now),
+      ];
+      if (evs.length) out.push({ roomId: room.id, events: evs });
+    }
+    return out;
+  }
+
+  pub(part, room) {
+    return {
+      id: part.id, name: part.name, connected: part.connected, muted: part.muted, buffering: part.buffering, position: part.position, paused: part.paused, dur: part.dur || 0, source: part.source || "",
+      // per-participant player state (loading/ready/playing/buffering/...)
+      pstate: part.pstate || "ready",
+    };
+  }
+
+  _pbState(room, now) {
     return {
       status: room.playback.status,
       position: expectedPosition(room.playback, now),
@@ -569,15 +1117,27 @@ export class PartyHub {
 
   snapshot(room, selfId) {
     const now = Date.now();
+    this._sweepGate(room, now);
     return {
       roomId: room.id, code: room.code, name: room.name,
       hostId: room.hostId, selfId,
-      hasPassword: !!room.password,
+      hasPassword: !!room.passwordHash,
       maxParticipants: room.maxParticipants,
       allowControl: room.allowControl, chatEnabled: room.chatEnabled,
       content: room.content,
       source: room.source || "",
-      playback: { ...this.pbState(room, now), seq: room.playback.seq },
+      // buffering policy + coordinated-transition state (additive)
+      waitMode: room.waitMode || "move",
+      readyTimeoutMs: room.readyTimeoutMs || LIMITS.READY_TIMEOUT_DEFAULT_MS,
+      holdTimeoutMs: room.holdTimeoutMs || LIMITS.HOLD_TIMEOUT_DEFAULT_MS,
+      gate: room.gate ? {
+        phase: room.gate.phase,
+        startAt: room.gate.startAt,
+        deadline: room.gate.deadline,
+        ready: room.gate.ready.size,
+      } : null,
+      hold: this._holdState(room, now),
+      playback: { ...this._pbState(room, now), seq: room.playback.seq },
       participants: [...room.participants.values()].map((p) => ({ ...this.pub(p, room), host: p.id === room.hostId })),
       chat: room.chat.slice(-LIMITS.CHAT_HISTORY),
       serverTs: now,
@@ -587,10 +1147,28 @@ export class PartyHub {
   /* ---------- TTL sweep (alarm-driven) ---------- */
 
   armAlarm() {
-    try { this.state.storage.setAlarm(Date.now() + 10000); } catch (e) {}
+    // the alarm doubles as the deadline tick: wake at the next gate deadline
+    // or hold expiry too, never later than the 10s TTL cadence
+    let at = Date.now() + 10000;
+    for (const room of this.rooms.values()) {
+      if (room.ended) continue;
+      const pending = [
+        room.gate && room.gate.phase === "loading" ? room.gate.deadline : null,
+        room.hold ? room.hold.until : null,
+      ];
+      for (const t of pending) {
+        if (t != null && t < at) at = t;
+      }
+    }
+    try { this.state.storage.setAlarm(at); } catch (e) {}
   }
 
   async alarm() {
+    // deadline tick first (party-server tick()): coordinated starts and
+    // wait-for-everyone holds resolve on time even when nobody sends traffic
+    // (they also re-evaluate lazily on every command - correctness never
+    // depends on the timer alone)
+    for (const batch of this.tick()) this.broadcast(batch.roomId, batch.events);
     const now = Date.now();
     for (const room of [...this.rooms.values()]) {
       if (room.ended) { this.dropRoom(room); continue; }
