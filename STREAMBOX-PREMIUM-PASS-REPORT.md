@@ -124,8 +124,12 @@ Both wrapper flavors sign with the committed preview key (install-over-previous 
 
 ## 13. Deployment and Release Instructions
 
-1. **Website:** commit `perf/premium-pass-2026-11` → merge to `main` on authorization → GitHub Pages deploys (also ships to both APKs automatically since they render the site). `sw.js`'s cache entry updates automatically on next visit (network-first HTML).
-2. **Wrapper APKs:** CI (`android-apk.yml`) builds Full+Lite on `main` push and publishes to the rolling `latest` release. Local alternative: `gradle :app:assembleDebug` (Gradle ≥8.7) with the committed preview key. **Recommend adding a gradle wrapper to `android/`** so local builds match CI exactly.
-3. **android-tv APK:** `android-tv/gradlew.bat assembleDebug` (or release). Remember §12.1 (outside repo).
-4. **Ordering:** the website's `sb:awake`/`sb:sleep` channel is backward compatible — old APKs ignore it, new APKs without it stay always-on. Nothing here requires a coordinated release.
-5. **Before release:** run the regression gate (`tools/qa.js`, `click-test.js`, `responsive-test.js`, `party-e2e.js`, `party-server` npm test) and the physical-device checklist (§11 gaps).
+**Status: EXECUTED on 2026-11-23 (owner-authorized push + release).**
+
+1. **Website:** `main` @ `798a441` (build **237**, incl. the mobile redesign + premium pass) pushed → GitHub Pages deploy (`pages-build-deployment`). `sw.js`'s cache entry updates automatically on next visit (network-first HTML).
+2. **Full + Lite APKs:** CI `android-apk.yml` on `main` builds both flavors and republishes the rolling `latest` release as `streambox.apk` / `streambox-lite.apk` (**v2.35 / versionCode 37** — strictly newer than 2.34/36, so the verified in-app updater accepts the install; `BUILD_NUM`/`version.txt` = 237 drives the in-app update bar).
+3. **Native app:** `native` @ `62631a6` (**0.100**, versionCode stays frozen at 50 per house rule) pushed → CI `android-native.yml` builds `app-debug.apk` (the exact variant verified locally) and republishes `streambox-native.apk` on the `latest-native` rolling release.
+4. **Cloudflare PartyHub worker:** unchanged this pass (no server/protocol edits since the last verified deploy, version `2731028c`); `backend.yml` re-runs its checks + same-code redeploy on the native push.
+5. **android-tv project:** not part of these releases (see §12.1 — outside the repo). Build with `android-tv/gradlew.bat assembleDebug`.
+6. **Ordering/back-compat:** the website's `sb:awake`/`sb:sleep` channel is additive (old APKs ignore it; new APKs without it stay always-on). No coordinated release required.
+7. **Before the next release:** run the regression gate (`tools/qa.js`, `click-test.js`, `responsive-test.js`, `party-e2e.js`, `party-server` npm test) and the physical-device checklist (§11 gaps).
