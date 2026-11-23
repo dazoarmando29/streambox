@@ -78,8 +78,10 @@ function serve() {
     if (!fp.startsWith(ROOT) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
       res.writeHead(404); res.end("nope"); return;
     }
-    const type = fp.endsWith(".html") ? "text/html" : fp.endsWith(".mp4") ? "video/mp4" : "application/octet-stream";
-    res.writeHead(200, { "content-type": type });
+    // proper MIME or Chrome refuses stylesheets (unstyled page)
+    const MIME = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".mp4": "video/mp4" };
+    const type = MIME[path.extname(fp).toLowerCase()] || "application/octet-stream";
+    res.writeHead(200, { "content-type": type, "cache-control": "no-store" });
     res.end(fs.readFileSync(fp));
   });
   return new Promise((r) => srv.listen(0, "127.0.0.1", () => r(srv)));

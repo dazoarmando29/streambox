@@ -1160,7 +1160,7 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
 /* ---------- 110. My List correctness ---------- */
 {
   const pw = html.match(/function paintWatchListBtn\s*\(\)\s*\{[\s\S]*?\n\}/);
-  if (pw && /inList\(/.test(pw[0]) && /In My List/.test(pw[0])) ok("paintWatchListBtn reflects the saved state");
+  if (pw && /inList\(/.test(pw[0]) && /setListBtn\(/.test(pw[0])) ok("paintWatchListBtn reflects the saved state (In My List vs My List)");
   else bad("paintWatchListBtn missing -- the player-page button must show In My List vs + My List");
   const wt = html.match(/function watchListToggle\s*\(\)\s*\{[\s\S]*?\n\}/);
   if (wt && /paintWatchListBtn\(\)/.test(wt[0])) ok("watchListToggle repaints the button after toggling");

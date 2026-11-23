@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0B111E">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -308,9 +308,10 @@
   #tapThruBtn { display: none; }
   @media (pointer: coarse) { #tapThruBtn { display: grid; } }
   body.touch-capable #tapThruBtn { display: grid; }
-  /* narrow phones: the PWA Install button must not break the header row
-     (the browser menu / About page remain the install paths there) */
-  @media (max-width: 519px) { #installBtn { display: none !important; } }
+  /* narrow + medium phones: the PWA Install pill lives in the More sheet -
+     the header keeps only Logo | Search | More (the premium streaming
+     pattern); tablets/desktop keep the full action cluster */
+  @media (max-width: 767px) { #installBtn { display: none !important; } }
   .tv-mode #playerBox #ctlBar { left: 18px; right: 18px; bottom: 18px; padding: 10px 18px 12px !important; }
   /* seek row: elapsed / total | track | remaining (YouTube-style grouping -
      three bare numbers in a row read like a math problem) */
@@ -496,9 +497,51 @@
   @supports (-webkit-touch-callout: none) {
     input, textarea { font-size: 16px !important; }
   }
-  /* phones: tighter hero, full-width player controls */
-  @media (max-width: 640px) {
-    #hero { height: 62vh !important; }
+  /* content must clear the fixed bottom bar (footer/rows used to collide
+     behind the translucent nav on phones AND tablets) */
+  @media (max-width: 1279px) {
+    body { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+    body.video-fs { padding-bottom: 0 !important; }
+  }
+  /* ================= PHONES (<= 599px): intentional mobile design ========
+     Not a compressed desktop: full-bleed player, slim overlay bar, bottom
+     sheets for every dialog, cinematic hero that leaves the catalog peeking,
+     one type scale, a 4px spacing rhythm. Desktop/TV stay untouched - every
+     rule here lives inside this query. */
+  @media (max-width: 599px) {
+    /* --- type + spacing tokens (one scale for the whole phone UI) --- */
+    body { font-size: 15px; line-height: 1.5; }
+    #hero h1 { font-size: 1.55rem !important; }
+    .row-title { font-size: 1rem; }
+    /* --- hero: cinematic, but the catalog peeks below it --- */
+    #hero { height: 58vh !important; min-height: 380px; }
+    #hero > div.relative { padding-bottom: 20px; }
+    #hero .line-clamp-3 { -webkit-line-clamp: 2; font-size: 13px; margin-top: 6px; max-width: 92%; }
+    #hero button { height: 44px; padding: 0 18px; font-size: 13px; }
+    /* --- catalog rows: one rhythm, clean poster gutters --- */
+    .row-scroll.row-scroll { padding: 16px 16px 20px; scroll-padding-left: 16px; }
+    .sb-row .row-scroll { gap: 12px; }
+    /* --- every dialog is a bottom sheet: thumb-reachable + scrollable --- */
+    #modal, #setPanel, #epDrawer, #partyPanel, #searchPanel {
+      align-items: flex-end !important; justify-content: center !important; padding: 0 !important; }
+    #modal > div, #setPanel > div, #epDrawer > div, #partyPanel > div, #searchPanel > div {
+      max-height: 92dvh; overflow-y: auto; overscroll-behavior: contain;
+      border-radius: 22px 22px 0 0 !important; margin: 0 !important;
+      width: 100% !important; max-width: none !important;
+      padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); }
+    #setPanel > div { max-height: 82dvh; }
+    #searchPanel > div { min-height: 70dvh; }
+    /* sheet grabber: the visual cue that this scrolls/closes downward */
+    #modal > div::before, #setPanel > div::before, #epDrawer > div::before,
+    #partyPanel > div::before, #searchPanel > div::before {
+      content: ""; display: block; width: 40px; height: 4px; border-radius: 99px;
+      background: rgba(255,255,255,.22); margin: 10px auto 2px; }
+    /* episode picker: readable thumbs, one generous grid */
+    #epGrid { grid-template-columns: repeat(3, minmax(0,1fr)); max-height: 58dvh; }
+    /* party room: chat gets a stable body, code stays big + readable */
+    #partyChatLog { max-height: 38dvh; }
+    #partyCode { font-size: 1.45rem !important; letter-spacing: .32em; }
+    /* --- player: the video owns the screen, bar is a slim overlay --- */
     /* the Skip pill owns bottom-right — lift the Up Next card clear of it
        (both sat at bottom:148px and overlapped below ~430px) */
     #upNextCard { bottom: 208px; }
@@ -544,11 +587,31 @@
     #hero .line-clamp-3 + div { margin-top: 8px; }
     #hero button { height: 44px; padding: 0 18px; font-size: 13px; }
   }
-  /* tablets (portrait + landscape): 4-col browse grids breathe at arm's
-     length — 3 cols looks childish, 5+ squeezes the titles */
-  @media (min-width: 641px) and (max-width: 1024px) {
+  /* ================= TABLETS (600-1279px): spacious, not stretched ====
+     Intentional tablet layouts: wider hero type column, centered floating
+     bottom bar, centered roomy dialogs, 4-up grids. Never a stretched
+     phone - and never the desktop design (that lives outside this query). */
+  @media (min-width: 600px) and (max-width: 1279px) {
+    /* browse grids breathe at arm's length (3 looks childish, 5+ squeezes) */
     #grid, #listGrid { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 18px; }
     #searchResults { grid-template-columns: repeat(4, minmax(0,1fr)); }
+    /* hero: taller billboard + wider type column (room to be cinematic
+       without hiding the catalog) */
+    #hero { height: 66vh !important; }
+    #hero h1 { font-size: 2.1rem !important; }
+    #hero .line-clamp-3 { max-width: 34rem; }
+    /* centered floating bottom bar (thumb reach) instead of edge-to-edge */
+    #mobileNav > div { max-width: 560px; margin: 0 auto 10px; border: 1px solid rgba(255,255,255,.12);
+      border-radius: 20px; background: rgba(15, 23, 41, .92); padding-bottom: .55rem;
+      box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+    /* dialogs: centered cards with real breathing room (not phone sheets) */
+    #modal > div, #setPanel > div, #epDrawer > div, #partyPanel > div, #searchPanel > div {
+      border-radius: 22px; max-height: 88dvh; overflow-y: auto; }
+    #modal { padding: 24px !important; align-items: center !important; }
+    #modal > div { width: min(860px, 94vw) !important; }
+    #setPanel > div { width: min(560px, 92vw) !important; }
+    /* episode picker: roomy 4-up thumbs */
+    #epGrid { grid-template-columns: repeat(4, minmax(0,1fr)); }
   }
   /* render speed: skip off-screen rows until needed */
   #rows > div { content-visibility: auto; contain-intrinsic-size: auto 320px; }
@@ -635,7 +698,7 @@
   body.calm .card.tv-focus .glass { box-shadow: 0 0 0 2px #00F0B5 !important; }
   body.calm .card.tv-focus .poster-frame,
   body.calm .tv-focus { box-shadow: 0 0 0 3px #00F0B5 !important; }
-  body.calm .mnav-active span:first-child { filter: none !important; }
+  body.calm .mnav-active .ico { filter: none !important; }
   .tv-mode .skel-poster, .tv-mode .skel-line { animation: none !important; }
   /* cards/zoom/ring/popups all run from the base rules (TV shares desktop motion) */
   /* subtitles coach-tip arrow + highlight on the \1F3AF  button */
@@ -717,10 +780,20 @@
      — the old underline-bar skin is retired (the active pill wears the dot) */
   /* mobile tab bar: thumb-sized, active tab glows teal like the desktop pill */
   .mnav-btn { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 2px; min-height: 52px; font-size: 10px; font-weight: 700; color: #8b98b3; border-radius: 14px; }
+    gap: 3px; min-height: 54px; font-size: 10px; font-weight: 700; color: #8b98b3; border-radius: 14px;
+    line-height: 1; padding: 4px 2px; }
   .mnav-btn:active { background: rgba(255,255,255,.08); }
+  .mnav-btn .ico { width: 21px; height: 21px; margin: 0 auto; }
   .mnav-active { color: #3AF0C8 !important; }
-  .mnav-active span:first-child { filter: drop-shadow(0 0 6px rgba(45,212,191,.8)); }
+  .mnav-active .ico { filter: drop-shadow(0 0 6px rgba(45,212,191,.8)); }
+  /* More sheet tiles: one centered icon over one label, every tile identical */
+  .mnav-sheet-btn { display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 7px; min-height: 76px; border-radius: 16px; background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.08); font-size: 11px; font-weight: 700; color: #cbd5e1;
+    padding: 10px 4px; line-height: 1; }
+  .mnav-sheet-btn:active { background: rgba(255,255,255,.12); }
+  .mnav-sheet-btn .ico { color: #7DF5DC; margin: 0 auto; }
+  .mnav-sheet-btn.mnav-on { color: #3AF0C8; border-color: rgba(0,240,181,.4); }
   .switch { position: relative; width: 40px; height: 22px; appearance: none; -webkit-appearance: none;
     border-radius: 99px; background: rgba(255,255,255,.15); cursor: pointer; flex-shrink: 0;
     transition: background .18s ease-out; }
@@ -771,6 +844,24 @@
   .tv-mode #partyRoomCode, .tv-app #partyRoomCode { font-size: 2.2rem; letter-spacing: .5em; }
   .tv-mode #partyQuick button, .tv-app #partyQuick button { min-height: 56px; font-size: 17px; }
   .tv-mode #partyChatInput, .tv-app #partyChatInput { min-height: 56px; font-size: 17px; }
+  /* ==== ICON SYSTEM (mobile & tablet polish) ================================
+     One 24-grid stroke icon set (the <svg><symbol> sprite below). Emoji glyphs
+     sat on the TEXT BASELINE and rendered a different box per platform - the
+     root cause of "icons not centered / misaligned buttons". A flex-sized SVG
+     box centers optically every time, at every width. .icbtn is the canonical
+     icon+label button alignment; bare glyph buttons get the same centering
+     without touching markup. Desktop/TV visuals are unchanged: same glyph
+     shapes at the same sizes, just perfectly centered. */
+  .ico { display: block; width: 20px; height: 20px; flex-shrink: 0;
+    stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .ico-sm { width: 16px; height: 16px; }
+  .ico-lg { width: 24px; height: 24px; }
+  .icbtn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; }
+  /* legacy glyph buttons (text emoji inside a button) center like icon boxes */
+  button > .ico, button > .ico-sm, button > .ico-lg { margin-inline: auto; }
+  /* nav + header pills: icon and label share one optical row */
+  .navlink > .ico, #mobileNav .mnav-btn > .ico, #mobileNav .mnav-btn > span { line-height: 1; }
+  #mobileNav .mnav-btn > .ico { margin: 0 auto; }
 </style>
 <!-- Tailwind: ONE static stylesheet generated from tailwind.config.js (the
      Obsidian Glow palette lives there now - same teal/cyan/amber/gray house
@@ -842,6 +933,46 @@ const TV_REMOTE_OK = new Set(["cinesrc", "yapgrid", "vidrift", "vidzen", "vidbol
 const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVIA|Fire TV|AFT/i.test(navigator.userAgent || "");
 </script>
 
+<!-- ICON SPRITE: one 24-grid stroke set for every icon surface (nav, header,
+     player, party, modals). Stroke icons flex-center reliably where emoji
+     glyphs sat on the text baseline and rendered per-platform boxes. -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10.5V20h12v-9.5"/><path d="M10 20v-5h4v5"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 5v14M17 5v14M3 12h18M3 8.5h4M3 15.5h4M17 8.5h4M17 15.5h4"/></symbol>
+  <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M8 21h8"/><path d="M12 18v3"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l2.2 5.6L20 10.8l-5.8 2.2L12 19l-2.2-6L4 10.8l5.8-2.2z"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M6 4v16l2-1.4L10 20V4z"/><rect x="12" y="5" width="8" height="4" rx="1"/><rect x="12" y="11" width="8" height="4" rx="1"/><rect x="12" y="17" width="8" height="3" rx="1"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5.5" y="10.5" width="13" height="9" rx="2.2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/><circle cx="12" cy="15" r="1.3" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-party" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.2"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4"/><path d="M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><circle cx="12" cy="8" r="1.1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v10"/><path d="M8 10.5 12 14.5l4-4"/><path d="M5 19h14"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M14.5 5 7.5 12l7 7"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M9.5 5l7 7-7 7"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13c0 .8.9 1.3 1.6.9l10-6.5c.6-.4.6-1.4 0-1.8l-10-6.5c-.7-.4-1.6.1-1.6.9z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="7" y="5.5" width="3.4" height="13" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.6" y="5.5" width="3.4" height="13" rx="1.2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-back10" viewBox="0 0 24 24"><path d="M11 5 6.5 8.5 11 12"/><path d="M6.5 8.5H14a5.5 5.5 0 1 1-5.5 5.5"/></symbol>
+  <symbol id="i-fwd30" viewBox="0 0 24 24"><path d="M13 5l4.5 3.5L13 12"/><path d="M17.5 8.5H10a5.5 5.5 0 1 0 5.5 5.5"/></symbol>
+  <symbol id="i-cc" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M10 10.2a2.4 2.4 0 1 0 0 3.6M17 10.2a2.4 2.4 0 1 0 0 3.6"/></symbol>
+  <symbol id="i-av" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18 7a7 7 0 0 1 0 10"/></symbol>
+  <symbol id="i-episodes" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2.2"/><path d="M8 9h8M8 12h8M8 15h5"/></symbol>
+  <symbol id="i-fs" viewBox="0 0 24 24"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.2"/><circle cx="17" cy="6" r="2.2"/><circle cx="17" cy="18" r="2.2"/><path d="M8 11l7-4M8 13l7 4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3"/><path d="M4 19c0-2.8 2.2-5 5-5s5 2.2 5 5"/><circle cx="16.5" cy="9.5" r="2.4"/><path d="M15 14.5c2.8 0 5 1.8 5 4.5"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4A2.5 2.5 0 0 1 4 13.5z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2-4.9"/><path d="M19 4v4h-4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14"/><path d="M8 7V5h8v2"/><path d="M6.5 7l1 12h9l1-12"/></symbol>
+  <symbol id="i-tvsetup" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2.2"/><path d="M9 21h6"/><path d="M12 17v4"/><path d="M9.5 9.5 12 8v4"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 8h11l-3-3"/><path d="M17 16H6l3 3"/></symbol>
+  <symbol id="i-cursor" viewBox="0 0 24 24"><path d="M6 3l12 8.2-5.3 1.1L15 19l-2.6 1-2.4-6.4L6 17V3z" fill="currentColor" stroke="none"/></symbol>
+</svg>
+
 <!-- NAVBAR -->
 <nav class="fixed top-0 w-full z-50 px-4 md:px-10 py-4 flex items-center gap-6 bg-gradient-to-b from-black/90 to-transparent">
   <a href="#" onclick="goHome(event)" class="flex items-center gap-2.5 shrink-0" aria-label="StreamBox home">
@@ -860,39 +991,63 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <button id="navKdrama" onclick="filterType('ko',event)" class="navlink">KDrama</button>
     <button id="navList" onclick="showList(event)" class="navlink">My List</button>
     <button id="navBrowse" onclick="openBrowseTab(event)" class="navlink">Browse</button>
-    <button onclick="openTvGuide(event)" class="navlink hidden 2xl:inline-flex" title="How to install & use on TV">&#x1F4FA; TV Setup</button>
+    <button onclick="openTvGuide(event)" class="navlink hidden 2xl:inline-flex" title="How to install & use on TV"><svg class="ico ico-sm"><use href="#i-tvsetup"/></svg> TV Setup</button>
   </div>
   <!-- action cluster: labels show on tablets (md-lg, no strip above) and wide
        desktops (2xl) - icon-only on phones and in the xl strip band, where
-       every pixel beside the tab strip counts -->
+       every pixel beside the tab strip counts. On PHONES only Search + More
+       live in the header (premium streaming pattern): lock/party/about/install
+       move into the shared More sheet, reachable from the header overflow or
+       the bottom bar - one secondary menu, never two. -->
   <div class="ml-auto flex items-center gap-1 min-[520px]:gap-1.5 md:gap-2 w-full md:w-auto justify-end">
-    <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 md:w-44 lg:w-52 xl:w-auto 2xl:w-64 md:justify-start rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm text-gray-400 flex items-center gap-2"><span class="text-teal-300">&#x1F50D;</span><span class="hidden md:inline xl:hidden 2xl:inline">Search...</span></button>
-    <button id="adultLockNav" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" aria-label="Adults-only gate" class="shrink-0 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-gray-300">&#x1F512;</button>
-    <button id="headerPartyBtn" onclick="partyOpen('join')" title="Join a Watch Party" aria-label="Join a Watch Party" class="shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x1F4E1;</span><span class="hidden md:inline xl:hidden 2xl:inline">Party</span></button>
-    <button onclick="aboutOpen()" title="About StreamBox and updates" aria-label="About StreamBox" class="shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2139;</span><span class="hidden md:inline xl:hidden 2xl:inline">About</span></button>
-    <button id="installBtn" onclick="installPWA()" aria-label="Install app" class="hidden shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 flex items-center gap-1.5"><span class="text-teal-300">&#x2B07;</span><span class="hidden md:inline xl:hidden 2xl:inline">Install</span></button>
+    <button onclick="openSearch(event)" aria-label="Open search" title="Search titles" class="shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 md:w-44 lg:w-52 xl:w-auto 2xl:w-64 md:justify-start rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm text-gray-400 flex items-center gap-2"><svg class="ico ico-sm text-teal-300"><use href="#i-search"/></svg><span class="hidden md:inline xl:hidden 2xl:inline">Search...</span></button>
+    <button id="adultLockNav" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" aria-label="Adults-only gate" class="hidden md:flex shrink-0 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 items-center justify-center text-gray-300"><svg class="ico ico-sm"><use href="#i-lock"/></svg></button>
+    <button id="headerPartyBtn" onclick="partyOpen('join')" title="Join a Watch Party" aria-label="Join a Watch Party" class="hidden md:flex shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 items-center gap-1.5"><svg class="ico ico-sm text-teal-300"><use href="#i-party"/></svg><span class="hidden md:inline xl:hidden 2xl:inline">Party</span></button>
+    <button onclick="aboutOpen()" title="About StreamBox and updates" aria-label="About StreamBox" class="hidden md:flex shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 items-center gap-1.5"><svg class="ico ico-sm text-teal-300"><use href="#i-info"/></svg><span class="hidden md:inline xl:hidden 2xl:inline">About</span></button>
+    <button id="installBtn" onclick="installPWA()" aria-label="Install app" class="hidden shrink-0 h-10 px-2 min-[520px]:px-2.5 md:px-4 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200 md:flex items-center gap-1.5"><svg class="ico ico-sm text-teal-300"><use href="#i-download"/></svg><span class="hidden md:inline xl:hidden 2xl:inline">Install</span></button>
+    <button id="navMoreBtn" onclick="openMoreSheet(event)" aria-label="More" title="More" class="md:hidden shrink-0 w-10 h-10 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 flex items-center justify-center text-gray-200"><svg class="ico"><use href="#i-more"/></svg></button>
   </div>
 </nav>
 
 <!-- MOBILE/TABLET TAB BAR: the desktop links only fit at xl — phones AND
-     tablets (which never reach the 1250px the strip + actions need) get this -->
+     tablets (which never reach the 1250px the strip + actions need) get this.
+     5 primary destinations + More (KDrama/Browse/Party/tools live in the one
+     shared sheet). Icons are 24-grid SVGs so they center optically at every
+     width; the active tab wears the accent + glow like the desktop pill. -->
 <nav id="mobileNav" aria-label="Sections" class="xl:hidden fixed bottom-0 left-0 right-0 z-50">
   <div class="flex bg-[#0B111E]/92 backdrop-blur-md border-t border-white/10 px-1 pt-1.5" style="padding-bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px))">
-    <button id="mnavHome" onclick="goHome(event)" class="mnav-btn mnav-active"><span class="text-xl leading-none">&#x1F3E0;</span><span>Home</span></button>
-    <button id="mnavMovies" onclick="filterType('movie',event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F3AC;</span><span>Movies</span></button>
-    <button id="mnavTv" onclick="filterType('tv',event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F4FA;</span><span>TV</span></button>
-    <button id="mnavAnime" onclick="filterType('anime',event)" class="mnav-btn"><span class="text-xl leading-none">&#x2728;</span><span>Anime</span></button>
-    <button id="mnavKdrama" onclick="filterType('ko',event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F338;</span><span>KDrama</span></button>
-    <button id="mnavList" onclick="showList(event)" class="mnav-btn"><span class="text-xl leading-none">&#x1F4CC;</span><span>My List</span></button>
-    <button id="mnavBrowse" onclick="openBrowseTab(event)" class="mnav-btn"><span class="text-xl leading-none">&#x2630;</span><span>Browse</span></button>
+    <button id="mnavHome" onclick="goHome(event)" class="mnav-btn mnav-active"><svg class="ico"><use href="#i-home"/></svg><span>Home</span></button>
+    <button id="mnavMovies" onclick="filterType('movie',event)" class="mnav-btn"><svg class="ico"><use href="#i-film"/></svg><span>Movies</span></button>
+    <button id="mnavTv" onclick="filterType('tv',event)" class="mnav-btn"><svg class="ico"><use href="#i-tv"/></svg><span>TV</span></button>
+    <button id="mnavAnime" onclick="filterType('anime',event)" class="mnav-btn"><svg class="ico"><use href="#i-spark"/></svg><span>Anime</span></button>
+    <button id="mnavList" onclick="showList(event)" class="mnav-btn"><svg class="ico"><use href="#i-list"/></svg><span>My List</span></button>
+    <button id="mnavMore" onclick="openMoreSheet(event)" class="mnav-btn"><svg class="ico"><use href="#i-more"/></svg><span>More</span></button>
   </div>
 </nav>
+
+<!-- SHARED MORE SHEET (phones + tablets): secondary destinations and utility
+     actions in one place — the header overflow and the bottom bar open this
+     same sheet (never two menus showing the same options). -->
+<div id="moreSheet" class="hidden fixed inset-0 z-[75] bg-black/60" onclick="if(event.target===this)closeMoreSheet()">
+  <div class="absolute left-0 right-0 bottom-0 rounded-t-3xl border-t border-white/10 bg-[#0F1729] pt-2.5" style="padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px))">
+    <div class="mx-auto w-10 h-1 rounded-full bg-white/20"></div>
+    <div class="grid grid-cols-3 gap-2 px-4 pt-4">
+      <button id="mnavKdrama" onclick="filterType('ko',event);closeMoreSheet()" class="mnav-sheet-btn"><svg class="ico ico-lg"><use href="#i-spark"/></svg><span>KDrama</span></button>
+      <button id="mnavBrowse" onclick="openBrowseTab(event);closeMoreSheet()" class="mnav-sheet-btn"><svg class="ico ico-lg"><use href="#i-filter"/></svg><span>Browse</span></button>
+      <button onclick="partyOpen('join');closeMoreSheet()" class="mnav-sheet-btn"><svg class="ico ico-lg"><use href="#i-party"/></svg><span>Party</span></button>
+      <button id="moreLockBtn" onclick="adultLockTap();closeMoreSheet()" class="mnav-sheet-btn"><svg class="ico ico-lg"><use href="#i-lock"/></svg><span>18+ Gate</span></button>
+      <button onclick="openTvGuide(event);closeMoreSheet()" class="mnav-sheet-btn"><svg class="ico ico-lg"><use href="#i-tvsetup"/></svg><span>TV Setup</span></button>
+      <button onclick="aboutOpen();closeMoreSheet()" class="mnav-sheet-btn"><svg class="ico ico-lg"><use href="#i-info"/></svg><span>About</span></button>
+      <button id="moreInstallBtn" onclick="installPWA();closeMoreSheet()" class="mnav-sheet-btn hidden"><svg class="ico ico-lg"><use href="#i-download"/></svg><span>Install</span></button>
+    </div>
+  </div>
+</div>
 
 <!-- Floating TV-help chip (phones / small screens where the nav link is hidden)
      - kept small + glassy: the old solid teal 48px circle overlapped page
      content and read as clutter on every phone screen -->
 <button id="tvGuideFab" onclick="openTvGuide(event)" aria-label="TV setup guide" title="TV setup guide"
-  class="md:hidden fixed bottom-20 right-3 z-50 w-10 h-10 rounded-full bg-white/10 border border-white/20 text-base backdrop-blur opacity-80 shadow-lg">&#x1F4FA;</button>
+  class="md:hidden fixed bottom-20 right-3 z-50 w-10 h-10 rounded-full bg-white/10 border border-white/20 text-base backdrop-blur opacity-80 shadow-lg flex items-center justify-center"><svg class="ico ico-sm"><use href="#i-tvsetup"/></svg></button>
 
 <!-- HOME VIEW -->
 <div id="homeView">
@@ -926,7 +1081,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <p id="gridSub" class="text-sm text-gray-400 mt-1 pl-5"></p>
       </div>
       <div class="flex items-center gap-3">
-        <button id="adultLockBtn" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" class="flex items-center gap-2 px-3.5 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-300"><span class="text-amber-400">&#x1F6E1;</span><span id="adultLockLabel">18+ Hidden</span></button>
+        <button id="adultLockBtn" onclick="adultLockTap()" title="Adults-only gate for 18+ titles" class="flex items-center gap-2 px-3.5 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-300"><svg class="ico ico-sm text-amber-400"><use href="#i-lock"/></svg><span id="adultLockLabel">18+ Hidden</span></button>
         <button id="sortBtn" onclick="cycleSort()" title="Change catalog sort" class="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-200"><span class="text-teal-300">&#x21C5;</span><span>Sort: <strong id="sortLabel" class="text-white">Popularity</strong></span></button>
       </div>
     </div>
@@ -1014,7 +1169,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <!-- twin-cut warning: shown only for known remake/original pairs -->
       <div id="twinTip" class="no-cinema hidden mb-3 bg-[#2a1a10] border border-amber-500/40 rounded-xl px-4 py-3 text-sm flex flex-wrap items-center gap-2">
         <span id="twinText" class="flex-1 min-w-[200px]"></span>
-        <button onclick="wrongVersion()" class="bg-teal-500 hover:bg-teal-300 font-bold px-4 py-2 rounded-full text-[13px]">&#x1F3AC; Wrong version?</button>
+        <button onclick="wrongVersion()" class="icbtn bg-teal-500 hover:bg-teal-300 font-bold px-4 py-2 rounded-full text-[13px]"><svg class="ico ico-sm"><use href="#i-film"/></svg>Wrong version?</button>
         <button onclick="hideTwinTip()" aria-label="Dismiss" class="w-8 h-8 rounded-full bg-black/50 hover:bg-black/80 shrink-0">&#x2715;</button>
       </div>
       <div id="playerBox" class="player-wrap relative w-full rounded-2xl overflow-hidden border border-white/10">
@@ -1094,7 +1249,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
             <button id="ctlMute" onclick="ctlMuteToggle()" aria-label="Mute or unmute" title="Mute" class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 grid place-items-center"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="#fff" stroke="none"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/><path d="M18 7a7 7 0 0 1 0 10"/></svg></button>
             <button id="ctlRate" onclick="ctlRateCycle()" aria-label="Playback speed" title="Speed" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">1&#215;</button>
             <button id="ctlQ" onclick="qualityStep(1)" aria-label="Video quality" title="Quality: tap to cycle Auto / 1080p / 720p / 480p" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Auto</button>
-            <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">&#9776; Episodes</button>
+            <button id="epDrawerBtn" onclick="openEpisodes()" aria-label="Episode list" title="Episode list" class="icbtn h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold"><svg class="ico ico-sm"><use href="#i-episodes"/></svg>Episodes</button>
             <button onclick="ctlSubsToggle()" id="ctlSubs" aria-label="Subtitles on or off" title="Subtitles on/off - opens Subs settings when nothing is loaded yet" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">CC</button>
             <button id="avBtn" onclick="openAV()" aria-label="Audio and subtitles" title="Audio (sub/dub), subtitles and quality - no settings detour" class="h-11 px-3 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">A/V</button>
             <button id="ctlControl" onclick="focusMirror()" aria-label="Send remote to mirror player" title="Control: send remote keys to this mirror own player (VidRift has no play API)" class="hidden w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 grid place-items-center"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.4" fill="#fff" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
@@ -1108,18 +1263,18 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       </div>
       <!-- unpaired-mirror strip (paired mirrors ride our bar now — one bar, no overlap) -->
       <div id="mirrorBar" class="hidden mt-3 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 flex flex-wrap items-center gap-2 text-sm">
-        <span>Mirror: <b id="mirrorName">–</b> — use its own player controls</span>
-        <button onclick="focusMirror()" title="Send remote keys to this mirror's own player (some answer OK/arrows, some need a pointer)" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">&#x1F3AF; Control</button>
-        <button id="mirrorHomeBtn" onclick="mirrorHome()" class="ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-300 text-xs font-bold">&#x21C4; CineSrc</button>
-        <button id="stripSubs" onclick="ctlSubsToggle()" aria-label="Subtitles on or off" title="Our subtitles on/off — Wyzie + your files, over any mirror" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">CC</button>
-        <button onclick="openSettings()" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">&#x2699;</button>
-        <button onclick="cursorToggle()" title="Remote cursor: arrows glide a pointer, OK clicks" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">&#x1F5B1;</button>
+        <span>Mirror: <b id="mirrorName">&#8211;</b> &#8212; use its own player controls</span>
+        <button onclick="focusMirror()" title="Send remote keys to this mirror's own player (some answer OK/arrows, some need a pointer)" class="icbtn h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold"><svg class="ico ico-sm"><use href="#i-tvsetup"/></svg>Control</button>
+        <button id="mirrorHomeBtn" onclick="mirrorHome()" class="icbtn ml-auto h-9 px-4 rounded-full bg-teal-500 hover:bg-teal-300 text-xs font-bold"><svg class="ico ico-sm"><use href="#i-refresh"/></svg>CineSrc</button>
+        <button id="stripSubs" onclick="ctlSubsToggle()" aria-label="Subtitles on or off" title="Our subtitles on/off &#8212; Wyzie + your files, over any mirror" class="h-9 px-4 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">CC</button>
+        <button onclick="openSettings()" aria-label="Settings" class="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center"><svg class="ico ico-sm"><use href="#i-gear"/></svg></button>
+        <button onclick="cursorToggle()" title="Remote cursor: arrows glide a pointer, OK clicks" aria-label="Remote cursor" class="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center"><svg class="ico ico-sm"><use href="#i-cursor"/></svg></button>
       </div>
       <!-- subtitles coach strip (design pack): points at Subs & Sync -->
       <div id="subTip" class="no-cinema hidden relative mt-3 bg-[#1a2745] border border-teal-500/40 rounded-xl p-4 pr-12 text-sm">
         <button onclick="hideSubTip(false)" aria-label="Dismiss tip" class="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/80">&#x2715;</button>
         <p class="font-bold">&#x1F4AC; Need English or Japanese Subtitles?</p>
-        <p class="text-gray-300 mt-1 text-[13px]">Captions auto-loaded: <b class="text-teal-300">English [Full CC]</b>. Press <b>C</b> on desktop or use <b>Subs &amp; Sync</b> to calibrate audio delays.</p>
+        <p class="text-gray-300 mt-1 text-[13px]">Captions auto-loaded: <b class="text-teal-300">English [Full CC]</b>. <span class="hidden md:inline">Press <b>C</b> on desktop or open <b>Subs &amp; Sync</b> to calibrate.</span><span class="md:hidden">Open <b>Subs &amp; Sync</b> to calibrate.</span></p>
         <div class="flex flex-wrap gap-2 mt-3">
           <button onclick="openSettings(); setTab('subs')" class="bg-teal-500 hover:bg-teal-300 font-bold px-4 py-2 rounded-full text-[13px]">Adjust Sync</button>
           <button onclick="hideSubTip(true)" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full text-[13px]">Got it — don't show again</button>
@@ -1147,36 +1302,36 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <!-- one clean card per switch (design pack) — every switch applies instantly -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Ad requests are filtered on every player (the APK blocks ad hosts app-wide) and sandboxed mirrors lose their pop-up ads.">
-            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x1F6E1;</span> Ad Shield</b><span class="block text-[11px] text-gray-500">Pop-up blocker + app-wide ad filter</span></span>
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><svg class="ico ico-sm text-teal-300"><use href="#i-lock"/></svg> Ad Shield</b><span class="block text-[11px] text-gray-500">Pop-up blocker + app-wide ad filter</span></span>
             <input type="checkbox" id="optShield" checked class="switch" onchange="toggleShield()">
           </label>
           <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="TV remotes can only drive some servers — hide the rest from Source lists.">
-            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x1F4FA;</span> TV-Safe Servers</b><span class="block text-[11px] text-gray-500">Remote-drivable servers only</span></span>
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><svg class="ico ico-sm text-teal-300"><use href="#i-tvsetup"/></svg> TV-Safe Servers</b><span class="block text-[11px] text-gray-500">Remote-drivable servers only</span></span>
             <input type="checkbox" id="optTvSafe" class="switch" onchange="tvSafeToggle()">
           </label>
           <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer">
-            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x25B6;</span> Autoplay Next</b><span class="block text-[11px] text-gray-500">Smooth episode chaining</span></span>
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><svg class="ico ico-sm text-teal-300"><use href="#i-play"/></svg> Autoplay Next</b><span class="block text-[11px] text-gray-500">Smooth episode chaining</span></span>
             <input type="checkbox" id="optAutonext" checked class="switch">
           </label>
           <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer">
-            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x23ED;</span> Auto-Skip Intro</b><span class="block text-[11px] text-gray-500">Bypasses OP/ED intros</span></span>
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><svg class="ico ico-sm text-teal-300"><use href="#i-fwd30"/></svg> Auto-Skip Intro</b><span class="block text-[11px] text-gray-500">Bypasses OP/ED intros</span></span>
             <input type="checkbox" id="optAutoskip" class="switch">
           </label>
           <label class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3 cursor-pointer" title="Stuck player hops mirrors by itself. Off = we name the server to try and you hop with &#x21C4; Source.">
-            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><span class="text-teal-300">&#x21C4;</span> Auto-Switch Server</b><span class="block text-[11px] text-gray-500">Stuck players heal themselves</span></span>
+            <span class="flex-1 min-w-0"><b class="block text-sm text-white flex items-center gap-1.5"><svg class="ico ico-sm text-teal-300"><use href="#i-swap"/></svg> Auto-Switch Server</b><span class="block text-[11px] text-gray-500">Stuck players heal themselves</span></span>
             <input type="checkbox" id="optAutoswitch" class="switch" onchange="autoSwitchSave()">
           </label>
         </div>
         <!-- engine row: one Motion Judder control + the real actions -->
         <div class="flex flex-wrap items-center gap-2 mt-4">
           <div id="judderPill" class="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-full px-4 py-2">
-            <span class="text-xs font-semibold text-gray-300 flex items-center gap-1.5"><span class="text-teal-300">&#x26A1;</span> Motion Judder</span>
+            <span class="text-xs font-semibold text-gray-300 flex items-center gap-1.5"><svg class="ico ico-sm text-teal-300"><use href="#i-refresh"/></svg> Motion Judder</span>
             <input type="range" id="optJudder" min="0" max="10" value="10" step="1" class="w-32 sm:w-44 h-6 accent-teal-400" aria-label="Judder reduction" oninput="motionOpts(); judderPaint()">
             <span id="judderLabel" class="text-xs font-bold text-teal-300 w-14">Smooth</span>
           </div>
           <button onclick="reloadPlayer()" class="bg-teal-400 text-[#0B111E] px-5 py-2 rounded-full text-xs font-bold shadow-[0_0_20px_rgba(0,240,181,0.35)]">Reload Stream</button>
-          <button onclick="otherSource()" title="Wrong film or broken stream? Drop this server and try another source." class="bg-white/10 px-4 py-2 rounded-full hover:bg-white/20 text-xs font-semibold">&#x21C4; Source Mirror</button>
-          <button onclick="wrongVersion()" title="Right title, wrong cut (remake plays the original or vice versa)? Jump to the next mirror." class="bg-white/10 px-4 py-2 rounded-full hover:bg-white/20 text-xs font-semibold">&#x1F3AC; Wrong Version?</button>
+          <button onclick="otherSource()" title="Wrong film or broken stream? Drop this server and try another source." class="icbtn bg-white/10 px-4 py-2 rounded-full hover:bg-white/20 text-xs font-semibold"><svg class="ico ico-sm"><use href="#i-swap"/></svg>Source Mirror</button>
+          <button onclick="wrongVersion()" title="Right title, wrong cut (remake plays the original or vice versa)? Jump to the next mirror." class="icbtn bg-white/10 px-4 py-2 rounded-full hover:bg-white/20 text-xs font-semibold"><svg class="ico ico-sm"><use href="#i-film"/></svg>Wrong Version?</button>
           <span id="watchStatus" class="ml-auto text-gray-500"></span>
         </div>
         <!-- engine-only inputs (JS reads them; no UI of their own) -->
@@ -1189,9 +1344,9 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <div class="flex items-center gap-3 mb-2">
           <h3 class="font-bold">Episodes</h3>
           <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
-            <button onclick="watchSeasonStep(-1)" aria-label="Previous season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
+            <button onclick="watchSeasonStep(-1)" aria-label="Previous season" class="w-9 h-9 rounded-full hover:bg-white/20 flex items-center justify-center"><svg class="ico"><use href="#i-left"/></svg></button>
             <span id="seasonLabel" class="text-sm font-semibold min-w-[86px] text-center">Season 1</span>
-            <button onclick="watchSeasonStep(1)" aria-label="Next season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
+            <button onclick="watchSeasonStep(1)" aria-label="Next season" class="w-9 h-9 rounded-full hover:bg-white/20 flex items-center justify-center"><svg class="ico"><use href="#i-right"/></svg></button>
           </div>
           <button onclick="nextEpisode(1)" class="text-xs bg-white/10 px-3 py-1.5 rounded-full hover:bg-white/20">Next Ep &#x2192;</button>
         </div>
@@ -1222,7 +1377,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <p class="flex justify-between gap-3"><span class="text-gray-500">Source Engine</span><b id="wEngine" class="text-right"></b></p>
         </div>
         <div class="flex flex-wrap gap-2 mt-4">
-          <button id="wListBtn" onclick="watchListToggle()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">+ My List</button>
+          <button id="wListBtn" onclick="watchListToggle()" class="glass-pill icbtn px-4 py-2 rounded-full text-sm font-semibold"><svg class="ico ico-sm"><use href="#i-plus"/></svg>My List</button>
           <button onclick="shareTitle()" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">Share</button>
           <button id="wPartyBtn" onclick="partyOpen('create')" class="glass-pill px-4 py-2 rounded-full text-sm font-semibold">Watch Party</button>
           <button id="wPartyStatus" onclick="partyOpen('create')" class="hidden px-4 py-2 rounded-full text-sm font-semibold bg-teal-400/15 border border-teal-400/50 text-teal-300"></button>
@@ -1263,8 +1418,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <p id="mMeta" class="flex flex-wrap items-center gap-2 mt-2 text-sm text-gray-400"></p>
       <p id="mOverview" class="text-sm text-gray-300 mt-3 leading-relaxed"></p>
       <div class="flex flex-wrap gap-3 mt-5 items-center">
-        <button id="mWatch" class="h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold shadow-[0_0_35px_-5px_rgba(0,240,181,0.35)] hover:scale-[1.02] active:scale-[0.98] transition-all">&#x25B6; Watch Now</button>
-        <button id="mListBtn" onclick="addToList()" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">+ My List</button>
+        <button id="mWatch" class="icbtn h-12 px-8 rounded-full bg-teal-400 hover:bg-teal-300 text-gray-950 font-bold shadow-[0_0_35px_-5px_rgba(0,240,181,0.35)] hover:scale-[1.02] active:scale-[0.98] transition-all"><svg class="ico ico-sm"><use href="#i-play"/></svg>Watch Now</button>
+        <button id="mListBtn" onclick="addToList()" class="icbtn h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill"><svg class="ico ico-sm"><use href="#i-plus"/></svg>My List</button>
         <button id="mPartyBtn" onclick="partyOpen('join')" class="h-12 px-6 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-sm font-semibold glass-pill">Watch Party</button>
       </div>
       <div id="mSeasons" class="mt-6 hidden">
@@ -1296,10 +1451,18 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <div id="partyCreateBox" class="bg-white/[0.03] border border-white/10 rounded-xl p-4">
         <p class="text-sm font-bold mb-2">Start a party</p>
         <input id="partyRoomName" maxlength="40" placeholder="Room name (optional)" class="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-teal-400/60 mb-2">
-        <input id="partyRoomPw" type="password" maxlength="64" placeholder="Password (optional)" class="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-teal-400/60 mb-2">
-        <div class="flex items-center gap-2 text-xs text-gray-400 mb-3">
-          <label class="flex items-center gap-1.5"><input id="partyCtlAll" type="checkbox" class="accent-teal-400"> Guests can control playback</label>
-          <label class="flex items-center gap-1.5 ml-auto"><input id="partyChatOn" type="checkbox" checked class="accent-teal-400"> Chat</label>
+        <!-- advanced room settings collapse behind one disclosure (the
+             create flow stays two fields + one button on phones) -->
+        <button id="partyOptsToggle" onclick="togglePartyOpts()" aria-expanded="false" class="w-full flex items-center justify-between bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 rounded-xl px-4 py-2.5 text-xs font-semibold text-gray-300 mb-2">
+          <span>Room options</span>
+          <svg class="ico ico-sm transition-transform" id="partyOptsChev"><use href="#i-right"/></svg>
+        </button>
+        <div id="partyOpts" class="hidden">
+          <input id="partyRoomPw" type="password" maxlength="64" placeholder="Password (optional)" class="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-teal-400/60 mb-2">
+          <div class="flex items-center gap-2 text-xs text-gray-400 mb-3">
+            <label class="flex items-center gap-1.5"><input id="partyCtlAll" type="checkbox" class="accent-teal-400"> Guests can control playback</label>
+            <label class="flex items-center gap-1.5 ml-auto"><input id="partyChatOn" type="checkbox" checked class="accent-teal-400"> Chat</label>
+          </div>
         </div>
         <button onclick="partyCreate()" class="w-full bg-teal-500 hover:bg-teal-300 text-gray-950 font-bold px-5 py-2.5 rounded-full text-sm">Create Room</button>
       </div>
@@ -1326,11 +1489,16 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
             <p class="text-[10px] text-gray-500">ROOM CODE</p>
           </div>
         </div>
-        <div class="flex flex-wrap gap-2 mt-3">
-          <button onclick="partyCopyInvite()" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">Copy Invite Link</button>
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+          <!-- primary party actions stay visible; secondary ones (copy code,
+               end) collapse behind More - the room screen stays calm -->
+          <button onclick="partyCopyInvite()" class="glass-pill icbtn px-4 py-2 rounded-full text-xs font-semibold"><svg class="ico ico-sm"><use href="#i-share"/></svg>Invite</button>
+          <button onclick="partyResync()" class="glass-pill icbtn px-4 py-2 rounded-full text-xs font-semibold"><svg class="ico ico-sm"><use href="#i-refresh"/></svg>Resync</button>
+          <button onclick="partyLeave()" class="icbtn px-4 py-2 rounded-full text-xs font-semibold bg-white/10 hover:bg-white/20"><svg class="ico ico-sm"><use href="#i-close"/></svg>Leave</button>
+          <button id="partyActionsMore" onclick="togglePartyActions()" aria-expanded="false" class="icbtn ml-auto px-3 py-2 rounded-full text-xs font-semibold bg-white/[0.06] hover:bg-white/10 text-gray-300"><svg class="ico ico-sm"><use href="#i-more"/></svg></button>
+        </div>
+        <div id="partySecondaryActions" class="hidden flex-wrap items-center gap-2 mt-2">
           <button onclick="partyCopyCode()" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">Copy Code</button>
-          <button onclick="partyResync()" class="glass-pill px-4 py-2 rounded-full text-xs font-semibold">Resync</button>
-          <button onclick="partyLeave()" class="px-4 py-2 rounded-full text-xs font-semibold bg-white/10 hover:bg-white/20">Leave</button>
           <button id="partyEndBtn" onclick="partyEndRoom()" class="hidden px-4 py-2 rounded-full text-xs font-semibold bg-red-400/20 hover:bg-red-400/30 text-red-200">End Party</button>
         </div>
       </div>
@@ -1445,7 +1613,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 <div id="setPanel" class="hidden fixed inset-0 z-[66] bg-black/70" onclick="if(event.target===this)closePanels()">
   <div class="absolute right-0 top-0 h-full w-full max-w-md bg-[#131B2C] border-l border-white/10 overflow-y-auto p-5">
     <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl font-black">&#x2699; Settings</h2>
+      <h2 class="text-xl font-black flex items-center gap-2"><svg class="ico"><use href="#i-gear"/></svg>Settings</h2>
       <button onclick="closePanels()" aria-label="Close settings" class="w-9 h-9 rounded-full bg-black/50 hover:bg-black/80">&#x2715;</button>
     </div>
     <div class="flex gap-2 mb-5 text-sm" role="tablist">
@@ -1528,7 +1696,7 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         </div>
       </div>
       <div class="flex flex-col gap-2 mt-4">
-        <button onclick="otherSource()" class="py-2.5 rounded-full bg-teal-500 hover:bg-teal-300 font-bold text-sm">&#x21C4; Try another source</button>
+        <button onclick="otherSource()" class="icbtn py-2.5 rounded-full bg-teal-500 hover:bg-teal-300 font-bold text-sm"><svg class="ico ico-sm"><use href="#i-swap"/></svg>Try another source</button>
         <button id="pctlBtn" onclick="togglePControls()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Video buttons: Hidden</button>
         <button onclick="forgetServer()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">Forget preferred server (Auto)</button>
         <button onclick="reloadPlayer()" class="py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-sm">&#x21BB; Reload player</button>
@@ -1545,15 +1713,15 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     <div class="flex items-center justify-between mb-3">
       <h2 class="text-xl font-black">Episodes</h2>
       <div class="flex gap-2">
-        <button id="spoilerBtn" onclick="spoilerToggle()" title="Hide episode details to avoid spoilers" class="h-9 px-3 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">&#x1F648; Spoilers: Off</button>
+        <button id="spoilerBtn" onclick="spoilerToggle()" title="Hide episode details to avoid spoilers" class="h-9 px-3 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">Spoilers: Off</button>
         <button onclick="closePanels()" aria-label="Close episodes" class="w-9 h-9 rounded-full bg-black/50 hover:bg-black/80">&#x2715;</button>
       </div>
     </div>
     <div class="flex items-center gap-2 mb-3">
       <div class="flex items-center gap-1 bg-white/10 border border-white/20 rounded-full px-1 py-0.5">
-        <button onclick="drawerSeasonStep(-1)" aria-label="Previous season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">‹</button>
+        <button onclick="drawerSeasonStep(-1)" aria-label="Previous season" class="w-9 h-9 rounded-full hover:bg-white/20 flex items-center justify-center"><svg class="ico"><use href="#i-left"/></svg></button>
         <span id="drawerSeasonLabel" class="text-sm font-semibold min-w-[86px] text-center">Season 1</span>
-        <button onclick="drawerSeasonStep(1)" aria-label="Next season" class="w-9 h-9 rounded-full hover:bg-white/20 text-lg leading-none">›</button>
+        <button onclick="drawerSeasonStep(1)" aria-label="Next season" class="w-9 h-9 rounded-full hover:bg-white/20 flex items-center justify-center"><svg class="ico"><use href="#i-right"/></svg></button>
       </div>
       <input id="epFilter" oninput="renderEpDrawer()" placeholder="Filter…" autocomplete="off" class="flex-1 min-w-0 px-3 py-2 rounded-full bg-white/10 border border-white/20 outline-none text-sm">
     </div>
@@ -1725,7 +1893,7 @@ function topPopup(){
   // topmost visible popup wins - by Z-INDEX, not DOM order: Back must close
   // what the user SEES on top (a DOM-order pick could close an occluded
   // popup first and leave the visible one stranded)
-  const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal,#pinPad,#avSheet,#vrSheet,#resumeDlg,#partyPanel,#aboutPanel")].filter(p => !p.classList.contains("hidden"));
+  const ps = [...document.querySelectorAll("#searchPanel,#epDrawer,#setPanel,#tvGuide,#modal,#pinPad,#avSheet,#vrSheet,#resumeDlg,#partyPanel,#aboutPanel,#moreSheet")].filter(p => !p.classList.contains("hidden"));
   if (!ps.length) return null;
   let best = ps[0], bestZ = -Infinity;
   for (const p of ps) {
@@ -2754,6 +2922,7 @@ function purgeRetiredCaches(){
         else if (top.id === "resumeDlg") resumePick(true);
         else if (top.id === "aboutPanel") aboutClose();
         else if (top.id === "partyPanel") partyClose();
+        else if (top.id === "moreSheet") closeMoreSheet();
         else closePanels();
         e.preventDefault(); return;
       }
@@ -2926,8 +3095,7 @@ function paintWatchListBtn(){
     const b = document.getElementById("wListBtn");
     if (!b) return;
     const saved = inList(watchState.type, watchState.id);
-    const label = saved ? "\u{2713} In My List" : "+ My List";
-    if (b.textContent !== label) b.textContent = label;
+    setListBtn(b, saved);
     b.classList.toggle("border-teal-400/50", saved);
     b.classList.toggle("text-teal-300", saved);
     b.title = saved ? "Remove from My List" : "Add to My List";
@@ -3106,6 +3274,15 @@ function showRows(){
   document.getElementById("hero").classList.remove("hidden");
   renderContinue();
 }
+/* My List buttons share one icon+label state (the SVG icon never baseline-
+   shifts; labels stay plain words - the icon carries add/check semantics) */
+function setListBtn(btn, saved){
+  if (!btn) return;
+  btn.classList.add("icbtn");
+  btn.innerHTML = saved
+    ? '<svg class="ico ico-sm"><use href="#i-check"/></svg>In My List'
+    : '<svg class="ico ico-sm"><use href="#i-plus"/></svg>My List';
+}
 function paintNav(which){
   ["navHome", "navMovies", "navTv", "navAnime", "navKdrama", "navList", "navBrowse"].forEach(id => {
     const el = document.getElementById(id);
@@ -3117,6 +3294,9 @@ function paintNav(which){
     const el = document.getElementById(m);
     if (el) el.classList.toggle("mnav-active", d === which);
   });
+  // sheet destinations (KDrama/Browse) live behind More - light it too
+  const more = document.getElementById("mnavMore");
+  if (more) more.classList.toggle("mnav-active", which === "navKdrama" || which === "navBrowse");
 }
 /* phone tab bar never covers the player: hidden on the watch screen */
 function syncMobileNav(){
@@ -3137,6 +3317,8 @@ window.addEventListener("beforeinstallprompt", (e) => {
     _deferredInstall = e;
     const b = document.getElementById("installBtn");
     if (b) b.classList.remove("hidden");
+    const mb = document.getElementById("moreInstallBtn");
+    if (mb) mb.classList.remove("hidden"); // phones: install lives in the More sheet
   } catch(err){}
 });
 function installPWA(){
@@ -3145,7 +3327,27 @@ function installPWA(){
     _deferredInstall.prompt();
     _deferredInstall = null;
     document.getElementById("installBtn").classList.add("hidden");
+    const mb = document.getElementById("moreInstallBtn");
+    if (mb) mb.classList.add("hidden");
   } catch(e){}
+}
+/* More sheet (phones + tablets): one shared secondary menu for KDrama,
+   Browse, Party, 18+ gate, TV setup, About, Install. */
+function openMoreSheet(ev){
+  if (ev) {
+    ev.preventDefault();
+    try { window._moreOpener = ev.currentTarget || document.activeElement; } catch(e){}
+  }
+  const s = document.getElementById("moreSheet");
+  if (s) s.classList.remove("hidden");
+  document.body.classList.add("modal-open"); // no scroll behind the sheet
+}
+function closeMoreSheet(){
+  const s = document.getElementById("moreSheet");
+  if (s) s.classList.add("hidden");
+  if (!topPopup()) document.body.classList.remove("modal-open");
+  // restore focus to whatever opened the sheet (keyboard/TV parity)
+  try { if (window._moreOpener && window._moreOpener.focus) window._moreOpener.focus(); } catch(e){}
 }
 /* Browse tab: kind pick FIRST (Movies/TV/Anime/K-Dramas), then the genre
    chips + year rail over the full paginated catalog. The kind chips stay
@@ -3342,12 +3544,18 @@ function pinClose(){
 function paintAdultLock(){
   const lbl = document.getElementById("adultLockLabel");
   if (lbl) lbl.textContent = adultLocked() ? "18+ Hidden" : "18+ Shown";
-  else {
-    const b = document.getElementById("adultLockBtn");
-    if (b) b.textContent = adultLocked() ? "\u{1F512} 18+ Hidden" : "\u{1F513} 18+ Shown";
-  }
   const nb = document.getElementById("adultLockNav");
-  if (nb) nb.textContent = adultLocked() ? "\u{1F512}" : "\u{1F513}";
+  if (nb) {
+    // state rides the icon COLOR (the SVG stays put - no baseline text swap)
+    nb.classList.toggle("text-amber-300", !adultLocked());
+    nb.setAttribute("aria-label", adultLocked() ? "Adults-only gate (locked)" : "Adults-only gate (unlocked)");
+  }
+  const mb = document.getElementById("moreLockBtn");
+  if (mb) {
+    const s = mb.querySelector("span");
+    if (s) s.textContent = adultLocked() ? "18+ Locked" : "18+ Shown";
+    mb.classList.toggle("mnav-on", !adultLocked());
+  }
 }
 function adultLockTap(){
   if (!adultLocked()) {
@@ -3791,8 +3999,7 @@ async function openDetail(type, id){
     <span class="text-teal-300">${escapeHtml((d.genres || []).map(g => g.name).filter(Boolean).join(" \u{00B7} ") || "\u{2014}")}</span>`;
   document.getElementById("mOverview").textContent = d.overview || "No overview.";
   try {
-    document.getElementById("mListBtn").textContent = inList(type, id) ? "\u{2713} In My List" : "+ My List";
-  } catch(e){}
+    setListBtn(document.getElementById("mListBtn"), inList(type, id));  } catch(e){}
   document.getElementById("mWatch").onclick = () => {
     if(type==="tv"){
       const s = (modalSeasons[modalSeasonIdx]||{}).season_number || 1;
@@ -5644,7 +5851,7 @@ function addToList(){
   const btn = document.getElementById("mListBtn");
   if (inList(currentDetail.type, currentDetail.id)) {
     saveList(getList().filter(x => !(x.type === currentDetail.type && x.id === currentDetail.id)));
-    if (btn) btn.textContent = "+ My List";
+    setListBtn(btn, false);
     toast("Removed from My List");
   } else {
     const item = { type: currentDetail.type, id: currentDetail.id, title: titleOf(d),
@@ -5652,7 +5859,7 @@ function addToList(){
       overview: d.overview || "",
       year: (d.release_date || d.first_air_date || "").slice(0, 4), at: Date.now() };
     saveList([item, ...getList()]);
-    if (btn) btn.textContent = "\u{2713} In My List";
+    setListBtn(btn, true);
     toast("\u{2713} Saved to My List", toastSaveActions());
   }
   try {
@@ -6999,8 +7206,12 @@ function updateMirrorUI(){
   const ch = document.getElementById("ctlHome");
   if (ch) {
     ch.classList.toggle("hidden", !isPaired);
-    const hl = watchState.anime ? "\u{21C4} AniPM" : "\u{21C4} CineSrc";
-    if (ch.textContent !== hl) ch.textContent = hl;
+    const hl = watchState.anime ? "AniPM" : "CineSrc";
+    if (ch.getAttribute("data-hl") !== hl) {
+      ch.setAttribute("data-hl", hl);
+      ch.classList.add("icbtn");
+      ch.innerHTML = '<svg class="ico ico-sm"><use href="#i-swap"/></svg>' + hl;
+    }
   }
   // anime declutter: quality + settings live in the A/V sheet now. VidBolt
   // quality lives in the A/V sheet too (fed by player panels), so its bar
@@ -7034,7 +7245,11 @@ function updateMirrorUI(){
     const label = (MIRRORS.find(x => x.id === mirror) || {}).name || mirror;
     document.getElementById("mirrorName").textContent = label;
     const home = document.getElementById("mirrorHomeBtn");
-    if (home) home.textContent = watchState.anime ? "\u{21C4} AniPM" : "\u{21C4} CineSrc";
+    if (home) {
+      const hl2 = watchState.anime ? "AniPM" : "CineSrc";
+      home.classList.add("icbtn");
+      home.innerHTML = '<svg class="ico ico-sm"><use href="#i-swap"/></svg>' + hl2;
+    }
     if (mirror === "yapgrid" && typeof subFile !== "undefined" && subFile && subFile.corsUrl) {
       document.getElementById("watchStatus").textContent = `YapGrid: showing your ${subFile.lang || "loaded"} subs \u{2713} — change language in \u{2699} \u{2192} Subs · no Ad Shield here, use Brave/uBlock`;
       return;
@@ -8143,7 +8358,7 @@ function updateDrawerSeasonLabel(arc, seasonName){
 }
 function paintSpoilerBtn(){
   const b = document.getElementById("spoilerBtn");
-  if (b) b.textContent = spoilerOn ? "\u{1F648} Spoilers: On" : "\u{1F648} Spoilers: Off";
+  if (b) b.textContent = spoilerOn ? "Spoilers: On" : "Spoilers: Off";
 }
 function spoilerToggle(){
   spoilerOn = !spoilerOn;
@@ -12042,6 +12257,23 @@ function partyToggleChat(){ PARTY.toggleChat(); }
 function partyToggleWait(){ PARTY.toggleWait(); }
 function partyToggleSpoiler(){ try { PARTY.toggleSpoiler(); } catch(e){} }
 function partyJump(pos){ try { PARTY.jumpTo(pos); } catch(e){} }
+/* progressive disclosure: room options + secondary room actions collapse */
+function togglePartyOpts(){
+  const box = document.getElementById("partyOpts");
+  const chev = document.getElementById("partyOptsChev");
+  const btn = document.getElementById("partyOptsToggle");
+  if (!box) return;
+  const open = box.classList.toggle("hidden") === false;
+  if (chev) chev.style.transform = open ? "rotate(90deg)" : "";
+  if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+function togglePartyActions(){
+  const box = document.getElementById("partySecondaryActions");
+  const btn = document.getElementById("partyActionsMore");
+  if (!box) return;
+  const open = box.classList.toggle("hidden") === false;
+  if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+}
 function partySendChat(){ PARTY.sendChat(); }
 
 /* playback hooks: wrap the two local entry points (function reassignment keeps
