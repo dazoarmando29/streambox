@@ -80,10 +80,10 @@ This report covers the P0 rebuild of Watch Party synchronization (timeline autho
 
 | File | Why |
 |---|---|
-| `backend/src/party.js` | PartyHub Durable Object: full parity with the Node room machine (transitions, holds, pstate, gate sweep, schedule/peer_state events) + parity fixes (heartbeat liveness, salted-hash passwords, `sync_report` limiter, `room_ended` reaches the ending host, `proto: 2`). |
-| `backend/test-party-parity.mjs` | Parity/verification harness for the DO (see C). |
+| `backend/src/party.js` | PartyHub Durable Object: full behavioral parity with the Node room machine — readiness-gated transitions (`gate`, `_maybeScheduleStart`, `_finalizeStart`, `_sweepGate`, `tick`), wait-for-everyone holds, `pstate`/`peer_state`/`schedule`, idempotent `ended`, stale-completion refusal, snapshot extensions — plus the audit parity fixes: heartbeat/any-traffic liveness (`markSeen`), **salted-hash passwords** (sha256 of `salt + "\0" + pw`, digest-compatible with Node; async because Workers only ships async digests), `sync_report` + `pstate` rate limiters, `room_ended` reaches the host who ended the room, `proto: 2` in `welcome`. Alarm now fires at `min(+10s, next gate deadline, next hold expiry)` so transitions resolve on time without traffic. |
+| `backend/test-party-parity.mjs` | **New:** 15-scenario dispatch-level harness (fake WebSockets + fake DO state + pinned clock) covering the full gate lifecycle (incl. the second `content` re-arm event and `ended` after `live`), holds (create/release/timeout-via-alarm/override), stale/idempotent completions, stale-sv guards, settings clamps, end→host, heartbeat liveness, hashed passwords, both rate limiters. Caught one real porting bug (`_pbState` name mismatch) before completion. |
 
-*Native Android client (`Party.kt`): see D — the new protocol is additive, so current APKs keep working through the legacy path; readiness reporting for native clients is listed as a follow-up.*
+Deliberate divergences (documented, not defects): DO `sync_report` keeps its lenient position clamp (old clients depend on it) where Node rejects; wire-level `bad_message` shapes preserved as before (no `for:` suffix on some DO errors); timer granularity ≤10 s vs Node's 2 s tick (same end state); `planCorrection` is client-side only. `Party.kt` (native client) needs no change — protocol additions are additive and it rides the legacy path (see D5).
 
 ---
 
@@ -100,7 +100,8 @@ This report covers the P0 rebuild of Watch Party synchronization (timeline autho
 | `tools/click-test.js` (interaction regression) | **15/15 pass** |
 | `tools/party-e2e.js` (real Edge pages × real WebSockets × real party-server) | **21/21 pass** |
 | `node --check` on every touched JS (incl. inline `<script>` extraction of index.html) | **clean** |
-| PartyHub DO (`native` branch) | see note below |
+| PartyHub DO parity harness (`sb-native-ref/backend/test-party-parity.mjs`, 15 scenarios, dispatch-level with pinned clock) | **15/15 pass** (independently re-run after review; the hub diff was line-reviewed against `rooms.js` — gate/hold lifecycle, idempotent `ended`, hash compatibility verified) |
+| DO `node --check src/party.js` + `npm run check` | **clean** |
 
 Coverage maps to your 28 required scenarios as follows (test names in `sync-reliability.test.js` unless noted): (1,2) join+play, 3+ participants ✓ · (3,4) late join playing/paused ✓ · (5) 20 s slow load ✓ + E2E · (6,7) repeated buffering / resume ✓ · (8,9) episode change while playing / while buffering ✓ + E2E · (10) rapid episode switching ✓ · (11) out-of-order seeks ✓ · (12) rapid play-pause-play ✓ · (13,14) disconnect/reconnect, network switch ✓ + E2E · (15) background return ✓ · (16) unauthorized episode change ✓ · (17) different source capabilities ✓ (cut/duration visibility + planner) · (18) unsupported player ✓ (planner) · (19) auto-next ✓ · (20) stale previous-episode event ✓ · (21) player init failure ✓ · (22) disconnect during scheduled start ✓ · (23) join during scheduled start ✓ · (24) host leaves ✓ · (25) buffering participant never ready ✓ · (26) simultaneous controllers ✓ · (27) duplicate socket events ✓ · (28) leave with pending timers ✓.
 
