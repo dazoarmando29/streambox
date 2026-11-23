@@ -1854,12 +1854,13 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
 {
   // the global `button { min-width/min-height: 44px }` a11y rule clamps even
   // !important widths - without an exemption the compact phone bar can never
-  // shrink (buttons stayed 44px and wrapped to two rows over the video)
+  // shrink (buttons stayed 44px and wrapped to two rows over the video). The
+  // exemption now holds a 40px FLOOR: thumb-reachable targets, still one row.
   const bar = html.match(/#btnRow > button \{[^}]*\}/g) || [];
-  const compact = bar.find((r) => /min-width: 0/.test(r) && /!important/.test(r));
-  if (compact && /min-height: 34px !important/.test(compact))
-    ok("the compact phone bar exempts the global 44px button floor (min-width/min-height)");
-  else bad("#btnRow > button at phone widths must set min-width:0 !important + min-height to break the 44px a11y floor");
+  const compact = bar.find((r) => /min-width: 40px/.test(r) && /!important/.test(r));
+  if (compact && /min-height: 40px !important/.test(compact))
+    ok("the phone bar exempts the 44px floor but holds a 40px thumb-reachable floor");
+  else bad("#btnRow > button at phone widths must set min-width/min-height 40px !important (exempt 44px, never below 40px)");
   // min-content floors (iframe 300px intrinsic, unwrapped pill rows) expand
   // the layout viewport on phones - the iframe must live out of flow
   if (/\.player-wrap #player \{ position: absolute; inset: 0; \}/.test(html) && /#qPills \{ flex-wrap: wrap; \}/.test(html) && /#judderPill \{ flex-wrap: wrap; \}/.test(html))

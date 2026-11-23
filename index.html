@@ -5166,6 +5166,11 @@ function loadPlayer(){
   clearTimeout(window._anipmRetryT); window._anipmRetryT = 0;
   clearTimeout(window._boltRetryT); window._boltRetryT = 0;
   clearTimeout(window._vrResumeT); // a stale VidRift resume must not seek the fresh frame
+  // a never-fired autoplay gesture must not fire ctlToggle on the NEXT player
+  if (window._autoGo) {
+    ["pointerdown", "touchstart", "mousedown", "keydown"].forEach(ev => document.removeEventListener(ev, window._autoGo, true));
+    window._autoGo = null;
+  }
   window._boltProgress = false;
   clearTapHint(); // fresh video, fresh tap verdict
   if (!mirrorAllowed(mirror)) { mirror = "cinesrc"; updateMirrorUI(); paintMirrors(); }
