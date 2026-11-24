@@ -2083,5 +2083,40 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("the engine must suspend decorative rendering work while video plays (fluid-active/fluid-boost posture)");
 }
 
+/* ---------- 165. StabilityGuard: repair-first ladder ---------- */
+{
+  const ladder = /function sgRepairSync\(/.test(html) && /function sgAudioNudge\(/.test(html)
+    && /function sgKick\(/.test(html) && /function sgRestart\(/.test(html);
+  const repairBeforeRestart = html.indexOf("function sgRepairSync") < html.indexOf("function sgRestart")
+    && /function sgTick[\s\S]{0,2400}sgRepairSync/.test(html)
+    && /900000/.test(html); // L4 restart budgeted (15 min cooldown)
+  const truthQuery = /sendCmd\("getPaused"\)[\s\S]{0,80}sendCmd\("getMuted"\)/.test(html);
+  if (ladder && repairBeforeRestart && truthQuery)
+    ok("StabilityGuard is repair-first: L1 truth-query sync repair exists and restart is a budgeted last resort");
+  else bad("StabilityGuard must implement the L1-L4 ladder with sync repair before any reload and budgeted restarts");
+}
+
+/* ---------- 166. StabilityGuard settings real + defaults safe ---------- */
+{
+  const wired = /id="optSgProtect"/.test(html) && /id="optSgAudio"/.test(html) && /id="optSgSubs"/.test(html)
+    && /function sgSave\(/.test(html) && /streambox_stability/.test(html)
+    && /class="switch" checked/.test(html);
+  const essential = /SG\.protect = saved\.protect !== false/.test(html);
+  if (wired && essential)
+    ok("StabilityGuard settings gate real subsystems and default to full protection");
+  else bad("StabilityGuard settings must exist, persist, and default to protection on");
+}
+
+/* ---------- 167. false-trigger suppression + priority override ---------- */
+{
+  const suppress = /function sgUserPaused\(/.test(html) && /function sgSeekInFlight\(/.test(html)
+    && /function sgInTransition\(/.test(html) && /_userMuteIntent/.test(html)
+    && /_userMuteIntent = !!pState\.muted/.test(html);
+  const priority = /function fluidMemcAllowed[\s\S]{0,400}SG\.level < 2/.test(html);
+  if (suppress && priority)
+    ok("false triggers suppressed (user pause/mute, seeks, transitions) and generated frames yield before essential playback");
+  else bad("stability guards must respect user intent and sacrifice interpolation first");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

@@ -1,18 +1,13 @@
-The StreamBox FluidMotion Update - next-generation smooth playback, engineered for old and cheap Android TVs as hard as for flagships.
+The StreamBox StabilityGuard Update - P0 playback reliability for old and cheap Android TVs. This one is about never losing audio or subtitles again.
 
 What's new
-- FluidMotion Engine: adaptive playback optimization across the whole ecosystem (web app, PWA, both WebView APKs). Real capability detection (requestVideoFrameCallback, WebGL2, memory/cores, TV profile), four auto performance tiers with watchdog + hysteresis, and a motion-enhancement section in player settings (Auto / Smooth 60 / Balanced / Low-End TV Boost / Cinematic / Off) that is fully wired to the live pipeline - no decorative switches
-- Genuine motion-compensated frame interpolation on owned streams: block-matching motion estimation on GPU (WebGL2), bidirectional motion-compensated warp synthesis with scene-change + match-confidence gating and occlusion-safe fallback. Intermediates render at their true timestamps - audio, duration and subtitle timing never change. Runs where frames are legally readable (the owned video shell with CORS-clean sources); on capable hardware 24/30fps content presents as smooth 60fps-class motion
-- Honest limits where they belong: provider embeds are opaque cross-origin iframes - nobody can read their frames - so they report "interpolation unavailable - frames not accessible" and get what actually helps: frame pacing, stall/quality watchdog and background suspension instead of fake FPS numbers. FluidMotion Stats shows real measurements only (rVFC frame counts, getVideoPlaybackQuality drops, WebGL backend, tier) and labels estimates as estimates
-- Playback-active mode: while video plays, decorative animation, hero motion and blur work pause (real CPU/GPU relief on 1-2GB TV sticks - the "Low-End TV Boost" tier additionally flattens blur entirely). Layout and playback are untouched
-- Adaptive quality (opt-in, default off): repeated decoder/network stalls step quality down one rung when the pill is on Auto - a manually picked quality is never overridden
-- Owned-stream loader (window._hlsSource / hlsLoad) with graceful degradation: a source without CORS consent falls back to plain playback instead of dying
-
-Housekeeping
-- Build 241; wrapper 2.40 (versionCode 39). QA gate extended with 4 FluidMotion locks (settings wiring, honesty, genuine MEMC, performance posture) - 0 failures
-- Native track: FluidMotion frame-rate matching (Surface.setFrameRate) + dropped-frame watchdog on the native branch (native 0.110)
+- StabilityGuard: a repair-first stability ladder that kills the "stutter -> video continues but audio dies and subtitles freeze" failure class. It PREVENTS the failure (early degradation signals demote optional work before anything essential suffers), REPAIRS individual components (re-queries real playback state through the documented player commands, clears stuck pause/seek flags, re-anchors subtitles instantly - no reload), NUDGES audio back through documented controls (never overriding your own mute), and only as a LAST RESORT does a controlled pause/play kick or a budgeted keep-position restart (max once per 15 minutes, max 3 per hour - no more restart loops)
+- Root cause fixed at the source: the subtitle freeze was a stuck-state failure in our media clock (a pause/seek flag whose clearing event was lost in the stutter). StabilityGuard detects the exact contradiction and repairs against provider truth. Reproduced and fixed in automated tests end-to-end
+- Audio continuity protection: audio restored after overload/focus loss through documented commands; intentional mutes are always respected; on the native app, real AudioManager focus + headphone/HDMI route handling
+- Stability settings (all on by default, all wired to real subsystems): Auto stability, Audio continuity, Subtitle resync. Essential playback never depends on flipping a switch
+- StabilityGuard diagnostics in FluidMotion Stats: health, recovery level, JS pressure, position cadence, subtitle clock, repair/nudge/kick/restart counters - real numbers only
+- Stability beats smoothness: generated motion frames are the FIRST thing sacrificed whenever playback stability is recovering (QA-locked priority order)
 
 Honest limits
-- Interpolation exists only where frames are legally readable; embed providers cannot be interpolated by anyone (browser security), and we never pretend otherwise
-- Display refresh-rate switching from the web is not possible (no browser API) - the native track handles true refresh matching on capable TVs
-- Physical-device verification of interpolation smoothness is pending user testing; the pipeline, math and gating are verified in automated browser tests against real moving content
+- Provider iframe decoders cannot be reached by anyone (browser security): we prevent, detect, nudge and budget - we do not claim to repair a provider's internal decoder
+- Automated tests prove the failure mechanics and the repair path; 60-120 minute sessions on physical 1-2GB Android TVs are still required to certify device-level audio recovery

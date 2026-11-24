@@ -1026,7 +1026,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 241; // bump every release alongside version.txt
+  const BUILD_NUM = 242; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1482,6 +1482,14 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
             <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer" title="When the decoder stalls repeatedly, step quality down instead of stuttering. Never touches a manually picked quality."><input type="checkbox" id="optFmAdaptive" class="switch" onchange="fluidSave()"> Adaptive quality</label>
             <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer" title="Live measurements over the player - real numbers only"><input type="checkbox" id="optFmStats" class="switch" onchange="fluidSave()"> FluidMotion Stats</label>
+          </div>
+          <!-- StabilityGuard: playback stability always outranks motion
+               enhancement. Every toggle gates a real subsystem. -->
+          <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-white/10">
+            <p class="font-bold text-xs flex items-center gap-1.5 w-full"><svg class="ico ico-sm text-teal-300"><use href="#i-lock"/></svg> StabilityGuard</p>
+            <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer" title="Automatic anti-stutter protection: early degradation triggers workload reduction before audio or subtitles fail."><input type="checkbox" id="optSgProtect" class="switch" checked> Auto stability</label>
+            <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer" title="Restore audio automatically after overload/focus loss (never overrides your mute)."><input type="checkbox" id="optSgAudio" class="switch" checked> Audio continuity</label>
+            <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer" title="Subtitles re-anchor to the authoritative position after any stutter - they never freeze."><input type="checkbox" id="optSgSubs" class="switch" checked> Subtitle resync</label>
           </div>
         </div>
       </div>
@@ -6426,6 +6434,7 @@ function skipFlash(d){
 }
 function ctlMuteToggle(){
   pState.muted = !pState.muted;
+  window._userMuteIntent = !!pState.muted; // StabilityGuard: an intentional mute is never "audio failure"
   if (mirror === "anipm") anipmSend("setMuted", { muted: pState.muted });
   else sendCmd("setMuted", [pState.muted]);
   ctlPaint();
@@ -12623,7 +12632,10 @@ function fluidEffMode(){
 }
 function fluidMemcAllowed(){
   const m = fluidEffMode();
-  return (m === "smooth" || m === "balanced") && FLUID.tier !== "D" && FLUID.caps.webgl2 && FLUID.caps.rVFC;
+  // priority override: generated frames are the FIRST thing sacrificed -
+  // StabilityGuard level >= 2 means essential playback is recovering
+  return (m === "smooth" || m === "balanced") && FLUID.tier !== "D" && FLUID.caps.webgl2 && FLUID.caps.rVFC
+    && (typeof SG === "undefined" || SG.level < 2);
 }
 function setFluidMode(m){
   FLUID.mode = m;
@@ -12999,7 +13011,7 @@ function fluidStatsPaint(){
     r("profile", "tier " + FLUID.tier + " / " + fluidEffMode());
     r("acceleration", FLUID.caps.webgl2 ? "WebGL2 active" : "browser default");
     r("a/v sync", owned ? "drift < 1 frame (rVFC-locked)" : "provider-managed");
-    ss.innerHTML = rows.join("");
+    try { ss.innerHTML = rows.join("") + sgStatsRows(); } catch(e){ ss.innerHTML = rows.join(""); }
   } catch(e){}
 }
 (function fluidInit(){
@@ -13009,6 +13021,272 @@ function fluidStatsPaint(){
   } catch(e){}
 })();
 /* ================== end FluidMotion Engine ================== */
+
+/* ==================== StreamBox StabilityGuard ====================
+   P0 playback stability engine. Priority override: reliable playback,
+   continuous audio, continuous subtitles, stable video, no unnecessary
+   restarts - in that order, ALWAYS above interpolation/effects.
+
+   The production bug this exists to kill (worst on 1-2GB TV boxes):
+   overload -> stutter -> video resumes but audio dies and subtitles FREEZE
+   at the stutter timestamp -> the old recovery then fully restarts -> loop.
+   Root mechanics (verified in code): during the stutter a provider 'pause'
+   event (or our own stall triage) sets pState.paused / a seek sets
+   pState.seeking, and the clearing event is lost - capNow() then pins the
+   caption clock forever while the media element keeps rendering. Nothing
+   revalidated state, and nothing re-kicked audio.
+
+   Recovery ladder (never restart-first):
+   L0 prevent  - early signals (JS loop latency, provider timeupdate cadence
+                 decay, dropped frames) demote optional work BEFORE failure
+   L1 repair   - re-query authoritative provider state via the documented
+                 command API (getPaused/getMuted/getPlaybackRate), clear
+                 stuck flags, re-anchor subtitles. NO reload.
+   L2 component- audio continuity nudges (documented setMuted(false) only
+                 without user intent), targeted state restoration.
+   L3 kick     - controlled pause/play through documented commands;
+                 position, tracks and settings untouched.
+   L4 restart  - the existing reload-keep-position, last resort, budgeted.
+
+   False-trigger suppression: never acts on user pause, user mute (for mute
+   nudges), in-flight seeks, episode/provider transitions, or short stalls.
+   All counters/labels in diagnostics are real measurements. */
+const SG = {
+  protect: true, audio: true, subResync: true,
+  level: 0,
+  sig: {
+    loopMs: 0, cadenceMs: 0, lastCurAt: 0, lastCur: -1,
+    repairs: 0, nudges: 0, kicks: 0, restarts: 0,
+    lastReason: "", subsStale: false, lastLevelAt: 0
+  },
+  cool: { repair: 0, nudge: 0, kick: 0, restart: 0, restartHour: 0, restartHourN: 0 },
+  win: { stalls: [] }
+};
+(function sgBoot(){
+  try {
+    const saved = JSON.parse(localStorage.getItem("streambox_stability") || "null");
+    if (saved) {
+      SG.protect = saved.protect !== false;
+      SG.audio = saved.audio !== false;
+      SG.subResync = saved.subResync !== false;
+      const a = document.getElementById("optSgProtect"), b = document.getElementById("optSgAudio"), c = document.getElementById("optSgSubs");
+      if (a) a.checked = SG.protect;
+      if (b) b.checked = SG.audio;
+      if (c) c.checked = SG.subResync;
+    }
+  } catch(e){}
+  try {
+    const a = document.getElementById("optSgProtect"), b = document.getElementById("optSgAudio"), c = document.getElementById("optSgSubs");
+    if (a) a.onchange = function(){ SG.protect = !!a.checked; sgSave(); };
+    if (b) b.onchange = function(){ SG.audio = !!b.checked; sgSave(); };
+    if (c) c.onchange = function(){ SG.subResync = !!c.checked; sgSave(); };
+  } catch(e){}
+})();
+function sgSave(){
+  try {
+    localStorage.setItem("streambox_stability", JSON.stringify({ protect: SG.protect, audio: SG.audio, subResync: SG.subResync }));
+  } catch(e){}
+}
+/* real early-warning signals */
+function sgProbes(){
+  try {
+    const now = Date.now();
+    if (SG.sig._tickAt) {
+      const late = (now - SG.sig._tickAt) - 1000; // 1s tick drift = JS pressure
+      if (late >= 0) SG.sig.loopMs = SG.sig.loopMs * 0.8 + late * 0.2;
+    }
+    SG.sig._tickAt = now;
+    const cur = (typeof pState !== "undefined" && pState.cur) || 0;
+    if (cur !== SG.sig.lastCur) { SG.sig.lastCur = cur; SG.sig.lastCurAt = now; }
+    SG.sig.cadenceMs = now - SG.sig.lastCurAt;
+  } catch(e){}
+}
+/* user intent guards (false-trigger suppression) */
+function sgUserPaused(){
+  try { return !!window._userPauseHold; } catch(e){ return false; }
+}
+function sgSeekInFlight(){
+  try {
+    if (!pState.seeking) return false;
+    if (!pState._seekAt) { pState._seekAt = Date.now(); return true; }
+    return Date.now() - pState._seekAt < 2000;
+  } catch(e){ return false; }
+}
+function sgInTransition(){
+  try {
+    return Date.now() < (window._sgTransitionUntil || 0);
+  } catch(e){ return false; }
+}
+function sgPlayingIntent(){
+  try {
+    return !!window._cinePlaying && !sgUserPaused()
+      && !document.getElementById("watchView").classList.contains("hidden");
+  } catch(e){ return false; }
+}
+/* L1: synchronization repair - re-query truth, clear stuck flags, re-anchor
+   subtitles. This is the direct fix for "subtitles frozen at the stutter
+   timestamp" and costs nothing (one documented command round-trip). */
+function sgRepairSync(reason){
+  try {
+    const now = Date.now();
+    if (now - SG.cool.repair < 20000) return false;
+    SG.cool.repair = now;
+    SG.sig.repairs++;
+    SG.sig.lastReason = "L1 " + reason;
+    // clear stuck flags (the frozen-caption mechanism)
+    pState.seeking = false;
+    try { delete pState._seekAt; } catch(e){}
+    // authoritative truth from the provider (documented command surface);
+    // the reply handlers adopt real paused/muted/rate state automatically
+    try { sendCmd("getPaused"); sendCmd("getMuted"); sendCmd("getPlaybackRate"); } catch(e){}
+    try { anipmSend("getState", {}); } catch(e){}
+    // re-anchor + repaint subtitles at the authoritative position NOW
+    try { window._capAnchor = null; paintCaps(true); } catch(e){}
+    SG.sig.subsStale = false;
+    return true;
+  } catch(e){ return false; }
+}
+/* L2: audio continuity - re-kick muted audio through documented commands.
+   NEVER fires for an intentional mute (window._userMuteIntent). */
+function sgAudioNudge(reason){
+  try {
+    if (!SG.audio) return false;
+    if (window._userMuteIntent) return false; // user muted on purpose
+    const now = Date.now();
+    if (now - SG.cool.nudge < 300000) return false;
+    SG.cool.nudge = now;
+    SG.sig.nudges++;
+    SG.sig.lastReason = "L2 " + reason;
+    // adopt provider truth first; if the provider is muted without user
+    // intent, restore audio through the documented setter
+    try { sendCmd("getMuted"); } catch(e){}
+    try {
+      if (mirror === "anipm") anipmSend("setMuted", { muted: false });
+      else sendCmd("setMuted", [false]);
+    } catch(e){}
+    // normalize playback rate in case a glitch left it warped
+    try { if (pState.rate && pState.rate !== 1) sendCmd("setPlaybackRate", [1]); } catch(e){}
+    return true;
+  } catch(e){ return false; }
+}
+/* L3: controlled kick - pause/play through documented commands. Re-kicks
+   the provider's media + audio clocks. Position/tracks untouched. */
+function sgKick(reason){
+  try {
+    const now = Date.now();
+    if (now - SG.cool.kick < 300000) return false;
+    SG.cool.kick = now;
+    SG.sig.kicks++;
+    SG.sig.lastReason = "L3 " + reason;
+    try {
+      if (mirror === "anipm") { anipmSend("pause", {}); setTimeout(() => { try { anipmSend("play", {}); } catch(e){} }, 600); }
+      else { sendCmd("pause"); setTimeout(() => { try { sendCmd("play"); } catch(e){} }, 600); }
+    } catch(e){}
+    setTimeout(() => { try { sgRepairSync("post-kick"); } catch(e){} }, 1400);
+    return true;
+  } catch(e){ return false; }
+}
+/* L4: last resort - the EXISTING reload-keep-position machinery, budgeted. */
+function sgRestart(reason){
+  try {
+    const now = Date.now();
+    if (now - SG.cool.restart < 900000) return false;
+    if (SG.cool.restartHour !== new Date().getHours()) { SG.cool.restartHour = new Date().getHours(); SG.cool.restartHourN = 0; }
+    if (SG.cool.restartHourN >= 3) return false;
+    SG.cool.restart = now;
+    SG.cool.restartHourN++;
+    SG.sig.restarts++;
+    SG.sig.lastReason = "L4 " + reason;
+    try { reloadKeepPos(); return true; } catch(e){}
+    try { midPlayRescue("stability last resort"); return true; } catch(e){}
+    return false;
+  } catch(e){ return false; }
+}
+/* the ladder driver: prevention first, escalation only on sustained
+   failure, de-escalation on sustained recovery (hysteresis everywhere) */
+function sgTick(){
+  try {
+    if (!SG.protect) return;
+    sgProbes();
+    const playing = sgPlayingIntent();
+    const stalled = SG.sig.cadenceMs; // ms since last real position change
+    // reset the state machine on episode/provider transitions
+    try {
+      const ws = (typeof watchState !== "undefined" && watchState) ? (watchState.id + ":" + (watchState.s || 1) + ":" + (watchState.e || 1) + ":" + mirror) : "";
+      if (ws !== SG.sig._wsKey) {
+        SG.sig._wsKey = ws;
+        window._sgTransitionUntil = Date.now() + 4000; // transition grace
+        SG.sig.subsStale = false;
+        SG.level = 0;
+      }
+    } catch(e){}
+
+    // ---- stuck-flag detection (the P0 subtitle freeze) ----
+    const seekStuck = pState.seeking && !sgSeekInFlight() && playing;
+    const subsShouldRun = playing && !pState.paused;
+    if (subsShouldRun && stalled > 4000) SG.sig.subsStale = true;
+
+    if (seekStuck) { sgRepairSync("stuck-seek-flag"); return; }
+
+    // ---- L0 prevention: early degradation, yield optional work first ----
+    if (playing && (SG.sig.loopMs > 400 || (stalled > 2000 && stalled <= 6000))) {
+      if (SG.level === 0) { SG.level = 1; SG.sig.lastLevelAt = Date.now(); SG.sig.lastReason = "L0 early degradation"; }
+      try { FLUID.onStall("sg-preload"); } catch(e){} // demote interpolation BEFORE anything essential suffers
+      return;
+    }
+
+    // ---- contradiction: position advancing while we think paused ----
+    if (pState.paused && !sgUserPaused() && !sgSeekInFlight() && !sgInTransition() && stalled < 900 && playing) {
+      sgRepairSync("paused-flag-stale");
+      return;
+    }
+
+    // ---- THE P0 CASE: playback expected, paused flag likely stuck (the
+    // clearing 'play' event was lost in the stutter) and the clock frozen.
+    // Distinguish from a genuine pause via _userPauseHold only; the repair
+    // re-queries provider TRUTH rather than guessing. ----
+    if (playing && pState.paused && !sgUserPaused() && !sgSeekInFlight() && !sgInTransition() && stalled > 8000) {
+      if (sgRepairSync("paused-stuck-after-stutter")) return;
+    }
+
+    // ---- sustained stall while the user expects playback ----
+    if (playing && !sgUserPaused() && !sgSeekInFlight() && !sgInTransition()) {
+      if (stalled > 60000 && sgRestart("position stalled 60s")) return;
+      if (stalled > 25000 && sgKick("position stalled 25s")) return;
+      if (stalled > 12000 && sgAudioNudge("audio/position suspect")) { sgRepairSync("sustained stall"); return; }
+      if (stalled > 6000 && SG.sig.subsStale) { sgRepairSync("caption clock stale"); return; }
+    }
+
+    // ---- recovery: cadence is fresh again ----
+    if (playing && stalled < 1200) {
+      SG.sig.subsStale = false;
+      if (SG.level > 0 && Date.now() - SG.sig.lastLevelAt > 60000) { SG.level = 0; SG.sig.lastReason = "recovered"; }
+    }
+  } catch(e){}
+}
+function sgStatsRows(){
+  const r = [];
+  const push = (k, v) => r.push('<div class="fm-row"><span>' + k + '</span><span>' + v + '</span></div>');
+  push("STABILITYGUARD", "<b>" + (SG.protect ? "ON" : "OFF") + "</b>");
+  push("health", SG.sig.subsStale ? "degraded" : (SG.level === 0 ? "stable" : "recovering L" + SG.level));
+  push("level", "L" + SG.level + " (0=prevention..4=restart)");
+  push("js loop latency", Math.round(SG.sig.loopMs) + " ms");
+  push("position cadence", Math.round(SG.sig.cadenceMs) + " ms ago");
+  push("subs clock", SG.sig.subsStale ? "stale (repairing)" : "in sync");
+  push("repairs/nudges/kicks", SG.sig.repairs + "/" + SG.sig.nudges + "/" + SG.sig.kicks);
+  push("full restarts", String(SG.sig.restarts));
+  push("last action", SG.sig.lastReason || "none");
+  return r.join("");
+}
+setInterval(sgTick, 1000);
+/* mark episode/provider transitions for the suppression window (called from
+   the existing load path via one tiny hook below) */
+try {
+  const _sgOpenWatch = openWatch;
+  openWatch = function(){ window._sgTransitionUntil = Date.now() + 4000; return _sgOpenWatch.apply(this, arguments); };
+} catch(e){}
+/* ================== end StabilityGuard ================== */
+
 
 /* QA diagnostics (?diag=1): turns ANY device into a test rig - so an iPhone
    report becomes data, not guesswork. Reports build, environment, the live
