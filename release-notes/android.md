@@ -1,3 +1,9 @@
+The StreamBox Subtitle Sync Fix - captions finally keep time.
+
+What is fixed
+- Subtitles no longer sit delayed behind the dialogue and no longer flash ahead of it (the "delayed and sometimes early" bug on CineSrc and every other provider). Root cause: the caption clock hard-reset to every provider timeupdate, and those messages are often a second or two STALE - each one yanked captions backward while the extrapolation between them jumped forward. The clock is now a proper media-clock estimator: it free-runs at your real playback rate (fixes growing delay at 1.5x/2x too), learns the message transport lag so late news never pulls captions backward, corrects a genuinely slow stream smoothly instead of jittering, and snaps instantly only on real seeks. Absolute rule: while playing, the displayed timeline can never move backward
+- Verified against a simulated 1.2s-late message stream (the exact reported scenario): zero backward movements, correct cue boundaries, correct speed scaling, correct seek behavior, frozen-while-paused - and permanently QA-locked so no future change can reintroduce it on any movie or show
+
 The StreamBox Provider Compatibility Update - FluidMotion grows where it legally can, and tells the truth everywhere else.
 
 What is new
