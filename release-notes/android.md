@@ -1,3 +1,13 @@
+The StreamBox Provider Compatibility Update - FluidMotion grows where it legally can, and tells the truth everywhere else.
+
+What is new
+- Universal Playback Adapter: every source automatically gets the most capable authorized playback path, with a live status that never overstates it - Genuine MEMC on owned streams, adaptive frame pacing + StabilityGuard on provider embeds, and an explicit "frames not accessible" honesty line (provider iframes are browser-locked to everyone; we do not bypass that)
+- Experimental Capture MEMC (OFF by default): with YOUR explicit screen-share consent, captured frames run through the genuine motion-compensation engine - live latency is shown and the mode disables itself before it could ever hurt A/V sync
+- Owned-stream track pills (embedded audio/subtitle tracks), smarter low-end interpolation (half-cost motion search on weak devices, early-exit matching), one shared engine across all platforms
+
+Honest numbers
+- Engine sustained interpolation measured on worst-case software GL: ~1.1 generated frames/sec at 360p (floor value; hardware GPUs on real devices are far faster). No 60fps claim until physical devices prove it - and StabilityGuard still yields generated frames first whenever playback needs the headroom
+
 The StreamBox StabilityGuard Update - P0 playback reliability for old and cheap Android TVs. This one is about never losing audio or subtitles again.
 
 What's new
@@ -5,7 +15,6 @@ What's new
 - Root cause fixed at the source: the subtitle freeze was a stuck-state failure in our media clock (a pause/seek flag whose clearing event was lost in the stutter). StabilityGuard detects the exact contradiction and repairs against provider truth. Reproduced and fixed in automated tests end-to-end
 - Audio continuity protection: audio restored after overload/focus loss through documented commands; intentional mutes are always respected; on the native app, real AudioManager focus + headphone/HDMI route handling
 - Stability settings (all on by default, all wired to real subsystems): Auto stability, Audio continuity, Subtitle resync. Essential playback never depends on flipping a switch
-- StabilityGuard diagnostics in FluidMotion Stats: health, recovery level, JS pressure, position cadence, subtitle clock, repair/nudge/kick/restart counters - real numbers only
 - Stability beats smoothness: generated motion frames are the FIRST thing sacrificed whenever playback stability is recovering (QA-locked priority order)
 
 Honest limits

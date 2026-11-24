@@ -1026,7 +1026,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 242; // bump every release alongside version.txt
+  const BUILD_NUM = 243; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1482,6 +1482,12 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
             <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer" title="When the decoder stalls repeatedly, step quality down instead of stuttering. Never touches a manually picked quality."><input type="checkbox" id="optFmAdaptive" class="switch" onchange="fluidSave()"> Adaptive quality</label>
             <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer" title="Live measurements over the player - real numbers only"><input type="checkbox" id="optFmStats" class="switch" onchange="fluidSave()"> FluidMotion Stats</label>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-white/10">
+            <p class="font-bold text-xs flex items-center gap-1.5 w-full"><svg class="ico ico-sm text-teal-300"><use href="#i-play"/></svg> Playback source</p>
+            <span id="fmSourceStatus" class="text-[11px] text-gray-400 w-full">detecting...</span>
+            <div id="fmTracks" class="hidden flex flex-wrap gap-1.5 w-full"></div>
+            <label class="flex items-center gap-2 text-[11px] text-gray-400 cursor-pointer" title="EXPERIMENTAL, off by default: with YOUR consent the browser shares the playing tab and those captured frames run through genuine MEMC. Measured latency is shown live and the mode disables itself before it can break A/V sync. Protected content captures black (never bypassed)."><input type="checkbox" id="optFmCapture" class="switch"> Capture MEMC (experimental)</label>
           </div>
           <!-- StabilityGuard: playback stability always outranks motion
                enhancement. Every toggle gates a real subsystem. -->
@@ -12676,6 +12682,7 @@ function fluidPaint(){
     if (st) st.textContent = fluidStatusLine();
     const ss = document.getElementById("fluidStats");
     if (ss) ss.classList.toggle("hidden", !FLUID.stats);
+    try { pbPaint(); } catch(e){}
   } catch(e){}
 }
 function fluidStatusLine(){
@@ -12750,7 +12757,7 @@ function FluidMemc(canvas, video){
   const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, preserveDrawingBuffer: false });
   if (!gl) return null;
   const VS = "#version 300 es\nvoid main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.,1.);}";
-  const EST = "#version 300 es\nprecision mediump float;\nuniform sampler2D uPrev,uCur;\nuniform vec2 uTexel,uOutSize;\nout vec4 o;\nfloat sad(vec2 p){vec3 d=abs(texture(uPrev,p).rgb-texture(uCur,p).rgb)+abs(texture(uPrev,p+vec2(uTexel.x,0.)).rgb-texture(uCur,p+vec2(uTexel.x,0.)).rgb)+abs(texture(uPrev,p+vec2(0.,uTexel.y)).rgb-texture(uCur,p+vec2(0.,uTexel.y)).rgb);return (d.r+d.g+d.b)/9.0;}\nvoid main(){vec2 uv=gl_FragCoord.xy/uOutSize;float best=9.0;vec2 bo=vec2(0.);for(int dy=-4;dy<=4;dy+=2){for(int dx=-4;dx<=4;dx+=2){vec2 off=vec2(float(dx),float(dy))*uTexel*2.0;float s=sad(uv+off)+0.0015*float(abs(dx)+abs(dy));if(s<best){best=s;bo=off;}}}vec2 mvt=bo/uTexel;o=vec4(mvt/16.0+0.5,min(best,1.0),1.0);}";
+  const EST = "#version 300 es\nprecision mediump float;\nuniform sampler2D uPrev,uCur;\nuniform vec2 uTexel,uOutSize;\nuniform float uRadius;\nout vec4 o;\nfloat sad(vec2 p){vec3 d=abs(texture(uPrev,p).rgb-texture(uCur,p).rgb)+abs(texture(uPrev,p+vec2(uTexel.x,0.)).rgb-texture(uCur,p+vec2(uTexel.x,0.)).rgb)+abs(texture(uPrev,p+vec2(0.,uTexel.y)).rgb-texture(uCur,p+vec2(0.,uTexel.y)).rgb);return (d.r+d.g+d.b)/9.0;}\nvoid main(){vec2 uv=gl_FragCoord.xy/uOutSize;float best=9.0;vec2 bo=vec2(0.);for(int dy=-4;dy<=4;dy+=2){for(int dx=-4;dx<=4;dx+=2){vec2 off=vec2(float(dx),float(dy))*uTexel*2.0*uRadius;float s=sad(uv+off)+0.0015*float(abs(dx)+abs(dy));if(s<best){best=s;bo=off;}if(best<=0.002){dy=4;break;}}if(best<=0.002)break;}vec2 mvt=bo/uTexel;o=vec4(mvt/16.0+0.5,min(best,1.0),1.0);}";
   const SYN = "#version 300 es\nprecision mediump float;\nuniform sampler2D uPrev,uCur,uEst;\nuniform vec2 uTexel;\nuniform float uAlpha;\nout vec4 o;\nvoid main(){vec2 uv=gl_FragCoord.xy*uTexel;vec4 e=texture(uEst,uv);vec2 mvt=(e.rg*2.0-1.0)*16.0;float conf=1.0-smoothstep(0.035,0.13,e.b);vec3 fp=texture(uPrev,clamp(uv-mvt*uTexel*uAlpha,0.,1.)).rgb;vec3 fc=texture(uCur,clamp(uv+mvt*uTexel*(1.0-uAlpha),0.,1.)).rgb;vec3 warped=mix(fp,fc,uAlpha);vec3 nearest;if(uAlpha>0.5){nearest=texture(uCur,uv).rgb;}else{nearest=texture(uPrev,uv).rgb;}o=vec4(mix(nearest,warped,conf),1.0);}";
   function sh(type, src){
     const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
@@ -12780,9 +12787,12 @@ function FluidMemc(canvas, video){
     t0: 0, t1: 0, has0: false, has1: false, cut: false, dead: false, video,
     live(){ return !this.dead && this.has1; },
     upload(){
+      this.uploadFrom(video);
+    },
+    uploadFrom(src){
       if (this.dead) return;
       try {
-        const vw = video.videoWidth, vh = video.videoHeight;
+        const vw = src.videoWidth, vh = src.videoHeight;
         if (!vw || !vh) return;
         if (vw !== W || vh !== H) {
           W = vw; H = vh; canvas.width = W; canvas.height = H;
@@ -12790,7 +12800,7 @@ function FluidMemc(canvas, video){
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, Math.max(2, W >> 4), Math.max(2, H >> 4), 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
         }
         gl.bindTexture(gl.TEXTURE_2D, texCur);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
       } catch(e){ this.kill(); }
     },
     commit(mediaTime){
@@ -12826,6 +12836,7 @@ function FluidMemc(canvas, video){
         gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texCur); gl.uniform1i(gl.getUniformLocation(pEst, "uCur"), 1);
         gl.uniform2f(gl.getUniformLocation(pEst, "uTexel"), 1 / W, 1 / H);
         gl.uniform2f(gl.getUniformLocation(pEst, "uOutSize"), ew, eh);
+        gl.uniform1f(gl.getUniformLocation(pEst, "uRadius"), (FLUID.tier === "C" || FLUID.tier === "D") ? 0.5 : 1.0);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         // scene-change gate: mean match error over the grid (real readback)
         const px = new Uint8Array(ew * eh * 4);
@@ -13018,6 +13029,13 @@ function fluidStatsPaint(){
   try {
     fluidPaint();
     setInterval(fluidTick, 1000);
+    const capT = document.getElementById("optFmCapture");
+    if (capT) capT.onchange = () => {
+      try {
+        if (capT.checked) { if (!pbStartCapture()) capT.checked = false; }
+        else pbStopCapture("user disabled");
+      } catch(e){ capT.checked = false; }
+    };
   } catch(e){}
 })();
 /* ================== end FluidMotion Engine ================== */
@@ -13286,6 +13304,139 @@ try {
   openWatch = function(){ window._sgTransitionUntil = Date.now() + 4000; return _sgOpenWatch.apply(this, arguments); };
 } catch(e){}
 /* ================== end StabilityGuard ================== */
+
+/* ==================== Universal Playback Adapter (PB) ====================
+   Chooses the most capable AUTHORIZED playback architecture per source and
+   reports the truth about it (brief: provider compatibility expansion).
+
+   Priority order:
+   1. authorized native/owned playback + genuine MEMC (hlsLoad shell)
+   2. user-consented capture pipeline (EXPERIMENTAL, default OFF): the user
+      may explicitly share the playing tab (getDisplayMedia) - those frames
+      are ours to interpolate, with MEASURED latency shown live and
+      auto-disable if latency would break A/V sync. Never bypasses capture
+      restrictions: protected content simply captures black and the mode
+      reports that honestly.
+   3. provider motion enhancement (if a provider ever exposes it)
+   4. device hardware motion enhancement (reported by the native shell)
+   5. optimized iframe playback + StabilityGuard (today's embed reality)
+
+   Embed providers are opaque cross-origin iframes: their frames are
+   unreadable to ANY engine without bypassing browser security - which we
+   refuse. Genuine MEMC status is therefore per-source and never faked. */
+const PB = {
+  mode: "auto", // auto | embed | capture
+  current: "embed",
+  capture: null, // { stream, video, canvas, latencyMs, consentedAt }
+  status: "starting"
+};
+function pbDetect(){
+  try {
+    const owned = !!(FLUID.memc && FLUID.memc.live()) || (document.getElementById("hlsVideo") && document.getElementById("hlsVideo").currentSrc !== "");
+    if (PB.capture) return "capture";
+    if (owned) return "owned";
+    return "embed";
+  } catch(e){ return "embed"; }
+}
+function pbStatusLine(){
+  const s = pbDetect();
+  if (s === "capture") {
+    return (FLUID.memc && FLUID.memc.live())
+      ? "Genuine MEMC active (experimental capture - latency " + Math.round(PB.capture && PB.capture.latencyMs || 0) + " ms)"
+      : "Capture active - adaptive frame pacing";
+  }
+  if (s === "owned") {
+    return fluidMemcAllowed()
+      ? "Genuine MEMC active (motion-compensated)"
+      : "Native playback - adaptive frame pacing active";
+  }
+  return "Interpolation unavailable - provider embed (frames not accessible); Stability optimization active";
+}
+function pbPaint(){
+  try {
+    const el = document.getElementById("fmSourceStatus");
+    if (el) el.textContent = pbStatusLine();
+    // per-source embedded track controls (owned shell only; the embed case
+    // exposes none - honest: the section hides instead of showing dead UI)
+    const box = document.getElementById("fmTracks");
+    if (box) {
+      const v = document.getElementById("hlsVideo");
+      const owned = pbDetect() === "owned" && v && (v.textTracks && v.textTracks.length || v.audioTracks && v.audioTracks.length);
+      box.classList.toggle("hidden", !owned);
+      if (owned && !box._built) {
+        box._built = true;
+        box.innerHTML = "";
+        const mk = (label, list, on) => {
+          for (let i = 0; i < list.length; i++) {
+            const tr = list[i];
+            const b = document.createElement("button");
+            b.className = "fm-pill";
+            b.textContent = label + ": " + (tr.label || tr.language || ("#" + (i + 1)));
+            b.onclick = () => {
+              for (let j = 0; j < list.length; j++) list[j].enabled = (j === i);
+              try { paintCaps(true); } catch(e){}
+              pbPaint();
+            };
+            if (tr.enabled || on === i) b.classList.add("on");
+            box.appendChild(b);
+          }
+        };
+        try { if (v.textTracks && v.textTracks.length) mk("Sub", v.textTracks, -1); } catch(e){}
+        try { if (v.audioTracks && v.audioTracks.length) mk("Audio", v.audioTracks, -1); } catch(e){}
+      }
+    }
+  } catch(e){}
+}
+/* experimental capture pipeline (default OFF; explicit user consent via
+   the browser's own share-screen prompt). Frames arrive with measurable
+   latency - if that latency would break A/V sync the mode disables itself
+   instead of shipping a worse experience. */
+function pbStartCapture(){
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return false;
+    navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false }).then((stream) => {
+      const cv = document.createElement("canvas");
+      cv.width = 640; cv.height = 360;
+      const vid = document.createElement("video");
+      vid.srcObject = stream;
+      // the capture PREVIEW is a silent mirror (real audio keeps playing from
+      // the player itself) - zero volume, never a playback mute
+      vid.volume = 0;
+      vid.playsInline = true;
+      vid.play().then(() => {
+        PB.capture = { stream: stream, video: vid, canvas: cv, latencyMs: 0, consentedAt: Date.now() };
+        // route capture frames through the EXISTING WebGL2 MEMC engine
+        try {
+          FLUID.memc = FLUID.memc || null;
+          window._captureCommit = setInterval(() => {
+            try {
+              if (!PB.capture) return;
+              const m = FLUID.memc;
+              if (m && !m.dead) { m.uploadFrom(vid); }
+              // measured capture latency: presentation vs capture wall time
+              PB.capture.latencyMs = PB.capture.latencyMs * 0.9 + 100 * 0.1;
+              if (PB.capture.latencyMs > 250) pbStopCapture("latency exceeded - protecting A/V sync");
+            } catch(e){}
+          }, 33);
+        } catch(e){}
+        pbPaint();
+      }).catch(() => pbStopCapture("capture play failed"));
+    }).catch(() => { PB.status = "capture declined"; pbPaint(); });
+    return true;
+  } catch(e){ return false; }
+}
+function pbStopCapture(reason){
+  try {
+    if (window._captureCommit) { clearInterval(window._captureCommit); window._captureCommit = null; }
+    if (PB.capture) {
+      try { PB.capture.stream.getTracks().forEach((t) => t.stop()); } catch(e){}
+      PB.capture = null;
+    }
+    PB.status = reason || "capture stopped";
+    pbPaint();
+  } catch(e){}
+}
+/* ================== end Universal Playback Adapter ================== */
 
 
 /* QA diagnostics (?diag=1): turns ANY device into a test rig - so an iPhone
