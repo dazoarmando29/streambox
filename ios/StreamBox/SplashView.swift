@@ -5,6 +5,7 @@ import SwiftUI
 /// splash underneath, so this one just hides the WKWebView white flash.
 struct SplashView: View {
     @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -38,6 +39,8 @@ struct SplashView: View {
             }
         }
         .onAppear {
+            // Reduce Motion: the plate stays still (system accessibility rule)
+            guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                 pulse = true
             }

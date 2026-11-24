@@ -558,6 +558,8 @@ public class MainActivity extends Activity {
             + "var ae=document.activeElement;"
             + "if(ae&&ae.tagName==='IFRAME'){ae.blur();var mb=document.querySelector('#mirrorBar:not(.hidden) button');if(mb){mb.focus();return 'refocus';}var b=document.getElementById('ctlPlay');if(b)b.focus();return 'refocus';}"
             + "if(document.body.classList.contains('video-fs')){exitVideoFs();goHome();return 'home';}"
+            + "var ms=document.getElementById('moreSheet');"
+            + "if(ms&&!ms.classList.contains('hidden')){closeMoreSheet();return 'panel';}"
             + "var pn=document.getElementById('pinPad');"
             + "if(pn&&!pn.classList.contains('hidden')){pinClose();return 'panel';}"
             + "var g=document.getElementById('tvGuide');"

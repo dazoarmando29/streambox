@@ -12,7 +12,9 @@ struct WebViewHost: UIViewRepresentable {
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var promptText = ""
+    @State private var showSettings = false
 
     private var sharePresented: Binding<Bool> {
         Binding(get: { model.shareItems != nil },
@@ -75,6 +77,27 @@ struct ContentView: View {
                 SplashView()
                     .transition(.opacity)
             }
+
+            // App lock: opaque cover (also masks the app-switcher snapshot
+            // content behind it while locked).
+            if model.locked {
+                LockOverlay(onUnlock: { model.requestUnlock() })
+                    .transition(.opacity)
+            }
+        }
+        .onChange(of: scenePhase) { phase in
+            switch phase {
+            case .active: model.onScenePhaseActive()
+            case .background: model.onScenePhaseBackground()
+            default: break
+            }
+        }
+        .alert("App Lock", isPresented: Binding(
+            get: { model.lockNotice != nil },
+            set: { if !$0 { model.lockNotice = nil } })) {
+            Button("OK", role: .cancel) { model.lockNotice = nil }
+        } message: {
+            Text(model.lockNotice ?? "")
         }
         .animation(.easeInOut(duration: 0.25), value: model.splashVisible)
         .animation(.easeInOut(duration: 0.25), value: model.isOnline)
@@ -90,7 +113,8 @@ struct ContentView: View {
                     }
                 }
         )
-        // hardware keyboard parity (iPad / keyboard cases)
+        // hardware keyboard parity (iPad / keyboard cases). Command-only so
+        // plain keys keep typing into the web layer's own fields.
         .background(
             VStack {
                 Button("") { model.back() }
@@ -101,6 +125,15 @@ struct ContentView: View {
                     .opacity(0)
                 Button("") { model.share(url: model.web.webView.url, text: "StreamBox") }
                     .keyboardShortcut("s", modifiers: .command)
+                    .opacity(0)
+                Button("") { model.web.evaluate("try{goHome();}catch(e){}") }
+                    .keyboardShortcut("1", modifiers: .command)
+                    .opacity(0)
+                Button("") { model.web.evaluate("try{filterType('movie');}catch(e){}") }
+                    .keyboardShortcut("2", modifiers: .command)
+                    .opacity(0)
+                Button("") { model.web.evaluate("try{showList();}catch(e){}") }
+                    .keyboardShortcut("3", modifiers: .command)
                     .opacity(0)
             }
         )
@@ -140,16 +173,22 @@ struct ContentView: View {
             } label: {
                 Label("Open in Safari", systemImage: "safari")
             }
+            Button {
+                showSettings = true
+                Haptics.tap()
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
             Divider()
             Toggle(isOn: Binding(
                 get: { model.settings.liteMode },
-                set: { model.settings.liteMode = $0; model.reload() }
+                set: { model.settings.liteMode = $0; Haptics.tap(); model.reload() }
             )) {
                 Label("Lite Mode", systemImage: "leaf")
             }
             Toggle(isOn: Binding(
                 get: { model.keepAwake },
-                set: { model.keepAwake = $0; model.applyIdleTimer() }
+                set: { model.keepAwake = $0; model.applyIdleTimer(); Haptics.tap() }
             )) {
                 Label("Keep Screen Awake", systemImage: "sun.max")
             }
@@ -164,6 +203,39 @@ struct ContentView: View {
                 .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 1))
         }
         .accessibilityLabel("StreamBox menu")
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+        }
+    }
+}
+
+/// Face ID / Touch ID / passcode gate. Opaque by design: while locked the
+/// app content must not be readable (including in the app switcher).
+struct LockOverlay: View {
+    let onUnlock: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.043, green: 0.067, blue: 0.118)
+                .ignoresSafeArea()
+            VStack(spacing: 18) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 42, weight: .bold))
+                    .foregroundColor(Color(red: 0.20, green: 0.89, blue: 0.69))
+                Text("StreamBox is locked")
+                    .font(.system(size: 22, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                Button(action: onUnlock) {
+                    Label("Unlock", systemImage: "faceid")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(Color(red: 0.04, green: 0.08, blue: 0.15))
+                        .padding(.horizontal, 30)
+                        .padding(.vertical, 15)
+                        .background(Color(red: 0.20, green: 0.89, blue: 0.69), in: Capsule())
+                }
+                .accessibilityLabel("Unlock StreamBox with Face ID or passcode")
+            }
+        }
     }
 }
 

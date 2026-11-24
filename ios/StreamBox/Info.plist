@@ -36,6 +36,9 @@
   <!-- App Store export compliance: standard encryption only (HTTPS). -->
   <key>ITSAppUsesNonExemptEncryption</key>
   <false/>
+  <!-- Optional app lock explanation (LocalAuthentication biometrics). -->
+  <key>NSFaceIDUsageDescription</key>
+  <string>StreamBox uses Face ID only to unlock the optional app lock. Biometrics never leave the device.</string>
   <key>LSRequiresIPhoneOS</key>
   <true/>
   <!-- Background audio: media keeps playing (audio + PiP + AirPlay family). -->

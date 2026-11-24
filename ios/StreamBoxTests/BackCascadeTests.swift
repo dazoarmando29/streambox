@@ -26,7 +26,7 @@ final class BackCascadeTests: XCTestCase {
         // Every popup must be checked before the ones layered behind it.
         // (Anchors below are single-occurrence strings; the shared goHome()
         // helper appears in several branches and is asserted separately.)
-        let chain = ["pinClose", "closeTvGuide", "closeSearch", "closePanels",
+        let chain = ["moreSheet", "pinClose", "closeTvGuide", "closeSearch", "closePanels",
                      "hideUpNext", "resumePick(true)", "partyClose", "aboutClose",
                      "closeModal", "watchView"]
         var last = -1

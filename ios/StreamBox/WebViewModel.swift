@@ -1,5 +1,6 @@
 import WebKit
 import SwiftUI
+import UIKit
 
 /// Owns the WKWebView and translates the shared shell contract (markers,
 /// back cascade, allowlist, bridge messages) between web and native.
@@ -60,6 +61,11 @@ final class WebViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKUI
         webView.isOpaque = false
         webView.backgroundColor = UIColor(red: 0.043, green: 0.067, blue: 0.118, alpha: 1)
 
+        // Pull to refresh: native reload affordance over the web layer.
+        let refresh = UIRefreshControl()
+        refresh.addTarget(self, action: #selector(onPullRefresh), for: .valueChanged)
+        webView.scrollView.refreshControl = refresh
+
         titleObservation = webView.observe(\.title, options: [.new]) { [weak self] wv, _ in
             guard let self = self, let title = wv.title,
                   let marker = AppConfig.titleMarker(title) else { return }
@@ -94,6 +100,18 @@ final class WebViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKUI
 
     func reload() {
         webView.reload()
+    }
+
+    @objc private func onPullRefresh() {
+        webView.reload()
+    }
+
+    /// Reduce Motion (accessibility): the web layer's calm edition drops the
+    /// decorative animation. One-way: user can still enable calm themselves.
+    private func injectAccessibilityModes() {
+        if UIAccessibility.isReduceMotionEnabled {
+            evaluate("try{document.body.classList.add('calm');document.documentElement.style.scrollBehavior='auto';}catch(e){}")
+        }
     }
 
     func evaluate(_ js: String) {
@@ -171,8 +189,11 @@ final class WebViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKUI
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         DispatchQueue.main.async { [weak self] in
-            self?.model?.webError = nil
-            self?.model?.dismissSplashIfNeeded()
+            guard let self = self else { return }
+            self.webView.scrollView.refreshControl?.endRefreshing()
+            self.injectAccessibilityModes()
+            self.model?.webError = nil
+            self.model?.dismissSplashIfNeeded()
         }
     }
 
@@ -190,6 +211,7 @@ final class WebViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKUI
         DispatchQueue.main.async { [weak self] in
             self?.model?.dismissSplashIfNeeded()
             self?.model?.webError = ns.localizedDescription
+            Haptics.warning()
         }
     }
 

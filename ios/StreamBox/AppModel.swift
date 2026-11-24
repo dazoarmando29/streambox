@@ -32,6 +32,11 @@ final class AppModel: ObservableObject {
     // Deep links wait for the page before PARTY.open() runs
     @Published var pendingPartyCode: String? = nil
 
+    // App lock (optional Face ID / Touch ID / passcode)
+    @Published var locked = false
+    @Published var lockNotice: String? = nil
+    private var unlockedThisSession = false
+
     let settings = SettingsStore()
     let web: WebViewModel
     private let monitor = NWPathMonitor()
@@ -40,12 +45,45 @@ final class AppModel: ObservableObject {
     init() {
         web = WebViewModel()
         web.model = self
+        Haptics.setEnabled(settings.hapticsEnabled)
+        if settings.appLockEnabled { locked = true }
         monitor.pathUpdateHandler = { [weak self] path in
             DispatchQueue.main.async { self?.applyPath(path) }
         }
         monitor.start(queue: DispatchQueue(label: "streambox.network"))
         RemoteCommands.install { [weak self] js in
             self?.web.evaluate(js)
+        }
+    }
+
+    // MARK: - App lock
+
+    func requestUnlock() {
+        AppLock.authenticate(reason: "Unlock StreamBox") { [weak self] ok in
+            guard let self = self else { return }
+            if ok {
+                self.locked = false
+                self.unlockedThisSession = true
+                self.lockNotice = nil
+                Haptics.success()
+            } else {
+                self.lockNotice = "Couldn't verify it's you. Try again."
+                Haptics.warning()
+            }
+        }
+    }
+
+    /// Scene lifecycle: re-lock shortly after backgrounding (privacy), and
+    /// gate the first foreground behind the lock when it is enabled.
+    func onScenePhaseActive() {
+        if settings.appLockEnabled && !unlockedThisSession && !locked {
+            locked = true
+        }
+    }
+
+    func onScenePhaseBackground() {
+        if settings.appLockEnabled && settings.appLockOnBackground && unlockedThisSession {
+            locked = true
         }
     }
 

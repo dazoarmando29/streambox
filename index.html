@@ -321,6 +321,37 @@
   #tapThruBtn { display: none; }
   @media (pointer: coarse) { #tapThruBtn { display: grid; } }
   body.touch-capable #tapThruBtn { display: grid; }
+  /* iOS WebKit promotes a playing video (even inside a cross-origin iframe)
+     to a hardware overlay plane that BURIES plain sibling layers: on
+     iPhone/iPad captions and the tap layer vanished UNDER the picture (the
+     glass bar survived - its backdrop-filter already composites it), so taps
+     fell through to the provider's own controls and subtitles never showed.
+     Forcing every overlay onto its own compositing layer puts it back above
+     the video plane on iOS; on Android/desktop it is an identity transform. */
+  #tapLayer, #capOverlay, #titleCard, #skipFloat, #upNextCard, #volToast, #trailerBar {
+    transform: translate3d(0, 0, 0);
+    -webkit-transform: translate3d(0, 0, 0);
+    will-change: transform;
+  }
+  /* glass spend: blur(18px) is heavy on older iPhones (taps felt laggy).
+     iOS WebKit runs a lighter blur; Reduce Transparency swaps glass for
+     solid panels; Increase Contrast strengthens edges. */
+  @supports (-webkit-touch-callout: none) {
+    #playerBox #ctlBar, [class*="backdrop-blur"] {
+      -webkit-backdrop-filter: blur(9px) saturate(1.2) !important;
+      backdrop-filter: blur(9px) saturate(1.2) !important;
+    }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    #playerBox #ctlBar, [class*="backdrop-blur"] {
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+      background-color: rgba(9, 15, 30, 0.97) !important;
+    }
+  }
+  @media (prefers-contrast: more) {
+    #playerBox #ctlBar { border-color: rgba(255, 255, 255, 0.45) !important; }
+  }
   /* narrow + medium phones: the PWA Install pill lives in the More sheet -
      the header keeps only Logo | Search | More (the premium streaming
      pattern); tablets/desktop keep the full action cluster */
@@ -1042,9 +1073,9 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
      actions in one place — the header overflow and the bottom bar open this
      same sheet (never two menus showing the same options). -->
 <div id="moreSheet" class="hidden fixed inset-0 z-[75] bg-black/60" onclick="if(event.target===this)closeMoreSheet()">
-  <div class="absolute left-0 right-0 bottom-0 rounded-t-3xl border-t border-white/10 bg-[#0F1729] pt-2.5" style="padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px))">
-    <div class="mx-auto w-10 h-1 rounded-full bg-white/20"></div>
-    <div class="grid grid-cols-3 gap-2 px-4 pt-4">
+  <div class="absolute left-0 right-0 bottom-0 rounded-t-3xl border-t border-white/10 bg-[#0F1729] pt-1.5" style="padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px))" onclick="if(event.target===this)closeMoreSheet()">
+    <button onclick="closeMoreSheet()" aria-label="Close menu" title="Close" class="flex items-center justify-center w-full py-2.5"><span class="block w-10 h-1 rounded-full bg-white/20"></span></button>
+    <div class="grid grid-cols-3 gap-2 px-4 pt-1">
       <button id="mnavKdrama" onclick="filterType('ko',event);closeMoreSheet()" class="mnav-sheet-btn"><svg class="ico ico-lg"><use href="#i-spark"/></svg><span>KDrama</span></button>
       <button id="mnavBrowse" onclick="openBrowseTab(event);closeMoreSheet()" class="mnav-sheet-btn"><svg class="ico ico-lg"><use href="#i-filter"/></svg><span>Browse</span></button>
       <button onclick="partyOpen('join');closeMoreSheet()" class="mnav-sheet-btn"><svg class="ico ico-lg"><use href="#i-party"/></svg><span>Party</span></button>
@@ -3018,7 +3049,11 @@ function purgeRetiredCaches(){
   try {
     const tl = document.getElementById("tapLayer");
     let tapAt = 0, tapZone = "", tapTimer = null;
-    tl.addEventListener("pointerup", (e) => {
+    // CLICK, not pointerup: iOS cancels pointer events the moment it suspects
+    // a pan/zoom gesture (the "taps do nothing / feel delayed on iPhone" bug),
+    // while click fires reliably for real taps and never for scrolls. The
+    // layer's touch-action: manipulation keeps clicks instant on touch.
+    tl.addEventListener("click", (e) => {
       if (e.button != null && e.button !== 0) return;
       const now = Date.now();
       const w = window.innerWidth || 1;
@@ -3372,7 +3407,21 @@ function openMoreSheet(ev){
     try { window._moreOpener = ev.currentTarget || document.activeElement; } catch(e){}
   }
   const s = document.getElementById("moreSheet");
-  if (s) s.classList.remove("hidden");
+  if (s) {
+    s.classList.remove("hidden");
+    // swipe-down dismiss (native sheet parity on phones - the old sheet
+    // could only be closed by a backdrop tap, which iOS users never found)
+    if (!s._swipeWired) {
+      s._swipeWired = true;
+      let y0 = null;
+      s.addEventListener("touchstart", (e) => { y0 = e.touches[0].clientY; }, { passive: true });
+      s.addEventListener("touchmove", (e) => {
+        if (y0 == null) return;
+        if (e.touches[0].clientY - y0 > 70) { y0 = null; closeMoreSheet(); }
+      }, { passive: true });
+      s.addEventListener("touchend", () => { y0 = null; }, { passive: true });
+    }
+  }
   document.body.classList.add("modal-open"); // no scroll behind the sheet
 }
 function closeMoreSheet(){

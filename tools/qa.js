@@ -1825,7 +1825,7 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
     ok("tapLayerSync engages the layer for our driven bar only and is wired into the player lifecycle (" + wired + " call sites)");
   else bad("tapLayerSync must exist and be called from updateMirrorUI/loadPlayer/goHome (per-mirror engagement)");
   // tap toggles the bar DOWN again and double tap seeks by side
-  const tp = html.match(/#tapLayer[\s\S]{0,60}[\s\S]*?pointerup[\s\S]{0,1600}/);
+  const tp = html.match(/getElementById\("tapLayer"\)[\s\S]{0,420}addEventListener\((?:"click"|"pointerup")[\s\S]{0,1600}/);
   if (tp && /hideHud\(\)/.test(tp[0]) && /ctlSeekRel\(d\)/.test(tp[0]) && /zone/.test(tp[0]))
     ok("the tap layer toggles the bar (second tap hides it) and double-tap seeks left -10s / right +30s");
   else bad("the tap layer handler must toggle hideHud on second tap and seek by side on double tap");

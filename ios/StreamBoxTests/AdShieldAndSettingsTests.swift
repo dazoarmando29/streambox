@@ -56,4 +56,21 @@ final class AdShieldAndSettingsTests: XCTestCase {
         store.nativePlayerEnabled = false
         XCTAssertFalse(store.nativePlayerEnabled)
     }
+
+    func testHapticsAndLockDefaults() {
+        let suiteName = "sb.tests.lock.\(UUID().uuidString)"
+        let suite = UserDefaults(suiteName: suiteName)!
+        defer { suite.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(defaults: suite)
+        // sensible defaults: haptics on, lock off, lock-on-background on,
+        // adaptive performance mode
+        XCTAssertTrue(store.hapticsEnabled)
+        XCTAssertFalse(store.appLockEnabled)
+        XCTAssertTrue(store.appLockOnBackground)
+        XCTAssertEqual(store.performanceMode, "adaptive")
+        store.appLockEnabled = true
+        store.performanceMode = "lite"
+        XCTAssertTrue(store.appLockEnabled)
+        XCTAssertEqual(store.performanceMode, "lite")
+    }
 }
