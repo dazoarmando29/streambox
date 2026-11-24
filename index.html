@@ -1026,7 +1026,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 244; // bump every release alongside version.txt
+  const BUILD_NUM = 245; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1817,6 +1817,25 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
       <div id="subPasteWrap" class="hidden mt-2">
         <textarea id="subPaste" rows="4" placeholder="Paste SRT or VTT text here…" class="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 outline-none text-sm"></textarea>
         <button onclick="savePastedSubs()" class="mt-2 px-4 h-10 rounded-full bg-white/10 hover:bg-white/20 text-sm font-bold">Use pasted subtitles</button>
+        <!-- SMART SUBTITLE CHOOSER + ADAPTIVE SYNC: every control wires to
+             the live engine (no decorative toggles). Confidence labels come
+             from real evidence - never an invented accuracy percentage. -->
+        <p class="text-xs text-gray-400 font-bold mt-5 mb-2">SMART SUBTITLES</p>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mb-2">
+          <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer" title="Rank subtitle candidates by release/edition match, verified history and evidence - not raw popularity."><input type="checkbox" id="optSubChooser" class="switch" checked onchange="SUB.chooser=this.checked;subSaveSettings()"> Smart Chooser</label>
+          <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer" title="Automatic timing correction (constant offset + drift), remembered per release."><input type="checkbox" id="optSubAutoSync" class="switch" checked onchange="SUB.autoSync=this.checked;subSaveSettings()"> Adaptive Auto-Sync</label>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="subFindBetter()" class="px-3 h-9 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">Find Better Match</button>
+          <button onclick="subResync()" class="px-3 h-9 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">Resync Subtitles</button>
+          <button onclick="subSyncNudge(0.25)" title="Subtitles appear before the dialogue - shift them later" class="px-3 h-9 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">Subs Too Early</button>
+          <button onclick="subSyncNudge(-0.25)" title="Subtitles appear after the dialogue - shift them earlier" class="px-3 h-9 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">Subs Too Late</button>
+          <button onclick="subCalOne()" title="The line on screen should be spoken right now" class="px-3 h-9 rounded-full bg-teal-500 hover:bg-teal-300 text-xs font-bold text-[#0B111E]">Sync This Line Now</button>
+          <button onclick="subRememberMatch()" class="px-3 h-9 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">Remember This Match</button>
+          <button onclick="subSyncReset()" class="px-3 h-9 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">Reset Synchronization</button>
+          <button onclick="subDialogueProbe()" title="Optional dialogue check: only on owned media and only with your configured speech service" class="px-3 h-9 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">Dialogue Sync</button>
+        </div>
+        <p id="subMatchLine" class="text-[11px] text-gray-500 mt-2">Timing Unverified</p>
       </div>
       <div class="flex flex-wrap items-center gap-3 mt-3 text-sm">
         <span class="text-xs text-gray-400">Position</span>
@@ -7419,6 +7438,7 @@ function updateMirrorUI(){
   // (VidRift). Mute/rate/speed live in their player or have no events to
   // stay honest — they hide instead of sitting dead.
   const isPaired = mirror === "vidrift" || mirror === "vidzen" || mirror === "vidbolt" || mirror === "vidcore";
+  try { subSyncReevaluate(); } catch(e){} // smart sync: rebind on source switch
   document.getElementById("trailerBar").classList.toggle("hidden", !isTrailer);
   document.getElementById("ctlBar").classList.toggle("hidden", !(isCS || isPaired));
   try { tapLayerSync(); } catch(e){} // the tap layer serves OUR bar only
@@ -7818,25 +7838,42 @@ async function wyzAutoSubs(){
     const items = await r.json();
     wyzQuotaClear();
     if (!Array.isArray(items) || !items.length) return;
-    // best first: most-downloaded non-CC track (crowd-vetted sync), else top hit
-    const ranked = [...items].sort((a, b) => (b.downloadCount || 0) - (a.downloadCount || 0));
-    const pick = ranked.find(x => !x.isHearingImpaired) || ranked[0];
-    const fr = await fetch(pick.url);
-    if (fr.status === 429) {
-      await wyzQuotaMsg(fr);
-      wyzCapNote();
-      bsAuto(); // capped on download: backups now, not next title
-      return;
+    // SMART SUBTITLE CHOOSER: weighted compatibility (release 30 / verified
+    // history 25 / timing evidence 20 / plausibility 10 / fps 5 / quality 5 /
+    // popularity 5). Popularity only breaks ties - it is NOT proof of sync.
+    const ctx = {
+      s: watchState.type === "tv" ? watchState.s : null,
+      e: watchState.type === "tv" ? watchState.e : null,
+      lang: wyzLang, dur: pState.dur || 0,
+      release: subParseRelease((window._releaseHint || "") + " " + (currentItem && currentItem.title || "")),
+      allowHI: false
+    };
+    const cands = subSmartPick(items, ctx);
+    if (!cands.length) return;
+    // at most SUB.dlCap downloads per automatic attempt (quota protection);
+    // invalid files fall through to the next candidate automatically
+    let loaded = false;
+    for (let ci = 0; ci < cands.length && ci < SUB.dlCap; ci++) {
+      if (!subDlBudgetOk()) break;
+      const pick = cands[ci].item;
+      SUB.dlUsed++;
+      const raw = await subFetchGuard(pick.url, "wyzie");
+      if (raw == null) continue;
+      const vraw = subValidateRaw(raw);
+      if (!vraw.ok) continue;
+      const cues = parseSubs(raw);
+      const val = subValidate(cues, ctx);
+      if (!val.ok) continue;
+      if (subStorageKey() !== myKey) return; // episode changed mid-fetch
+      setSubs({ name: (pick.fileName || "wyzie.srt"), lang: (pick.display || wyzLang.toUpperCase()), cues, url: pick.url, corsUrl: pick.url, src: "wyzie", code: wyzLang,
+        pos: DEF_SUBPOS, offset: 0, fileId: (pick.fileName || pick.url), matchLabel: cands[ci].label });
+      wyzQuotaClear();
+      const ws = document.getElementById("watchStatus");
+      if (ws && (mirror === "cinesrc" || mirror === "vidbolt")) ws.textContent = `Subtitles auto-loaded (${cues.length} lines, ${cands[ci].label}) \u{2713} \u{2014} nudge sync anytime in \u{2699} \u{2192} Subs`;
+      loaded = true;
+      break;
     }
-    if (!fr.ok) return;
-    const cues = parseSubs(await fr.text());
-    if (!cues.length) return;
-    if (subStorageKey() !== myKey) return; // episode changed mid-fetch
-    setSubs({ name: (pick.fileName || "wyzie.srt"), lang: (pick.display || wyzLang.toUpperCase()), cues, url: pick.url, corsUrl: pick.url, src: "wyzie", code: wyzLang,
-      pos: DEF_SUBPOS, offset: 0 });
-    wyzQuotaClear();
-    const ws = document.getElementById("watchStatus");
-    if (ws && (mirror === "cinesrc" || mirror === "vidbolt")) ws.textContent = `Subtitles auto-loaded (${cues.length} lines) \u{2713} — nudge sync anytime in \u{2699} \u{2192} Subs`;
+    if (!loaded) bsAuto(); // nothing validated cleanly: existing backup chain
   } catch(e){}
 }
 /* Backup subtitles (BetaSeries): used ONLY when the Wyzie free key is capped.
@@ -8209,6 +8246,22 @@ function setSubs(o, remember = true){
   subsOn = true;
   subSource = "ours"; // our file shows through OUR overlay (floats with the bar)
   try { applySubSource(); } catch(e){}
+  // SMART SYNC bind: never carry corrections across episodes/mirrors/
+  // releases; restore remembered timing ONLY when the release fingerprint
+  // matches (duration + mirror). Cues stay immutable - transforms apply at
+  // lookup time via subMapTime().
+  try {
+    if (o) {
+      o.sessionKey = subStorageKey();
+      SUB.sync.fileId = o.fileId || "";
+      subSyncReevaluate();
+      if (SUB.autoSync && subSyncRestore()) {
+        subStatus("Previously verified match restored.");
+      } else if (o.matchLabel) {
+        subStatus(o.matchLabel === "Recommended Match" ? "Best available subtitle loaded." : "Best available subtitle loaded.");
+      }
+    }
+  } catch(e){}
   if (remember && o) {
     try { localStorage.setItem(subStorageKey(), JSON.stringify(o)); pruneSubCaches(); }
     catch(e){ subStatus("Loaded, but too big to remember on this device."); }
@@ -8296,6 +8349,10 @@ function clearSubs(){
 function subStatus(msg){
   const ws = document.getElementById("watchStatus");
   if (ws) ws.textContent = msg;
+  try {
+    const ml = document.getElementById("subMatchLine");
+    if (ml && typeof SUB !== "undefined") ml.textContent = SUB.sync.label;
+  } catch(e){}
 }
 /* Caption style (house rule: 12-26sp / white-yellow-cyan / bg None-Semi-Solid
    with live preview): ONE state shared by the Settings Subs tab and the A/V
@@ -8536,7 +8593,7 @@ function paintCaps(force){
   if (ourSubsActive()
       && !document.getElementById("watchView").classList.contains("hidden")
       && (mirror === "cinesrc" || mirror === "vidbolt" || mirror === "anipm")) {
-    const t = capNow() + (subFile.offset || 0);
+    const t = subMapTime(capNow()); // smart sync transform (cues stay immutable)
     for (let i = 0; i < subFile.cues.length; i++) {
       const c = subFile.cues[i];
       if (t >= c.s && t <= c.e) { html = c.text.split("\n").map(escapeHtml).join("<br>"); break; }
@@ -13470,6 +13527,494 @@ function pbStopCapture(reason){
   } catch(e){}
 }
 /* ================== end Universal Playback Adapter ================== */
+
+/* ==================== Smart Subtitle Engine (SUB) ====================
+   Smart Subtitle Chooser + Adaptive Synchronization. Design rules:
+   - ONE playback clock: the existing capNow() estimator. No competing
+     timers. Timing corrections are pure functions applied at LOOKUP time;
+     original cues stay immutable.
+   - Scoring weights: release/edition 30, verified history 25, timing
+     evidence 20, runtime/cue plausibility 10, fps 5, quality 5, popularity
+     5. Popularity is a TIEBREAKER, never proof of sync. Missing metadata is
+     UNKNOWN (neutral), never an exact match. Confidence labels reflect real
+     evidence - NO invented accuracy percentages anywhere.
+   - Auto matching downloads at most SUB.dlCap candidates per title unless
+     the user asks for more. Request dedup, caches, cooldowns, backoff.
+   - Dialogue matching is UNSUPPORTED on provider iframes (their audio is
+     not reachable by anyone) and says so; an optional speech endpoint
+     exists only behind explicit user consent and only for owned media. */
+const SUB = {
+  chooser: true, autoSync: true,
+  sttEndpoint: "", sttConsent: false,
+  dlUsed: 0, dlCap: 2,
+  searchCache: {}, inflight: {}, providerCooldown: {},
+  sync: { offset: 0, scale: 1, segments: [], verifiedBy: "none", label: "Timing Unverified", fileId: "", fp: "", anchors: [], evidence: 0 },
+  memoryVersion: 1
+};
+try {
+  const _subSaved = JSON.parse(localStorage.getItem("streambox_smartsubs") || "null");
+  if (_subSaved) {
+    SUB.chooser = _subSaved.chooser !== false;
+    SUB.autoSync = _subSaved.autoSync !== false;
+    SUB.sttEndpoint = _subSaved.sttEndpoint || "";
+    SUB.sttConsent = !!_subSaved.sttConsent;
+  }
+} catch(e){}
+function subSaveSettings(){
+  try {
+    localStorage.setItem("streambox_smartsubs", JSON.stringify({
+      chooser: SUB.chooser, autoSync: SUB.autoSync,
+      sttEndpoint: SUB.sttEndpoint, sttConsent: SUB.sttConsent
+    }));
+  } catch(e){}
+}
+/* ---- release-name intelligence (WEB-DL/BluRay/REPACK/editions/...) ---- */
+function subParseRelease(name){
+  const n = String(name || "").toLowerCase();
+  const pick = (list) => list.find((x) => n.indexOf(x) >= 0) || "";
+  const rm = n.match(/\b(2160|1080|720|480)p?\b/);
+  const source = pick(["web-dl", "web dl", "webrip", "web rip", "bluray", "blu-ray", "bdrip", "hdtv", "dvdrip", "dvd rip", "hdcam", "camrip"]);
+  const edition = pick(["director's cut", "directors cut", "extended", "theatrical", "unrated", "uncut", "remastered", "repack", "proper", "imax"]);
+  const grpM = n.replace(/\.(srt|vtt|ass|ssa|txt|zip)$/, "").match(/[-\[]([a-z0-9]{2,})\]?$/);
+  const epM = n.match(/s(\d{1,2})\s*[ex]\s*(\d{1,3})/) || n.match(/\b(\d{1,2})x(\d{2,3})\b/);
+  return {
+    res: rm ? rm[1] + "p" : "", source, edition,
+    group: grpM ? grpM[1] : "",
+    s: epM ? parseInt(epM[1], 10) : null,
+    e: epM ? parseInt(epM[2], 10) : null
+  };
+}
+/* ---- eligibility gates (BEFORE any scoring) ---- */
+function subEligible(item, ctx){
+  const rel = subParseRelease(item.name || item.fileName || item.file || "");
+  const lang = String(item.lang || item.language || item.display || "").toLowerCase();
+  // hard reject: wrong episode identity
+  if (ctx.s != null && rel.s != null && rel.s !== ctx.s) return { ok: false, why: "wrong season" };
+  if (ctx.e != null && rel.e != null && rel.e !== ctx.e) return { ok: false, why: "wrong episode" };
+  // hard reject: named language conflicts with the requested one (unknown passes)
+  if (ctx.lang && lang && !lang.includes("und")) {
+    const alias = { en: ["english", "eng"], tl: ["tagalog", "filipino", "tgl"], ja: ["japanese", "jpn"], ko: ["korean", "kor"] };
+    const a = (alias[ctx.lang] || [ctx.lang]).concat([ctx.lang]);
+    // TOKEN match, never substring ("french" contains "en" - a real bug
+    // caught by the test suite)
+    const tokens = lang.split(/[^a-z]+/).filter(Boolean);
+    const hit = a.some((x) => tokens.some((tk) => tk === x));
+    if (!hit) return { ok: false, why: "language mismatch" };
+  }
+  // reject commentary / forced-only tracks for full dialogue
+  if (/commentary/.test(lang + " " + String(item.name || ""))) return { ok: false, why: "commentary track" };
+  if (/forced/.test(String(item.name || "")) && !ctx.allowForced) return { ok: false, why: "forced-only track" };
+  return { ok: true, rel };
+}
+/* ---- weighted compatibility score (percent-free, evidence-tracked) ---- */
+function subScore(item, ctx, rel){
+  let score = 0, evidence = 0, flags = [];
+  const has = (x) => x != null && x !== "";
+  // 30% release + edition compatibility
+  let relScore = 0.5; // unknown = neutral, never an exact match
+  if (has(rel.source) || has(rel.edition)) {
+    evidence++;
+    relScore = 0.2;
+    if (ctx.release && has(rel.source) && rel.source === ctx.release.source) relScore = 0.75;
+    if (ctx.release && has(rel.edition) && has(ctx.release.edition)) {
+      relScore = rel.edition === ctx.release.edition ? 1 : 0.15;
+    } else if (ctx.release && has(rel.edition) !== has(ctx.release.edition)) {
+      relScore = Math.min(relScore, 0.45); flags.push("edition unknown");
+    }
+  }
+  score += relScore * 0.30;
+  // 25% verified source-specific history (same release fingerprint + file)
+  const mem = subSyncLoad(ctx);
+  let hist = 0.5;
+  if (mem && mem.fileId && item.fileId && mem.fileId === item.fileId) {
+    evidence++; hist = 1; flags.push("Previously Confirmed");
+  } else if (mem && mem.verifiedBy === "user") {
+    evidence++; hist = 0.7;
+  }
+  score += hist * 0.25;
+  // 20% dialogue/timing evidence (real anchors only)
+  const anch = (SUB.sync.anchors || []).length;
+  const ev20 = anch > 0 ? Math.min(1, anch / 3) : (mem && mem.verifiedBy ? 0.6 : 0.5);
+  if (anch > 0 || (mem && mem.verifiedBy)) evidence++;
+  score += ev20 * 0.20;
+  // 10% runtime / cue plausibility (post-download facts count double)
+  let plaus = 0.5;
+  if (item._validated) { evidence++; plaus = item._validated.plaus || 0.5; }
+  score += plaus * 0.10;
+  // 5% frame-rate compatibility (unknown = neutral; NEVER assumed)
+  score += 0.5 * 0.05;
+  // 5% subtitle quality (full dialogue preferred; HI kept if user wants)
+  let q = 0.7;
+  if (has(item.isHearingImpaired)) {
+    evidence++;
+    q = item.isHearingImpaired ? (ctx.allowHI ? 0.9 : 0.25) : 0.85;
+  }
+  score += q * 0.05;
+  // 5% popularity (secondary signal ONLY)
+  const dl = item.downloadCount || item.downloads || 0;
+  score += (dl > 0 ? Math.min(1, Math.log10(1 + dl) / 5) : 0.5) * 0.05;
+  const coverage = evidence / 7;
+  let label = "Likely Match";
+  if (flags.indexOf("Previously Confirmed") >= 0) label = "Previously Confirmed";
+  else if (coverage >= 0.5 && relScore >= 0.75) label = "Recommended Match";
+  else if (relScore <= 0.2) label = "Different Release";
+  return { score, evidence: coverage, label, flags };
+}
+/* ---- candidate ordering: smart first, popularity only inside ties ---- */
+function subSmartPick(items, ctx){
+  const out = [];
+  (items || []).forEach((it) => {
+    const gate = subEligible(it, ctx);
+    if (!gate.ok) return;
+    const s = subScore(it, ctx, gate.rel);
+    out.push({ item: it, rel: gate.rel, ...s });
+  });
+  out.sort((a, b) => (b.score - a.score) || ((b.item.downloadCount || 0) - (a.item.downloadCount || 0)));
+  return out;
+}
+/* ---- candidate content validation (before applying anything) ---- */
+function subValidateRaw(text){
+  if (!text || !String(text).trim()) return { ok: false, why: "empty file" };
+  if (/<html|<!doctype|<body/i.test(text)) return { ok: false, why: "HTML response, not subtitles" };
+  return { ok: true };
+}
+function subValidate(cues, ctx){
+  if (!cues || cues.length < 2) return { ok: false, why: "too few cues", plaus: 0 };
+  let bad = 0, overlap = 0, dups = {}, ad = 0, prevEnd = -1;
+  for (let i = 0; i < cues.length; i++) {
+    const c = cues[i];
+    if (!(c.e > c.s) || c.s < 0) bad++;
+    if (c.s < prevEnd - 0.05) overlap++;
+    prevEnd = Math.max(prevEnd, c.e);
+    const key = c.text.trim().toLowerCase();
+    if (dups[key]) dups[key]++; else dups[key] = 1;
+    if (/^\s*(ad\b|advertisement|subtitles? (by|from)|www\.|https?:)/i.test(c.text)) ad++;
+  }
+  if (bad > cues.length * 0.1) return { ok: false, why: "corrupt timestamps", plaus: 0 };
+  if (overlap > cues.length * 0.5) return { ok: false, why: "excessive cue overlap", plaus: 0 };
+  if (ad > cues.length * 0.3) return { ok: false, why: "promotional/ad cues", plaus: 0 };
+  const dupN = Object.values(dups).filter((v) => v > 2).length;
+  if (dupN > cues.length * 0.4) return { ok: false, why: "duplicate cues", plaus: 0 };
+  // plausibility vs real duration: ending early is FINE (credits), only a
+  // wildly LONGER timeline means a different cut
+  let plaus = 0.8;
+  const last = cues[cues.length - 1];
+  if (ctx.dur > 0) {
+    if (last.e > ctx.dur * 1.6) plaus = 0.2;  // longer than the video: wrong cut
+    else if (last.e < ctx.dur * 0.45) plaus = 0.55; // suspicious but allowed
+    else plaus = 0.95;
+  }
+  return { ok: true, plaus, overlap, lastEnd: last.e };
+}
+/* ---- quota / network protection (2 downloads max per auto attempt) ---- */
+function subDlBudgetOk(){ return SUB.dlUsed < SUB.dlCap; }
+async function subFetchGuard(url, provider){
+  try {
+    if (SUB.providerCooldown[provider] && Date.now() < SUB.providerCooldown[provider]) return null;
+    if (SUB.inflight[url]) return SUB.inflight[url];
+    const p = (async () => {
+      SUB.fetchCount = (SUB.fetchCount || 0) + 1; // real network trips (dedup metric)
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 15000);
+      try {
+        const r = await fetch(url, { signal: ctl.signal });
+        if (r.status === 429) { SUB.providerCooldown[provider] = Date.now() + 300000; return null; }
+        if (!r.ok) return null;
+        return await r.text();
+      } finally { clearTimeout(t); delete SUB.inflight[url]; }
+    })();
+    SUB.inflight[url] = p;
+    return await p;
+  } catch(e){ return null; }
+}
+/* ---- adaptive sync: transform at LOOKUP, cues stay immutable ---- */
+function subMapCore(t){
+  const s = SUB.sync;
+  if (s.segments && s.segments.length) {
+    let seg = s.segments[0];
+    for (let i = 0; i < s.segments.length; i++) {
+      if (t >= s.segments[i].from) seg = s.segments[i];
+    }
+    return t * seg.scale + seg.offset;
+  }
+  return t * s.scale + s.offset;
+}
+function subMapTime(t){
+  // manual trim (subFile.offset) rides ON TOP of the engine transform
+  return subMapCore(t) + ((subFile && subFile.offset) || 0);
+}
+function subSyncNudge(d){
+  SUB.sync.offset += d;
+  SUB.sync.label = "Timing corrected (manual)";
+  SUB.sync.verifiedBy = "user";
+  try { paintCaps(true); } catch(e){}
+  subStatus("Timing correction applied.");
+  subSyncSave();
+}
+function subCalOne(){
+  // "Sync This Line Now": the cue currently on screen should be spoken NOW
+  try {
+    const t = capNow();
+    let active = null;
+    for (let i = 0; i < subFile.cues.length; i++) {
+      const c = subFile.cues[i];
+      const m = subMapCore(c.s);
+      if (m <= t && subMapCore(c.e) >= t) { active = c; break; }
+    }
+    if (!active) { subStatus("No subtitle line on screen to sync."); return; }
+    const target = t - ((subFile && subFile.offset) || 0);
+    SUB.sync.anchors.push({ cue: active.s, wall: target });
+    if (SUB.sync.anchors.length > 1) { subCalTwo(); return; }
+    SUB.sync.offset += target - subMapCore(active.s);
+    SUB.sync.verifiedBy = "user";
+    SUB.sync.label = "Previously Confirmed";
+    paintCaps(true);
+    subStatus("Timing correction applied.");
+    subSyncSave();
+  } catch(e){}
+}
+function subCalTwo(){
+  const a = SUB.sync.anchors;
+  if (a.length < 2) return;
+  const A = a[a.length - 2], B = a[a.length - 1];
+  const dc = B.cue - A.cue, dw = B.wall - A.wall;
+  if (Math.abs(dc) < 20) {
+    subStatus("Anchors too close for drift math - pick lines farther apart.");
+    SUB.sync.anchors.pop();
+    return;
+  }
+  let scale = dw / dc;
+  if (!(scale > 0.85 && scale < 1.18)) {
+    subStatus("Those anchors disagree too much - keeping your first correction.");
+    SUB.sync.anchors.pop();
+    return;
+  }
+  // frame-rate hints: snap ONLY with strong evidence (never assumed)
+  const FPS_R = [1, 24000 / 24000, 24000 / 23976, 25 / 23.976, 25 / 24, 30000 / 29970, 30 / 25, 25 / 23.976 * 23.976 / 24];
+  let snapped = null;
+  [1, 24000 / 23976, 25 / 23.976, 25 / 24, 30 / 25, 24 / 25, 23.976 / 25].forEach((r) => {
+    if (Math.abs(scale - r) < 0.006) snapped = r;
+  });
+  if (snapped) scale = snapped;
+  SUB.sync.scale = scale;
+  SUB.sync.offset = A.wall - A.cue * scale;
+  SUB.sync.verifiedBy = "user";
+  SUB.sync.label = snapped ? "Verified Match (frame-rate corrected)" : "Verified Match (drift corrected)";
+  // SEGMENTED sync: with 3+ anchors on differently-cut material (added
+  // intros, recaps, commercial breaks) fit piecewise affine sections;
+  // outlier pairs are rejected and the result must stay monotonic. If the
+  // segments disagree, keep the global fit instead of warping dialogue.
+  if (SUB.sync.anchors.length >= 3 && subBuildSegments()) {
+    SUB.sync.label = "Verified Match (segmented)";
+    subStatus("Subtitle drift corrected.");
+  } else {
+    subStatus("Subtitle drift corrected.");
+  }
+  paintCaps(true);
+  subSyncSave();
+}
+function subBuildSegments(){
+  try {
+    const a = SUB.sync.anchors;
+    const segs = [];
+    for (let i = 1; i < a.length; i++) {
+      const dc = a[i].cue - a[i - 1].cue, dw = a[i].wall - a[i - 1].wall;
+      if (Math.abs(dc) < 20) continue;          // anchors too close: skip pair
+      const sc = dw / dc;
+      if (!(sc > 0.85 && sc < 1.18)) continue;  // outlier pair rejected
+      segs.push({ from: a[i - 1].cue, to: a[i].cue, scale: sc, offset: a[i - 1].wall - a[i - 1].cue * sc });
+    }
+    if (segs.length < 2) return false;
+    segs.sort((x, y) => x.from - y.from);
+    for (let i = 1; i < segs.length; i++) {
+      const prevEnd = segs[i - 1].to * segs[i - 1].scale + segs[i - 1].offset;
+      const curStart = segs[i].from * segs[i].scale + segs[i].offset;
+      if (curStart < prevEnd - 0.25) return false; // non-monotonic: keep global fit
+    }
+    SUB.sync.segments = segs.slice(0, 8);
+    return true;
+  } catch(e){ return false; }
+}
+function subSyncReset(){
+  SUB.sync = { offset: 0, scale: 1, segments: [], verifiedBy: "none", label: "Timing Unverified", fileId: "", fp: "", anchors: [], evidence: 0 };
+  try { subSyncSave(); } catch(e){}
+  try { paintCaps(true); } catch(e){}
+  subStatus("Reset synchronization.");
+}
+function subRememberMatch(){
+  SUB.sync.verifiedBy = "user";
+  SUB.sync.label = "Previously Confirmed";
+  subSyncSave();
+  subStatus("Match remembered.");
+}
+/* ---- memory: release-fingerprint guarded, bounded, expiring ---- */
+function subFingerprint(){
+  try {
+    return mirror + ":" + Math.round((pState.dur || 0) / 60);
+  } catch(e){ return mirror + ":0"; }
+}
+function subSyncSave(){
+  try {
+    const key = "sb_sync_" + subStorageKey();
+    localStorage.setItem(key, JSON.stringify({
+      v: SUB.memoryVersion, fp: subFingerprint(), mirror,
+      offset: SUB.sync.offset, scale: SUB.sync.scale,
+      segments: SUB.sync.segments, verifiedBy: SUB.sync.verifiedBy,
+      fileId: SUB.sync.fileId, at: Date.now(),
+      anchors: (SUB.sync.anchors || []).slice(-4)
+    }));
+    // bounded store: keep the newest 8 entries, drop >90 days
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf("sb_sync_") === 0) keys.push(k);
+    }
+    keys.sort();
+    while (keys.length > 8) { try { localStorage.removeItem(keys.shift()); } catch(e){} }
+  } catch(e){}
+}
+function subSyncLoad(ctx){
+  try {
+    const raw = localStorage.getItem("sb_sync_" + subStorageKey());
+    if (!raw) return null;
+    const m = JSON.parse(raw);
+    if (!m || m.v !== SUB.memoryVersion) return null;
+    if (Date.now() - (m.at || 0) > 90 * 24 * 3600 * 1000) return null;
+    // NEVER apply a timing adjustment from a different release
+    if (m.fp !== subFingerprint()) return null;
+    return m;
+  } catch(e){ return null; }
+}
+function subSyncRestore(){
+  const m = subSyncLoad();
+  if (!m) return false;
+  SUB.sync.offset = m.offset || 0;
+  SUB.sync.scale = m.scale || 1;
+  SUB.sync.segments = m.segments || [];
+  SUB.sync.verifiedBy = m.verifiedBy || "none";
+  SUB.sync.anchors = m.anchors || [];
+  SUB.sync.fp = m.fp;
+  SUB.sync.label = m.verifiedBy === "user" ? "Previously Confirmed" : "Timing corrected (remembered)";
+  return true;
+}
+function subSyncReevaluate(){
+  // source/mirror/episode changed: re-bind, never carry stale corrections
+  try {
+    const fp = subFingerprint();
+    if (SUB.sync.fp !== fp) {
+      const had = SUB.sync.verifiedBy !== "none";
+      SUB.sync.offset = 0; SUB.sync.scale = 1; SUB.sync.segments = []; SUB.sync.anchors = [];
+      SUB.sync.verifiedBy = "none"; SUB.sync.fp = fp;
+      SUB.sync.label = "Timing Unverified";
+      if (subSyncRestore()) { subStatus("Previously verified match restored."); }
+      else if (had) { subStatus("A different subtitle version may match better."); }
+    }
+  } catch(e){}
+}
+/* ---- status + match details (labels only - no invented percentages) ---- */
+function subMatchDetails(){
+  try {
+    const s = SUB.sync;
+    return s.label + " | evidence: " + Math.round((s.evidence || 0) * 100) + "% of factors known | release: " +
+      (subFile ? (subParseRelease(subFile.name).source || "unknown") : "n/a") + " | provider: " +
+      (subFile ? subFile.src : "n/a") + " | correction: " + (s.scale !== 1 ? ("x" + s.scale.toFixed(4) + " + ") : "") + s.offset.toFixed(2) + "s";
+  } catch(e){ return "unknown"; }
+}
+/* ---- dialogue-aware alignment: CONSENT-GATED, owned media only ---- */
+function subDialogueSupported(){
+  // provider iframes: audio is not reachable by anyone - honest refusal
+  const owned = document.getElementById("hlsVideo") && document.getElementById("hlsVideo").currentSrc !== "";
+  return owned && SUB.sttEndpoint && SUB.sttConsent;
+}
+function subFuzzyMatch(a, b){
+  const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+  const A = norm(a), B = norm(b);
+  if (!A.length || !B.length) return 0;
+  if (A === B) return 1;
+  // bounded LCS-ish similarity (cheap, deterministic)
+  const m = A.length, n = B.length;
+  if (m > 200 || n > 200) return 0;
+  let prev = new Array(n + 1).fill(0), best = 0;
+  for (let i = 1; i <= m; i++) {
+    const cur = new Array(n + 1).fill(0);
+    for (let j = 1; j <= n; j++) {
+      cur[j] = A[i - 1] === B[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]);
+      if (cur[j] > best) best = cur[j];
+    }
+    prev = cur;
+  }
+  return (2 * best) / (m + n);
+}
+async function subDialogueProbe(){
+  // OPTIONAL: requires an explicitly configured speech endpoint AND consent.
+  // Sends at most 3 x 2s clips from OWNED media; never from provider iframes.
+  try {
+    if (!subDialogueSupported()) {
+      subStatus("Timing verification unavailable on this player.");
+      return;
+    }
+    subStatus("Checking dialogue alignment...");
+    const v = document.getElementById("hlsVideo");
+    const stream = v.captureStream ? v.captureStream() : null;
+    if (!stream || !stream.getAudioTracks().length) {
+      subStatus("Timing verification unavailable on this player.");
+      return;
+    }
+    const rec = new MediaRecorder(stream);
+    const clips = [];
+    rec.ondataavailable = (e) => clips.push(e.data);
+    rec.start();
+    await new Promise((r) => setTimeout(r, 2000));
+    rec.stop();
+    await new Promise((r) => { rec.onstop = r; });
+    const blob = new Blob(clips, { type: "webm" });
+    const fd = new FormData();
+    fd.append("audio", blob, "clip.webm");
+    fd.append("t", String(v.currentTime));
+    const r = await fetch(SUB.sttEndpoint, { method: "POST", body: fd });
+    if (!r.ok) { subStatus("Timing verification unavailable on this player."); return; }
+    const out = await r.json();
+    const words = out && out.text ? out.text : "";
+    if (!words) { subStatus("Timing verification unavailable on this player."); return; }
+    // match recognized speech against nearby cues -> anchor -> one-point fix
+    let bestC = null, bestS = 0;
+    const t = v.currentTime;
+    subFile.cues.forEach((c) => {
+      if (Math.abs(c.s - t) < 25) {
+        const s = subFuzzyMatch(words, c.text);
+        if (s > bestS) { bestS = s; bestC = c; }
+      }
+    });
+    if (bestC && bestS >= 0.72) {
+      SUB.sync.anchors.push({ cue: bestC.s, wall: t });
+      subCalOne();
+      subStatus("Timing correction applied.");
+    } else {
+      subStatus("A different subtitle version may match better.");
+    }
+  } catch(e){
+    subStatus("Timing verification unavailable on this player.");
+  }
+}
+/* ---- user actions wired to the settings UI ---- */
+async function subFindBetter(){
+  try {
+    subStatus("Finding compatible subtitles...");
+    subFile = null;
+    SUB.dlUsed = 0; // a user request may use the full budget again
+    await wyzAutoSubs();
+    if (subFile) subStatus("Best available subtitle loaded.");
+  } catch(e){}
+}
+async function subResync(){
+  try {
+    subSyncReset();
+    subStatus("Checking video version...");
+    await wyzAutoSubs();
+    if (subFile) subStatus("Best available subtitle loaded.");
+  } catch(e){}
+}
+/* ================== end Smart Subtitle Engine ================== */
 
 
 /* QA diagnostics (?diag=1): turns ANY device into a test rig - so an iPhone

@@ -1949,7 +1949,7 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
     ok("blocked autoplay arms a one-shot page gesture that starts playback (the tap layer ate the old in-frame click)");
   else bad("autoplayblocked must arm a one-shot gesture recovery and say 'Tap anywhere to start playback'");
   // captions render on the extrapolated clock, not the thinned provider ticks
-  if (/function capNow\s*\(\)/.test(html) && /capNow\(\) \+ \(subFile\.offset/.test(html) && /\}, 150\);/.test(html))
+  if (/function capNow\s*\(\)/.test(html) && /(subMapTime\(capNow\(\)\)|capNow\(\) \+ \(subFile\.offset)/.test(html) && /\}, 150\);/.test(html))
     ok("captions extrapolate between timeupdates and repaint on the 150ms ticker (no more late subtitles)");
   else bad("paintCaps must use capNow() extrapolation + the 150ms caption ticker");
   // drift: room-paused enforcement + the shared correction planner
@@ -2152,10 +2152,42 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
     && /function capNow[\s\S]{0,2600}est < c\.last/.test(html); // absolute monotonic clamp
   const snap = /function capNow[\s\S]{0,2400}Math\.abs\(innov\) > 2\.5/.test(html);
   const pausedTruth = /function capNow[\s\S]{0,1600}pState\.paused \|\| pState\.seeking/.test(html);
-  const tickerIntact = /capNow\(\) \+ \(subFile\.offset/.test(html) && /\}, 150\);/.test(html);
+  const tickerIntact = /(subMapTime\(capNow\(\)\)|capNow\(\) \+ \(subFile\.offset)/.test(html) && /\}, 150\);/.test(html);
   if (rateAware && noYank && snap && pausedTruth && tickerIntact)
     ok("subtitle clock is a staleness-aware estimator: rate-correct, never yanked by late messages, smooth catch-up, snap on seeks");
   else bad("capNow must be the staleness-aware media-clock estimator (rate free-run, lag compensation, smooth correction, jump snap)");
+}
+
+/* ---------- 171. smart subtitle chooser: weighted + honest ---------- */
+{
+  const weights = /score \+= relScore \* 0\.30/.test(html) && /score \+= hist \* 0\.25/.test(html) && /score \+= ev20 \* 0\.20/.test(html);
+  const labels = /Recommended Match/.test(html) && /Different Release/.test(html) && /Timing Unverified/.test(html) && /Previously Confirmed/.test(html);
+  const noFake = !/\d+%\s*(accurate|accuracy|match accurate)/i.test(html); // never an invented accuracy claim
+  const gates = /function subEligible\(/.test(html) && /wrong episode/.test(html) && /language mismatch/.test(html);
+  if (weights && labels && noFake && gates)
+    ok("smart subtitle chooser scores by release/history/evidence with real confidence labels (popularity tiebreak only, no invented accuracy)");
+  else bad("subtitle chooser must use the weighted multi-factor scoring with evidence labels and hard eligibility gates");
+}
+
+/* ---------- 172. subtitle quota + immutable cues ---------- */
+{
+  const budget = /SUB\.dlCap/.test(html) && /function subDlBudgetOk\(/.test(html) && /ci < SUB\.dlCap/.test(html);
+  const immutable = /cues stay immutable/.test(html) && /function subMapTime\(/.test(html) && /function subMapCore\(/.test(html);
+  const net = /function subFetchGuard\(/.test(html) && /providerCooldown/.test(html) && /inflight/.test(html);
+  if (budget && immutable && net)
+    ok("subtitle downloads are budgeted (max 2 per auto attempt), deduped/backed-off, and cues stay immutable (transform at lookup)");
+  else bad("subtitle engine must enforce the 2-download budget, network guards, and immutable cues with lookup-time transforms");
+}
+
+/* ---------- 173. subtitle memory: release-guarded + resettable ---------- */
+{
+  const guard = /function subSyncLoad[\s\S]{0,600}m\.fp !== subFingerprint\(\)/.test(html);
+  const versioned = /m\.v !== SUB\.memoryVersion/.test(html);
+  const reset = /function subSyncReset\(/.test(html) && /Reset Synchronization/.test(html);
+  const rebind = /function subSyncReevaluate\(/.test(html);
+  if (guard && versioned && reset && rebind)
+    ok("subtitle sync memory is release-fingerprint guarded, versioned, bounded and resettable - never carried across releases");
+  else bad("subtitle memory must be fingerprint-guarded, versioned and resettable with source-switch rebinding");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
