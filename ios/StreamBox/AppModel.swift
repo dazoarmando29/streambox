@@ -94,9 +94,9 @@ final class AppModel: ObservableObject {
         }
         guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
         if landscapeLocked {
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape), errorHandler: nil)
         } else {
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait), errorHandler: nil)
         }
         // re-evaluate the (temporarily narrowed) orientation mask
         scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()

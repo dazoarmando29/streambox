@@ -58,8 +58,10 @@ struct NativePlayerView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let vc = AVPlayerViewController()
         vc.player = player
-        vc.allowsPictureInPicture = true
-        vc.allowsAirPlay = true
+        // PiP + AirPlay on iOS: no toggles needed - PiP activates through
+        // the audio background mode (Info.plist UIBackgroundModes) and
+        // AirPlay through the system route picker. This flag lets PiP start
+        // automatically when the app backgrounds mid-playback.
         vc.canStartPictureInPictureAutomaticallyFromInline = true
         return vc
     }
