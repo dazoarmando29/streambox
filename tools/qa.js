@@ -1980,5 +1980,97 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   else bad("Party.providerPlayState must exist and the PlayerScreen bridge play/pause events must call it");
 }
 
+/* ---------- 92. StabilityGuard: the repair-first recovery ladder ---------- */
+{
+  const sgPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/StabilityGuard.kt");
+  const sg = fs.existsSync(sgPath) ? qaRead(sgPath) : "";
+  const psSg = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
+  const fmSg = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/FluidMotion.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/FluidMotion.kt")) : "";
+  if (!sg || !psSg || !fmSg) bad("StabilityGuard/PlayerScreen/FluidMotion missing - the stability ladder cannot be verified");
+  else {
+    // L1 = documented truth poke, NEVER a reload; L2 = setMuted(false) only
+    // without user mute intent (window._userMuteIntent rides __sb.mute);
+    // L3 = documented pause/play ~600ms apart; L4 = the EXISTING
+    // reopen-at-position machinery only (webGen rebuild / load(startAt)).
+    const poke = psSg.includes('sendCmd(\\"getPaused\\")') &&
+      psSg.includes('sendCmd(\\"getMuted\\")') &&
+      psSg.includes('sendCmd(\\"getPlaybackRate\\")') &&
+      /SYNC_REPAIR -> \{[\s\S]{0,600}?GUARD_POKE_JS\)/.test(psSg) &&
+      !/SYNC_REPAIR -> \{[\s\S]{0,600}?load\(/.test(psSg);
+    const nudge = psSg.includes("try{if(!window._userMuteIntent){sendCmd('setMuted',[false]);}}catch(e){}") &&
+      /window\._userMuteIntent = !!m;/.test(psSg) &&
+      /AUDIO_NUDGE -> \{[\s\S]{0,900}?GUARD_UNMUTE_JS\)/.test(psSg);
+    const kick = psSg.includes("sendCmd('pause')") && psSg.includes("sendCmd('play')") &&
+      /GUARD_KICK_PLAY_JS\) \}, 600\)/.test(psSg);
+    const l4 = /RESTART -> \{[\s\S]{0,700}?webGen \+= 1/.test(psSg) &&
+      /load\(startAt = cur\)/.test(psSg) &&
+      /seekTo\(hp\.currentPosition\)/.test(psSg) &&
+      /noteMedia3AudioError/.test(sg);
+    const cool = /REPAIR_COOLDOWN_MS = 20_000L/.test(sg) &&
+      /NUDGE_COOLDOWN_MS = 300_000L/.test(sg) &&
+      /KICK_COOLDOWN_MS = 300_000L/.test(sg) &&
+      /RESTART_COOLDOWN_MS = 900_000L/.test(sg) &&
+      /RESTART_MAX_PER_HOUR = 3/.test(sg);
+    const suppress = /!i\.userPaused && !seekInFlight && !i\.inTransition/.test(sg) &&
+      /stalled > 8000L/.test(sg) &&
+      /mutedObs >= 2/.test(sg) &&
+      /inTransition = !pastSyncGrace\(\)/.test(psSg) &&
+      /seekCmdRecent = nowMs - lastSeekCmdAt < 2000L/.test(psSg);
+    if (poke && nudge && kick && l4 && cool && suppress) {
+      ok("StabilityGuard: L1 truth poke never reloads, L2 unmute respects user intent, L3 kicks through documented commands, L4 reuses the reopen-at-position machinery - cooldowns, 3/hour budget and full false-trigger suppression");
+    } else {
+      bad("the stability ladder (0.120 P0) must keep: the getPaused/getMuted/getPlaybackRate truth poke with NO reload at L1, the _userMuteIntent-guarded setMuted(false) nudge, the ~600ms documented pause/play kick, L4 through the EXISTING webGen/load(startAt) machinery only (position preserved), the 20s/5min/5min/15min + max-3-per-hour budget, and suppression of user pause, user mute, in-flight seeks, episode/provider transitions and short (unsustained) stalls");
+    }
+  }
+}
+
+/* ---------- 93. StabilityGuard: real settings gates + subtitle re-anchor + motion yields ---------- */
+{
+  const sgPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/StabilityGuard.kt");
+  const sg = fs.existsSync(sgPath) ? qaRead(sgPath) : "";
+  const psS93 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
+  const stS93 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt")) : "";
+  const fmS93 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/FluidMotion.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/FluidMotion.kt")) : "";
+  if (!sg || !psS93 || !stS93 || !fmS93) bad("StabilityGuard/PlayerScreen/Store/FluidMotion missing - the stability settings cannot be verified");
+  else {
+    // the three toggles gate REAL subsystems: ladder, audio, subs clock
+    const gates = /getBoolean\(K_STAB_GUARD, true\)/.test(stS93) &&
+      /getBoolean\(K_STAB_AUDIO, true\)/.test(stS93) &&
+      /getBoolean\(K_STAB_SUBSYNC, true\)/.test(stS93) &&
+      /StabilityGuard\.setProtection\(ctx, stabOn\)/.test(psS93) &&
+      /StabilityGuard\.setAudio\(ctx, stabAudio\)/.test(psS93) &&
+      /StabilityGuard\.setSubResync\(ctx, stabSubs\)/.test(psS93) &&
+      /if \(!protectionOn\) \{/.test(sg) && /if \(!subResyncOn\) return null/.test(sg) &&
+      /if \(!audioOn\) return false|if \(!protectionOn \|\| !audioOn\) return null/.test(sg);
+    // subtitle continuity: every repair re-anchors the caption clock at the
+    // authoritative position and a stale cue is cleared, never frozen
+    const subs = /lastRepPos = at/.test(psS93) &&
+      /capTick = System\.currentTimeMillis\(\)/.test(psS93) &&
+      /capTick - curAt > 3000L/.test(psS93) &&
+      /cueAt\(f\.cues, t\)/.test(psS93);
+    // audio focus + route changes reach the L2 nudge (API-guarded, session-scoped)
+    const focus = /ACTION_AUDIO_BECOMING_NOISY/.test(sg) &&
+      /requestAudioFocus/.test(sg) &&
+      /focus regained after loss/.test(sg) &&
+      /abandonFocus/.test(sg);
+    // priority override: FluidMotion demotes FIRST and its work yields at
+    // guard level >= 2, restoring one step at a time after recovery
+    const yields = /fun demote\(reason: String\)/.test(fmS93) &&
+      /fun yieldToStability\(yield: Boolean\)/.test(fmS93) &&
+      /suspendDecorations\.value = stabilityYield \|\| tier == Tier\.C/.test(fmS93) &&
+      /!stabilityYield/.test(fmS93) &&
+      /FluidMotion\.yieldToStability\(level >= 2\)/.test(sg) &&
+      /FluidMotion\.demote\(/.test(sg);
+    if (gates && subs && focus && yields) {
+      ok("StabilityGuard settings gate real subsystems (default ON), the caption clock re-anchors on every repair and clears stale cues, audio focus/route changes nudge audio, and FluidMotion demotes first and yields at level >= 2");
+    } else {
+      bad("the three stability toggles must gate their own subsystems (Store defaults ON - never decorative), L1 must re-anchor the caption clock at the authoritative position and clear stale cues, focus/route changes must reach the audio nudge, and FluidMotion must demote on pressure and yield to stability from guard level 2 (0.120 priority override)");
+    }
+  }
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);
