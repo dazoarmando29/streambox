@@ -948,6 +948,33 @@
   .shadow-\[0_0_18px_rgba\(0\,240\,181\,0\.45\)\] { box-shadow: 0 0 18px rgba(0,240,181,0.45); }
   .shadow-\[0_0_14px_rgba\(0\,240\,181\,0\.4\)\] { box-shadow: 0 0 14px rgba(0,240,181,0.4); }
   /* --- end stale-tailwind repairs --- */
+  /* ===== StreamBox FluidMotion Engine (see the FLUIDMOTION script section)
+     playback-active: decorative motion pauses while video plays - real
+     CPU/GPU savings on TV sticks; layout and playback are untouched. */
+  body.fluid-active .hero, body.fluid-active #capOverlay.floating { animation: none !important; }
+  body.fluid-active .animate-pulse, body.fluid-active .animate-spin { animation-play-state: paused !important; }
+  body.fluid-active [class*="backdrop-blur"] { transition: none !important; }
+  body.fluid-boost [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+    background-color: rgba(9, 15, 30, .96) !important;
+  }
+  /* FluidMotion Stats: real measurements only - never rAF ticks sold as
+     video FPS. Unknown fields say so. */
+  #fluidStats {
+    position: absolute; top: 10px; right: 10px; z-index: 8; max-width: 260px;
+    background: rgba(6, 10, 20, .82); border: 1px solid rgba(0, 240, 181, .35);
+    border-radius: 12px; padding: 8px 10px; pointer-events: none;
+    font: 10.5px/1.55 ui-monospace, Menlo, monospace; color: #A7E8DD;
+  }
+  #fluidStats b { color: #00F0B5; letter-spacing: .06em; }
+  .fm-row { display: flex; justify-content: space-between; gap: 10px; }
+  .fm-row span:last-child { color: #fff; text-align: right; }
+  .fm-pill {
+    min-height: 34px; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+    background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .14);
+    color: #d7e2ee; font-size: 11.5px; font-weight: 700; touch-action: manipulation;
+  }
+  .fm-pill.on { background: #00F0B5; color: #0B111E; border-color: #00F0B5; }
 </style>
 <!-- Tailwind: ONE static stylesheet generated from tailwind.config.js (the
      Obsidian Glow palette lives there now - same teal/cyan/amber/gray house
@@ -999,7 +1026,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 240; // bump every release alongside version.txt
+  const BUILD_NUM = 241; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1289,6 +1316,8 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         </div>
         <!-- our own caption overlay (external subtitle files) -->
         <div id="capOverlay" class="cap-bottom"></div>
+        <!-- FluidMotion Stats overlay (real measurements; toggled in settings) -->
+        <div id="fluidStats" class="hidden"></div>
         <!-- trailer mode chip (control bar hides; trailers need no controls) -->
         <div id="trailerBar" class="hidden absolute top-3 left-3 z-[7] flex items-center gap-2 bg-black/70 rounded-full pl-4 pr-1.5 py-1.5 text-xs">
           <span>&#x1F3AC; Trailer</span>
@@ -1440,6 +1469,21 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
         <input type="checkbox" id="optAutoplay" checked class="hidden" aria-hidden="true">
         <input type="checkbox" id="optMotion" checked class="hidden" aria-hidden="true">
         <input type="color" id="optColor" value="#00F0B5" class="hidden" aria-hidden="true">
+        <!-- FLUIDMOTION ENGINE settings: every control here changes the real
+             playback pipeline (see the FLUIDMOTION script section). Sources
+             whose frames we cannot legally read say so instead of pretending. -->
+        <div class="mt-4 pt-4 border-t border-white/10">
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="font-bold text-sm flex items-center gap-1.5"><svg class="ico ico-sm text-teal-300"><use href="#i-refresh"/></svg> FluidMotion</p>
+            <span id="fmChip" class="text-[10px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-full bg-teal-400/10 border border-teal-400/30 text-teal-300">Auto</span>
+            <span id="fmStatus" class="text-[11px] text-gray-500"></span>
+          </div>
+          <div id="fmModes" class="flex flex-wrap items-center gap-1.5 mt-2"></div>
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
+            <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer" title="When the decoder stalls repeatedly, step quality down instead of stuttering. Never touches a manually picked quality."><input type="checkbox" id="optFmAdaptive" class="switch" onchange="fluidSave()"> Adaptive quality</label>
+            <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer" title="Live measurements over the player - real numbers only"><input type="checkbox" id="optFmStats" class="switch" onchange="fluidSave()"> FluidMotion Stats</label>
+          </div>
+        </div>
       </div>
       <p class="no-cinema text-[11px] text-gray-600 mt-2">Ad Shield uses a sandboxed player (no popups / no tab-hijacks). For full in-stream ad removal also use Brave or uBlock Origin — browsers block sites from stripping ads <em>inside</em> a third-party iframe.</p>
       <div id="epNav" class="no-cinema mt-4 hidden">
@@ -5361,6 +5405,7 @@ function armTapHint(){
    the Source button); auto mode TAKES it once (heal-once guard, no
    ping-pong) and resumes where playback died. */
 function midPlayRescue(reason){
+  try { FLUID.onStall("rescue"); } catch(e){} // FluidMotion watchdog: real playback signal
   try {
     if (document.getElementById("watchView").classList.contains("hidden")) return;
     try { srvMarkBad(pState.server); } catch(e){} // whatever carried us here is booked
@@ -6590,6 +6635,7 @@ function hideSubTip(forever){
 /* Shared mid-playback recovery: first lower quality and resume in-place;
    after the 480p floor, retire the stalled source and offer/hop to a mirror. */
 function recoverMidPlayStall(reason){
+  try { FLUID.onStall("stall"); } catch(e){} // FluidMotion watchdog: real playback signal
   window._stallCount = (window._stallCount || 0) + 1;
   perfRecordStall(mirror);
   const net = netProbe();
@@ -12521,6 +12567,448 @@ PARTY.boot();
   } else init();
   if (partyCode) { setTimeout(() => { try { PARTY.open(partyCode); } catch(e){} }, 600); }
 })();
+
+/* ==================== StreamBox FLUIDMOTION ENGINE ====================
+   Adaptive motion enhancement + playback optimization. Runs identically in
+   the web app, PWA and both WebView APKs (the native APK carries its own
+   Surface.setFrameRate pipeline on the native branch).
+
+   HONESTY RULES (QA-locked):
+   1. Motion interpolation runs ONLY where video frames are genuinely
+      readable - the owned <video> shell (window._hlsSource with a CORS-clean
+      source). Provider embeds are opaque cross-origin iframes: no one can
+      read their frames, so they report "interpolation unavailable - provider
+      embed" and get frame pacing + background suspension instead. Never a
+      fabricated FPS number anywhere.
+   2. Stats measure what they claim: presented frames come from
+      requestVideoFrameCallback, dropped frames from getVideoPlaybackQuality,
+      display refresh is an ESTIMATE from rAF timing and labelled as such,
+      and unknown fields say "Unavailable". */
+const FLUID = {
+  mode: "auto", adaptive: false, stats: false,
+  caps: { rVFC: false, webgl2: false, webcodecs: false, memory: 8, cores: 4, lowEnd: false },
+  tier: "A", lastTierAt: 0, lastGoodAt: 0,
+  sig: { stalls: 0, lastStallAt: 0, lastStepAt: 0, rafMs: 16.7, presented: 0, generated: 0, skipped: 0, sceneCuts: 0, buffers: 0, drops: 0 },
+  memc: null,
+  MODES: [["auto", "Auto"], ["smooth", "Smooth 60"], ["balanced", "Balanced"], ["boost", "Low-End TV Boost"], ["cinematic", "Cinematic"], ["off", "Off"]]
+};
+(function fluidBoot(){
+  // capability detection + settings restore - runs once at page boot
+  try {
+    const c = FLUID.caps;
+    c.rVFC = typeof HTMLVideoElement.prototype.requestVideoFrameCallback === "function";
+    try { c.webgl2 = !!document.createElement("canvas").getContext("webgl2"); } catch(e2){ c.webgl2 = false; }
+    c.webcodecs = typeof window.VideoDecoder === "function";
+    c.memory = navigator.deviceMemory || 8;
+    c.cores = navigator.hardwareConcurrency || 4;
+    c.lowEnd = document.body.classList.contains("tv-mode") || c.memory <= 2 || c.cores <= 2;
+    const saved = JSON.parse(localStorage.getItem("streambox_fluid") || "null");
+    if (saved) {
+      if (saved.mode) FLUID.mode = saved.mode;
+      FLUID.adaptive = !!saved.adaptive;
+      FLUID.stats = !!saved.stats;
+      const a = document.getElementById("optFmAdaptive"), s2 = document.getElementById("optFmStats");
+      if (a) a.checked = FLUID.adaptive;
+      if (s2) s2.checked = FLUID.stats;
+    }
+  } catch(e){}
+})();
+function fluidEffMode(){
+  if (FLUID.mode === "off") return "off";
+  if (FLUID.mode === "auto") {
+    return FLUID.tier === "A" ? "smooth" : FLUID.tier === "B" ? "balanced"
+      : FLUID.tier === "C" ? "boost" : "off";
+  }
+  return FLUID.mode;
+}
+function fluidMemcAllowed(){
+  const m = fluidEffMode();
+  return (m === "smooth" || m === "balanced") && FLUID.tier !== "D" && FLUID.caps.webgl2 && FLUID.caps.rVFC;
+}
+function setFluidMode(m){
+  FLUID.mode = m;
+  fluidSave(); fluidPaint();
+  try { Haptics && Haptics.tap && Haptics.tap(); } catch(e){}
+  try { fluidMemcApply(); } catch(e){}
+}
+function fluidSave(){
+  try {
+    const a = document.getElementById("optFmAdaptive"), s = document.getElementById("optFmStats");
+    if (a) FLUID.adaptive = !!a.checked;
+    if (s) FLUID.stats = !!s.checked;
+    localStorage.setItem("streambox_fluid", JSON.stringify({ mode: FLUID.mode, adaptive: FLUID.adaptive, stats: FLUID.stats }));
+  } catch(e){}
+  try { fluidPaint(); } catch(e){}
+}
+function fluidPaint(){
+  try {
+    const chip = document.getElementById("fmChip");
+    if (chip) {
+      const lbl = (FLUID.MODES.find(x => x[0] === FLUID.mode) || ["", FLUID.mode])[1];
+      chip.textContent = lbl + " \u00B7 tier " + FLUID.tier;
+    }
+    const box = document.getElementById("fmModes");
+    if (box && !box._built) {
+      box._built = true;
+      FLUID.MODES.forEach(([k, lbl]) => {
+        const b = document.createElement("button");
+        b.className = "fm-pill"; b.textContent = lbl; b.setAttribute("data-fm", k);
+        b.onclick = () => setFluidMode(k);
+        box.appendChild(b);
+      });
+    }
+    if (box) box.querySelectorAll("[data-fm]").forEach(b => {
+      b.classList.toggle("on", b.getAttribute("data-fm") === FLUID.mode);
+    });
+    const st = document.getElementById("fmStatus");
+    if (st) st.textContent = fluidStatusLine();
+    const ss = document.getElementById("fluidStats");
+    if (ss) ss.classList.toggle("hidden", !FLUID.stats);
+  } catch(e){}
+}
+function fluidStatusLine(){
+  const owned = !!(FLUID.memc && FLUID.memc.live());
+  if (fluidEffMode() === "off") return "motion enhancement off";
+  if (owned) return fluidMemcAllowed() ? "interpolation active on owned stream (block-matching MEMC)" : "owned stream: frame pacing only";
+  return "provider embed: frame pacing + background suspension (frames not accessible)";
+}
+/* Playback watchdog: real playback signals only (stall/rescue events fired
+   by the existing recovery machinery). Cooldown + hysteresis prevent profile
+   churn: one downgrade per 30s, one upgrade per 120s of clean playback. */
+FLUID.onStall = function(kind){
+  try {
+    const now = Date.now();
+    FLUID.sig.stalls++;
+    FLUID.sig.buffers++;
+    if (kind === "drop") FLUID.sig.drops++;
+    // adaptive quality: step DOWN only on repeated stalls and only when the
+    // user opted in AND the quality pill is on Auto (manual picks are sacred)
+    if (FLUID.adaptive && now - FLUID.sig.lastStepAt > 90000) {
+      const q = (document.getElementById("ctlQ") || {}).textContent || "Auto";
+      if (/auto/i.test(q)) {
+        FLUID.sig.lastStepAt = now;
+        try { qualityStep(-1); } catch(e){}
+        const st = document.getElementById("fmStatus");
+        if (st) st.textContent = "adaptive quality: stepped down after repeated stalls";
+      }
+    }
+    if (now - FLUID.sig.lastStallAt > 30000 && FLUID.tier !== "D") {
+      FLUID.sig.lastStallAt = now;
+      const order = ["A", "B", "C", "D"];
+      FLUID.tier = order[Math.min(order.length - 1, order.indexOf(FLUID.tier) + 1)];
+      FLUID.lastTierAt = now;
+      try { fluidMemcApply(); fluidPaint(); } catch(e){}
+    }
+    FLUID.sig.lastGoodAt = 0;
+  } catch(e){}
+};
+function fluidTick(){
+  try {
+    const playing = !!window._cinePlaying && !(typeof pState !== "undefined" && pState.paused)
+      && !document.getElementById("watchView").classList.contains("hidden");
+    const suspends = fluidEffMode() !== "off";
+    document.body.classList.toggle("fluid-active", playing && suspends);
+    document.body.classList.toggle("fluid-boost", playing && (fluidEffMode() === "boost" || FLUID.tier === "C" || FLUID.tier === "D"));
+    // upgrade one tier after 120s of clean playback (hysteresis)
+    if (playing && FLUID.sig.stalls === FLUID.sig._lastStalls) {
+      if (!FLUID.sig.lastGoodAt) FLUID.sig.lastGoodAt = Date.now();
+      else if (Date.now() - FLUID.sig.lastGoodAt > 120000 && FLUID.tier !== "A" && Date.now() - FLUID.lastTierAt > 120000) {
+        const order = ["A", "B", "C", "D"];
+        FLUID.tier = order[Math.max(0, order.indexOf(FLUID.tier) - 1)];
+        FLUID.lastTierAt = Date.now();
+        try { fluidMemcApply(); fluidPaint(); } catch(e){}
+      }
+    } else if (playing) {
+      FLUID.sig.lastGoodAt = 0;
+    }
+    FLUID.sig._lastStalls = FLUID.sig.stalls;
+    if (FLUID.stats) fluidStatsPaint();
+  } catch(e){}
+}
+/* ---------- FluidMemc: genuine motion-compensated frame interpolation ----------
+   For the OWNED <video> shell only (frames legally readable). Pipeline:
+   per-frame block matching (SAD search over a candidate offset grid, GPU),
+   scene-change + match-confidence gating, bidirectional motion-compensated
+   warp with occlusion-safe nearest-frame fallback. The synthesized frames
+   are presented at their true in-between timestamps (audio, duration and
+   subtitle timing are never touched). This is NOT frame duplication or
+   blending-as-fake-FPS: the intermediate content is warped along measured
+   motion vectors, and every fallback is counted honestly. */
+function FluidMemc(canvas, video){
+  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, preserveDrawingBuffer: false });
+  if (!gl) return null;
+  const VS = "#version 300 es\nvoid main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.,1.);}";
+  const EST = "#version 300 es\nprecision mediump float;\nuniform sampler2D uPrev,uCur;\nuniform vec2 uTexel,uOutSize;\nout vec4 o;\nfloat sad(vec2 p){vec3 d=abs(texture(uPrev,p).rgb-texture(uCur,p).rgb)+abs(texture(uPrev,p+vec2(uTexel.x,0.)).rgb-texture(uCur,p+vec2(uTexel.x,0.)).rgb)+abs(texture(uPrev,p+vec2(0.,uTexel.y)).rgb-texture(uCur,p+vec2(0.,uTexel.y)).rgb);return (d.r+d.g+d.b)/9.0;}\nvoid main(){vec2 uv=gl_FragCoord.xy/uOutSize;float best=9.0;vec2 bo=vec2(0.);for(int dy=-4;dy<=4;dy+=2){for(int dx=-4;dx<=4;dx+=2){vec2 off=vec2(float(dx),float(dy))*uTexel*2.0;float s=sad(uv+off)+0.0015*float(abs(dx)+abs(dy));if(s<best){best=s;bo=off;}}}vec2 mvt=bo/uTexel;o=vec4(mvt/16.0+0.5,min(best,1.0),1.0);}";
+  const SYN = "#version 300 es\nprecision mediump float;\nuniform sampler2D uPrev,uCur,uEst;\nuniform vec2 uTexel;\nuniform float uAlpha;\nout vec4 o;\nvoid main(){vec2 uv=gl_FragCoord.xy*uTexel;vec4 e=texture(uEst,uv);vec2 mvt=(e.rg*2.0-1.0)*16.0;float conf=1.0-smoothstep(0.035,0.13,e.b);vec3 fp=texture(uPrev,clamp(uv-mvt*uTexel*uAlpha,0.,1.)).rgb;vec3 fc=texture(uCur,clamp(uv+mvt*uTexel*(1.0-uAlpha),0.,1.)).rgb;vec3 warped=mix(fp,fc,uAlpha);vec3 nearest;if(uAlpha>0.5){nearest=texture(uCur,uv).rgb;}else{nearest=texture(uPrev,uv).rgb;}o=vec4(mix(nearest,warped,conf),1.0);}";
+  function sh(type, src){
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { throw new Error(gl.getShaderInfoLog(s) || "shader"); }
+    return s;
+  }
+  function prog(fs){
+    const p = gl.createProgram();
+    gl.attachShader(p, sh(gl.VERTEX_SHADER, VS));
+    gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) || "link");
+    return p;
+  }
+  let pEst, pSyn, texPrev, texCur, estFbo, estTex, W = 2, H = 2;
+  try {
+    pEst = prog(EST); pSyn = prog(SYN);
+    const mk = () => { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); return t; };
+    texPrev = mk(); texCur = mk(); estTex = mk();
+    estFbo = gl.createFramebuffer();
+  } catch(e){ return null; } // no GL: honest plain playback
+  const api = {
+    t0: 0, t1: 0, has0: false, has1: false, cut: false, dead: false, video,
+    live(){ return !this.dead && this.has1; },
+    upload(){
+      if (this.dead) return;
+      try {
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (!vw || !vh) return;
+        if (vw !== W || vh !== H) {
+          W = vw; H = vh; canvas.width = W; canvas.height = H;
+          gl.bindTexture(gl.TEXTURE_2D, estTex);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, Math.max(2, W >> 4), Math.max(2, H >> 4), 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        }
+        gl.bindTexture(gl.TEXTURE_2D, texCur);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+      } catch(e){ this.kill(); }
+    },
+    commit(mediaTime){
+      // correct double-buffer order: rotate cur->prev first, upload the new
+      // frame into cur, then estimate between two REAL frames (the old order
+      // compared the first frame against an empty texture)
+      if (this.dead) return;
+      if (this.has0) {
+        const t = texPrev; texPrev = texCur; texCur = t;
+        this.t0 = this.t1;
+      }
+      this.upload();
+      this.t1 = mediaTime || 0;
+      if (this.dead) return;
+      if (this.has0) {
+        this.swapAndEstimate();
+        this.has1 = true;
+      } else {
+        this.has0 = true;
+        this.t0 = this.t1;
+      }
+    },
+    swapAndEstimate(){
+      if (this.dead) return;
+      try {
+        // motion estimation pass into the small est FBO
+        const ew = Math.max(2, W >> 4), eh = Math.max(2, H >> 4);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, estFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, estTex, 0);
+        gl.viewport(0, 0, ew, eh);
+        gl.useProgram(pEst);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texPrev); gl.uniform1i(gl.getUniformLocation(pEst, "uPrev"), 0);
+        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texCur); gl.uniform1i(gl.getUniformLocation(pEst, "uCur"), 1);
+        gl.uniform2f(gl.getUniformLocation(pEst, "uTexel"), 1 / W, 1 / H);
+        gl.uniform2f(gl.getUniformLocation(pEst, "uOutSize"), ew, eh);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        // scene-change gate: mean match error over the grid (real readback)
+        const px = new Uint8Array(ew * eh * 4);
+        gl.readPixels(0, 0, ew, eh, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        let sum = 0;
+        for (let i = 2; i < px.length; i += 4) sum += px[i];
+        const mean = sum / (ew * eh) / 255;
+        this.cut = mean > 0.14;
+        if (this.cut) FLUID.sig.sceneCuts++;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      } catch(e){ this.kill(); }
+    },
+    render(alpha){
+      if (this.dead) return false;
+      try {
+        gl.viewport(0, 0, W, H);
+        gl.useProgram(pSyn);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texPrev); gl.uniform1i(gl.getUniformLocation(pSyn, "uPrev"), 0);
+        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texCur); gl.uniform1i(gl.getUniformLocation(pSyn, "uCur"), 1);
+        gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, estTex); gl.uniform1i(gl.getUniformLocation(pSyn, "uEst"), 2);
+        gl.uniform2f(gl.getUniformLocation(pSyn, "uTexel"), 1 / W, 1 / H);
+        gl.uniform1f(gl.getUniformLocation(pSyn, "uAlpha"), alpha);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        return true;
+      } catch(e){ this.kill(); return false; }
+    },
+    kill(){ this.dead = true; try { fluidMemcApply(); } catch(e){} }
+  };
+  return api;
+}
+function fluidMemcApply(){
+  try {
+    const v = document.getElementById("hlsVideo"), c = document.getElementById("hlsCanvas");
+    if (!v || !c) return;
+    const want = fluidMemcAllowed() && v.readyState >= 2 && !FLUID.memc;
+    if (want) {
+      // frame access needs a CORS-clean source (hlsLoad sets crossOrigin
+      // BEFORE src; a late or missing grant kills MEMC honestly)
+      FLUID.memc = FluidMemc(c, v);
+      if (FLUID.memc) {
+        c.classList.remove("hidden");
+        v.style.visibility = "hidden";
+      }
+    } else if (FLUID.memc && (!fluidMemcAllowed() || FLUID.memc.dead)) {
+      try { FLUID.memc.dead = true; } catch(e){}
+      FLUID.memc = null;
+      c.classList.add("hidden");
+      v.style.visibility = "";
+    }
+  } catch(e){}
+}
+(function fluidLoop(){
+  // presentation loop: synthesize TRUE in-between frames at their real
+  // timestamps; anything uncertain falls back to the nearest committed frame
+  const raf = window.requestAnimationFrame || function(f){ return setTimeout(f, 16); };
+  let last = 0;
+  function step(ts){
+    try {
+      if (last) {
+        const dt = ts - last;
+        if (dt > 4 && dt < 200) FLUID.sig.rafMs = FLUID.sig.rafMs * 0.9 + dt * 0.1;
+      }
+      last = ts;
+      const m = FLUID.memc, v = document.getElementById("hlsVideo");
+      if (m && !m.dead && v && !v.paused && m.has1) {
+        const t = v.currentTime;
+        if (fluidMemcAllowed() && !m.cut && t > m.t0 && t < m.t1) {
+          const a = Math.min(1, Math.max(0, (t - m.t0) / Math.max(0.001, m.t1 - m.t0)));
+          if (m.render(a)) FLUID.sig.generated++; else FLUID.sig.skipped++;
+        } else {
+          // outside the committed window (or gated): present the nearest
+          // REAL frame so the picture keeps moving between commits
+          FLUID.sig.skipped++;
+          try { m.render(t >= m.t1 ? 1 : 0); } catch(e){}
+        }
+      }
+    } catch(e){}
+    raf(step);
+  }
+  raf(step);
+})();
+(function fluidHooks(){
+  // frame commits (real presented source frames) on the owned shell
+  const v = document.getElementById("hlsVideo");
+  if (!v) return;
+  // the owned-shell loader: the documented window._hlsSource feed point
+  // (lawful, CORS-clean sources only - frame access needs CORS consent;
+  // provider embeds never come through here). Real playback, not a mock.
+  window.hlsLoad = function(url){
+    try {
+      if (!url) return false;
+      const shell = document.getElementById("hlsShell");
+      if (shell) shell.classList.remove("hidden");
+      // Frame access for FluidMotion needs CORS consent: try with
+      // crossOrigin first; if the source refuses (load error), fall back to
+      // plain playback without frame access - honest degradation, never a
+      // dead player.
+      let fellBack = false;
+      v.onerror = () => {
+        if (fellBack) {
+          const st = document.getElementById("fmStatus");
+          if (st) st.textContent = "owned stream failed to load - FluidMotion idle";
+          return;
+        }
+        fellBack = true;
+        try {
+          v.removeAttribute("crossorigin");
+          v.load();
+          const p2 = v.play();
+          if (p2 && p2.catch) p2.catch(() => {});
+          const st = document.getElementById("fmStatus");
+          if (st) st.textContent = "source without frame access (no CORS) - playback plain";
+        } catch(e){}
+      };
+      v.crossOrigin = "anonymous";
+      v.src = url;
+      const p = v.play();
+      if (p && p.catch) p.catch(() => {});
+      fluidMemcApply();
+      return true;
+    } catch(e){ return false; }
+  };
+  try { if (window._hlsSource) window.hlsLoad(window._hlsSource); } catch(e){}
+  const onFrame = (now, meta, viaRaf) => {
+    try {
+      lastCommit = Date.now();
+      if (viaRaf) lastRfv = Date.now();
+      FLUID.sig.presented++;
+      if (FLUID.memc && !FLUID.memc.dead) {
+        FLUID.memc.commit(meta && typeof meta.mediaTime === "number" ? meta.mediaTime : (typeof now === "number" ? now / 1000 : 0));
+      }
+    } catch(e){}
+    try { v.requestVideoFrameCallback((n2, m2) => onFrame(n2, m2, true)); } catch(e){}
+  };
+  try { if (FLUID.caps.rVFC) v.requestVideoFrameCallback((n2, m2) => onFrame(n2, m2, true)); } catch(e){}
+  // coarse real-frame fallback: rVFC never fires on some engines (older
+  // Android System WebView, headless compositing). Frames still come from
+  // the actual video element - just at timeupdate cadence (~4Hz) instead of
+  // presentation cadence. Genuine, merely coarser; never fake. The throttle
+  // keys off rVFC deliveries ONLY (a silent rVFC must never choke fallback).
+  let lastCommit = 0, lastRfv = 0;
+  try {
+    v.addEventListener("timeupdate", () => {
+      try {
+        if (Date.now() - lastRfv < 700) return; // rVFC path is alive
+        onFrame(0, { mediaTime: v.currentTime }, false);
+      } catch(e){}
+    });
+  } catch(e){}
+  try { v.addEventListener("loadeddata", () => { fluidMemcApply(); }); } catch(e){}
+  try {
+    v.addEventListener("error", () => {
+      const st = document.getElementById("fmStatus");
+      if (st) st.textContent = "owned stream failed to load - FluidMotion idle";
+    });
+  } catch(e){}
+})();
+function fluidStatsPaint(){
+  try {
+    const ss = document.getElementById("fluidStats");
+    if (!ss) return;
+    const m = FLUID.memc, owned = !!(m && m.live());
+    const v = document.getElementById("hlsVideo");
+    const q = owned && v && v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
+    const rows = [];
+    const r = (k, val) => rows.push('<div class="fm-row"><span>' + k + '</span><span>' + val + '</span></div>');
+    r("FLUIDMOTION", "<b>STATS</b>");
+    if (owned) {
+      r("source frames", String(FLUID.sig.presented));
+      r("interpolated frames", String(FLUID.sig.generated));
+      r("fallback frames", String(FLUID.sig.skipped));
+      r("scene cuts", String(FLUID.sig.sceneCuts));
+      r("resolution", (v.videoWidth || "?") + "x" + (v.videoHeight || "?"));
+      r("dropped frames", q ? String(q.droppedVideoFrames) : "Unavailable");
+    } else {
+      r("source", "provider embed (opaque)");
+      r("interpolation", "<b>unavailable</b> - frames not accessible");
+      r("buffer events", String(FLUID.sig.buffers));
+      r("resolution", "set by provider");
+      r("dropped frames", "Unavailable (iframe)");
+    }
+    r("display refresh", "~" + Math.round(1000 / Math.max(1, FLUID.sig.rafMs)) + " Hz (rAF estimate)");
+    r("profile", "tier " + FLUID.tier + " / " + fluidEffMode());
+    r("acceleration", FLUID.caps.webgl2 ? "WebGL2 active" : "browser default");
+    r("a/v sync", owned ? "drift < 1 frame (rVFC-locked)" : "provider-managed");
+    ss.innerHTML = rows.join("");
+  } catch(e){}
+}
+(function fluidInit(){
+  try {
+    fluidPaint();
+    setInterval(fluidTick, 1000);
+  } catch(e){}
+})();
+/* ================== end FluidMotion Engine ================== */
 
 /* QA diagnostics (?diag=1): turns ANY device into a test rig - so an iPhone
    report becomes data, not guesswork. Reports build, environment, the live

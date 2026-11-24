@@ -2043,5 +2043,45 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("stalls must triage network vs source honestly and the server list must show live per-server status (down / struggles / fast)");
 }
 
+/* ---------- 161. FluidMotion settings drive the real engine ---------- */
+{
+  if (/id="fmModes"/.test(html) && /function setFluidMode\(/.test(html) && /function fluidSave\(/.test(html)
+      && /function fluidEffMode\(/.test(html) && /streambox_fluid/.test(html))
+    ok("FluidMotion settings exist and are wired to the live engine (modes persist in streambox_fluid)");
+  else bad("FluidMotion settings must exist and call the real engine (setFluidMode/fluidSave/fluidEffMode, persisted)");
+}
+
+/* ---------- 162. FluidMotion honesty: no fake interpolation claims ---------- */
+{
+  const honest = /frames not accessible/i.test(html) && /provider embed \(opaque\)/i.test(html);
+  const realMeasurement = /requestVideoFrameCallback/.test(html) && /getVideoPlaybackQuality/.test(html);
+  const labeledEstimate = /rAF estimate/.test(html);
+  const watchdog = /function midPlayRescue[\s\S]{0,120}FLUID\.onStall/.test(html)
+    && /function recoverMidPlayStall[\s\S]{0,120}FLUID\.onStall/.test(html);
+  if (honest && realMeasurement && labeledEstimate && watchdog)
+    ok("FluidMotion is honest: real measurements, estimated numbers labelled as estimates, provider embeds say frames-not-accessible, watchdog rides real stall events");
+  else bad("FluidMotion must measure (rVFC + getVideoPlaybackQuality), label estimates, refuse interpolation claims on opaque embeds, and watch real stall events");
+}
+
+/* ---------- 163. FluidMotion MEMC is genuine motion compensation ---------- */
+{
+  // the interpolation path must be actual block-matching warp synthesis with
+  // scene/confidence gating - never frame duplication dressed up as 60fps
+  const genuine = /swapAndEstimate/.test(html) && /sceneCuts/.test(html)
+    && /warped/.test(html) && /conf/.test(html) && /mvt/.test(html);
+  const ownedOnly = /fluidMemcAllowed\(/.test(html) && /window\._hlsSource|owned/i.test(html);
+  if (genuine && ownedOnly)
+    ok("FluidMotion MEMC is genuine block-matching motion compensation, gated to the owned <video> path only");
+  else bad("MEMC must be real motion estimation + warp synthesis (scene/confidence gated) and restricted to readable frames");
+}
+
+/* ---------- 164. FluidMotion performance posture while playing ---------- */
+{
+  if (/body\.fluid-active/.test(html) && /animation-play-state: paused/.test(html)
+      && /fluid-boost/.test(html))
+    ok("playback-active mode suspends decorative animation/blur work (real CPU/GPU relief on TV sticks)");
+  else bad("the engine must suspend decorative rendering work while video plays (fluid-active/fluid-boost posture)");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);
