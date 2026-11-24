@@ -98,7 +98,8 @@ final class AppModel: ObservableObject {
         } else {
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
         }
-        scene.setNeedsUpdateOfSupportedInterfaceOrientations()
+        // re-evaluate the (temporarily narrowed) orientation mask
+        scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
     }
 
     func applyIdleTimer() {
