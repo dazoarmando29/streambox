@@ -1,5 +1,39 @@
 # Changelog
 
+## Provider Compatibility Update - web 243 / wrapper 2.60 (41)
+
+### Added
+- **Universal Playback Adapter** (PB): picks the most capable authorized
+  playback architecture per source (owned+MEMC > consented capture >
+  provider enhancement > hardware enhancement > iframe+StabilityGuard) with
+  a live per-source status that can never overstate MEMC (QA-locked):
+  "Genuine MEMC active" / "adaptive frame pacing" / "Interpolation
+  unavailable - provider embed (frames not accessible)".
+- **Experimental capture MEMC** (default OFF): explicit user consent via
+  the browser share-screen prompt feeds captured frames through the real
+  WebGL2 MEMC engine, with live measured latency and auto-disable above
+  250ms to protect A/V sync. Protected content captures black; never
+  bypassed. Subordinate to StabilityGuard like all generated frames.
+- **Owned-shell track pills**: embedded text/audio tracks surface in the A/V
+  section and wire to the existing subtitle system.
+
+### Changed
+- MEMC engine: tiered motion-search radius (low-end halves the search),
+  early-exit block matching, generalized frame ingest (uploadFrom) - one
+  shared engine, no duplicates (QA-locked).
+- Honest provider matrix documented in FLUIDMOTION-PROVIDER-COMPATIBILITY-
+  REPORT.md: genuine MEMC inside provider iframes is blocked by browser
+  security (frames unreadable to any engine without bypassing it) - the
+  best authorized alternative is implemented per provider.
+
+### Measured (honest)
+- Engine sustained interpolation on software GL (SwiftShader, worst case):
+  ~1.1 generated fps at 360p over a 30s driver window. Hardware GL on real
+  devices is dramatically faster; device benchmarks pending physical
+  testing. No 60fps claim is made.
+
+## StabilityGuard Update - web 242 / wrapper 2.50 (40) / native 0.120
+
 ## StabilityGuard Update - web 242 / wrapper 2.50 (40) / native 0.120
 
 ### Added

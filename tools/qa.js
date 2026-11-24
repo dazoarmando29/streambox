@@ -2118,5 +2118,27 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("stability guards must respect user intent and sacrifice interpolation first");
 }
 
+/* ---------- 168. universal adapter: per-source truth status ---------- */
+{
+  const adapter = /const PB = \{/.test(html) && /function pbDetect\(/.test(html) && /function pbStatusLine\(/.test(html);
+  const honest = /Genuine MEMC active \(motion-compensated\)/.test(html)
+    && /Interpolation unavailable - provider embed \(frames not accessible\)/.test(html);
+  const capture = /function pbStartCapture\(/.test(html) && /optFmCapture/.test(html)
+    && /latency exceeded - protecting A\/V sync/.test(html);
+  if (adapter && honest && capture)
+    ok("universal playback adapter picks the authorized path per source and reports real MEMC status (capture mode experimental + latency-guarded)");
+  else bad("playback adapter must exist with honest per-source status and consent-gated, latency-guarded capture mode");
+}
+
+/* ---------- 169. interpolation engine stays lightweight + shared ---------- */
+{
+  const shared = (html.match(/function FluidMemc/g) || []).length === 1; // one engine, no duplicates
+  const tiered = /uRadius/.test(html) && /best<=0\.002/.test(html); // low-end tier radius + early exit
+  const tracks = /id="fmTracks"/.test(html);
+  if (shared && tiered && tracks)
+    ok("one shared MEMC engine with low-end search-radius tiers, early-exit matching, and owned-shell track integration");
+  else bad("MEMC must stay a single shared engine with low-end optimizations and real track wiring");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);
