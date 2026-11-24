@@ -2126,5 +2126,38 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   }
 }
 
+/* ---------- 95. subtitle clock: staleness-aware estimator (web capNow parity) ---------- */
+{
+  const ckPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/CaptionClock.kt");
+  const ck = fs.existsSync(ckPath) ? qaRead(ckPath) : "";
+  const psCk = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
+  if (!ck || !psCk) bad("CaptionClock.kt/PlayerScreen.kt missing - the subtitle clock cannot be verified");
+  else {
+    // the estimator must free-run at REAL playback rate, tolerate stale
+    // provider messages without pulling captions backward, correct slow
+    // media clocks smoothly, and snap only on genuine jumps. Regression =
+    // the "subtitles delayed / sometimes early" bug on any title.
+    const rateAware = /var e = est \+ \(\(nowMs - at\) \/ 1000f\) \* r/.test(ck) &&
+      /val r = if \(rate > 0f\) rate else 1f/.test(ck);
+    const noYank = /lag = lag \* 0\.85f \+ l \* 0\.15f/.test(ck) &&
+      /val target = cur \+ lag/.test(ck) &&
+      /e \+= innov \* 0\.3f/.test(ck) &&
+      /never a yank/.test(ck) &&
+      /if \(last >= 0f && e < last\) e = last/.test(ck); // absolute monotonic clamp
+    const snap = /kotlin\.math\.abs\(innov\) > 2\.5f/.test(ck) &&
+      /fun snap\(pos: Float\)/.test(ck) &&
+      /capClock\.snap\(target\)/.test(psCk); // the app's own seeks snap too
+    const truth = /if \(paused \|\| seeking \|\| at == 0L\)/.test(ck) &&
+      /paused = !playing/.test(psCk) &&
+      /seeking = scrub >= 0f \|\| pendingSeek >= 0f/.test(psCk);
+    const wired = /capClock\.now\(/.test(psCk) &&
+      /\) \+ subOffset/.test(psCk) && // the offset ladder stays AFTER the clock
+      /cueAt\(f\.cues, t\)/.test(psCk);
+    if (rateAware && noYank && snap && truth && wired)
+      ok("subtitle clock is a staleness-aware estimator: rate-correct, never yanked by late messages, smooth catch-up, snap on seeks");
+    else bad("the caption clock must be the staleness-aware media-clock estimator (rate free-run, lag compensation, smooth correction, jump snap, paused/seeking truth, monotonic while playing) wired with the offset added AFTER the clock (0.210)");
+  }
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

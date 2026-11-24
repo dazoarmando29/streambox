@@ -121,6 +121,7 @@ import com.streambox.nativeapp.data.Store
 import com.streambox.nativeapp.data.SubPick
 import com.streambox.nativeapp.data.SubStyle
 import com.streambox.nativeapp.playback.CaptureMemc
+import com.streambox.nativeapp.playback.CaptionClock
 import com.streambox.nativeapp.playback.FluidMotion
 import com.streambox.nativeapp.playback.StabilityGuard
 import kotlinx.coroutines.Dispatchers
@@ -1425,6 +1426,11 @@ private class PlayerMem(
     var curAt by mutableStateOf(0L)
     // the caption repaint clock (120ms) - on PlayerMem per the 0.76 rule
     var capTick by mutableStateOf(0L)
+    // Caption media-clock ESTIMATOR (0.210, web capNow() parity): a plain
+    // engine object (no Compose state) that owns the caption timeline -
+    // rate-scaled free-run, learned transport-lag compensation, seek snaps,
+    // monotonic while playing. See playback/CaptionClock.kt.
+    val capClock = CaptionClock()
     var seasonList by mutableStateOf(listOf<SeasonInfo>())
     var seasonEps by mutableIntStateOf(0)
     var routeMal by mutableStateOf(mal)
@@ -2043,6 +2049,9 @@ fun PlayerScreen(
         val target = t.coerceAtLeast(0f)
         pm.cur = target
     pm.curAt = System.currentTimeMillis()
+        // Subtitle clock (0.210): a REAL seek snaps the caption timeline
+        // instantly - the only way it ever moves backward (web parity).
+        pm.capClock.snap(target)
         val hp = pm.hlsPlayer
         if (pm.mirror == "hls" && hp != null) {
             // Native seek - the HLS slot owns its playback clock.
@@ -2906,14 +2915,15 @@ fun PlayerScreen(
 
     // Captions ride a fine clock (0.94): provider timeupdates are thinned to
     // ~4Hz (the 0.74 weak-box rule) which made text land a beat late - the
-    // lookup now extrapolates between updates and repaints every 120ms.
+    // lookup used to extrapolate between updates and repaint every 120ms.
+    // 0.210: that extrapolation is now the STALENESS-AWARE ESTIMATOR (web
+    // capNow() parity, playback/CaptionClock.kt) - the "subtitles delayed /
+    // sometimes early" fix.
     LaunchedEffect(Unit) {
         while (true) { pm.capTick = System.currentTimeMillis(); delay(120) }
     }
     val capCue = remember(pm.cur, pm.subs, pm.subOffset, pm.capTick) {
         val f = pm.subs ?: return@remember null
-        val extra = if (pm.playing && pm.curAt > 0L)
-            ((pm.capTick - pm.curAt) / 1000f).coerceIn(0f, 2f) else 0f
         // Subtitle auto-resync (0.120): a FROZEN clock must never freeze a
         // cue on screen - if the caption clock went stale while playing
         // (the P0 stutter class), clear the stale text instead of pinning
@@ -2922,7 +2932,20 @@ fun PlayerScreen(
         if (pm.stabSubs && pm.playing && pm.curAt > 0L && pm.capTick - pm.curAt > 3000L) {
             return@remember null
         }
-        val t = pm.cur + pm.subOffset + extra
+        // Caption clock ESTIMATOR (0.210, web capNow() parity): rate-scaled
+        // free-run between provider updates, learned transport-lag
+        // compensation (late messages NEVER move cues backward), smooth
+        // correction, snap only on real seeks (the app's seek/scrub state
+        // snaps explicitly), provider truth while paused/scrubbing, and an
+        // absolute monotonic clamp while playing.
+        val t = pm.capClock.now(
+            truth = if (pm.scrub >= 0f) pm.scrub else pm.cur,
+            rate = RATES[pm.rateIdx],
+            paused = !pm.playing,
+            seeking = pm.scrub >= 0f || pm.pendingSeek >= 0f ||
+                System.currentTimeMillis() - pm.lastSeekCmdAt < 1500L,
+            nowMs = pm.capTick,
+        ) + pm.subOffset // the offset ladder adjusts the offset AFTER the clock
         cueAt(f.cues, t)
     }
 
