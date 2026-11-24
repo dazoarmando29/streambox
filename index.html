@@ -1026,7 +1026,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 243; // bump every release alongside version.txt
+  const BUILD_NUM = 244; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -8482,18 +8482,51 @@ function paintSubsUI(){
   try { paintCapStyleUI(); } catch(e){}
 }
 function capNow(){
-  // provider clocks are THINNED (~4Hz on weak devices) and captions rendered
-  // straight off them landed a beat late (the native 0.94 fix, web side):
-  // extrapolate between timeupdates with the wall clock - never while paused
-  // or seeking (that would drift the text away from a frozen picture)
+  // Media-clock ESTIMATOR (the "subtitles delayed / sometimes early" fix):
+  // provider timeupdates are THINNED and often transport-late (their data
+  // describes where the video WAS). The old clock hard-reset to every
+  // message, so each late message YANKED captions backward (visible delay)
+  // while wall-clock extrapolation between them jumped ahead (early flash).
+  // This estimator instead free-runs at the REAL playback rate and corrects
+  // toward staleness-compensated measurements:
+  //   - it learns the transport lag (est - msg) and aims at msg + lag
+  //   - late messages therefore never pull the timeline backward
+  //   - a genuine slow media clock is corrected SMOOTHLY (not per-message)
+  //   - seeks / episode jumps snap instantly (|innov| > 2.5s)
+  //   - paused/seeking: the provider value IS the truth
   try {
     const cur = pState.cur || 0;
-    if (window._capAnchor == null || window._capAnchor.cur !== cur) {
-      window._capAnchor = { cur, at: Date.now() };
+    const now = Date.now();
+    const rate = (pState.rate && pState.rate > 0) ? pState.rate : 1;
+    if (pState.paused || pState.seeking) {
+      window._capClock = { est: cur, at: now, raw: cur, lag: 0, last: cur };
       return cur;
     }
-    if (pState.paused || pState.seeking) return cur;
-    return window._capAnchor.cur + (Date.now() - window._capAnchor.at) / 1000;
+    const c = window._capClock;
+    if (!c) { window._capClock = { est: cur, at: now, raw: cur, lag: 0, last: cur }; return cur; }
+    // free-run between measurements, scaled by the actual playback rate
+    let est = c.est + ((now - c.at) / 1000) * rate;
+    if (cur !== c.raw) {
+      // apparent transport staleness: how far ahead our clock already is
+      const lag = Math.max(0, est - cur);
+      c.lag = (c.lag || 0) * 0.85 + lag * 0.15;
+      const target = cur + c.lag;      // where the media really is now
+      const innov = target - est;
+      if (Math.abs(innov) > 2.5) {
+        est = cur;                     // seek / jump: snap to truth
+        c.lag = 0;
+        c.last = est;
+      } else {
+        est += innov * 0.3;            // smooth correction, never a yank
+      }
+      c.raw = cur;
+    }
+    // ABSOLUTE monotonic guarantee while playing: a single rogue/echoed
+    // message can never pull captions backward (only a real seek can)
+    if (c.last != null && est < c.last) est = c.last;
+    c.last = est;
+    c.est = est; c.at = now;
+    return est;
   } catch(e){ return (typeof pState !== "undefined" ? (pState.cur || 0) : 0); }
 }
 function paintCaps(force){
@@ -13159,7 +13192,7 @@ function sgRepairSync(reason){
     try { sendCmd("getPaused"); sendCmd("getMuted"); sendCmd("getPlaybackRate"); } catch(e){}
     try { anipmSend("getState", {}); } catch(e){}
     // re-anchor + repaint subtitles at the authoritative position NOW
-    try { window._capAnchor = null; paintCaps(true); } catch(e){}
+    try { window._capClock = null; paintCaps(true); } catch(e){}
     SG.sig.subsStale = false;
     return true;
   } catch(e){ return false; }

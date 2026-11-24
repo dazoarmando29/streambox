@@ -2140,5 +2140,23 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("MEMC must stay a single shared engine with low-end optimizations and real track wiring");
 }
 
+/* ---------- 170. subtitle clock: no delay-yank, no early flash ---------- */
+{
+  // the estimator must free-run at REAL playback rate, tolerate stale
+  // provider messages without pulling captions backward, correct slow media
+  // clocks smoothly, and snap only on genuine jumps. Regression = the
+  // "subtitles delayed / sometimes early" bug on any title.
+  const rateAware = /function capNow[\s\S]{0,1600}\* rate/.test(html);
+  const noYank = /function capNow[\s\S]{0,2400}c\.lag/.test(html)
+    && /never a yank/.test(html)
+    && /function capNow[\s\S]{0,2600}est < c\.last/.test(html); // absolute monotonic clamp
+  const snap = /function capNow[\s\S]{0,2400}Math\.abs\(innov\) > 2\.5/.test(html);
+  const pausedTruth = /function capNow[\s\S]{0,1600}pState\.paused \|\| pState\.seeking/.test(html);
+  const tickerIntact = /capNow\(\) \+ \(subFile\.offset/.test(html) && /\}, 150\);/.test(html);
+  if (rateAware && noYank && snap && pausedTruth && tickerIntact)
+    ok("subtitle clock is a staleness-aware estimator: rate-correct, never yanked by late messages, smooth catch-up, snap on seeks");
+  else bad("capNow must be the staleness-aware media-clock estimator (rate free-run, lag compensation, smooth correction, jump snap)");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);
