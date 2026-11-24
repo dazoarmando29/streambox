@@ -1,15 +1,18 @@
-The iPhone & iPad expansion, install center, and PWA polish - the same StreamBox now installs everywhere, free-first.
+The StreamBox FluidMotion Update - next-generation smooth playback, engineered for old and cheap Android TVs as hard as for flagships.
 
 What's new
-- iOS / iPadOS: a complete native Xcode project (Swift + SwiftUI + WKWebView) joins the repo - native splash, secure JS bridge, share sheet, AVKit playback path for authorized direct media, Ad Shield content blocking, deep links (streambox://party/CODE), offline states, iPad multitasking and keyboard/trackpad support. Built and simulator-tested by GitHub Actions on macOS runners (no Mac needed)
-- Install center (install.html): one polished page that detects your device and shows the right free options first - Web App for iPhone/iPad (Safari Add to Home Screen guide), Android APKs, TV and desktop routes, plus honest cards for TestFlight/App Store that activate only when real links exist. Footer now carries Install + Privacy doors
-- PWA upgrade: proper apple-touch-icon sizes (180/167/152), 1024 manifest icons with a true maskable variant, service worker shell cache v3 with the new icons, and the More-sheet Install door now always leads somewhere useful on iOS (which never fires beforeinstallprompt)
-- Privacy page (privacy.html): plain-language policy - no accounts, no analytics, no ads of our own; what stays on device, what crosses the network, and the iOS privacy manifest that declares it to Apple
+- FluidMotion Engine: adaptive playback optimization across the whole ecosystem (web app, PWA, both WebView APKs). Real capability detection (requestVideoFrameCallback, WebGL2, memory/cores, TV profile), four auto performance tiers with watchdog + hysteresis, and a motion-enhancement section in player settings (Auto / Smooth 60 / Balanced / Low-End TV Boost / Cinematic / Off) that is fully wired to the live pipeline - no decorative switches
+- Genuine motion-compensated frame interpolation on owned streams: block-matching motion estimation on GPU (WebGL2), bidirectional motion-compensated warp synthesis with scene-change + match-confidence gating and occlusion-safe fallback. Intermediates render at their true timestamps - audio, duration and subtitle timing never change. Runs where frames are legally readable (the owned video shell with CORS-clean sources); on capable hardware 24/30fps content presents as smooth 60fps-class motion
+- Honest limits where they belong: provider embeds are opaque cross-origin iframes - nobody can read their frames - so they report "interpolation unavailable - frames not accessible" and get what actually helps: frame pacing, stall/quality watchdog and background suspension instead of fake FPS numbers. FluidMotion Stats shows real measurements only (rVFC frame counts, getVideoPlaybackQuality drops, WebGL backend, tier) and labels estimates as estimates
+- Playback-active mode: while video plays, decorative animation, hero motion and blur work pause (real CPU/GPU relief on 1-2GB TV sticks - the "Low-End TV Boost" tier additionally flattens blur entirely). Layout and playback are untouched
+- Adaptive quality (opt-in, default off): repeated decoder/network stalls step quality down one rung when the pill is on Auto - a manually picked quality is never overridden
+- Owned-stream loader (window._hlsSource / hlsLoad) with graceful degradation: a source without CORS consent falls back to plain playback instead of dying
 
 Housekeeping
-- Build 238; Android wrapper 2.36 (versionCode 38). The iOS build number is kept in step with version.txt by tools/sync-ios-version.js and CI checks it
-- QA gate green (0 failures) with every lock preserved: footer legend, About update flow, sw cache honesty, wrapper safety
+- Build 241; wrapper 2.40 (versionCode 39). QA gate extended with 4 FluidMotion locks (settings wiring, honesty, genuine MEMC, performance posture) - 0 failures
+- Native track: FluidMotion frame-rate matching (Surface.setFrameRate) + dropped-frame watchdog on the native branch (native 0.110)
 
 Honest limits
-- iOS provider playback depends on each embed supporting mobile WebKit - where one cannot play, the app shows a clear fallback and a mirror switcher instead of a dead frame
-- Native iOS beta installs via free Apple ID signing (AltStore/SideStore): 7-day expiry, refresh weekly. TestFlight and App Store links appear only when a real listing exists - never before
+- Interpolation exists only where frames are legally readable; embed providers cannot be interpolated by anyone (browser security), and we never pretend otherwise
+- Display refresh-rate switching from the web is not possible (no browser API) - the native track handles true refresh matching on capable TVs
+- Physical-device verification of interpolation smoothness is pending user testing; the pipeline, math and gating are verified in automated browser tests against real moving content
