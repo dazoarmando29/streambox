@@ -1,5 +1,38 @@
 # Changelog
 
+## StabilityGuard Update - web 242 / wrapper 2.50 (40) / native 0.120
+
+### Added
+- **StreamBox StabilityGuard** (P0 playback stability, all platforms):
+  repair-first L0-L4 recovery ladder that kills the production "audio dies +
+  subtitles freeze after a stutter" failure class. L0 prevention (early
+  degradation demotes optional work), L1 sync repair (truth-query through
+  the documented command API, stuck-flag clearing, subtitle re-anchoring -
+  no reload), L2 audio continuity (documented unmute nudge that never
+  overrides user mute), L3 controlled pause/play kick, L4 budgeted
+  reload-keep-position (15 min cooldown, max 3/hour).
+- StabilityGuard settings (Auto stability / Audio continuity / Subtitle
+  resync) - all wired to real subsystems, all default ON.
+- StabilityGuard diagnostics in FluidMotion Stats: health, level, JS loop
+  latency, position cadence, subtitle clock state, repair/nudge/kick/
+  restart counters, last action. Real measurements only.
+- False-trigger suppression: user pause, user mute, in-flight seeks and
+  episode transitions never trigger recovery actions (verified by test).
+
+### Changed
+- FluidMotion yields to stability: generated frames are sacrificed first
+  whenever StabilityGuard level >= 2 (QA-locked priority override).
+- Caption clock repair: stuck `paused`/`seeking` flags (the confirmed
+  freeze mechanism) are detected and repaired against provider truth.
+
+### Honest limits
+- Provider iframe decoders are not directly controllable; we prevent,
+  detect, nudge and budget - we do not claim to fix provider-internal
+  decoders. Physical Android TV sessions (60-120 min) remain required to
+  certify device-level audio recovery.
+
+## FluidMotion Update - web 241 / wrapper 2.40 (39) / native 0.110
+
 ## FluidMotion Update - web 241 / wrapper 2.40 (39) / native 0.110
 
 ### Added
