@@ -86,6 +86,12 @@ object FluidMotion {
         val stabilityRestarts: Int = 0,
         val stabilityLastReason: String = "Unavailable",
         val audioFocus: String = "Unavailable",
+        // Per-source motion status (0.200, provider-compatibility
+        // vocabulary): exactly one honest status per source - genuine MEMC
+        // is NEVER claimed where frames are inaccessible.
+        val sourceStatus: String = "Unavailable",
+        // Hardware motion-enhancement survey result (documented APIs only).
+        val hardwareMemc: String = "Unavailable",
     )
 
     /** Compose suspension seam: decorative animations may observe this and
@@ -119,6 +125,23 @@ object FluidMotion {
     /** Last real reason a demotion fired (diagnostics, never invented). */
     @Volatile
     var lastDemoteReason: String = ""
+        private set
+
+    // ---- hardware motion-enhancement survey (0.200) ---------------------
+    /** Documented-API survey result. Android exposes NO documented
+        device MEMC / motion-enhancement API; the two surfaces that LOOK
+        related are NOT it and are never mislabeled:
+        - Display.getHdrCapabilities() (API 24+) reports HDR dynamic-range
+          capabilities (HLG/HDR10/Dolby Vision) - not motion processing;
+        - MediaCodecInfo.VideoCapabilities frame-rate/quality ranges
+          describe what a codec can decode/encode - not motion enhancement.
+        hardwareMemcDetected stays false until a DOCUMENTED detection path
+        exists; "Hardware motion enhancement active" is then unreachable. */
+    @Volatile
+    private var hardwareMemcDetected = false
+
+    @Volatile
+    var memcSurveyNote: String = "Unavailable"
         private set
 
     @Volatile
@@ -210,6 +233,7 @@ object FluidMotion {
         hardwareDecoder = isHardwareDecoder(decoderName)
         capabilityTier = deriveTier()
         tier = capabilityTier
+        surveyHardwareMemc()
         rebuildStats()
     }
 
@@ -665,6 +689,93 @@ object FluidMotion {
         }
     }
 
+    // ---- per-source status (0.200, provider-compatibility vocabulary) ---
+
+    /** The hardware survey: documented APIs only. Probes the two surfaces
+        that superficially look like motion enhancement, records what they
+        REALLY are (HDR capability / codec capability) and concludes
+        honestly. No undocumented vendor interface is ever touched, and
+        neither probe may ever be mislabeled as MEMC (brief rule). */
+    @Suppress("DEPRECATION") // HdrCapabilities.getSupportedHdrTypes is the
+    // documented probe surface (deprecated but real - it reports HDR types)
+    private fun surveyHardwareMemc() {
+        var hdrNote = "hdr n/a"
+        var codecNote = "codec n/a"
+        try {
+            val dm = appCtx?.getSystemService(Context.DISPLAY_SERVICE) as?
+                android.hardware.display.DisplayManager
+            val hdr = dm?.displays?.firstOrNull()?.hdrCapabilities
+            // REAL value: the display's supported HDR types. This is
+            // dynamic range, NOT motion processing.
+            hdrNote = if (hdr != null) {
+                "hdr types " + hdr.supportedHdrTypes.size + " (dynamic range, not MEMC)"
+            } else {
+                "hdr none (not MEMC)"
+            }
+        } catch (e: Exception) {
+        }
+        try {
+            val fmt = MediaFormat.createVideoFormat("video/avc", 1280, 720)
+            val name = findDecoderName()
+            val info = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+                .codecInfos.firstOrNull { it.name == name }
+            val caps = try {
+                if (name.isEmpty()) null else info?.getCapabilitiesForType("video/avc")
+            } catch (e: Exception) {
+                null
+            }
+            val vc = caps?.getVideoCapabilities()
+            // REAL value: the decoder's supported frame-rate range. This is
+            // codec capability, NOT motion enhancement.
+            codecNote = if (vc != null) {
+                "decoder " + name + " fps " + vc.getSupportedFrameRates() + " (codec range, not MEMC)"
+            } else {
+                "decoder caps n/a (not MEMC)"
+            }
+        } catch (e: Exception) {
+        }
+        // No documented MEMC/motion-enhancement API exists on Android -
+        // the honest survey conclusion (hardwareMemcDetected stays false).
+        hardwareMemcDetected = false
+        memcSurveyNote = "no documented MEMC API (" + hdrNote + ", " + codecNote + ")"
+    }
+
+    /** Hardware motion-enhancement status (vocabulary, honest): a
+        documented-API detection would report "Hardware motion enhancement
+        active" - none exists, so the survey answer is the truth. */
+    @JvmStatic
+    fun hardwareMemcStatus(): String =
+        if (hardwareMemcDetected) "Hardware motion enhancement active" else "Unsupported by current hardware"
+
+    /** The accurate per-source status line (brief-required vocabulary).
+        Rules (QA locked): genuine MEMC is claimed ONLY when real
+        motion-compensated frames are being generated (never for provider
+        embeds - their frames are inaccessible by browser/platform design). */
+    @JvmStatic
+    fun sourceStatus(): String {
+        val cap = try { CaptureMemc.state.value } catch (e: Exception) { null }
+        return when {
+            // essentials recovering: the honest status IS the optimization
+            StabilityGuard.levelNow() >= 2 -> "Stability optimization active"
+            // reserved: only real generated frames may claim MEMC. The
+            // capture pipeline in this build generates NOTHING (its own
+            // hard-wired false) - this branch is unreachable today.
+            cap != null && cap.generating -> "Genuine MEMC active (motion-compensated)"
+            // capture running (or awaiting consent) without synthesis
+            cap != null && (cap.wanted || cap.running) -> "experimental pipeline not yet generating frames"
+            kind == Kind.NATIVE_MEDIA3 -> when {
+                // reserved for a documented-API detection (none exists)
+                hardwareMemcDetected -> "Hardware motion enhancement active"
+                // REAL measured rate: a genuinely high-frame-rate source
+                contentFps >= 50f -> "Native high-frame-rate playback"
+                // frame-rate matching + the dropped-frame watchdog = real
+                // adaptive pacing (NOT interpolation - never claimed)
+                else -> "Adaptive frame pacing active"
+            }
+            else -> "Interpolation unavailable - provider embed (frames not accessible)"
+        }
+    }
+
     private fun rebuildStats() {
         val g = try {
             StabilityGuard.state.value
@@ -691,13 +802,16 @@ object FluidMotion {
             stabilityRestarts = g?.restarts ?: 0,
             stabilityLastReason = g?.lastReason ?: "Unavailable",
             audioFocus = g?.audioFocus ?: "Unavailable",
+            sourceStatus = sourceStatus(),
+            hardwareMemc = hardwareMemcStatus(),
         )
     }
 
     /** One honest status line for the UI. Never claims interpolation and
         never reports a fps nobody measured. Carries the live StabilityGuard
         fields (0.120): level, repair/nudge/kick/restart counts, lastReason
-        and audio focus - real values, "Unavailable" where unknown. */
+        and audio focus - real values, "Unavailable" where unknown - and the
+        per-source status line (0.200) from the brief-required vocabulary. */
     @JvmStatic
     fun describe(): String {
         val fps = if (contentFps > 0f)
@@ -709,6 +823,7 @@ object FluidMotion {
             stats.stabilityKicks + "/" + stats.stabilityRestarts +
             " " + stats.stabilityLastReason + " - focus " + stats.audioFocus
         return "Motion: " + mode.label + " - tier " + tier.name + " - " + fps +
-            " - " + stats.interpolationReason + " - " + drops + " - " + guard
+            " - " + stats.interpolationReason + " - " + drops + " - " + guard +
+            " - " + sourceStatus()
     }
 }
