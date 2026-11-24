@@ -51,6 +51,8 @@ object Store {
     private const val K_PENDING_UPDATE = "pending_update_v1"
     private const val K_FEED = "feed_cache"
     private const val K_UPD_CHECK = "upd_checked_at"
+    private const val K_FLUID_MODE = "fluid_mode"
+    private const val K_FLUID_ADAPTIVE = "fluid_adaptive_quality"
 
     private fun prefs(ctx: Context) =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -271,6 +273,23 @@ object Store {
 
     fun setAutoSkip(ctx: Context, on: Boolean) {
         prefs(ctx).edit().putBoolean(K_AUTO_NEXT, on).apply()
+    }
+
+    /** FluidMotion engine settings (0.110, device-local taste): the motion
+        mode ("auto"/"smooth"/"balanced"/"boost"/"cinematic"/"off") and the
+        opt-in adaptive-quality knob (default OFF - the watchdog may only
+        cap the video size when something explicitly turns this on). */
+    fun fluidMode(ctx: Context): String = prefs(ctx).getString(K_FLUID_MODE, "auto") ?: "auto"
+
+    fun setFluidMode(ctx: Context, mode: String) {
+        prefs(ctx).edit().putString(K_FLUID_MODE, mode).apply()
+    }
+
+    fun fluidAdaptiveQuality(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(K_FLUID_ADAPTIVE, false)
+
+    fun setFluidAdaptiveQuality(ctx: Context, on: Boolean) {
+        prefs(ctx).edit().putBoolean(K_FLUID_ADAPTIVE, on).apply()
     }
 
     /** Watch Party session (rejoin after app restart). App-private prefs only;

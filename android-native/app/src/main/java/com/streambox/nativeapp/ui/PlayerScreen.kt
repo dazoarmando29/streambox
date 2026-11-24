@@ -119,6 +119,7 @@ import com.streambox.nativeapp.data.Progress
 import com.streambox.nativeapp.data.Store
 import com.streambox.nativeapp.data.SubPick
 import com.streambox.nativeapp.data.SubStyle
+import com.streambox.nativeapp.playback.FluidMotion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -1389,6 +1390,9 @@ private class PlayerMem(
     var bsTick by mutableIntStateOf(0)
     var autoSkip by mutableStateOf(Store.autoSkip(ctx))
     var autoDone by mutableStateOf("")
+    // FluidMotion mode (0.110) - the Motion row's live label. The engine
+    // itself holds the authoritative mode; this is the sheet's view of it.
+    var fluidMode by mutableStateOf(FluidMotion.Profile.fromKey(Store.fluidMode(ctx)))
 }
 
 /** Receives player events forwarded by the injected JS hook. */
@@ -2685,6 +2689,34 @@ fun PlayerScreen(
             if (p != null && l != null) p.removeListener(l)
         }
     }
+
+    // FluidMotion engine (0.110): the owned Media3 path gets REAL frame-rate
+    // matching (Surface.setFrameRate on the PlayerView's surface) plus the
+    // dropped-frame watchdog; provider embeds stay on the display-mode path
+    // above and honestly report that their frames are NOT accessible (a
+    // WebView's cross-origin iframes can never be interpolated).
+    DisposableEffect(pm.hlsPlayer, pm.mirror) {
+        FluidMotion.init(ctx)
+        val p = pm.hlsPlayer
+        if (p != null && pm.mirror == "hls") {
+            FluidMotion.start(p)
+            FluidMotion.noteNativeMedia3()
+        } else {
+            FluidMotion.noteProviderEmbed()
+        }
+        onDispose {
+            FluidMotion.stop(p)
+            FluidMotion.active.value = false
+        }
+    }
+
+    // Compose suspension seam (0.110): decorative animations can observe
+    // FluidMotion.active (and FluidMotion.suspendDecorations) and stand
+    // down while playback owns the screen. pm.playing is the one truth for
+    // BOTH pipelines (the web seam and Media3 fold into it).
+    LaunchedEffect(pm.playing) {
+        FluidMotion.active.value = pm.playing
+    }
     LaunchedEffect(pm.hlsPlayer, pm.mirror) {
         val p = pm.hlsPlayer ?: return@LaunchedEffect
         if (pm.mirror != "hls") return@LaunchedEffect
@@ -3358,7 +3390,13 @@ fun PlayerScreen(
                                         // match the display to it (judder
                                         // out, fast motion stays fluid).
                                         val fps = o.optDouble("fps", 0.0).toFloat()
-                                        if (fps in 15f..121f) matchContentRate(ctx, fps)
+                                        if (fps in 15f..121f) {
+                                            matchContentRate(ctx, fps)
+                                            // FluidMotion stats ride the
+                                            // SAME measured rate - nothing
+                                            // here is ever invented.
+                                            FluidMotion.noteContentFps(fps)
+                                        }
                                     }
                                     "ready" -> {
                                         // VidBolt TV: its shell waits for a
@@ -4244,6 +4282,25 @@ fun PlayerScreen(
                                         Spacer(modifier = Modifier.height(6.dp))
                                     }
                                 }
+                            }
+                            // MOTION (FluidMotion engine, 0.110): ONE
+                            // compact row that cycles the six motion modes
+                            // on tap. Frame-rate matching is real on the
+                            // owned Media3 surface (Surface.setFrameRate);
+                            // provider embeds render in a WebView where
+                            // frames are NOT accessible - the row says so
+                            // honestly instead of inventing a picture.
+                            Spacer(modifier = Modifier.height(10.dp))
+                            PanelColTitle("MOTION")
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OptRow(
+                                label = "Motion",
+                                detail = FluidMotion.describe(),
+                                chip = pm.fluidMode.label,
+                                active = pm.fluidMode != FluidMotion.Profile.OFF,
+                                big = big,
+                            ) {
+                                pm.fluidMode = FluidMotion.cycleMode(ctx)
                             }
                         }
                         // COLUMN 2: AUDIO (honest only): AniPM drives its
