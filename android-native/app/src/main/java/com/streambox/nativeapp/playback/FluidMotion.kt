@@ -76,6 +76,16 @@ object FluidMotion {
         val mode: Profile,
         val interpolationAvailable: Boolean = false,
         val interpolationReason: String = "",
+        // StabilityGuard fields (0.120): live stability state on the same
+        // honest stats surface - real counters only, "Unavailable" where
+        // nothing is known yet.
+        val stabilityLevel: Int = 0,
+        val stabilityRepairs: Int = 0,
+        val stabilityNudges: Int = 0,
+        val stabilityKicks: Int = 0,
+        val stabilityRestarts: Int = 0,
+        val stabilityLastReason: String = "Unavailable",
+        val audioFocus: String = "Unavailable",
     )
 
     /** Compose suspension seam: decorative animations may observe this and
@@ -95,6 +105,20 @@ object FluidMotion {
 
     @Volatile
     var tier: Tier = Tier.B
+        private set
+
+    /** Priority override (0.120): StabilityGuard owns the ladder and this
+        engine yields BEFORE audio/subtitles ever suffer. While set, the
+        engine behaves at tier-D policy (decorations suspended, the
+        interpolation/quality work stays off) and never upgrades. Cleared
+        only after sustained recovery; the 120s-per-step hysteresis then
+        climbs back gradually. */
+    @Volatile
+    private var stabilityYield = false
+
+    /** Last real reason a demotion fired (diagnostics, never invented). */
+    @Volatile
+    var lastDemoteReason: String = ""
         private set
 
     @Volatile
@@ -283,6 +307,35 @@ object FluidMotion {
         } catch (e: Exception) {
         }
         applyAdaptiveQuality()
+    }
+
+    /** StabilityGuard L0 (0.120): demote ONE tier immediately - optional
+        work is the FIRST sacrifice when the box is choking (dropped-frame
+        bursts, JS frame gaps, event-loop lag). Bypasses the 30s watchdog
+        cooldown on purpose: prevention runs before anything essential
+        suffers. Real reason string, kept for diagnostics. */
+    @JvmStatic
+    fun demote(reason: String) {
+        lastDemoteReason = reason
+        val next = Tier.entries[(tier.ordinal + 1).coerceAtMost(Tier.entries.size - 1)]
+        if (next != tier) {
+            tier = next
+            lastTierChangeMs = System.currentTimeMillis()
+            cleanPlayMs = 0
+        }
+        applyAdaptiveQuality()
+        rebuildStats()
+    }
+
+    /** Priority override (0.120): essential playback outranks motion work.
+        While yielded the engine runs tier-D policy (decorations suspended,
+        interpolation/quality work off) regardless of the live tier. */
+    @JvmStatic
+    fun yieldToStability(yield: Boolean) {
+        if (stabilityYield == yield) return
+        stabilityYield = yield
+        applyAdaptiveQuality()
+        rebuildStats()
     }
 
     // ---- pipeline binding ----------------------------------------------
@@ -477,6 +530,12 @@ object FluidMotion {
                 winDropped += droppedFrames
                 lastDropMs = now
                 cleanPlayMs = 0
+                // A real drop BURST is an L0 pressure signal (0.120):
+                // StabilityGuard demotes optional work before anything
+                // essential suffers - never the other way around.
+                if (droppedFrames >= 8) {
+                    com.streambox.nativeapp.playback.StabilityGuard.notePressure("dropped frames")
+                }
                 rebuildStats()
             } catch (e: Exception) {
             }
@@ -539,8 +598,13 @@ object FluidMotion {
             winPresented = 0f
         }
         // Hysteresis: one tier back up only after 120s of clean playback,
-        // and never above the device's probed capability tier.
-        if (cleanPlayMs >= CLEAN_UPGRADE_MS && tier != capabilityTier && mode != Profile.OFF) {
+        // never above the device's probed capability tier, and NEVER while
+        // StabilityGuard has the engine yielded (0.120 priority override -
+        // recovery of essentials comes first, motion work climbs back one
+        // step at a time only after sustained recovery).
+        if (cleanPlayMs >= CLEAN_UPGRADE_MS && tier != capabilityTier && mode != Profile.OFF &&
+            !stabilityYield
+        ) {
             upgrade()
         }
     }
@@ -573,19 +637,24 @@ object FluidMotion {
             v1 honestly says it does not exist (see describe());
         (b) the max-video-size request is only ever made in BOOST or AUTO on
             a decoder-limited device, and only with adaptive quality ON;
-        (c) decorative animations suspend while the tier is C/D. */
+        (c) decorative animations suspend while the tier is C/D - or while
+            StabilityGuard has the engine yielded (0.120: tier-D behavior,
+            essentials outrank every motion concern);
+        (d) while yielded the cap policy runs at tier D regardless of the
+            live tier (and only bites at all with adaptive quality ON). */
     private fun applyAdaptiveQuality() {
-        suspendDecorations.value = tier == Tier.C || tier == Tier.D
+        suspendDecorations.value = stabilityYield || tier == Tier.C || tier == Tier.D
         val p = player ?: return
         try {
             val decoderLimited = !hardwareDecoder || capabilityTier >= Tier.C
             val permitted = adaptiveQuality && mode != Profile.OFF &&
                 (mode == Profile.BOOST || (mode == Profile.AUTO && decoderLimited))
+            val eff = if (stabilityYield) Tier.D else tier
             val cap = when {
                 !permitted -> null
-                tier == Tier.D -> intArrayOf(960, 540)
-                tier == Tier.C -> intArrayOf(1280, 720)
-                tier == Tier.B -> intArrayOf(1920, 1080)
+                eff == Tier.D -> intArrayOf(960, 540)
+                eff == Tier.C -> intArrayOf(1280, 720)
+                eff == Tier.B -> intArrayOf(1920, 1080)
                 else -> null // tier A keeps the full ladder
             }
             val b = p.trackSelectionParameters.buildUpon()
@@ -597,6 +666,11 @@ object FluidMotion {
     }
 
     private fun rebuildStats() {
+        val g = try {
+            StabilityGuard.state.value
+        } catch (e: Exception) {
+            null
+        }
         stats = FluidStats(
             droppedFrames = droppedTotal,
             presentedApprox = presentedTotal,
@@ -610,18 +684,31 @@ object FluidMotion {
                 Kind.PROVIDER_EMBED -> "provider embed (frames not accessible)"
                 Kind.NATIVE_MEDIA3 -> "native frame-rate matching (no interpolation)"
             },
+            stabilityLevel = g?.level ?: 0,
+            stabilityRepairs = g?.repairs ?: 0,
+            stabilityNudges = g?.nudges ?: 0,
+            stabilityKicks = g?.kicks ?: 0,
+            stabilityRestarts = g?.restarts ?: 0,
+            stabilityLastReason = g?.lastReason ?: "Unavailable",
+            audioFocus = g?.audioFocus ?: "Unavailable",
         )
     }
 
     /** One honest status line for the UI. Never claims interpolation and
-        never reports a fps nobody measured. */
+        never reports a fps nobody measured. Carries the live StabilityGuard
+        fields (0.120): level, repair/nudge/kick/restart counts, lastReason
+        and audio focus - real values, "Unavailable" where unknown. */
     @JvmStatic
     fun describe(): String {
         val fps = if (contentFps > 0f)
             String.format(Locale.US, "%.3f", contentFps) + " fps"
         else "fps pending"
         val drops = "drops " + droppedTotal + "/" + presentedTotal
+        val guard = "guard L" + stats.stabilityLevel +
+            " " + stats.stabilityRepairs + "/" + stats.stabilityNudges + "/" +
+            stats.stabilityKicks + "/" + stats.stabilityRestarts +
+            " " + stats.stabilityLastReason + " - focus " + stats.audioFocus
         return "Motion: " + mode.label + " - tier " + tier.name + " - " + fps +
-            " - " + stats.interpolationReason + " - " + drops
+            " - " + stats.interpolationReason + " - " + drops + " - " + guard
     }
 }

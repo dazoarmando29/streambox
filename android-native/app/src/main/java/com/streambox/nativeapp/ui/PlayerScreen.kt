@@ -57,6 +57,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -120,6 +121,7 @@ import com.streambox.nativeapp.data.Store
 import com.streambox.nativeapp.data.SubPick
 import com.streambox.nativeapp.data.SubStyle
 import com.streambox.nativeapp.playback.FluidMotion
+import com.streambox.nativeapp.playback.StabilityGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -942,6 +944,10 @@ private val SB_HOOK = """
     },
     mute: function(m){
       window.__sbUserMuted = !!m;
+      // StabilityGuard (0.120): user MUTE INTENT lives on the page too -
+      // the L2 unmute nudge checks this flag and never fights a mute the
+      // viewer asked for (web _userMuteIntent parity).
+      window._userMuteIntent = !!m;
       var v=document.querySelector('video'); if(v) v.muted=!!m;
       if (ANIPM) anipmSend('setMuted', {muted: !!m});
       // VidBolt speaks volume (its message contract): 0 mutes, 1 restores.
@@ -1247,6 +1253,74 @@ private val SB_HOOK = """
 })();
 """
 
+/* ==================== StabilityGuard (0.120) hooks ====================
+   Small documented-command snippets the stability ladder runs through the
+   SAME evaluateJavascript seam as everything else. Each is wrapped so a
+   surface without the command is a clean no-op. */
+
+/** L1 truth poke (documented CineSrc command surface - the page defines
+    sendCmd): re-request paused/muted/rate so the REAL state flows back
+    through the bridge. NEVER reloads - that is the whole point of L1. */
+private val GUARD_POKE_JS =
+    "try{sendCmd(\"getPaused\");sendCmd(\"getMuted\");sendCmd(\"getPlaybackRate\");}catch(e){}"
+
+/** L2 audio continuity: the documented setMuted(false) nudge - ONLY when
+    the viewer has not intentionally muted (window._userMuteIntent). */
+private val GUARD_UNMUTE_JS =
+    "try{if(!window._userMuteIntent){sendCmd('setMuted',[false]);}}catch(e){}"
+
+/** L3 controlled kick: documented pause/play commands, ~600ms apart,
+    position/tracks/settings untouched. */
+private val GUARD_KICK_PAUSE_JS =
+    "try{sendCmd('pause');}catch(e){try{window.__sb&&window.__sb.pause();}catch(e2){}}"
+private val GUARD_KICK_PLAY_JS =
+    "try{sendCmd('play');}catch(e){try{window.__sb&&window.__sb.play();}catch(e2){}}"
+
+/** Authoritative element read (L1 truth source the bridge thinning cannot
+    lose): real values off the live <video> only - webkitAudioDecodedByteCount
+    reports "audio pipeline silent" (frozen counter = dead audio the muted
+    flag can never show) and reads -1/absent honestly when unavailable. */
+private val GUARD_READ_JS =
+    "(function(){try{var v=null;try{v=document.querySelector('video');}catch(e){}" +
+        "if(!v){try{var fw=window.frames[0];if(fw&&fw.document)v=fw.document.querySelector('video');}catch(e2){}}" +
+        "if(!v)return{ok:2};" +
+        "var a=-1;try{a=(typeof v.webkitAudioDecodedByteCount==='number')?v.webkitAudioDecodedByteCount:-1;}catch(e3){}" +
+        "return{ok:1,p:v.currentTime||0,pa:!!v.paused,m:!!v.muted," +
+        "vol:(typeof v.volume==='number')?v.volume:-1," +
+        "r:(typeof v.playbackRate==='number')?v.playbackRate:-1,a:a};}catch(e){return{ok:0};}})()"
+
+/** One authoritative-read answer. ok=false: the eval answered but no video
+    is reachable; dead=true: the eval NEVER answered (silent zombie
+    renderer - the 0.74 class where evaluateJavascript becomes a no-op). */
+private class GuardRead(
+    val ok: Boolean = false,
+    val dead: Boolean = false,
+    val pos: Float = -1f,
+    val paused: Boolean = true,
+    val muted: Boolean = false,
+    val volume: Float = -1f,
+    val rate: Float = -1f,
+    val audioDecoded: Long = -1L,
+)
+
+private fun parseGuardRead(raw: String?): GuardRead {
+    return try {
+        val o = org.json.JSONObject(raw ?: return GuardRead())
+        if (o.optInt("ok", 0) != 1) return GuardRead()
+        GuardRead(
+            ok = true,
+            pos = o.optDouble("p", -1.0).toFloat(),
+            paused = o.optBoolean("pa", true),
+            muted = o.optBoolean("m", false),
+            volume = o.optDouble("vol", -1.0).toFloat(),
+            rate = o.optDouble("r", -1.0).toFloat(),
+            audioDecoded = o.optLong("a", -1L),
+        )
+    } catch (e: Exception) {
+        GuardRead()
+    }
+}
+
 /** Player state holder (0.76): the player keeps its states on ONE
     remembered object instead of a hundred local delegates. The 0.65 lesson
     (JVM 64KB method limit) already moved the big layers out; by 0.75 the
@@ -1393,6 +1467,14 @@ private class PlayerMem(
     // FluidMotion mode (0.110) - the Motion row's live label. The engine
     // itself holds the authoritative mode; this is the sheet's view of it.
     var fluidMode by mutableStateOf(FluidMotion.Profile.fromKey(Store.fluidMode(ctx)))
+    // StabilityGuard (0.120): user-pause INTENT (only the app's own pause
+    // toggle / room pause sets it - a provider pause event never does) and
+    // the three persisted settings that gate the guard's subsystems.
+    var userPaused by mutableStateOf(false)
+    var userPauseCmdAt by mutableStateOf(0L)
+    var stabOn by mutableStateOf(Store.stabilityGuard(ctx))
+    var stabAudio by mutableStateOf(Store.stabilityAudio(ctx))
+    var stabSubs by mutableStateOf(Store.stabilitySubResync(ctx))
 }
 
 /** Receives player events forwarded by the injected JS hook. */
@@ -1748,6 +1830,9 @@ fun PlayerScreen(
         val q = pm.cinesrcQ
         pm.lastLoadAtMs = System.currentTimeMillis()
         pm.endedHandled = false
+        // StabilityGuard (0.120): a fresh load INTENDS playback - the
+        // user-pause hold from the previous page must never ride along.
+        pm.userPaused = false
         pm.bootAt = pm.lastLoadAtMs
         pm.firstTuAfterLoad = true
         pm.loadGen += 1
@@ -2081,6 +2166,192 @@ fun PlayerScreen(
         }
     }
 
+    // StabilityGuard (0.120): the repair-first recovery ladder - the fix
+    // for "stutter -> video resumes but audio dies and subtitles freeze at
+    // the stutter timestamp -> recovery restarts everything -> loop". The
+    // DECISIONS live in playback/StabilityGuard.kt (cooldowns, sustained-
+    // signal rules, false-trigger suppression); this body only feeds it
+    // real player truth and runs the one action it returns. L1 never
+    // reloads; L4 reuses the EXISTING webGen/reopen-at-position machinery.
+    fun guardReanchor(at: Float, subs: Boolean) {
+        if (at >= 0f) {
+            // the authoritative position heals the app clock AND the
+            // watchdog's movement pulse (repair-first: the old reload
+            // ladder stands down without being touched)
+            pm.cur = at
+            pm.lastRepPos = at
+        }
+        if (subs) {
+            // subtitle clock re-anchor + forced repaint: the caption
+            // lookup extrapolates from curAt - fresh base, fresh cue
+            pm.curAt = System.currentTimeMillis()
+            pm.capTick = System.currentTimeMillis()
+        }
+    }
+
+    fun guardRun(a: StabilityGuard.Action, readPos: Float) {
+        val hp = pm.hlsPlayer
+        val hls = pm.mirror == "hls"
+        when (a) {
+            StabilityGuard.Action.REANCHOR -> {
+                if (pm.stabSubs) guardReanchor(readPos, true)
+            }
+            StabilityGuard.Action.SYNC_REPAIR -> {
+                // L1 sync repair - NO reload: heal the clocks from the
+                // authoritative read, clear stuck seeking flags, and
+                // re-request provider truth through the documented
+                // command surface (the reply adopts real state).
+                guardReanchor(readPos, pm.stabSubs)
+                if (pm.scrub >= 0f) pm.scrub = -1f
+                cmd(GUARD_POKE_JS)
+            }
+            StabilityGuard.Action.AUDIO_NUDGE -> {
+                guardReanchor(readPos, pm.stabSubs)
+                if (hls && hp != null) {
+                    // L2 on the owned Media3 path: controlled recovery that
+                    // PRESERVES the position (playWhenReady + seekTo at the
+                    // current spot - Media3 1.4.1 exposes no public
+                    // audio-renderer-only rebuild)
+                    try {
+                        hp.playWhenReady = false
+                        hp.playWhenReady = true
+                        hp.seekTo(hp.currentPosition)
+                    } catch (e: Exception) {}
+                } else {
+                    // documented unmute nudge - ONLY without user mute
+                    // intent (the JS flag mirrors pm.muted)
+                    cmd(GUARD_UNMUTE_JS)
+                    cmd("window.__sb && window.__sb.mute(false)")
+                }
+                // targeted rate restoration: the USER's pick, never 1x and
+                // never an invented value (web parity, intent-safe)
+                cmd("window.__sb && window.__sb.rate(" + RATES[pm.rateIdx] + ")")
+            }
+            StabilityGuard.Action.KICK -> {
+                // L3 controlled kick: pause/play through documented
+                // commands ~600ms apart - position/tracks untouched
+                guardReanchor(readPos, pm.stabSubs)
+                if (hls && hp != null) {
+                    try {
+                        hp.pause()
+                        pm.main.postDelayed({ try { hp.play() } catch (e: Exception) {} }, 600)
+                    } catch (e: Exception) {}
+                } else {
+                    cmd(GUARD_KICK_PAUSE_JS)
+                    pm.main.postDelayed({ cmd(GUARD_KICK_PLAY_JS) }, 600)
+                    pm.main.postDelayed({
+                        cmd(GUARD_POKE_JS)
+                        guardReanchor(-1f, pm.stabSubs)
+                    }, 1400)
+                }
+            }
+            StabilityGuard.Action.RESTART -> {
+                // L4 last resort - the EXISTING reopen-at-position
+                // machinery ONLY, never from zero: webGen rebuilds the
+                // WebView and its effect reopens at pm.cur (provider
+                // embeds); the owned HLS slot reopens through load().
+                restoreDisplayRate(ctx)
+                if (hls && hp != null) load(startAt = pm.cur)
+                else pm.webGen += 1
+            }
+        }
+    }
+
+    fun guardTick(r: GuardRead, dead: Boolean) {
+        val hp = pm.hlsPlayer
+        val hls = pm.mirror == "hls"
+        val nowMs = System.currentTimeMillis()
+        // the owned path answers from Media3's real state; the WebView
+        // path answers from the authoritative element read
+        val read = if (hls && hp != null) {
+            GuardRead(
+                ok = true,
+                pos = hp.currentPosition / 1000f,
+                paused = !hp.isPlaying,
+                muted = hp.volume <= 0f,
+                volume = hp.volume,
+                rate = hp.playbackParameters.speed,
+                audioDecoded = -1L,
+            )
+        } else {
+            r
+        }
+        val input = StabilityGuard.GuardInput(
+            playingFlag = pm.playing,
+            userPaused = pm.userPaused,
+            userMuted = pm.muted,
+            mediaLive = pm.gotMedia,
+            inTransition = !pastSyncGrace() || pm.pendingLoadAt >= 0f,
+            seekCmdRecent = nowMs - pm.lastSeekCmdAt < 2000L || pm.pendingSeek >= 0f,
+            scrub = pm.scrub,
+            webPath = !hls,
+            sessionKey = pm.epSeason.toString() + ":" + pm.epNumber + ":" + pm.mirror,
+            localClock = pm.cur,
+            providerClock = pm.lastRepPos,
+            readOk = read.ok,
+            readDead = dead,
+            readPos = read.pos,
+            readPaused = read.paused,
+            readMuted = read.muted,
+            readVolume = read.volume,
+            readRate = read.rate,
+            expectedRate = RATES[pm.rateIdx],
+            audioDecoded = read.audioDecoded,
+            media3Stalled = hls && hp != null && hp.playWhenReady && !hp.isPlaying &&
+                hp.playbackState != Player.STATE_ENDED,
+        )
+        val a = StabilityGuard.tick(input) ?: return
+        guardRun(a, read.pos)
+    }
+
+    // The watch loop (2s cadence): one authoritative read per tick on the
+    // WebView path (the bridge thinning cannot lose it) and a zombie check
+    // (an eval that never answers is the silent-renderer-death class).
+    LaunchedEffect(pm.mirror) {
+        var pendingAt = 0L
+        while (true) {
+            delay(2000)
+            val hp = pm.hlsPlayer
+            if (pm.mirror == "hls" && hp != null) {
+                pendingAt = 0L
+                guardTick(GuardRead(ok = true), dead = false)
+                continue
+            }
+            // the previous eval never answered: a silent zombie WebView -
+            // tell the guard so L4 can rebuild through the existing path
+            if (pendingAt > 0L) {
+                guardTick(GuardRead(dead = true), dead = true)
+            }
+            pendingAt = System.currentTimeMillis()
+            val w = pm.web
+            try {
+                w?.evaluateJavascript(GUARD_READ_JS) { raw ->
+                    pendingAt = 0L
+                    pm.main.post { guardTick(parseGuardRead(raw), dead = false) }
+                }
+            } catch (e: Exception) {
+                pendingAt = 0L
+            }
+            if (w == null) pendingAt = 0L
+        }
+    }
+
+    // StabilityGuard session (0.120): audio focus while playing + route
+    // changes (headset / HDMI / becoming-noisy) land as L2 nudges on THIS
+    // player. Lifecycle-safe: registered for the play session only.
+    DisposableEffect(title.id, title.type, season, episode) {
+        StabilityGuard.attach(ctx)
+        StabilityGuard.executor = { a, pos -> guardRun(a, pos) }
+        onDispose {
+            StabilityGuard.executor = null
+            StabilityGuard.abandonFocus()
+            StabilityGuard.detach(ctx)
+        }
+    }
+    LaunchedEffect(pm.playing, pm.stabAudio) {
+        if (pm.playing && pm.stabAudio) StabilityGuard.requestFocus()
+    }
+
     fun pokeChrome() {
         pm.chromeVisible = true
         pm.pokeTick += 1
@@ -2104,6 +2375,12 @@ fun PlayerScreen(
     fun togglePlay() {
         pokeChrome()
         pm.playing = !pm.playing
+        // StabilityGuard (0.120): a pause through OUR bar is user INTENT -
+        // the recovery ladder stands down completely while it holds (web
+        // _userPauseHold parity). The timestamp lets a provider pause echo
+        // of this command mark itself as user intent too.
+        pm.userPaused = !pm.playing
+        pm.userPauseCmdAt = System.currentTimeMillis()
         try { com.streambox.nativeapp.party.Party.onLocalPlayPause(!pm.playing) } catch (e: Exception) {}
         val hp = pm.hlsPlayer
         if (pm.mirror == "hls" && hp != null) {
@@ -2119,8 +2396,18 @@ fun PlayerScreen(
     // VidRift has no pause command (partial) - labeled, never faked.
     androidx.compose.runtime.DisposableEffect(title.id, title.type, season, episode) {
         com.streambox.nativeapp.party.PartyPlayer.ops = object : com.streambox.nativeapp.party.PartyOps {
-            override fun play() { pm.playing = true; cmd("window.__sb && window.__sb.play()") }
-            override fun pause() { pm.playing = false; cmd("window.__sb && window.__sb.pause()") }
+            override fun play() {
+                pm.playing = true
+                pm.userPaused = false
+                cmd("window.__sb && window.__sb.play()")
+            }
+            override fun pause() {
+                pm.playing = false
+                // a room pause is user intent (the ladder stands down)
+                pm.userPaused = true
+                pm.userPauseCmdAt = System.currentTimeMillis()
+                cmd("window.__sb && window.__sb.pause()")
+            }
             override fun seek(seconds: Float) { seekTo(seconds) }
             override fun rate(r: Float) { cmd("window.__sb && window.__sb.rate(" + r + ")") }
             override fun position(): Float = pm.cur
@@ -2605,6 +2892,14 @@ fun PlayerScreen(
         val f = pm.subs ?: return@remember null
         val extra = if (pm.playing && pm.curAt > 0L)
             ((pm.capTick - pm.curAt) / 1000f).coerceIn(0f, 2f) else 0f
+        // Subtitle auto-resync (0.120): a FROZEN clock must never freeze a
+        // cue on screen - if the caption clock went stale while playing
+        // (the P0 stutter class), clear the stale text instead of pinning
+        // it at the stutter timestamp; the L1 repair re-anchors the clock
+        // at the authoritative position and the cue returns in sync.
+        if (pm.stabSubs && pm.playing && pm.curAt > 0L && pm.capTick - pm.curAt > 3000L) {
+            return@remember null
+        }
         val t = pm.cur + pm.subOffset + extra
         cueAt(f.cues, t)
     }
@@ -2682,6 +2977,11 @@ fun PlayerScreen(
 
             override fun onPlayerError(error: PlaybackException) {
                 pm.playing = false
+                // StabilityGuard (0.120): an audio-session error on the
+                // owned path gets the L2 controlled recovery immediately
+                // (position preserved) - never a silent dead-audio state.
+                val ga = StabilityGuard.noteMedia3AudioError(error.errorCode)
+                if (ga != null) StabilityGuard.executor?.invoke(ga, -1f)
             }
         }
         if (p != null && l != null) p.addListener(l)
@@ -3100,13 +3400,26 @@ fun PlayerScreen(
                                 when (t) {
                                     "play" -> {
                                         pm.playing = true
+                                        // StabilityGuard (0.120): a real
+                                        // play clears the user-pause hold
+                                        pm.userPaused = false
                                         // the user paused/played inside the PROVIDER's own
                                         // player - the room must hear it (echoes of our own
                                         // sends are gated inside providerPlayState)
                                         try { com.streambox.nativeapp.party.Party.providerPlayState(false) } catch (e: Exception) {}
                                     }
                                     "pause" -> {
-                                        pm.playing = false
+                                        // StabilityGuard (0.120): our own
+                                        // L3 kick's pause echo must never
+                                        // be adopted as state, and a pause
+                                        // landing within 4s of the user's
+                                        // own pause COMMAND is the user
+                                        // (web _userPauseAt parity) - only
+                                        // then does the ladder hold down.
+                                        if (!StabilityGuard.kickEchoActive()) pm.playing = false
+                                        if (System.currentTimeMillis() - pm.userPauseCmdAt < 4000L) {
+                                            pm.userPaused = true
+                                        }
                                         try { com.streambox.nativeapp.party.Party.providerPlayState(true) } catch (e: Exception) {}
                                     }
                                     "ended" -> {
@@ -3187,6 +3500,9 @@ fun PlayerScreen(
                                         // element was unpaused (0.74/0.78) -
                                         // the freeze detector in the hook.
                                         pm.stallKick += 1
+                                        // L0 prevention (0.120): demote
+                                        // optional work BEFORE the spiral
+                                        StabilityGuard.notePressure("frame freeze")
                                     }
                                     "video:jank" -> {
                                         // The pipeline is choking (0.78):
@@ -3195,6 +3511,10 @@ fun PlayerScreen(
                                         // lighten the stream before it
                                         // escalates into mute + freeze.
                                         enterSlow()
+                                        // L0 prevention (0.120): FluidMotion
+                                        // yields first - essentials never
+                                        // pay for motion work
+                                        StabilityGuard.notePressure("frame gaps")
                                     }
                                     "anipm:quality" -> {
                                         val arr = o.optJSONArray("qualities")
@@ -4301,6 +4621,49 @@ fun PlayerScreen(
                                 big = big,
                             ) {
                                 pm.fluidMode = FluidMotion.cycleMode(ctx)
+                            }
+                            // STABILITY (StabilityGuard, 0.120): the
+                            // repair-first recovery ladder - L1 sync repair
+                            // (never reload), L2 audio continuity, L3
+                            // controlled kick, L4 budgeted restart through
+                            // the existing reopen-at-position path. Each
+                            // row gates a REAL subsystem (never decorative)
+                            // and the status line is live engine state.
+                            Spacer(modifier = Modifier.height(10.dp))
+                            PanelColTitle("STABILITY")
+                            Spacer(modifier = Modifier.height(6.dp))
+                            val guardState by StabilityGuard.state.collectAsState()
+                            OptRow(
+                                label = "Stability protection",
+                                detail = StabilityGuard.describe(),
+                                chip = (if (pm.stabOn) "ON" else "OFF") + " L" + guardState.level,
+                                active = pm.stabOn,
+                                big = big,
+                            ) {
+                                pm.stabOn = !pm.stabOn
+                                StabilityGuard.setProtection(ctx, pm.stabOn)
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OptRow(
+                                label = "Audio continuity",
+                                detail = "Unmute nudges + audio focus and route recovery",
+                                chip = if (pm.stabAudio) "ON" else "OFF",
+                                active = pm.stabAudio,
+                                big = big,
+                            ) {
+                                pm.stabAudio = !pm.stabAudio
+                                StabilityGuard.setAudio(ctx, pm.stabAudio)
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OptRow(
+                                label = "Subtitle auto-resync",
+                                detail = "Caption clock re-anchors at the real position",
+                                chip = if (pm.stabSubs) "ON" else "OFF",
+                                active = pm.stabSubs,
+                                big = big,
+                            ) {
+                                pm.stabSubs = !pm.stabSubs
+                                StabilityGuard.setSubResync(ctx, pm.stabSubs)
                             }
                         }
                         // COLUMN 2: AUDIO (honest only): AniPM drives its

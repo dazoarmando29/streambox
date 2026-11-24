@@ -53,6 +53,9 @@ object Store {
     private const val K_UPD_CHECK = "upd_checked_at"
     private const val K_FLUID_MODE = "fluid_mode"
     private const val K_FLUID_ADAPTIVE = "fluid_adaptive_quality"
+    private const val K_STAB_GUARD = "stability_guard"
+    private const val K_STAB_AUDIO = "stability_audio"
+    private const val K_STAB_SUBSYNC = "stability_sub_resync"
 
     private fun prefs(ctx: Context) =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -290,6 +293,29 @@ object Store {
 
     fun setFluidAdaptiveQuality(ctx: Context, on: Boolean) {
         prefs(ctx).edit().putBoolean(K_FLUID_ADAPTIVE, on).apply()
+    }
+
+    /** StabilityGuard settings (0.120, device-local taste): "Stability
+        protection" gates the L1-L4 recovery ladder, "Audio continuity" the
+        audio nudges + focus/route recovery, "Subtitle auto-resync" the
+        caption-clock re-anchoring. All default ON and each gates its own
+        real subsystem - never a decorative toggle. */
+    fun stabilityGuard(ctx: Context): Boolean = prefs(ctx).getBoolean(K_STAB_GUARD, true)
+
+    fun setStabilityGuard(ctx: Context, on: Boolean) {
+        prefs(ctx).edit().putBoolean(K_STAB_GUARD, on).apply()
+    }
+
+    fun stabilityAudio(ctx: Context): Boolean = prefs(ctx).getBoolean(K_STAB_AUDIO, true)
+
+    fun setStabilityAudio(ctx: Context, on: Boolean) {
+        prefs(ctx).edit().putBoolean(K_STAB_AUDIO, on).apply()
+    }
+
+    fun stabilitySubResync(ctx: Context): Boolean = prefs(ctx).getBoolean(K_STAB_SUBSYNC, true)
+
+    fun setStabilitySubResync(ctx: Context, on: Boolean) {
+        prefs(ctx).edit().putBoolean(K_STAB_SUBSYNC, on).apply()
     }
 
     /** Watch Party session (rejoin after app restart). App-private prefs only;
