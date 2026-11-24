@@ -215,19 +215,18 @@ Verified in this environment (Windows; no Mac):
 | Web edits regression | PASS (QA locks on footer/About/install/sw preserved) | QA gate |
 
 Verified on GitHub Actions macOS runners (real `xcodebuild`, real iOS
-Simulator):
+Simulator) - workflow run 45358602477, branch `ios-expansion`:
 
-| Check | Where verified |
-| --- | --- |
-| Project generation (XcodeGen) | CI job "Generate project" |
-| App compiles for iOS Simulator | CI job "Build (iOS Simulator, unsigned)" |
-| Unit tests (config/allowlist/cascade/rule/settings) | CI job "Unit + UI tests" |
-| UI smoke tests (boot, web view, native menu) | CI job "Unit + UI tests" |
-| Unsigned device build + .ipa payload | CI job "Build unsigned device payload" |
-| Artifact honesty metadata | CI job "Write install metadata" |
-
-(If any of these CI jobs fails, the run link in section 13 is the truth -
-the merge checklist requires green CI before shipping.)
+| Check | Result | Where verified |
+| --- | --- | --- |
+| Project generation (XcodeGen) | PASS | CI "Generate project" |
+| App compiles for iOS Simulator | PASS (3 CI iterations to green; compile errors fixed honestly as found) | CI "Build (iOS Simulator, unsigned)" |
+| Unit tests (config/allowlist/cascade/rule/settings) | **PASS - 19 tests, 0 failures** | CI "Unit + UI tests" |
+| UI smoke tests (boot, WKWebView hosted, native menu) | **PASS - 2 tests, 0 failures** | CI "Unit + UI tests" (iPhone simulator) |
+| Unsigned device build + .ipa payload | PASS | CI "Build unsigned device payload" |
+| Artifact honesty metadata | PASS (declares simulator-only / re-sign-required / signed-absent) | CI "Write install metadata" |
+| Artifacts uploaded | `streambox-ios-simulator`, `streambox-ios-unsigned-device` (+ metadata) | run 45358602477 |
+| Signed export + TestFlight steps | Correctly SKIPPED (no secrets configured) | run 45358602477 |
 
 NOT verified (impossible without hardware/accounts - explicitly unclaimed):
 
@@ -295,7 +294,8 @@ subtitle, catalog code in `index.html`; `android/` wrapper logic;
 
 - QA gate green before every push (this repo's `tools/qa.js`).
 - iOS: `Build StreamBox iOS` workflow on GitHub Actions
-  (https://github.com/dazoarmando29/streambox/actions/workflows/ios.yml).
+  (https://github.com/dazoarmando29/streambox/actions/workflows/ios.yml) -
+  green run 45358602477 (19 unit + 2 UI tests, 0 failures, artifacts up).
 - APK train: existing `Build StreamBox APK` workflow republishes the
   rolling `latest` release as `apk-v2.36`.
 - Website: served from `main` at https://dazoarmando29.github.io/streambox/
