@@ -1,0 +1,201 @@
+name: Build StreamBox iOS
+
+# iOS / iPadOS build + test pipeline (macOS runners are free for public
+# repositories). Artifact honesty rules:
+#   - streambox-ios-simulator      runs in the iOS Simulator only
+#   - streambox-ios-unsigned-device NOT directly installable; re-sign with
+#                                  your own Apple ID via AltStore/SideStore
+#   - streambox-ios-signed         only exists when signing secrets are set
+#   - install-metadata.json        states exactly what each artifact is
+# No IPA is ever published to a GitHub release as a universal installer.
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+      - "tools/sync-ios-version.js"
+      - "version.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: Build and test (iOS)
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      HAVE_SIGNING: ${{ secrets.IOS_SIGNING_CERTIFICATE_P12_BASE64 != '' && secrets.IOS_PROVISIONING_PROFILE_BASE64 != '' && secrets.IOS_TEAM_ID != '' }}
+      HAVE_ASC: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID != '' && secrets.APP_STORE_CONNECT_API_KEY_P8 != '' && secrets.APP_STORE_CONNECT_ISSUER_ID != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: QA gate
+        run: node tools/qa.js
+
+      - name: Toolchain report
+        run: |
+          xcodebuild -version
+          sw_vers
+          node --version
+
+      - name: iOS version sync check
+        run: node tools/sync-ios-version.js --check
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build (iOS Simulator, unsigned)
+        working-directory: ios
+        run: |
+          xcodebuild -project StreamBox.xcodeproj -scheme StreamBox \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath build/sim \
+            build CODE_SIGNING_ALLOWED=NO
+
+      - name: Unit + UI tests (iOS Simulator)
+        working-directory: ios
+        run: |
+          SIM_NAME=$(xcrun simctl list devices available | sed -n 's/^ *\(iPhone [^(]*\) (.*/\1/p' | head -n 1 | sed 's/ *$//')
+          if [ -z "$SIM_NAME" ]; then SIM_NAME="iPhone 16"; fi
+          echo "Testing on simulator: $SIM_NAME"
+          xcodebuild -project StreamBox.xcodeproj -scheme StreamBox \
+            -destination "platform=iOS Simulator,name=$SIM_NAME" \
+            -derivedDataPath build/sim \
+            test
+
+      - name: Package simulator artifact
+        working-directory: ios
+        run: |
+          APP_PATH=$(find build/sim/Build/Products -maxdepth 2 -name "StreamBox.app" | head -n 1)
+          echo "Simulator app: $APP_PATH"
+          cd "$(dirname "$APP_PATH")" && zip -ry "$GITHUB_WORKSPACE/streambox-ios-simulator.zip" StreamBox.app
+
+      - name: Build unsigned device payload (.ipa for re-signing)
+        working-directory: ios
+        run: |
+          xcodebuild -project StreamBox.xcodeproj -scheme StreamBox \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build/dev \
+            build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          mkdir -p build/payload/Payload
+          cp -R build/dev/Build/Products/Release-iphoneos/StreamBox.app build/payload/Payload/
+          cd build/payload && zip -ry "$GITHUB_WORKSPACE/streambox-ios-unsigned-device.ipa" Payload
+
+      - name: Import signing assets (only when secrets exist)
+        if: env.HAVE_SIGNING == 'true'
+        run: |
+          echo "${{ secrets.IOS_SIGNING_CERTIFICATE_P12_BASE64 }}" | base64 --decode > /tmp/sb-cert.p12
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}" | base64 --decode > "$HOME/Library/MobileDevice/Provisioning Profiles/sb.mobileprovision"
+          security create-keychain -p sb-temp-keychain build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p sb-temp-keychain build.keychain
+          security import /tmp/sb-cert.p12 -k build.keychain -P "${{ secrets.IOS_SIGNING_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k sb-temp-keychain build.keychain
+          rm -f /tmp/sb-cert.p12
+
+      - name: Signed archive + IPA export (only when secrets exist)
+        if: env.HAVE_SIGNING == 'true'
+        working-directory: ios
+        run: |
+          cat > /tmp/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>${{ secrets.IOS_TEAM_ID }}</string>
+            <key>signingCertificate</key><string>${{ secrets.IOS_SIGNING_IDENTITY }}</string>
+            <key>provisioningProfiles</key><dict><key>com.streambox.ios</key><string>${{ secrets.IOS_PROVISIONING_PROFILE_NAME }}</string></dict>
+          </dict></plist>
+          PLIST
+          xcodebuild -project StreamBox.xcodeproj -scheme StreamBox \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath build/StreamBox.xcarchive \
+            archive CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="${{ secrets.IOS_TEAM_ID }}"
+          xcodebuild -exportArchive \
+            -archivePath build/StreamBox.xcarchive \
+            -exportOptionsPlist /tmp/ExportOptions.plist \
+            -exportPath build/signed
+          cp build/signed/StreamBox.ipa "$GITHUB_WORKSPACE/streambox-ios-signed.ipa"
+
+      - name: TestFlight upload (only when App Store Connect key exists)
+        if: env.HAVE_SIGNING == 'true' && env.HAVE_ASC == 'true'
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}" > ~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
+          xcrun altool --upload-app -f streambox-ios-signed.ipa -t ios \
+            --apiKey "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
+            --apiIssuer "${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}"
+
+      - name: Write install metadata (artifact honesty)
+        run: |
+          cat > install-metadata.json <<JSON
+          {
+            "app": "StreamBox",
+            "bundleId": "com.streambox.ios",
+            "version": "$(grep -o 'MARKETING_VERSION: "[^"]*"' ios/project.yml | head -n1 | cut -d'"' -f2)",
+            "build": "$(cat version.txt)",
+            "commit": "$GITHUB_SHA",
+            "generatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "xcode": "$(xcodebuild -version | head -n1)",
+            "artifacts": {
+              "streambox-ios-simulator.zip": {
+                "signing": "none",
+                "installable": "iOS Simulator only",
+                "note": "Runs in Xcode simulators. Not a device installer."
+              },
+              "streambox-ios-unsigned-device.ipa": {
+                "signing": "none",
+                "installable": "no - requires re-signing",
+                "note": "Re-sign with your own (free) Apple ID using AltStore or SideStore, then install. 7-day free provisioning expiry applies."
+              },
+              "streambox-ios-signed.ipa": {
+                "signing": "$(if [ "$HAVE_SIGNING" = "true" ]; then echo "apple distribution/development"; else echo "absent - no signing secrets configured"; fi)",
+                "installable": "$(if [ "$HAVE_SIGNING" = "true" ]; then echo "TestFlight / App Store / registered devices"; else echo "n/a"; fi)",
+                "note": "Only produced when IOS_SIGNING_* secrets are configured."
+              }
+            }
+          }
+          JSON
+          cat install-metadata.json
+
+      - name: Upload simulator artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: streambox-ios-simulator
+          path: streambox-ios-simulator.zip
+          retention-days: 90
+
+      - name: Upload unsigned device artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: streambox-ios-unsigned-device
+          path: |
+            streambox-ios-unsigned-device.ipa
+            install-metadata.json
+          retention-days: 90
+
+      - name: Upload signed artifact (only when produced)
+        if: env.HAVE_SIGNING == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: streambox-ios-signed
+          path: streambox-ios-signed.ipa
+          retention-days: 90

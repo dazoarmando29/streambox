@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0B111E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="StreamBox">
+<title>Install StreamBox - every device, every way</title>
+<meta name="description" content="Install StreamBox on iPhone, iPad, Android, TV and desktop. Web app, native app, TestFlight and more - with honest differences explained.">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: #0B111E;
+    color: #E6EDF5;
+    font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+    line-height: 1.55;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    min-height: 100vh;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 28px 18px 60px; }
+  h1, h2, h3 { font-family: "Space Grotesk", system-ui, sans-serif; }
+  .brand { font-weight: 900; font-size: 15px; letter-spacing: .12em; color: #8aa; text-transform: uppercase; }
+  .brand b { color: #2DD4BF; }
+  h1 { font-size: clamp(26px, 6vw, 40px); font-weight: 900; margin: 10px 0 6px; }
+  .sub { color: #9fb1c4; font-size: 15px; max-width: 620px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(45, 212, 191, .12); border: 1px solid rgba(45, 212, 191, .35);
+    color: #2DD4BF; font-size: 12px; font-weight: 800; letter-spacing: .08em;
+    padding: 7px 14px; border-radius: 999px; margin: 14px 0 22px; text-transform: uppercase;
+  }
+  .card {
+    background: #0F1729; border: 1px solid rgba(255, 255, 255, .09);
+    border-radius: 20px; padding: 22px; margin: 16px 0;
+  }
+  .card.reco { border-color: rgba(45, 212, 191, .55); box-shadow: 0 0 0 1px rgba(45, 212, 191, .25), 0 12px 40px rgba(0, 0, 0, .35); }
+  .tag {
+    display: inline-block; font-size: 10.5px; font-weight: 900; letter-spacing: .14em;
+    text-transform: uppercase; padding: 4px 10px; border-radius: 999px; margin-bottom: 10px;
+  }
+  .tag.free { background: rgba(45, 212, 191, .15); color: #2DD4BF; }
+  .tag.paid { background: rgba(255, 190, 60, .14); color: #FFBE3C; }
+  .tag.soon { background: rgba(148, 163, 184, .16); color: #94A3B8; }
+  .tag.reco { background: #2DD4BF; color: #06231F; }
+  h2.card-title { font-size: 21px; font-weight: 800; margin-bottom: 6px; }
+  .card p { color: #9fb1c4; font-size: 14.5px; }
+  ol.steps { margin: 14px 0 6px 20px; }
+  ol.steps li { margin: 9px 0; padding-left: 6px; font-size: 15px; }
+  ol.steps li b { color: #fff; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 9px; justify-content: center;
+    min-height: 48px; padding: 12px 22px; border-radius: 999px; border: 0;
+    font-size: 15px; font-weight: 800; cursor: pointer; text-decoration: none;
+    background: #2DD4BF; color: #06231F; margin: 10px 10px 4px 0; -webkit-tap-highlight-color: transparent;
+  }
+  .btn.ghost { background: rgba(255, 255, 255, .07); color: #E6EDF5; border: 1px solid rgba(255, 255, 255, .16); }
+  .btn[disabled], .btn.off { background: rgba(255, 255, 255, .06); color: #64748b; cursor: not-allowed; border: 1px dashed rgba(255, 255, 255, .18); }
+  .note {
+    background: rgba(255, 190, 60, .08); border: 1px solid rgba(255, 190, 60, .28);
+    border-radius: 12px; padding: 12px 14px; font-size: 13.5px; color: #F3D08A; margin: 12px 0;
+  }
+  .note.ok { background: rgba(45, 212, 191, .08); border-color: rgba(45, 212, 191, .3); color: #A7E8DD; }
+  .note b { color: inherit; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+  th { color: #9fb1c4; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
+  td.yes { color: #2DD4BF; font-weight: 800; }
+  td.part { color: #FFBE3C; font-weight: 700; }
+  td.no { color: #64748b; }
+  details { margin: 10px 0; }
+  summary { cursor: pointer; font-weight: 800; padding: 12px 0; font-size: 15.5px; }
+  details p { padding: 0 0 10px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .foot { margin-top: 34px; color: #64748b; font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .foot a { color: #9fb1c4; }
+  svg.ico { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
+  .platform-card { display: none; }
+  .platform-card.show { display: block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">STREAM<b>BOX</b></div>
+  <h1>Install StreamBox</h1>
+  <p class="sub">One app, every screen. Pick the install that fits your device - the free options first, always. No account, no cost, no tricks.</p>
+  <div class="chip" id="deviceChip">
+    <svg class="ico" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18.5h2"/></svg>
+    <span id="deviceChipText">Detecting your device...</span>
+  </div>
+
+  <!-- ============ iPhone / iPad ============ -->
+  <div class="platform-card" id="cardApple">
+    <div class="card reco">
+      <span class="tag reco">Recommended</span>
+      <span class="tag free">Free - no account, no computer</span>
+      <h2 class="card-title">Install the StreamBox Web App</h2>
+      <p>Adds StreamBox to your Home Screen with its own full-screen window - no Safari tabs, no URL bar. Works in about two minutes.</p>
+      <ol class="steps">
+        <li>Open <b>StreamBox in Safari</b> (this page, right now).</li>
+        <li>Tap the <b>Share</b> button (the square with an arrow, in the Safari toolbar).</li>
+        <li>Scroll and select <b>Add to Home Screen</b>.</li>
+        <li>Enable <b>Open as Web App</b> if your iOS version offers it.</li>
+        <li>Tap <b>Add</b>.</li>
+        <li>Launch <b>StreamBox</b> from your Home Screen - done.</li>
+      </ol>
+      <button class="btn" onclick="location.href='index.html'">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        Open StreamBox in Safari
+      </button>
+      <div class="note">
+        <b>Honest limits of the web app on iOS:</b> Picture-in-Picture and AirPlay are limited by Safari; playback runs through the same players as the website; offline covers the app shell only (streaming needs internet). Your Continue Watching, My List and settings stay on your device.
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="tag free">Free with your Apple ID</span>
+      <h2 class="card-title">Native app - beta via AltStore / SideStore</h2>
+      <p>The native iPhone + iPad app (built by this repository's CI on every change) can be installed for free by re-signing it with your own Apple ID. Runs on Windows or macOS - no Mac development machine needed for the free path.</p>
+      <ol class="steps">
+        <li>Install <b>AltStore</b> (Windows/Mac) or <b>SideStore</b> on your device.</li>
+        <li>Download the latest <b>streambox-ios-unsigned-device.ipa</b> artifact from the GitHub Actions run (link below).</li>
+        <li>Open the IPA with AltStore/SideStore - it re-signs with your Apple ID and installs.</li>
+        <li>Free provisioning expires after <b>7 days</b>: refresh weekly (AltStore refreshes on your Wi-Fi; SideStore can refresh anywhere).</li>
+      </ol>
+      <a class="btn ghost" href="https://github.com/dazoarmando29/streambox/actions/workflows/ios.yml" target="_blank" rel="noopener">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+        Get the IPA from CI
+      </a>
+      <a class="btn ghost" href="https://github.com/dazoarmando29/streambox/blob/main/ios/INSTALL.md" target="_blank" rel="noopener">Full free-install guide</a>
+      <div class="note">
+        <b>The IPA is not directly installable.</b> iOS only installs apps signed by Apple-issued certificates - that is Apple's rule, not ours. AltStore/SideStore do the legitimate re-signing with your free Apple ID. Never trust anyone claiming an unsigned IPA installs directly.
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="tag soon" id="tfTag">Coming later</span>
+      <h2 class="card-title">TestFlight beta</h2>
+      <p id="tfText">TestFlight distribution requires a paid Apple Developer Program membership on the publishing side, which this project does not have yet. When a real public invite link exists, it will appear here - no fake links.</p>
+      <a class="btn off" id="tfBtn" href="#" onclick="return false;">Not available yet</a>
+    </div>
+
+    <div class="card">
+      <span class="tag soon" id="asTag">Coming later</span>
+      <h2 class="card-title">App Store</h2>
+      <p id="asText">An App Store submission needs the paid developer membership plus review. The app is being kept submission-ready (privacy manifest, metadata, review notes) so listing it later is straightforward. This button activates only when a real App Store link exists.</p>
+      <a class="btn off" id="asBtn" href="#" onclick="return false;">Not listed yet</a>
+    </div>
+  </div>
+
+  <!-- ============ Android / TV ============ -->
+  <div class="platform-card" id="cardAndroid">
+    <div class="card reco">
+      <span class="tag reco">Recommended</span>
+      <span class="tag free">Free</span>
+      <h2 class="card-title">Install the Android app</h2>
+      <p>Full and Lite editions, install-in-place updates, TV launcher support. Download the APK, allow installs from your browser, done.</p>
+      <a class="btn" href="https://github.com/dazoarmando29/streambox/releases/tag/latest" target="_blank" rel="noopener">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+        Get streambox.apk (Full)
+      </a>
+      <a class="btn ghost" href="https://github.com/dazoarmando29/streambox/releases/tag/latest" target="_blank" rel="noopener">Get streambox-lite.apk (Lite)</a>
+      <button class="btn ghost" onclick="location.href='index.html'">Or just use the web app</button>
+    </div>
+    <div class="card">
+      <span class="tag free">Free</span>
+      <h2 class="card-title">Android TV / Fire TV</h2>
+      <p>The same APKs carry a TV launcher banner and a 10-foot interface. Sideload with Downloader or adb, then run the in-app TV Setup guide.</p>
+      <button class="btn ghost" onclick="location.href='index.html'">Open the TV setup guide inside StreamBox</button>
+    </div>
+  </div>
+
+  <!-- ============ Desktop / other ============ -->
+  <div class="platform-card" id="cardDesktop">
+    <div class="card">
+      <span class="tag free">Free</span>
+      <h2 class="card-title">Desktop: use the web app</h2>
+      <p>StreamBox runs great in any modern browser - Chrome, Edge, Firefox, Safari. Install it as a desktop app from the browser's install icon in the address bar where offered.</p>
+      <button class="btn" onclick="location.href='index.html'">Open StreamBox</button>
+    </div>
+    <div class="card">
+      <span class="tag free">Free</span>
+      <h2 class="card-title">Android emulator / APK</h2>
+      <p>Want the app shell on a computer? The Android APKs run on emulators too, or use the website directly - it is the same StreamBox.</p>
+      <a class="btn ghost" href="https://github.com/dazoarmando29/streambox/releases/tag/latest" target="_blank" rel="noopener">Download the APKs</a>
+    </div>
+  </div>
+
+  <!-- ============ Comparison ============ -->
+  <div class="card">
+    <h2 class="card-title">Web app vs native app - real differences</h2>
+    <table>
+      <thead><tr><th>Capability</th><th>Web app (Add to Home Screen)</th><th>Native app</th></tr></thead>
+      <tbody>
+        <tr><td>Price</td><td class="yes">Free forever</td><td class="yes">Free (beta via AltStore)</td></tr>
+        <tr><td>Install without a computer</td><td class="yes">Yes</td><td class="no">Needs AltStore/SideStore</td></tr>
+        <tr><td>Home-screen icon + full screen</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+        <tr><td>Catalog, search, My List, Continue Watching</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+        <tr><td>Watch Party</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+        <tr><td>Picture-in-Picture / AirPlay</td><td class="part">Limited by Safari</td><td class="yes">Full (AVKit)</td></tr>
+        <tr><td>Offline app shell</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+        <tr><td>Ad Shield blocking</td><td class="part">Browser-level only</td><td class="yes">System content blocker</td></tr>
+        <tr><td>Updates</td><td class="yes">Automatic on launch</td><td class="part">Reinstall new build (auto via TestFlight later)</td></tr>
+        <tr><td>Expiry</td><td class="yes">Never</td><td class="part">Free signing: 7-day refresh</td></tr>
+      </tbody>
+    </table>
+    <div class="note ok">
+      Both editions run the <b>same StreamBox app</b> - same catalog, same player, same parties. The native shell adds system integration; the web app adds zero-friction install. You can use both side by side.
+    </div>
+  </div>
+
+  <!-- ============ Troubleshooting ============ -->
+  <div class="card">
+    <h2 class="card-title">Troubleshooting</h2>
+    <details>
+      <summary>I don't see "Add to Home Screen" in Safari</summary>
+      <p>Make sure you opened this page in <b>Safari itself</b> (not the in-app browser of another app). In-app browsers hide that option. Tap the Share button in Safari's toolbar - the option is inside the share sheet, you may need to scroll down.</p>
+    </details>
+    <details>
+      <summary>The Home Screen icon opens in a Safari tab instead of its own window</summary>
+      <p>Remove the icon, reopen the site in Safari, and re-add it. If your iOS shows an "Open as Web App" toggle in the Add dialog, enable it before tapping Add.</p>
+    </details>
+    <details>
+      <summary>Video does not play on iPhone/iPad</summary>
+      <p>Some providers serve players that only work in desktop browsers - StreamBox shows a clear fallback message and offers another mirror. Tap the server/mirror button under the player to switch sources. Report the title on GitHub and we will look at it.</p>
+    </details>
+    <details>
+      <summary>The native beta stopped opening after 7 days</summary>
+      <p>That is free Apple-ID provisioning expiring - refresh the app from AltStore/SideStore (needs your Apple ID sign-in again) or re-install the IPA. Continue Watching and My List survive reinstalls because they live in the app's web storage.</p>
+    </details>
+    <details>
+      <summary>Is any of this against Apple's rules?</summary>
+      <p>No. Add to Home Screen is Apple's own feature. AltStore/SideStore use Apple's free personal-signing program exactly as designed (with its real 7-day limit). We never use enterprise certificates or signing bypasses, and we will not ship anything that does.</p>
+    </details>
+  </div>
+
+  <div class="foot">
+    <span class="brand">STREAM<b>BOX</b></span>
+    <span>&bull;</span><a href="index.html">Home</a>
+    <span>&bull;</span><a href="privacy.html">Privacy</a>
+    <span>&bull;</span><a href="https://github.com/dazoarmando29/streambox" target="_blank" rel="noopener">GitHub</a>
+    <span class="flex-1" style="flex:1"></span>
+    <span style="letter-spacing:.15em">INSTALL CENTER</span>
+    <span>&bull;</span><span>dazzo</span>
+  </div>
+</div>
+
+<script>
+(function () {
+  // ---- install channel configuration -------------------------------
+  // Leave empty until REAL links exist. The buttons above stay honest
+  // ("Not available yet") - never a fake or placeholder link.
+  var TESTFLIGHT_URL = "";   // e.g. "https://testflight.apple.com/join/XXXX"
+  var APP_STORE_URL = "";    // e.g. "https://apps.apple.com/app/idXXXXXXXX"
+
+  // ---- platform detection ------------------------------------------
+  var ua = navigator.userAgent || "";
+  var p = "other";
+  var isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var isAndroid = /Android/.test(ua);
+  var isTV = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVIA|Fire TV|AFT/i.test(ua);
+  var isMac = /Macintosh/.test(ua) && !isIOS;
+  var isWin = /Windows/.test(ua);
+  if (isIOS) p = "apple";
+  else if (isTV) p = "android";
+  else if (isAndroid) p = "android";
+  else if (isMac || isWin || /Linux/.test(ua)) p = "desktop";
+
+  var chipText = {
+    apple: "iPhone / iPad detected",
+    android: isTV ? "Android TV / Fire TV detected" : "Android device detected",
+    desktop: "Desktop browser detected",
+    other: "Welcome to StreamBox"
+  };
+  document.getElementById("deviceChipText").textContent = chipText[p] || chipText.other;
+
+  // show the right cards (all cards = unknown device)
+  ["cardApple", "cardAndroid", "cardDesktop"].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (p === "apple" && id === "cardApple") el.classList.add("show");
+    else if (p === "android" && id === "cardAndroid") el.classList.add("show");
+    else if (p === "desktop" && id === "cardDesktop") el.classList.add("show");
+  });
+
+  // ---- TestFlight / App Store cards: activate ONLY with real links --
+  function activate(cardId, tagId, btnId, textId, url, label) {
+    if (!url) return;
+    document.getElementById(tagId).textContent = "Available now";
+    document.getElementById(tagId).className = "tag free";
+    document.getElementById(textId).textContent = "Tap below to install StreamBox through Apple's official channel.";
+    var b = document.getElementById(btnId);
+    b.href = url;
+    b.className = "btn";
+    b.textContent = label;
+    b.onclick = null;
+    b.target = "_blank";
+    b.rel = "noopener";
+  }
+  activate("cardApple", "tfTag", "tfBtn", "tfText", TESTFLIGHT_URL, "Join the TestFlight beta");
+  activate("cardApple", "asTag", "asBtn", "asText", APP_STORE_URL, "Download on the App Store");
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0B111E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Privacy - StreamBox</title>
+<meta name="description" content="StreamBox privacy: what stays on your device, what crosses the network, and what we never collect.">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0B111E; color: #E6EDF5; line-height: 1.6;
+    font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    min-height: 100vh;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 30px 20px 60px; }
+  h1, h2 { font-family: "Space Grotesk", system-ui, sans-serif; }
+  .brand { font-weight: 900; font-size: 15px; letter-spacing: .12em; color: #8aa; text-transform: uppercase; }
+  .brand b { color: #2DD4BF; }
+  h1 { font-size: clamp(26px, 6vw, 38px); font-weight: 900; margin: 10px 0 4px; }
+  .updated { color: #64748b; font-size: 13px; margin-bottom: 22px; }
+  h2 { font-size: 19px; margin: 26px 0 8px; }
+  p, li { color: #9fb1c4; font-size: 15px; }
+  ul { margin: 8px 0 8px 22px; }
+  li { margin: 6px 0; }
+  .card { background: #0F1729; border: 1px solid rgba(255,255,255,.09); border-radius: 18px; padding: 20px; margin: 16px 0; }
+  .note { background: rgba(45,212,191,.08); border: 1px solid rgba(45,212,191,.3); border-radius: 12px; padding: 13px 15px; color: #A7E8DD; font-size: 14px; margin: 12px 0; }
+  a { color: #2DD4BF; }
+  .foot { margin-top: 34px; color: #64748b; font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .foot a { color: #9fb1c4; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">STREAM<b>BOX</b></div>
+  <h1>Privacy</h1>
+  <div class="updated">Plain-language policy &bull; last updated November 2026</div>
+
+  <div class="note">
+    <b>The short version:</b> StreamBox has no accounts, no analytics, and no ads of its own. Your watch data lives on your device. We cannot sell what we never collect.
+  </div>
+
+  <div class="card">
+    <h2>What stays on your device</h2>
+    <ul>
+      <li>Continue Watching history, My List, and playback preferences (browser local storage / app web storage).</li>
+      <li>Your subtitle language and style settings.</li>
+      <li>The parental-control PIN (stored only as a salted hash, never in plain text).</li>
+      <li>Server/mirror performance notes used to pick a healthy player.</li>
+    </ul>
+    <p>This data never leaves your device and is removed if you clear the website data or delete the app.</p>
+  </div>
+
+  <div class="card">
+    <h2>What crosses the network</h2>
+    <ul>
+      <li><b>Catalog requests</b> - movie/TV metadata is proxied through our own API worker (streambox-api) which holds the catalog provider key server-side. The provider sees requests from our server, not your identity from us.</li>
+      <li><b>Subtitle lookups</b> - title identifiers are sent to subtitle services (Wyzie / TSDB / BetaSeries) to fetch subtitle files.</li>
+      <li><b>Watch Party</b> - if you join a room, the room's playback state and your chosen nickname pass through the party hub (a Durable Object) for the life of the session. Invite codes are random; there is no contact discovery.</li>
+      <li><b>Media streams</b> - requested directly from the mirror/embed providers you select. Those providers have their own privacy policies.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>What we never collect</h2>
+    <ul>
+      <li>No accounts, emails, phone numbers, or contact lists.</li>
+      <li>No advertising identifiers, no tracking pixels, no third-party analytics SDKs.</li>
+      <li>No location data, no camera, no microphone, no photo library access.</li>
+      <li>No selling or sharing of personal data - there is none to share.</li>
+    </ul>
+    <p>The native iPhone/iPad app ships a <b>privacy manifest</b> declaring exactly this: no tracking, no collected data types, and only on-device app settings storage (Apple's required-reason API CA92.1).</p>
+  </div>
+
+  <div class="card">
+    <h2>Third-party providers</h2>
+    <p>Playback embeds, subtitle lookups, and the movie catalog are served by third parties (for example TMDB for artwork and metadata, and the mirror players under the player). Their content and their servers are governed by their own terms and policies. StreamBox blocks known ad and tracker hosts in its apps, which also limits what those pages can collect about you.</p>
+  </div>
+
+  <div class="card">
+    <h2>Children</h2>
+    <p>StreamBox includes an 18+ gate that is locked by default. We do not knowingly collect personal information from anyone, including children.</p>
+  </div>
+
+  <div class="card">
+    <h2>Changes and contact</h2>
+    <p>If this policy changes, the updated version is published on this page. Questions or concerns belong on the project's <a href="https://github.com/dazoarmando29/streambox" target="_blank" rel="noopener">GitHub repository</a>, where development happens in the open.</p>
+  </div>
+
+  <div class="foot">
+    <span class="brand">STREAM<b>BOX</b></span>
+    <span>&bull;</span><a href="index.html">Home</a>
+    <span>&bull;</span><a href="install.html">Install</a>
+    <span class="flex-1" style="flex:1"></span>
+    <span>&bull;</span><span>dazzo</span>
+  </div>
+</div>
+</body>
+</html>

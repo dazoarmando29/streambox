@@ -1,12 +1,12 @@
 /* StreamBox service worker: offline app-shell + faster repeat loads.
    Pages (navigations) are NETWORK-FIRST so site updates always reach you;
    icons/manifest are cache-first. Bump CACHE on shell changes. */
-const CACHE = "streambox-v2";
-const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
+const CACHE = "streambox-v3";
+const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-180.png", "./icon-1024.png", "./icon-1024-maskable.png"];
 // Only the shell statics are cache-first. Everything else same-origin (the
 // version.txt poll carries a cache-buster every visit) must ride the network:
 // caching those keyed-by-URL grows the cache forever and can pin stale copies.
-const STATIC_OK = new Set(["manifest.webmanifest", "icon-192.png", "icon-512.png", "tailwind.css"]);
+const STATIC_OK = new Set(["manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-180.png", "icon-152.png", "icon-167.png", "icon-1024.png", "icon-1024-maskable.png", "tailwind.css"]);
 
 function offline() {
   return new Response("Offline", {
