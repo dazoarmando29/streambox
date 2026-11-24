@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Favorite
@@ -257,6 +258,9 @@ fun StreamBoxApp() {
         if (prev != v) {
             whatsNew = v to whatsNewBullets(prev, v)
             Store.setLastSeenVersion(appCtx, v)
+            // just-updated: drop any offer the PREVIOUS install saved so the
+            // same update can never come back "with the same description"
+            withContext(Dispatchers.IO) { Updater.savePending(appCtx, null) }
         }
     }
     // In-app updates (0.80): the rolling latest-native prerelease is the
@@ -317,6 +321,15 @@ fun StreamBoxApp() {
             if (ev == androidx.lifecycle.Lifecycle.Event.ON_START) {
                 updAutoShown = false // a fresh foreground always re-offers
                 updScope.launch {
+                    // back from the install-permission screen: flip the button
+                    // back to "Download & Install" the moment the grant lands
+                    // (it used to keep the "Allow Installs" label and warn
+                    // about a permission that was already given)
+                    if (updState.needsPermission &&
+                        withContext(Dispatchers.IO) { Updater.installsAllowed(appCtx) }
+                    ) {
+                        updState.needsPermission = false
+                    }
                     for (attempt in 0..2) {
                         offerUpdate(false)
                         if (upd != null) break
@@ -481,10 +494,20 @@ fun StreamBoxApp() {
             // silences it for a while and the corner pill keeps the door open.
             if (whatsNew == null) {
                 upd?.let { rel ->
+                    // Auto-open ONCE per offer via an effect. The old code
+                    // flipped updAutoShown DURING composition and then gated
+                    // on it - the recomposition it triggered re-evaluated the
+                    // gate and made the popup vanish after ~a second (the TV
+                    // "flash then gone" bug). Effects never lie mid-frame.
+                    LaunchedEffect(rel.digest, updAutoShown) {
+                        if (!updOpen && !updAutoShown) {
+                            updAutoShown = true
+                            updOpen = true
+                        }
+                    }
                     // 0.86: the offer re-appears on EVERY foreground while
                     // an update is pending - Later only silences this session
-                    if (!updOpen && updAutoShown) return@let
-                    updAutoShown = true
+                    if (updOpen) {
                     UpdateDialog(
                         rel = rel,
                         st = updState,
@@ -527,6 +550,7 @@ fun StreamBoxApp() {
                             }
                         },
                     )
+                    }
                 }
             }
         }
@@ -537,6 +561,11 @@ fun StreamBoxApp() {
 /** What's New copy, newest first - add a key per release. The card lists
     every entry between the version you last saw and the current one. */
 private val WHATS_NEW: Map<String, List<String>> = linkedMapOf(
+    "0.102" to listOf(
+        "The update popup no longer flashes away at startup - it stays until you choose, and its buttons are always on screen",
+        "Fixed the update loop: after you install, the same update can never be offered again",
+        "Compact What's New and Update cards - the notes scroll while the buttons stay put",
+    ),
     "0.81" to listOf(
         "The update popup had a parsing bug in the first 0.80 build - this build fixes it so the offer always appears when a newer build is out",
         "In-app updates - a popup at startup, Download and Install does everything, and the file is verified and cleaned up by itself",
@@ -772,7 +801,9 @@ private fun SplashScreen() {
     }
 }
 
-/** One-time What's New card after a fresh update (design pack glass). */
+/** One-time What's New card after a fresh update (design pack glass).
+    Compact: only the bullets scroll - the CTA is pinned and ALWAYS visible
+    (the old card scrolled the button off-screen on TVs and small phones). */
 @Composable
 private fun WhatsNewDialog(version: String, bullets: List<String>, onDone: () -> Unit) {
     val big = AppEnv.isTv
@@ -783,44 +814,47 @@ private fun WhatsNewDialog(version: String, bullets: List<String>, onDone: () ->
             modifier = Modifier
                 .widthIn(max = if (big) 640.dp else 420.dp)
                 .background(Card, RoundedCornerShape(24.dp))
-                .padding(if (big) 28.dp else 20.dp)
-                // 0.90: the whole card scrolls within the screen - the
-                // Start Watching button can never end up unreachable
-                .heightIn(max = if (big) 460.dp else 620.dp)
-                .verticalScroll(rememberScrollState()),
+                .padding(if (big) 24.dp else 18.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(if (big) 40.dp else 36.dp)
                         .glow(RoundedCornerShape(12.dp))
                         .background(Accent, RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = Ink, modifier = Modifier.size(if (big) 22.dp else 20.dp))
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
-                    Text("What's New", color = Color.White, fontWeight = FontWeight.Black, fontSize = if (big) 26.sp else 21.sp)
+                    Text("What's New", color = Color.White, fontWeight = FontWeight.Black, fontSize = if (big) 22.sp else 18.sp)
                     Text(
-                        "VERSION " + version,
-                        color = Dim,
+                        "VERSION " + version + " \u00B7 UPDATED",
+                        color = Accent,
                         fontWeight = FontWeight.Bold,
-                        fontSize = if (big) 12.sp else 10.sp,
+                        fontSize = if (big) 11.sp else 10.sp,
                         letterSpacing = 2.sp,
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
-            bullets.forEach { b ->
-                Row(verticalAlignment = Alignment.Top) {
-                    Box(modifier = Modifier.padding(top = 6.dp).size(7.dp).background(Accent, CircleShape))
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(b, color = Soft, fontFamily = BodyFont, fontSize = if (big) 15.sp else 13.sp)
+            Spacer(modifier = Modifier.height(12.dp))
+            // ONLY the bullets scroll - bounded so the CTA below never moves
+            Column(
+                modifier = Modifier
+                    .heightIn(max = if (big) 260.dp else 200.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                bullets.forEach { b ->
+                    Row(verticalAlignment = Alignment.Top) {
+                        Box(modifier = Modifier.padding(top = 6.dp).size(6.dp).background(Accent, CircleShape))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(b, color = Soft, fontFamily = BodyFont, fontSize = if (big) 14.sp else 12.5.sp)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
-                Spacer(modifier = Modifier.height(8.dp))
             }
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             PillButton(
                 "Start Watching", big, accent = true, icon = Icons.Filled.PlayArrow,
                 modifier = Modifier.fillMaxWidth().focusRequester(ctaFr),
@@ -996,12 +1030,7 @@ private fun UpdateDialog(
                     .background(Accent, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)),
             )
             Column(modifier = Modifier
-                .padding(if (big) 28.dp else 20.dp)
-                // everything (including the buttons) scrolls as one block
-                // within a screen-safe height - the remote can always reach
-                // Download & Install and the scroll follows focus
-                .heightIn(max = if (big) 460.dp else 620.dp)
-                .verticalScroll(rememberScrollState())) {
+                .padding(if (big) 28.dp else 20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
@@ -1045,7 +1074,14 @@ private fun UpdateDialog(
                     )
                 }
                 Spacer(modifier = Modifier.height(14.dp))
-                Column {
+                // ONLY the release notes scroll - the Download & Install and
+                // Later buttons below stay on screen at every size (the old
+                // one-block scroll pushed them out of reach on TV and phones)
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = if (big) 280.dp else 210.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
                     if (notes.intro.isNotBlank()) {
                         Text(
                             notes.intro,
@@ -1138,7 +1174,10 @@ private fun UpdateDialog(
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         PillButton(
-                            if (st.needsPermission) "Allow Installs, Then Tap Again" else "Download & Install",
+                            // short label: the warning above explains the
+                            // two-step, and the long one wrapped to 3 lines
+                            // and clipped its own text on phones
+                            if (st.needsPermission) "Allow Installs" else "Download & Install",
                             big,
                             accent = true,
                             icon = Icons.Filled.Download,

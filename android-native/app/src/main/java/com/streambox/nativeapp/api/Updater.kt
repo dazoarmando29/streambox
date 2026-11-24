@@ -99,7 +99,10 @@ object Updater {
                 if (compareVersions(rel.version, BuildConfig.VERSION_NAME) > 0) rel else null
             } else {
                 val self = selfDigest(ctx) ?: return null
-                if (rel.digest != self) rel else null
+                // digest carries a "sha256:" prefix - self does NOT. The old
+                // bare compare could never be equal, so a body without the
+                // version marker offered the SAME update forever (the loop).
+                if (rel.digest.removePrefix("sha256:") != self) rel else null
             }
         } catch (e: Exception) {
             lastCheckFailed = true
