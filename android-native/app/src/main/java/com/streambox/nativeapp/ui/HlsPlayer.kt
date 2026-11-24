@@ -34,8 +34,22 @@ fun HlsSurface(player: ExoPlayer, modifier: Modifier = Modifier) {
                 isFocusable = false
                 isFocusableInTouchMode = false
                 this.player = player
+                // FluidMotion (0.110): the frame-rate call needs THIS
+                // view's real playback surface (SurfaceView holder) - the
+                // engine attaches a SurfaceHolder.Callback so the rate is
+                // set right after the surface exists.
+                try {
+                    com.streambox.nativeapp.playback.FluidMotion.bindPlayerView(this)
+                } catch (e: Exception) {
+                }
             }
         },
-        onRelease = { it.player = null },
+        onRelease = {
+            it.player = null
+            try {
+                com.streambox.nativeapp.playback.FluidMotion.unbindPlayerView()
+            } catch (e: Exception) {
+            }
+        },
     )
 }
