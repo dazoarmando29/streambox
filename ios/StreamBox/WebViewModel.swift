@@ -124,7 +124,7 @@ final class WebViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKUI
                 // Fail-safe (same as Android): on an allowlisted non-SPA page
                 // the cascade knows nothing - walk WebView history instead.
                 let onAppSite = self.webView.url?.host?.lowercased() == AppConfig.siteHost
-                if self.webView.canGoBack() && !onAppSite {
+                if self.webView.canGoBack && !onAppSite {
                     self.webView.goBack()
                 }
                 // iOS: nothing above 'exit' - the app stays open.
