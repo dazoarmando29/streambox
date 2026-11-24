@@ -353,17 +353,12 @@
     #playerBox #ctlBar { border-color: rgba(255, 255, 255, 0.45) !important; }
   }
   /* iOS GUARANTEED DECK: on iPhone/iPad the provider's video layer can
-     swallow overlay taps and captions ("controls gone / subtitles gone"),
-     so iOS gets a control + caption deck directly BELOW the picture - it
-     never overlays the video and never auto-hides. Android/desktop keep the
-     overlay grammar exactly as-is. */
+     swallow overlay taps ("controls gone"), so iOS gets a control deck
+     directly BELOW the picture - it never overlays the video and never
+     auto-hides. Captions stay on the one overlay (positioned above the bar,
+     styled pill) on every platform. Android/desktop grammar unchanged. */
   #iosDeck { display: none; }
   body.ios-device #watchView #iosDeck { display: block; margin-top: 10px; }
-  body.ios-device #capOverlay { display: none !important; } /* no double captions */
-  #capStrip { text-align: center; font-weight: 700;
-    font-size: clamp(15px, 4.2vw, 22px); line-height: 1.35; color: #fff;
-    text-shadow: 0 2px 4px #000, 0 0 12px rgba(0, 0, 0, .9); padding: 2px 6% 10px; }
-  #capStrip:empty { display: none; }
   #iosDeck .deck-row { display: flex; gap: 8px; align-items: stretch;
     background: rgba(9, 15, 30, .78); border: 1px solid rgba(255, 255, 255, .12);
     border-radius: 18px; padding: 8px;
@@ -1004,7 +999,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 239; // bump every release alongside version.txt
+  const BUILD_NUM = 240; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1355,13 +1350,10 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
           </div>
         </div>
       </div>
-      <!-- iOS DECK: guaranteed captions + controls BELOW the picture.
-           On iPhone/iPad the provider video layer can swallow overlay taps
-           and captions (the "controls gone / subtitles gone" reports), so
-           iOS gets its own always-there deck - never over the video, never
-           auto-hidden, every button >= 44px. -->
+      <!-- iOS DECK: guaranteed controls BELOW the picture (iPhone/iPad:
+           the provider video layer can swallow overlay taps - the "controls
+           gone" report). Captions render on the styled overlay above. -->
       <div id="iosDeck">
-        <div id="capStrip"></div>
         <div class="deck-row">
           <button onclick="ctlSeekRel(-10)" aria-label="Back 10 seconds">&#8722;10s</button>
           <button id="deckPlay" class="deck-main" onclick="ctlToggle()" aria-label="Play or pause">Play</button>
@@ -3145,14 +3137,10 @@ function purgeRetiredCaches(){
         window._barFromTap = true;
         return;
       }
-      if (!window._barFromTap) {
-        // the load-time/auto bar: this tap EXTENDS it (restarts the idle),
-        // it must never vanish the moment the user reaches for a button
-        pokeHud();
-        return;
-      }
-      // the bar is one the USER summoned: tap again = dismiss (300ms delay so
-      // a double-tap seek doesn't also hide the bar)
+      // tap on a VISIBLE bar always dismisses it (auto or summoned): the old
+      // "extend the auto-bar" nuance read as "it shows and just stays" on
+      // phones - tap means toggle. The 300ms grace keeps double-tap seeks
+      // from hiding the bar too (the double-tap branch cancels this timer).
       tapTimer = setTimeout(() => { hideHud(); }, 300);
     }, { passive: true });
   } catch(e){}
@@ -7726,7 +7714,7 @@ async function wyzDownload(url, it){
     if (!cues.length) throw new Error("File downloaded but unreadable.");
     const lang = (it && (it.display || it.language)) || wyzLang.toUpperCase();
     setSubs({ name: ((it && it.fileName) || "wyzie.srt"), lang, cues, url: url, corsUrl: url, src: "wyzie", code: wyzLang,
-      pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+      pos: subFile ? subFile.pos : DEF_SUBPOS, offset: subFile ? (subFile.offset || 0) : 0 });
     koStandDown(); // searched-and-picked = manual: K-drama auto stands down, provider layer clears
     wyzQuotaClear();
     subStatus(`Loaded ${cues.length} lines (${lang}).`);
@@ -7784,7 +7772,7 @@ async function wyzAutoSubs(){
     if (!cues.length) return;
     if (subStorageKey() !== myKey) return; // episode changed mid-fetch
     setSubs({ name: (pick.fileName || "wyzie.srt"), lang: (pick.display || wyzLang.toUpperCase()), cues, url: pick.url, corsUrl: pick.url, src: "wyzie", code: wyzLang,
-      pos: "bottom", offset: 0 });
+      pos: DEF_SUBPOS, offset: 0 });
     wyzQuotaClear();
     const ws = document.getElementById("watchStatus");
     if (ws && (mirror === "cinesrc" || mirror === "vidbolt")) ws.textContent = `Subtitles auto-loaded (${cues.length} lines) \u{2713} — nudge sync anytime in \u{2699} \u{2192} Subs`;
@@ -7935,7 +7923,7 @@ async function bsDownload(sub){
     if (!cues.length) throw new Error("Backup file unreadable.");
     const gl = guessLang(sub.file);
     setSubs({ name: (sub.file || "backup.srt"), lang: gl !== "Custom" ? gl : (sub.language || wyzLang.toUpperCase()), cues, src: sub.tsdbUrl ? "tsdb" : "betaseries", corsUrl: (sub.tsdbUrl || ""),
-      pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+      pos: subFile ? subFile.pos : DEF_SUBPOS, offset: subFile ? (subFile.offset || 0) : 0 });
     koStandDown(); // searched-and-picked = manual: K-drama auto stands down, provider layer clears
     subStatus(`Loaded ${cues.length} lines (backup \u{2713}).`);
   } catch(err) {
@@ -7964,7 +7952,7 @@ async function bsAuto(){
     if (!cues.length) return;
     if (subStorageKey() !== myKey) return; // episode changed mid-fetch
     const gl = guessLang(pick.file);
-    setSubs({ name: (pick.file || "backup.srt"), lang: gl !== "Custom" ? gl : (pick.language || wyzLang.toUpperCase()), cues, src: pick.tsdbUrl ? "tsdb" : "betaseries", corsUrl: (pick.tsdbUrl || ""), pos: "bottom", offset: 0 });
+    setSubs({ name: (pick.file || "backup.srt"), lang: gl !== "Custom" ? gl : (pick.language || wyzLang.toUpperCase()), cues, src: pick.tsdbUrl ? "tsdb" : "betaseries", corsUrl: (pick.tsdbUrl || ""), pos: DEF_SUBPOS, offset: 0 });
     const ws = document.getElementById("watchStatus");
     // quiet-mode: the switch-note (if this session already noted it) stands —
     // later episodes load backups with no further messages
@@ -8015,7 +8003,7 @@ function loadProviderTrack(t, fallbackName){
       const cues = parseSubs(txt);
       if (cues && cues.length) {
         setSubs({ name: safeLabel(fallbackName, "provider track"), lang: "", cues,
-          url: String(u), corsUrl: String(u), src: "provider", code: "", pos: "bottom", offset: 0 });
+          url: String(u), corsUrl: String(u), src: "provider", code: "", pos: DEF_SUBPOS, offset: 0 });
         toast("Provider captions loaded into StreamBox - they float with the bar \u{2713}");
       }
     }).catch(() => {});
@@ -8217,7 +8205,7 @@ function loadSubFile(input){
     const cues = parseSubs(rd.result);
     if (!cues.length) { subStatus("Couldn't read that file — is it .srt or .vtt?"); return; }
     setSubs({ name: f.name, lang: guessLang(f.name), cues,
-      pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+      pos: subFile ? subFile.pos : DEF_SUBPOS, offset: subFile ? (subFile.offset || 0) : 0 });
     koStandDown(); // manual pick owns captions — K-drama auto stands down, provider layer clears
     subStatus(`Loaded ${cues.length} lines.`);
   };
@@ -8232,7 +8220,7 @@ function savePastedSubs(){
   const cues = parseSubs(txt);
   if (!cues.length) { subStatus("Nothing readable pasted — need SRT/VTT text."); return; }
   setSubs({ name: "pasted.txt", lang: "Custom", cues,
-    pos: subFile ? subFile.pos : "bottom", offset: subFile ? (subFile.offset || 0) : 0 });
+    pos: subFile ? subFile.pos : DEF_SUBPOS, offset: subFile ? (subFile.offset || 0) : 0 });
   koStandDown(); // manual pick owns captions — K-drama auto stands down, provider layer clears
   document.getElementById("subPasteWrap").classList.add("hidden");
   document.getElementById("subPaste").value = "";
@@ -8253,6 +8241,10 @@ function subStatus(msg){
    sheet STYLING & SYNC column. Size is sp (TV renders 1.35x so the 12-26
    ladder reads right from the couch). */
 let capStyle = { size: 18, color: "white", bg: "semi" };
+/* caption default POSITION: phones get "top" (Netflix-style: out of the
+   picture's dialogue area AND never under the control bar - the old bottom
+   default clipped under the bar in landscape); desktop/TV keep "bottom". */
+const DEF_SUBPOS = (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ? "top" : "bottom";
 try {
   const cs = JSON.parse(localStorage.getItem("streambox_cap_style") || "{}");
   if (cs && typeof cs === "object") {
@@ -8283,11 +8275,20 @@ function applyCapStyle(el, scale){
   el.style.padding = capStyle.bg === "none" ? "0" : "3px 10px";
 }
 function capFloat(barUp){
-  // the caption rides up while the control bar is up, and comes back down to
-  // its own position when the bar minimizes again
+  // the caption rides above the CONTROL BAR (its real measured height - the
+  // old % lift landed INSIDE the bar in landscape and the text clipped), and
+  // settles back to its own position when the bar minimizes again
   try {
     const ov = document.getElementById("capOverlay");
-    if (ov) ov.classList.toggle("bar-lift", !!barUp);
+    if (!ov) return;
+    ov.classList.toggle("bar-lift", !!barUp);
+    if (barUp) {
+      const bar = document.getElementById("ctlBar");
+      const h = bar ? Math.round(bar.getBoundingClientRect().height) : 0;
+      ov.style.bottom = h > 0 ? (h + 18) + "px" : "";
+    } else {
+      ov.style.bottom = "";
+    }
   } catch(e){}
 }
 function capSizeStep(d){
@@ -8453,15 +8454,6 @@ function paintCaps(force){
     // the caption BACKGROUND hugs the TEXT (a pill), never the full-width
     // overlay — the old full-bleed band read as a broken player bar
     ov.innerHTML = html ? `<span class="cap-pill">${html}</span>` : "";
-  }
-  // iOS deck caption strip: the guaranteed-visible captions below the
-  // picture (the overlay above it can be buried by the provider video layer)
-  const strip = document.getElementById("capStrip");
-  if (strip && strip.dataset.h !== html) {
-    strip.dataset.h = html;
-    strip.innerHTML = html ? `<span class="cap-pill">${html}</span>` : "";
-    const sp = strip.querySelector(".cap-pill");
-    if (sp) applyCapStyle(sp);
   }
   // cheap last-state guard: the 150ms ticker + ctlPaint call this constantly -
   // skip the class/style/apply work while NOTHING visible changed (text,
@@ -12575,9 +12567,8 @@ PARTY.boot();
     line("ctlBar", bar && bar.classList.contains("bar-hidden") ? "hidden (tap picture to wake)" : "visible", null);
     const ov = document.getElementById("capOverlay");
     line("caption overlay", "display=" + getComputedStyle(ov).display + " z=" + getComputedStyle(ov).zIndex + " " + getComputedStyle(ov).transform.slice(0, 26), null);
-    const strip = document.getElementById("capStrip");
-    const st = (strip && strip.textContent || "").trim();
-    line("caption strip", st ? 'SHOWING: "' + st.slice(0, 40) + '"' : (iosDeck ? "empty (no cue at this moment)" : "n/a"), st ? true : null);
+    const st = (ov.textContent || "").trim();
+    line("caption text", st ? 'SHOWING: "' + st.slice(0, 40) + '"' : "empty (no cue at this moment)", st ? true : null);
     try {
       line("clock", "cur=" + (pState.cur || 0).toFixed(1) + "s paused=" + !!pState.paused + " mirror=" + mirror, null);
       const has = !!(subFile && subFile.cues && subFile.cues.length);
