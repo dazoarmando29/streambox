@@ -2072,5 +2072,59 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   }
 }
 
+/* ---------- 94. FluidMotion universal: per-source status honesty + capture guardrails ---------- */
+{
+  const fm94 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/FluidMotion.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/FluidMotion.kt")) : "";
+  const cm94 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/CaptureMemc.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/CaptureMemc.kt")) : "";
+  const st94 = fs.existsSync(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt"))
+    ? qaRead(path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/data/Store.kt")) : "";
+  const ps94 = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
+  if (!fm94 || !cm94 || !st94 || !ps94) bad("FluidMotion/CaptureMemc/Store/PlayerScreen missing - the per-source status cannot be verified");
+  else {
+    // the brief-required vocabulary, verbatim
+    const vocab = [
+      "Genuine MEMC active (motion-compensated)",
+      "Native high-frame-rate playback",
+      "Hardware motion enhancement active",
+      "Adaptive frame pacing active",
+      "Stability optimization active",
+      "Interpolation unavailable - provider embed (frames not accessible)",
+      "Unsupported by current hardware",
+    ];
+    const missing = vocab.filter((v) => !fm94.includes('"' + v + '"'));
+    // MEMC honesty (the hard rule): generated frames are never claimed -
+    // the capture stage cannot set generating=true and the MEMC status is
+    // gated on it; provider embeds always get the frames-not-accessible line
+    const gen = !/generating = true/.test(cm94 + fm94) &&
+      /generating: Boolean = false/.test(cm94) &&
+      /cap != null && cap\.generating -> "Genuine MEMC active \(motion-compensated\)"/.test(fm94) &&
+      /else -> "Interpolation unavailable - provider embed \(frames not accessible\)"/.test(fm94);
+    // hardware enhancement is only claimable via a documented-API detection
+    // that does not exist - the survey must conclude honestly
+    const hw = !/hardwareMemcDetected = true/.test(fm94) &&
+      /"Unsupported by current hardware"/.test(fm94) &&
+      /no documented MEMC API/.test(fm94);
+    // capture guardrails: default OFF, consent dialog only, 250ms
+    // auto-disable, StabilityGuard subordination (yields first, rejected at
+    // recovery), and the pipeline reports "not yet generating frames"
+    const cap = /getBoolean\(K_FLUID_CAPTURE, false\)/.test(st94) &&
+      /res\.resultCode == android\.app\.Activity\.RESULT_OK/.test(ps94) &&
+      /LATENCY_LIMIT_MS = 250f/.test(cm94) &&
+      /latEma > LATENCY_LIMIT_MS/.test(cm94) &&
+      /StabilityGuard\.levelNow\(\)/.test(cm94) &&
+      /lvl >= 3 -> autoDisable/.test(cm94) &&
+      /if \(lvl < 2\)/.test(cm94) &&
+      /experimental pipeline not yet generating frames/.test(cm94);
+    if (!missing.length && gen && hw && cap) {
+      ok("per-source FluidMotion status is honest (brief vocabulary verbatim, no MEMC claims where frames are inaccessible, hardware survey honest) and capture MEMC is default-OFF, consent-only, latency-guarded and StabilityGuard-subordinate");
+    } else {
+      bad("FluidMotion universal (0.200) must keep the brief's exact status vocabulary, NEVER claim genuine MEMC without real generated frames (generating stays false; embeds always report frames-not-accessible), report hardware enhancement as Unsupported without a documented API, and keep capture MEMC default-OFF (Store), consent-gated, auto-disabled over 250ms latency, yielding to StabilityGuard (level >= 2) and rejected at recovery (level >= 3) with the honest 'experimental pipeline not yet generating frames' status" +
+        (missing.length ? " - missing statuses: " + missing.join(" | ") : ""));
+    }
+  }
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

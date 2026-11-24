@@ -53,6 +53,7 @@ object Store {
     private const val K_UPD_CHECK = "upd_checked_at"
     private const val K_FLUID_MODE = "fluid_mode"
     private const val K_FLUID_ADAPTIVE = "fluid_adaptive_quality"
+    private const val K_FLUID_CAPTURE = "fluid_capture_memc"
     private const val K_STAB_GUARD = "stability_guard"
     private const val K_STAB_AUDIO = "stability_audio"
     private const val K_STAB_SUBSYNC = "stability_sub_resync"
@@ -293,6 +294,16 @@ object Store {
 
     fun setFluidAdaptiveQuality(ctx: Context, on: Boolean) {
         prefs(ctx).edit().putBoolean(K_FLUID_ADAPTIVE, on).apply()
+    }
+
+    /** Experimental capture-MEMC intent (0.200, default OFF): "on" only
+        records that the user enabled it AND consented - capture itself is
+        re-consented per session and never starts from this flag alone. */
+    fun fluidCaptureMemc(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(K_FLUID_CAPTURE, false)
+
+    fun setFluidCaptureMemc(ctx: Context, on: Boolean) {
+        prefs(ctx).edit().putBoolean(K_FLUID_CAPTURE, on).apply()
     }
 
     /** StabilityGuard settings (0.120, device-local taste): "Stability

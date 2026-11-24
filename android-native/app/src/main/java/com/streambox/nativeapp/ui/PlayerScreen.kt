@@ -120,6 +120,7 @@ import com.streambox.nativeapp.data.Progress
 import com.streambox.nativeapp.data.Store
 import com.streambox.nativeapp.data.SubPick
 import com.streambox.nativeapp.data.SubStyle
+import com.streambox.nativeapp.playback.CaptureMemc
 import com.streambox.nativeapp.playback.FluidMotion
 import com.streambox.nativeapp.playback.StabilityGuard
 import kotlinx.coroutines.Dispatchers
@@ -1712,6 +1713,22 @@ fun PlayerScreen(
         }
     }
 
+    // Experimental capture MEMC (0.200): the platform's own MediaProjection
+    // consent dialog is the ONLY way a capture ever starts - nothing here
+    // may capture silently. A declined dialog leaves the feature off.
+    val captureLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { res ->
+        val d = res.data
+        if (res.resultCode == android.app.Activity.RESULT_OK && d != null) {
+            Store.setFluidCaptureMemc(ctx, true)
+            CaptureMemc.start(ctx, res.resultCode, d)
+        } else {
+            Store.setFluidCaptureMemc(ctx, false)
+            CaptureMemc.noteConsentDenied()
+        }
+    }
+
     val scope = rememberCoroutineScope()
     // The provider's OWN subtitle file rendered through OUR overlay: the
     // exact player text/timing, our styled pill, floating with the bar -
@@ -2342,10 +2359,15 @@ fun PlayerScreen(
     DisposableEffect(title.id, title.type, season, episode) {
         StabilityGuard.attach(ctx)
         StabilityGuard.executor = { a, pos -> guardRun(a, pos) }
+        // capture MEMC (0.200) is session-scoped: the player attaches the
+        // persisted intent (consent is ALWAYS re-requested) and tears the
+        // capture down on exit without forgetting the user's choice
+        CaptureMemc.attach(ctx)
         onDispose {
             StabilityGuard.executor = null
             StabilityGuard.abandonFocus()
             StabilityGuard.detach(ctx)
+            CaptureMemc.endProjection("player closed")
         }
     }
     LaunchedEffect(pm.playing, pm.stabAudio) {
@@ -4621,6 +4643,80 @@ fun PlayerScreen(
                                 big = big,
                             ) {
                                 pm.fluidMode = FluidMotion.cycleMode(ctx)
+                            }
+                            // PER-SOURCE STATUS (0.200): the honest
+                            // provider-compatibility line from the brief's
+                            // vocabulary. Genuine MEMC is NEVER claimed
+                            // where frames are inaccessible (QA locked) and
+                            // hardware enhancement is only claimed by a
+                            // documented-API detection - the survey found
+                            // none, so it says so.
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OptRow(
+                                label = "Source status",
+                                detail = FluidMotion.sourceStatus(),
+                                chip = "",
+                                active = pm.mirror == "hls",
+                                big = big,
+                            )
+                            OptRow(
+                                label = "Hardware motion enhancement",
+                                detail = FluidMotion.hardwareMemcStatus(),
+                                chip = "",
+                                active = false,
+                                big = big,
+                            )
+                            // EXPERIMENTAL CAPTURE MEMC (0.200): default
+                            // OFF. A capture starts ONLY through the
+                            // platform's MediaProjection consent dialog;
+                            // measured latency auto-disables it above 250ms
+                            // (A/V sync protection) and StabilityGuard
+                            // rejects it during recovery. The pipeline
+                            // measures real motion - it does NOT synthesize
+                            // frames yet and never claims to.
+                            val capState by CaptureMemc.state.collectAsState()
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OptRow(
+                                label = "Capture MEMC (experimental)",
+                                detail = if (capState.running) {
+                                    "Capturing with consent - " +
+                                        (if (capState.latencyMs >= 0f) capState.latencyMs.toInt().toString() + " ms measured" else "latency Unavailable") +
+                                        " - experimental pipeline not yet generating frames"
+                                } else {
+                                    capState.lastReason
+                                },
+                                chip = if (capState.wanted) "ON" else "OFF",
+                                active = capState.wanted,
+                                big = big,
+                            ) {
+                                if (capState.wanted) {
+                                    CaptureMemc.stop("user turned capture off")
+                                } else {
+                                    // consent FIRST - capture never starts
+                                    // without the platform's own dialog
+                                    runCatching {
+                                        val mgr = ctx.getSystemService(android.content.Context.MEDIA_PROJECTION_SERVICE)
+                                            as? android.media.projection.MediaProjectionManager
+                                        val intent = mgr?.createScreenCaptureIntent()
+                                        if (intent != null) captureLauncher.launch(intent)
+                                        else CaptureMemc.noteUnavailable()
+                                    }.onFailure {
+                                        CaptureMemc.noteUnavailable()
+                                    }
+                                }
+                            }
+                            if (capState.wanted || capState.framesIn > 0L) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OptRow(
+                                    label = "Capture pipeline",
+                                    detail = "frames " + capState.framesIn +
+                                        " - latency " + (if (capState.latencyMs >= 0f) capState.latencyMs.toInt().toString() + " ms" else "Unavailable") +
+                                        " - motion blocks " + (if (capState.motionBlocks >= 0) capState.motionBlocks.toString() else "Unavailable") +
+                                        " - experimental pipeline not yet generating frames",
+                                    chip = if (capState.running) "LIVE" else if (capState.autoDisabled) "AUTO OFF" else "WAIT",
+                                    active = capState.running,
+                                    big = big,
+                                )
                             }
                             // STABILITY (StabilityGuard, 0.120): the
                             // repair-first recovery ladder - L1 sync repair
