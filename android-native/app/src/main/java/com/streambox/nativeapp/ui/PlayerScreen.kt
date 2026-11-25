@@ -107,6 +107,8 @@ import com.streambox.nativeapp.api.Api
 import com.streambox.nativeapp.api.Backups
 import com.streambox.nativeapp.api.Cue
 import com.streambox.nativeapp.api.cueAt
+import com.streambox.nativeapp.api.quality
+import com.streambox.nativeapp.api.usable
 import com.streambox.nativeapp.api.Ep
 import com.streambox.nativeapp.api.IntroDb
 import com.streambox.nativeapp.api.SeasonInfo
@@ -2888,18 +2890,49 @@ fun PlayerScreen(
             }
         }
         if (pm.subs != null) return@LaunchedEffect
-        val first = fetchSubChain().second.firstOrNull() ?: return@LaunchedEffect
-        val text = withContext(Dispatchers.IO) {
-            runCatching { Wyz.fetchFile(first.url) }.getOrNull()
-        } ?: return@LaunchedEffect
-        if (pm.subs == null) {
-            val lang = first.display.ifEmpty { pm.wyzLang.uppercase() }
-            setSub(first.release, lang, Subs.parse(text))
+        // SMART PICK (0.230): popularity is NOT proof of compatibility. A
+        // file timed for a different cut (recap in/out, logo, ad breaks) is
+        // the "one step faster / one step slower" class - validate up to 3
+        // candidates against the REAL video duration and keep the most
+        // plausible one; downloads only break ties. Invalid files fall
+        // through to the next candidate automatically.
+        val cands = fetchSubChain().second
+        if (cands.isEmpty()) return@LaunchedEffect
+        var bestUrl = ""
+        var bestName = ""
+        var bestLang = ""
+        var bestCues: List<com.streambox.nativeapp.api.Cue>? = null
+        var bestScore = -1f
+        var used = 0
+        for (cand in cands) {
+            if (used >= 3 || bestScore >= 1f) break
+            used++
+            val text = withContext(Dispatchers.IO) {
+                runCatching { Wyz.fetchFile(cand.url) }.getOrNull()
+            } ?: continue
+            val cues = Subs.parse(text)
+            if (!usable(cues)) continue
+            val score = quality(cues, pm.dur) +
+                (cand.downloads.coerceAtMost(100000) / 1000000f) // tiebreak only
+            if (score > bestScore) {
+                bestScore = score
+                bestCues = cues
+                bestUrl = cand.url
+                bestName = cand.release
+                bestLang = cand.display.ifEmpty { pm.wyzLang.uppercase() }
+            }
+        }
+        val cues = bestCues
+        if (cues != null && pm.subs == null) {
+            setSub(bestName, bestLang, cues)
+            if (bestScore < 0.5f) {
+                pm.subMsg = "This file may be a different cut - tap Sync This Line if lines lead or lag."
+            }
             // Remember it as THIS episode's pick so reopening restores the
             // same file instead of spending the chain again.
             Store.saveSubPick(
                 ctx, title.type, title.id, pm.epSeason, pm.epNumber,
-                SubPick(first.url, first.release, lang),
+                SubPick(bestUrl, bestName, bestLang),
             )
         }
     }
@@ -5151,6 +5184,31 @@ fun PlayerScreen(
                                 val o = Math.round((pm.subOffset + 0.5f) * 10) / 10f
                                 pm.subOffset = o.coerceIn(-30f, 30f)
                                 Store.saveSubsPref(ctx, title.type, title.id, pm.subPos, pm.subOffset)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        // SYNC THIS LINE (0.230): tap when the words on screen
+                        // match what is being said - one tap cures a constant
+                        // lead/lag ("one step faster" class). Remembered per
+                        // title like every other timing setting.
+                        StyleChip("Sync This Line", on = false, big = big) {
+                            val f = pm.subs
+                            if (f != null) {
+                                val t = pm.capClock.now(
+                                    truth = if (pm.scrub >= 0f) pm.scrub else pm.cur,
+                                    rate = RATES[pm.rateIdx],
+                                    paused = !pm.playing,
+                                    seeking = pm.scrub >= 0f || pm.pendingSeek >= 0f ||
+                                        System.currentTimeMillis() - pm.lastSeekCmdAt < 1500L,
+                                    nowMs = System.currentTimeMillis(),
+                                    provMsgAt = pm.lastProvMsgAt,
+                                )
+                                val shown = cueAt(f.cues, t + pm.subOffset)
+                                if (shown != null) {
+                                    pm.subOffset = (shown.s - t).coerceIn(-30f, 30f)
+                                    Store.saveSubsPref(ctx, title.type, title.id, pm.subPos, pm.subOffset)
+                                    pm.subMsg = "Timing corrected."
+                                }
                             }
                         }
                         Spacer(modifier = Modifier.height(12.dp))
