@@ -2213,5 +2213,19 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   else bad("capNow must measure media speed, freeze on stalls, and cap lag so drift can never be masked");
 }
 
+/* ---------- 175. settings panel: centered glass modal ---------- */
+{
+  const modal = /class="set-modal"/.test(html) && !/id="setPanel"[\s\S]{0,400}absolute right-0/.test(html);
+  const glass = /backdrop-filter:blur\(26px\)/.test(html) && /animation:setPop/.test(html)
+    && /rgba\(28,39,60,\.78\)/.test(html); // semi-transparent shell, not solid #131B2C
+  const tabs = /class="set-tab on"/.test(html) && /b\.className = "set-tab"/.test(html);
+  const scoped = /<style id="setModalCSS">/.test(html);
+  const linkAt = html.indexOf('<link rel="stylesheet" href="tailwind.css">');
+  const cssAt = html.indexOf('<style id="setModalCSS">');
+  if (modal && glass && tabs && scoped && cssAt > linkAt)
+    ok("the settings panel is a centered semi-transparent glass modal (blur + pop animation, segmented tabs, CSS after tailwind.css)");
+  else bad("setPanel must be the centered glass modal: .set-modal shell (no right-anchored solid drawer), backdrop blur + setPop animation + translucent shell, semantic .set-tab tabs painted by setTab, and the setModalCSS block AFTER the tailwind link");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);

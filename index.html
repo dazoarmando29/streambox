@@ -985,6 +985,77 @@
      no JIT flash on slow TV boxes. Rebuild after any class change:
      npx tailwindcss -c tailwind.config.js -i tailwind.input.css -o tailwind.css --minify -->
 <link rel="stylesheet" href="tailwind.css">
+<style id="setModalCSS">
+/* ===== Settings modal redesign (248): centered semi-transparent glass =====
+   Scoped to #setPanel and loaded AFTER tailwind.css so these rules win every
+   utility tie. No new Tailwind utilities are used (the prebuilt tailwind.css
+   cannot grow - the stale-build ghost-sheet class). */
+#setPanel:not(.hidden){ display:flex; align-items:center; justify-content:center;
+  background:rgba(2,6,14,.55);
+  backdrop-filter:blur(10px) saturate(1.15); -webkit-backdrop-filter:blur(10px) saturate(1.15);
+  animation:setFade .18s ease both; }
+#setPanel .set-modal{ position:relative; margin:12px auto; width:min(600px, 94vw);
+  max-height:min(88vh, 940px); overflow-y:auto; overflow-x:hidden;
+  padding:22px 22px calc(24px + env(safe-area-inset-bottom, 0px));
+  border-radius:26px;
+  background:linear-gradient(180deg, rgba(28,39,60,.78), rgba(13,20,34,.88));
+  backdrop-filter:blur(26px) saturate(1.5); -webkit-backdrop-filter:blur(26px) saturate(1.5);
+  border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 40px 90px rgba(0,0,0,.6), 0 0 0 1px rgba(0,240,181,.05), inset 0 1px 0 rgba(255,255,255,.10);
+  animation:setPop .24s cubic-bezier(.2,.9,.25,1.15) both;
+  scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.22) transparent; }
+#setPanel .set-modal::-webkit-scrollbar{ width:10px }
+#setPanel .set-modal::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.20); border-radius:999px; border:3px solid transparent; background-clip:padding-box }
+#setPanel .set-modal::-webkit-scrollbar-track{ background:transparent }
+#setPanel .set-sheen{ position:absolute; inset:0 0 auto 0; height:130px; border-radius:26px 26px 0 0;
+  background:linear-gradient(180deg, rgba(0,240,181,.10), transparent); pointer-events:none; }
+#setPanel .set-head{ position:relative; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+#setPanel .set-title{ display:flex; align-items:center; gap:12px; font-size:22px; font-weight:800; letter-spacing:-.01em; color:#fff; }
+#setPanel .set-gear{ width:40px; height:40px; display:flex; align-items:center; justify-content:center; border-radius:13px;
+  background:linear-gradient(135deg, rgba(0,240,181,.22), rgba(34,211,238,.10));
+  border:1px solid rgba(0,240,181,.32); color:#7ff5da; box-shadow:0 6px 18px rgba(0,240,181,.16); }
+#setPanel .set-close{ width:40px; height:40px; border-radius:999px; font-size:14px; color:#d9e4f2;
+  background-color:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); }
+#setPanel .set-close:hover{ background-color:rgba(255,255,255,.17); transform:rotate(90deg); }
+/* segmented tabs */
+#setPanel .set-tabs{ position:relative; display:flex; gap:4px; padding:5px; margin:18px 0 22px;
+  border-radius:999px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.10);
+  box-shadow:inset 0 2px 10px rgba(0,0,0,.22); }
+#setPanel .set-tab{ flex:1; padding:9px 0; border:0; background:transparent; border-radius:999px;
+  font-weight:700; font-size:14px; letter-spacing:.01em; color:#c2cee2; }
+#setPanel .set-tab:hover{ background-color:rgba(255,255,255,.09); color:#fff; }
+#setPanel .set-tab.on{ background-image:linear-gradient(135deg,#00F0B5,#22d3ee); background-color:transparent;
+  color:#04272b; font-weight:800; box-shadow:0 8px 22px rgba(0,240,181,.30); }
+/* pills + chips (painters keep their bg-teal-500 / bg-white\/10 contracts) */
+#setPanel button{ font-family:inherit; cursor:pointer; color:#e8eefb;
+  background-color:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.11); border-radius:999px;
+  transition:transform .16s ease, background-color .16s ease, box-shadow .16s ease, color .16s ease; }
+#setPanel button:hover{ transform:translateY(-1px); background-color:rgba(255,255,255,.14); }
+#setPanel button:active{ transform:translateY(0) scale(.97); }
+#setPanel button[class*="bg-teal-500"]{ background-image:linear-gradient(135deg,#00F0B5,#22d3ee); background-color:transparent;
+  color:#04272b; font-weight:800; border-color:transparent; box-shadow:0 8px 20px rgba(0,240,181,.26); }
+#setPanel button.w-full{ height:46px; border-radius:16px; font-weight:800; letter-spacing:.01em; }
+#setPanel button.w-full[class*="bg-teal"]{ background-image:linear-gradient(135deg,#00F0B5,#22d3ee); background-color:transparent;
+  color:#04272b; border-color:transparent; box-shadow:0 12px 30px rgba(0,240,181,.28); }
+/* section labels + value chips */
+#setPanel p[class*="text-xs"][class*="font-bold"]{ color:#5eead4; letter-spacing:.16em; text-transform:uppercase; font-size:10.5px; }
+#setPanel #sleepLabel, #setPanel #volLabel{ color:#eafff9; background-color:rgba(0,240,181,.16);
+  border:1px solid rgba(0,240,181,.30); border-radius:999px; padding:1px 9px; margin-left:6px; letter-spacing:.02em; }
+/* inputs */
+#setPanel input, #setPanel textarea, #setPanel select{ background-color:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12); border-radius:14px; color:#e6eefc; padding:10px 12px; }
+#setPanel input:focus, #setPanel textarea:focus, #setPanel select:focus{ outline:none;
+  border-color:rgba(0,240,181,.55); box-shadow:0 0 0 3px rgba(0,240,181,.18); }
+/* TV-remote focus ring */
+#setPanel button:focus-visible, #setPanel input:focus-visible,
+#setPanel textarea:focus-visible, #setPanel select:focus-visible{ outline:2px solid rgba(0,240,181,.75); outline-offset:2px; }
+@keyframes setFade{ from{opacity:0} to{opacity:1} }
+@keyframes setPop{ from{opacity:0; transform:translateY(16px) scale(.965)} to{opacity:1; transform:none} }
+@media (prefers-reduced-motion: reduce){
+  #setPanel:not(.hidden), #setPanel .set-modal{ animation:none }
+  #setPanel button, #setPanel .set-close:hover{ transition:none; transform:none }
+}
+</style>
 </head>
 <body>
 
@@ -1026,7 +1097,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 247; // bump every release alongside version.txt
+  const BUILD_NUM = 248; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1771,15 +1842,16 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
 
 <!-- SETTINGS PANEL -->
 <div id="setPanel" class="hidden fixed inset-0 z-[66] bg-black/70" onclick="if(event.target===this)closePanels()">
-  <div class="absolute right-0 top-0 h-full w-full max-w-md bg-[#131B2C] border-l border-white/10 overflow-y-auto p-5">
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl font-black flex items-center gap-2"><svg class="ico"><use href="#i-gear"/></svg>Settings</h2>
-      <button onclick="closePanels()" aria-label="Close settings" class="w-9 h-9 rounded-full bg-black/50 hover:bg-black/80">&#x2715;</button>
+  <div class="set-modal">
+    <div class="set-sheen"></div>
+    <div class="set-head">
+      <h2 class="set-title"><span class="set-gear"><svg class="ico"><use href="#i-gear"/></svg></span>Settings</h2>
+      <button onclick="closePanels()" aria-label="Close settings" class="set-close">&#x2715;</button>
     </div>
-    <div class="flex gap-2 mb-5 text-sm" role="tablist">
-      <button id="tabPlayback" onclick="setTab('playback')" class="flex-1 py-2 rounded-full font-bold">Playback</button>
-      <button id="tabSubs" onclick="setTab('subs')" class="flex-1 py-2 rounded-full">Subs</button>
-      <button id="tabServers" onclick="setTab('servers')" class="flex-1 py-2 rounded-full">Servers</button>
+    <div class="set-tabs" role="tablist">
+      <button id="tabPlayback" onclick="setTab('playback')" class="set-tab on" aria-selected="true">Playback</button>
+      <button id="tabSubs" onclick="setTab('subs')" class="set-tab" aria-selected="false">Subs</button>
+      <button id="tabServers" onclick="setTab('servers')" class="set-tab" aria-selected="false">Servers</button>
     </div>
 
     <div id="panePlayback">
@@ -6825,7 +6897,8 @@ function setTab(name){
   ["playback", "subs", "servers"].forEach(t => {
     document.getElementById("pane" + t[0].toUpperCase() + t.slice(1)).classList.toggle("hidden", t !== name);
     const b = document.getElementById("tab" + t[0].toUpperCase() + t.slice(1));
-    b.className = "flex-1 py-2 rounded-full " + (t === name ? "bg-teal-500 font-bold" : "bg-white/10 hover:bg-white/20");
+    b.className = "set-tab" + (t === name ? " on" : "");
+    b.setAttribute("aria-selected", t === name ? "true" : "false");
   });
   if (name === "subs") {
     paintWyzLang(); wyzSearch();
