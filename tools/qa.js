@@ -2126,25 +2126,40 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   }
 }
 
-/* ---------- 95. subtitle clock: staleness-aware estimator (web capNow parity) ---------- */
+/* ---------- 95. subtitle clock: staleness-aware estimator v4 (web capNow v4) ---------- */
 {
   const ckPath = path.join(ROOT, "android-native/app/src/main/java/com/streambox/nativeapp/playback/CaptionClock.kt");
   const ck = fs.existsSync(ckPath) ? qaRead(ckPath) : "";
   const psCk = fs.existsSync(psPath) ? qaPlayer(psPath) : "";
   if (!ck || !psCk) bad("CaptionClock.kt/PlayerScreen.kt missing - the subtitle clock cannot be verified");
   else {
-    // the estimator must free-run at REAL playback rate, tolerate stale
-    // provider messages without pulling captions backward, correct slow
-    // media clocks smoothly, and snap only on genuine jumps. Regression =
-    // the "subtitles delayed / sometimes early" bug on any title.
-    const rateAware = /var e = est \+ \(\(nowMs - at\) \/ 1000f\) \* r/.test(ck) &&
-      /val r = if \(rate > 0f\) rate else 1f/.test(ck);
-    const noYank = /lag = lag \* 0\.85f \+ l \* 0\.15f/.test(ck) &&
+    // ESTIMATOR v4: free-run at the WINNING rate (the measured speed beats
+    // any claimed rate; claimed is fallback only) and frozen solid while
+    // the evidence says the picture is stalled
+    const rateAware = /var e = if \(stalled\) est else est \+ \(\(nowMs - at\) \/ 1000f\) \* rateBefore/.test(ck) &&
+      /if \(rateN > 0 && rateEst >= 0f\) rateEst/.test(ck);
+    // v4: MEASURED speed from provider position deltas - implausible
+    // samples never teach it (dw/dc guards), fast adoption on real speed
+    // changes, slow EMA otherwise
+    const measured = /rateEst \* 0\.2f \+ inst \* 0\.8f/.test(ck) &&
+      /rateEst \* 0\.6f \+ inst \* 0\.4f/.test(ck) &&
+      /dw > 0\.05f && dw < 10f && dc >= 0f && dc \/ dw < 8f/.test(ck);
+    // v4: EVIDENCE-BASED stall freeze - provider pulsing yet the position
+    // frozen (1.2s) or total silence (8s); sparse providers never freeze
+    const freeze = /\(msgFresh && staleFor > 1200L\) \|\| staleFor > 8000L/.test(ck) &&
+      /provMsgAt/.test(ck) && /lastProvMsgAt/.test(psCk);
+    // v4: MESSAGE-GATED correction (only on a new measurement - every-tick
+    // correction would fight free-run) with the lag EMA capped at 2.0s
+    const noYank = /if \(cur != raw\) \{/.test(ck) &&
+      /lag = lag \* 0\.8f \+ lagGuess \* 0\.2f/.test(ck) &&
+      /\(e - cur\)\.coerceIn\(0f, 2\.0f\)/.test(ck) &&
       /val target = cur \+ lag/.test(ck) &&
       /e \+= innov \* 0\.3f/.test(ck) &&
       /never a yank/.test(ck) &&
       /if \(last >= 0f && e < last\) e = last/.test(ck); // absolute monotonic clamp
+    // snap on real jumps only, with a full speed re-measure reset
     const snap = /kotlin\.math\.abs\(innov\) > 2\.5f/.test(ck) &&
+      /rateEst = 0f/.test(ck) && /rateN = 0/.test(ck) &&
       /fun snap\(pos: Float\)/.test(ck) &&
       /capClock\.snap\(target\)/.test(psCk); // the app's own seeks snap too
     const truth = /if \(paused \|\| seeking \|\| at == 0L\)/.test(ck) &&
@@ -2153,9 +2168,9 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
     const wired = /capClock\.now\(/.test(psCk) &&
       /\) \+ subOffset/.test(psCk) && // the offset ladder stays AFTER the clock
       /cueAt\(f\.cues, t\)/.test(psCk);
-    if (rateAware && noYank && snap && truth && wired)
-      ok("subtitle clock is a staleness-aware estimator: rate-correct, never yanked by late messages, smooth catch-up, snap on seeks");
-    else bad("the caption clock must be the staleness-aware media-clock estimator (rate free-run, lag compensation, smooth correction, jump snap, paused/seeking truth, monotonic while playing) wired with the offset added AFTER the clock (0.210)");
+    if (rateAware && measured && freeze && noYank && snap && truth && wired)
+      ok("subtitle clock estimator v4: measured speed wins over claims, evidence-based stall freeze, message-gated correction, snap on seeks");
+    else bad("the caption clock must be the v4 staleness-aware estimator (measured rate wins with plausible-sample guards + fast adoption, evidence-based stall freeze that never false-freezes sparse-but-healthy providers, message-gated capped-lag correction, jump snap with speed re-measure, paused/seeking truth, monotonic while playing) wired with the provider pulse + the offset added AFTER the clock (0.220)");
   }
 }
 
