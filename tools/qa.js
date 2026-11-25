@@ -2146,12 +2146,12 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   // provider messages without pulling captions backward, correct slow media
   // clocks smoothly, and snap only on genuine jumps. Regression = the
   // "subtitles delayed / sometimes early" bug on any title.
-  const rateAware = /function capNow[\s\S]{0,1600}\* rate/.test(html);
-  const noYank = /function capNow[\s\S]{0,2400}c\.lag/.test(html)
+  const rateAware = /function capNow[\s\S]{0,3200}\* rate/.test(html);
+  const noYank = /function capNow[\s\S]{0,3600}c\.lag/.test(html)
     && /never a yank/.test(html)
-    && /function capNow[\s\S]{0,2600}est < c\.last/.test(html); // absolute monotonic clamp
-  const snap = /function capNow[\s\S]{0,2400}Math\.abs\(innov\) > 2\.5/.test(html);
-  const pausedTruth = /function capNow[\s\S]{0,1600}pState\.paused \|\| pState\.seeking/.test(html);
+    && /function capNow[\s\S]{0,3800}est < c\.last/.test(html); // absolute monotonic clamp
+  const snap = /function capNow[\s\S]{0,3800}Math\.abs\(innov\) > 2\.5/.test(html);
+  const pausedTruth = /function capNow[\s\S]{0,3200}pState\.paused \|\| pState\.seeking/.test(html);
   const tickerIntact = /(subMapTime\(capNow\(\)\)|capNow\(\) \+ \(subFile\.offset)/.test(html) && /\}, 150\);/.test(html);
   if (rateAware && noYank && snap && pausedTruth && tickerIntact)
     ok("subtitle clock is a staleness-aware estimator: rate-correct, never yanked by late messages, smooth catch-up, snap on seeks");
@@ -2188,6 +2188,22 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   if (guard && versioned && reset && rebind)
     ok("subtitle sync memory is release-fingerprint guarded, versioned, bounded and resettable - never carried across releases");
   else bad("subtitle memory must be fingerprint-guarded, versioned and resettable with source-switch rebinding");
+}
+
+/* ---------- 174. subtitle clock v3: measured rate + stall freeze ---------- */
+{
+  // the "subtitles so fast / ahead of voices" class must never return:
+  // the clock MEASURES media speed (never trusts a rate claim), FREEZES on
+  // media stalls (buffering), and CAPS lag compensation so it cannot mask
+  // runaway drift (snap-to-truth self-heals beyond the cap).
+  const measured = /function capNow[\s\S]{0,3200}c\.rateEst/.test(html)
+    && /rate = \(c\.rateN > 0 && c\.rateEst >= 0\) \? c\.rateEst/.test(html);
+  const freeze = /msgFresh && staleFor > 1200/.test(html) && /staleFor > 8000/.test(html)
+    && /window\._provMsgAt = Date\.now\(\)/.test(html); // provider-pulse evidence
+  const cap = /Math\.min\(2\.0, est - cur\)/.test(html) && /c\.rateEst = 0; c\.rateN = 0;/.test(html);
+  if (measured && freeze && cap)
+    ok("subtitle clock measures real media speed, freezes on stalls, and caps lag compensation (runaway class eliminated)");
+  else bad("capNow must measure media speed, freeze on stalls, and cap lag so drift can never be masked");
 }
 
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
