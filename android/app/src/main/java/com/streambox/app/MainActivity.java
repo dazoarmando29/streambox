@@ -197,6 +197,12 @@ public class MainActivity extends Activity {
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setTextZoom(100);
+        // Ad tabs must be DEAD in the app: no multi-window, no automatic
+        // window.open. Playback never needs popups - only ads do. The website
+        // side already blocks what browser security allows; this closes the
+        // rest app-wide (every provider, raw frames included).
+        s.setSupportMultipleWindows(false);
+        s.setJavaScriptCanOpenWindowsAutomatically(false);
         // TV remotes + keyboards navigate page focus; keep default UA so site tv-mode detection works
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
