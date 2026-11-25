@@ -1,11 +1,13 @@
-The StreamBox Subtitle Speed Fix - captions now move at the speed of the voices.
+The StreamBox Player Fix - VidBolt plays again, and the ad tabs are gone.
 
 What is fixed
-- "Subtitles so fast / ahead of the dialogue" on movies, TV shows, anime (AniPM) and K-dramas (VidBolt) - FIXED. Root cause: the caption clock free-ran at the CLAIMED playback speed and, worse, whenever the video buffered or the provider reported a wrong speed, the clock kept racing ahead while the picture was frozen. The clock now MEASURES the video's true speed from the provider's own position updates (measured beats claimed - verified: a provider claiming 1.5x while playing at 1x now holds captions at 1x), FREEZES with the picture the instant buffering stalls it (verified: zero drift through a 5-second stall), and re-measures instantly after seeks or speed changes (verified: real 1.5x playback tracks at 1.5x). Subtitle timing corrections remain remembered per release, and Sync This Line Now still fine-tunes anything left
-- The same clock logic is QA-locked (four locks on the estimator) so this class can never regress on any title, and it is being mirrored to the native Android app
+- VidBolt "Playback disabled - remove the sandbox attribute" on the website - FIXED. Root cause found by running VidBolt's own gate code in a live test rig: the page refuses to play inside ANY sandboxed frame - even one with allow-same-origin - so the old "sandbox first, retry raw later" path could never work. VidBolt now loads raw first time, every time, on every title
+- Ad pop-up tabs ("every often") - FIXED at every layer we control. The shield's fallback mode used to allow pop-ups "just in case a server breaks" - that permission is what let popup ad engines (one server literally runs a 10-second ad timer) open tabs on you. No sandboxed frame can open a pop-up anymore, in any mode. The page's own pop-up guards now also cover middle-click and form submits, and the APK WebView can no longer open windows at all (multi-window disabled app-wide, every provider, raw frames included)
+- Every other server was checked against the same detector: only VidBolt actually refuses sandboxed frames; CineSrc, VidZen, VidSrc, VsEmbed and friends keep their sandbox and its pop-up blocking. The player's status line now tells the truth about each source
 
-Also included in this train
-- The full Smart Subtitle suite stays green (23/23), plus the anti-stutter StabilityGuard and the anti-delay clock suites
+What was NOT changed
+- Ad blockers stay ON. Nothing in this fix disables, weakens or bypasses an ad blocker - the app-wide ad-host filter, the sandbox pop-up block and your browser's own blockers all keep working. VidBolt simply never needed them off to play
 
 Honest limits
-- Captions can only be as accurate as the position data a provider sends; where a provider embeds its own burned-in captions, those are the provider's own (the app says so) - our styled captions take over the moment a subtitle file is loaded
+- A handful of sources must run raw to play at all (VidBolt, VidFast, VidLink, YapGrid, AniPM, VidRift). Inside a raw frame the website cannot block that server's own pop-ups - that is a browser security boundary, not a setting. Those same pop-ups are fully blocked in the APK, and your browser's pop-up blocker covers the web. VidBolt's embed ships no pop-up code of its own
+- Playback stability still outranks everything else: no server was changed to sandboxed without proof it still plays

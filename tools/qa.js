@@ -1209,14 +1209,18 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
 /* ---------- 113. Ad Shield everywhere (website sandbox + APK filter) ---------- */
 {
   const ns = html.match(/const NO_SANDBOX = new Set\(\[([^\]]*)\]\)/);
-  if (ns && /"vidrift"/.test(ns[1]) && /"anipm"/.test(ns[1])
-      && !/"vidbolt"/.test(ns[1]) && !/"cinesrc"/.test(ns[1]) && !/"vidzen"/.test(ns[1]))
-    ok("NO_SANDBOX is only the sandbox-breaking set (CineSrc/VidZen/VidBolt keep the pop-up block)");
-  else bad("NO_SANDBOX must be the BREAK set only -- CineSrc/VidZen/VidBolt need sandbox popup-blocking on the website");
-  if (/function boltSandboxProbe/.test(html) && /window\._boltRaw = true/.test(html)
-      && /mirror === "vidbolt" && window\._boltRaw/.test(html))
-    ok("VidBolt is shield-first: sandboxed until it earns ONE honest raw retry (boltSandboxProbe)");
-  else bad("VidBolt must load sandboxed with a one-shot raw fallback probe -- its popups died behind the old blanket raw mode");
+  if (ns && /"vidrift"/.test(ns[1]) && /"anipm"/.test(ns[1]) && /"vidbolt"/.test(ns[1])
+      && !/"cinesrc"/.test(ns[1]) && !/"vidzen"/.test(ns[1]) && !/"vsembed"/.test(ns[1]))
+    ok("NO_SANDBOX is the MEASURED break set (VidBolt's gate trips on ANY sandbox attribute) while tolerant mirrors keep the pop-up block");
+  else bad("NO_SANDBOX must hold exactly the sandbox-BREAKING pages (vidbolt: measured SecurityError under any sandbox attr, even allow-same-origin) while sandbox-tolerant mirrors (CineSrc/VidZen/vsembed) stay sandboxed for pop-up blocking");
+  if (/function boltSandboxProbe/.test(html))
+    bad("boltSandboxProbe must stay gone -- measured: any sandbox attribute refuses VidBolt playback, so a probe can only burn a load");
+  else ok("VidBolt loads raw first try -- no probe round-trip against a gate that cannot pass");
+  if (/allow-popups/.test(html)) bad("a sandbox string still grants allow-popups -- playback never needs popups and that token is the ad-tab class (VidZen's 10s popup engine)");
+  else ok("no sandbox string grants allow-popups -- ad tabs are impossible inside every sandboxed frame, even with the shield toggle off");
+  const pg = /window\.open = function/.test(html) && /addEventListener\("auxclick"/.test(html) && /addEventListener\("submit"/.test(html);
+  if (pg) ok("top-level popup guards: window.open allowlist + click/auxclick/submit capture");
+  else bad("the page must guard window.open and capture click/auxclick/submit target=_blank popup paths");
   if (/Ad Shield unavailable/.test(html)) bad("the Ad Shield unavailable path survives -- the shield covers every player");
   else ok("no Ad Shield unavailable dead-end");
   const am = html.match(/function applyMirrorSandbox\s*\(\)\s*\{[\s\S]*?\n\}/);
@@ -1231,6 +1235,9 @@ catch (e) { bad("manifest.webmanifest invalid JSON: " + e.message); }
   const blockFirst = ma && /ad hosts die FIRST[\s\S]{0,300}isAdHost/.test(ma) && /media second/.test(ma);
   if (ma && blockFirst) ok("the APK filter blocks ad hosts BEFORE media (pre-roll dies, streams ride)");
   else bad("MainActivity must block ad hosts first and only then honor media extensions");
+  const mw = ma && /setSupportMultipleWindows\(false\)/.test(ma) && /setJavaScriptCanOpenWindowsAutomatically\(false\)/.test(ma);
+  if (mw) ok("the wrapper WebView can never open pop-up windows (multi-window + auto-open off)");
+  else bad("the wrapper WebView must disable multiple windows and automatic window.open -- ad tabs must be dead in the app");
 }
 
 /* ---------- 114. K-Dramas boot on VidBolt ---------- */
