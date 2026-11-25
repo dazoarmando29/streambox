@@ -38,6 +38,41 @@ fun cueAt(cues: List<Cue>, t: Float): Cue? {
     return null
 }
 
+/** Plausibility of a subtitle file against the REAL video duration - the
+    "one step faster / slower" class is almost always a file timed for a
+    different cut (recap in/out, logo, ad breaks). A file that ends far
+    beyond the video or far too early is a different edit. Dialogue ending
+    before the credits is NORMAL and scores fine. Returns 0..1. */
+fun quality(cues: List<Cue>, dur: Float): Float {
+    if (cues.size < 2) return 0f
+    val last = cues[cues.size - 1].e
+    if (dur <= 0f) return 0.6f // unknown duration: neutral, never an exact match
+    return when {
+        last > dur * 1.6f -> 0.15f  // far longer than the video: wrong cut
+        last > dur * 1.25f -> 0.4f
+        last < dur * 0.45f -> 0.45f // suspiciously short
+        last < dur * 0.55f -> 0.7f  // ends early (credits) - acceptable
+        else -> 1f
+    }
+}
+
+/** Basic file sanity before applying: corrupt timestamps, duplicates,
+    excessive overlap or promo-filled files are rejected outright. */
+fun usable(cues: List<Cue>): Boolean {
+    if (cues.size < 2) return false
+    var bad = 0
+    var overlap = 0
+    var prevEnd = -1f
+    for (c in cues) {
+        if (c.e <= c.s || c.s < 0f) bad++
+        if (c.s < prevEnd - 0.05f) overlap++
+        if (c.e > prevEnd) prevEnd = c.e
+    }
+    if (bad > cues.size / 10) return false
+    if (overlap > cues.size / 2) return false
+    return true
+}
+
 data class SubFile(
     val name: String,
     val lang: String,

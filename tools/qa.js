@@ -2174,5 +2174,36 @@ else corruptHits.forEach((f) => bad("corrupted identifiers (C->o) in " + f + " -
   }
 }
 
+/* ---------- 96. smart subtitle pick: validate before applying ---------- */
+{
+  const rd = (p) => {
+    try { return require("fs").readFileSync(require("path").join(__dirname, "..", p), "utf8"); }
+    catch (e) { return ""; }
+  };
+  const subs = rd("android-native/app/src/main/java/com/streambox/nativeapp/api/Subs.kt");
+  const ps = rd("android-native/app/src/main/java/com/streambox/nativeapp/ui/PlayerScreen.kt");
+  const scorer = /fun quality\(cues: List<Cue>, dur: Float\)/.test(subs) &&
+    /fun usable\(cues: List<Cue>\)/.test(subs);
+  const applied = /(Subs\.)?usable\(cues\)/.test(ps) && /(Subs\.)?quality\(cues, pm\.dur\)/.test(ps) &&
+    /used >= 3/.test(ps); // at most 3 candidate downloads per auto attempt
+  if (scorer && applied)
+    ok("smart subtitle pick validates candidates against real video duration (max 3 downloads, popularity only tiebreaks)");
+  else bad("auto-subtitles must validate candidates (usable + duration plausibility) within a 3-download budget - popularity-first selection is the 'one step faster' bug");
+}
+
+/* ---------- 97. one-tap dialogue sync ---------- */
+{
+  const rd = (p) => {
+    try { return require("fs").readFileSync(require("path").join(__dirname, "..", p), "utf8"); }
+    catch (e) { return ""; }
+  };
+  const ps = rd("android-native/app/src/main/java/com/streambox/nativeapp/ui/PlayerScreen.kt");
+  const sync = /Sync This Line/.test(ps) && /shown\.s - t/.test(ps) &&
+    /saveSubsPref\(ctx, title\.type, title\.id, pm\.subPos, pm\.subOffset\)/.test(ps);
+  if (sync)
+    ok("one-tap 'Sync This Line' aligns a constant lead/lag to the spoken line and remembers it per title");
+  else bad("the timing panel must offer Sync This Line (cue-start vs clock) persisted per title");
+}
+
 console.log("\n==== StreamBox QA: " + fails + " failures, " + warns + " warnings ====");
 process.exit(fails ? 1 : 0);
