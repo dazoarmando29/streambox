@@ -1026,7 +1026,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 246; // bump every release alongside version.txt
+  const BUILD_NUM = 247; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -1996,6 +1996,16 @@ const IS_TV_DEVICE = /Android TV|Smart TV|SmartTV|Tizen|WebOS|TV;|GoogleTV|BRAVI
     document.addEventListener("click", e => {
       const a = e.target.closest && e.target.closest('a[target="_blank"]');
       if (a && !/cinesrc\.st|themoviedb/i.test(a.href)) { e.preventDefault(); }
+    }, true);
+    // middle-click and Enter-on-link open tabs outside the click event, and
+    // forms can target _blank - all three are popup paths, all three are cut
+    document.addEventListener("auxclick", e => {
+      const a = e.target.closest && e.target.closest('a[target="_blank"]');
+      if (a && !/cinesrc\.st|themoviedb/i.test(a.href)) { e.preventDefault(); }
+    }, true);
+    document.addEventListener("submit", e => {
+      const f = e.target;
+      if (f && (f.target === "_blank" || f.target === "_new") && !/cinesrc\.st|themoviedb/i.test(f.action || "")) { e.preventDefault(); }
     }, true);
   } catch(e){}
 })();
@@ -5536,9 +5546,6 @@ function armStuckWatchdogs(){
     }, _aTV ? 45000 : 18000);
     window._watchdog2 = setTimeout(() => {
       if (pairStarted() || (mirror !== "vidbolt" && mirror !== "vidzen" && mirror !== "vidcore")) return;
-      // VidBolt: one shield-less retry first - a player that refuses the
-      // sandbox sits black and the old blanket raw mode used to hide that
-      if (mirror === "vidbolt" && boltSandboxProbe()) return;
       if (window._autoHopped || !autoSwitchOn()) { stuckRecommend(`${nm} stayed stuck`, fbn); return; }
       window._autoHopped = true;
       const wsb = document.getElementById("watchStatus");
@@ -5664,8 +5671,7 @@ function loadPlayer(){
     // a title that already earned its unsandboxed retry keeps it across
     // episode reloads (no 8s dark wait every episode); new title = re-probe
     if (window._anipmRawFor !== watchState.id) { window._anipmRaw = false; window._anipmRawFor = watchState.id; }
-    if (window._boltRawFor !== watchState.id) { window._boltRaw = false; window._boltRawFor = watchState.id; }
-    // slow TV boxes can take a minute just to get going — TV gets 30s/60s
+        // slow TV boxes can take a minute just to get going — TV gets 30s/60s
     // before we retry or heal, so a merely-loading player is never yanked
     armStuckWatchdogs();
     showTitleCard();
@@ -5855,11 +5861,13 @@ function toggleShield(){
   }
   const f = document.getElementById("player");
   // Shield ON = sandbox without popups/top-navigation (this is what kills the
-  // resume-click ad popups on CineSrc and every tolerant mirror). OFF = allow
-  // popups (only if a server breaks). Turning it back ON retries the sandbox
-  // even on a source that once refused it (per-title raw flags reset).
-  if (on) { window._boltRaw = false; window._anipmRaw = false; }
-  f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-modals");
+  // resume-click ad popups on CineSrc and every tolerant mirror). OFF is the
+  // "a server broke" fallback - modals only, NEVER popups: playback never
+  // needs window.open, and allowing tabs is exactly how the ad-tab class
+  // (VidZen's 10s popup engine) gets out. Turning it back ON retries the
+  // sandbox even on a source that once refused it (per-title raw flags reset).
+  if (on) { window._anipmRaw = false; }
+  f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-modals");
   reloadKeepPos();
 }
 
@@ -6982,9 +6990,11 @@ function forgetServer(){
    there); the rest use their own player entirely.
    NO_SANDBOX members load UNSANDBOXED (see applyMirrorSandbox): Ad Shield is
    off there by necessity, use Brave/uBlock for in-stream ads. All other
-   mirrors stay sandboxed. VidBolt is shield-first now: sandboxed while it
-   starts (its popups and modal ads die there), with ONE honest raw retry if
-   the player refuses the sandbox (window._boltRaw). */
+   mirrors stay sandboxed. VidBolt joined the raw set in 247 - MEASURED in a
+   live gate replica: its document.domain probe throws SecurityError under
+   ANY sandbox attribute (even allow-same-origin), so a sandboxed VidBolt can
+   only ever show its "Playback disabled" refusal page. Raw is playback;
+   its embed ships no pop-up code of its own. */
 const MIRRORS = [
   { id: "cinesrc", name: "CineSrc" },
   { id: "vidlink", name: "VidLink" },
@@ -7006,7 +7016,7 @@ const MIRRORS = [
    frame). Everything else — INCLUDING our own CineSrc/VidZen, which sail
    through sandbox — carries the sandbox popup-block whenever Ad Shield is
    on: that is the website-side ad shield that killed the resume popups. */
-const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm", "vidrift"]);
+const NO_SANDBOX = new Set(["vidlink", "vidfast", "yapgrid", "anipm", "vidrift", "vidbolt"]);
 /* TV-safe lineup helpers (TV_REMOTE_OK / IS_TV_DEVICE live in CONFIG above):
    only players a TV remote can actually drive. Genuine TV boxes get this
    automatically; anyone can flip it by hand in Playback Settings. */
@@ -7530,9 +7540,7 @@ function updateMirrorUI(){
       return;
     }
     if (mirror === "vidbolt") {
-      document.getElementById("watchStatus").textContent = window._boltRaw
-        ? "VidBolt: our bar drives play/seek/skip — A/V holds servers, quality + subtitles — Ad Shield off for this source (it refused the sandbox)"
-        : "VidBolt: our bar drives play/seek/skip — A/V holds servers, quality + subtitles — Ad Shield on (its popups stay blocked)";
+      document.getElementById("watchStatus").textContent = "VidBolt: our bar drives play/seek/skip — A/V holds servers, quality + subtitles — raw frame (its gate refuses ANY sandbox; ad hosts stay filtered in the app)";
       return;
     }
     document.getElementById("watchStatus").textContent = NO_SANDBOX.has(mirror)
@@ -7542,8 +7550,9 @@ function updateMirrorUI(){
     document.getElementById("watchStatus").textContent = "\u{1F3AC} Playing official trailer";
   }
 }
-/* Per-mirror sandbox: these refuse ANY sandboxed iframe, so drop
-   the sandbox attr entirely for them. Everything else keeps Ad Shield. */
+/* Per-mirror sandbox: these refuse ANY sandboxed iframe (measured - the
+   sandbox attribute itself trips their gates), so drop the sandbox attr
+   entirely for them. Everything else keeps Ad Shield. */
 function applyMirrorSandbox(){
   const f = document.getElementById("player");
   if (!f) return;
@@ -7558,13 +7567,6 @@ function applyMirrorSandbox(){
     try { paintEngineLabel(); } catch(e){}
     return;
   }
-  // VidBolt: shield-first - the same one-shot raw retry it earns only after a
-  // sandboxed start fails (window._boltRaw, per title)
-  if (mirror === "vidbolt" && window._boltRaw) {
-    f.removeAttribute("sandbox");
-    try { paintEngineLabel(); } catch(e){}
-    return;
-  }
   if (NO_SANDBOX.has(mirror)) {
     // our players + sandbox-refusing pages stay raw — the request filter is
     // the shield here, never the sandbox attribute
@@ -7573,7 +7575,7 @@ function applyMirrorSandbox(){
     return;
   }
   const on = sh ? sh.checked : true;
-  f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-modals");
+  f.setAttribute("sandbox", on ? "allow-scripts allow-same-origin allow-forms allow-presentation" : "allow-scripts allow-same-origin allow-forms allow-presentation allow-modals");
   try { paintEngineLabel(); } catch(e){}
 }
 /* the engine label must always tell the TRUTH about the live frame state
@@ -9383,9 +9385,6 @@ function boltArmStartRetry(delay){
     if (document.getElementById("watchView").classList.contains("hidden")) return; // left the player
     if (mirror !== "vidbolt" || window._boltProgress
         || [watchState.type, watchState.id, watchState.s, watchState.e].join(":") !== key) return;
-    // one shield-less retry before any reload/hop: a player that refuses the
-    // sandbox sits black and retries only repeat the refusal
-    if (boltSandboxProbe()) return;
     const used = window._boltRetryCount || 0;
     if (used < 2) {
       window._boltRetryCount = used + 1;
@@ -9406,26 +9405,6 @@ function boltArmStartRetry(delay){
     if (ws) ws.textContent = `VidBolt stayed loading after two retries — moving to ${nm}.`;
     setMirror(fb, true);
   }, delay);
-}
-function boltSandboxProbe(){
-  // VidBolt earned a shield-less retry: on players/networks that refuse the
-  // sandbox the frame sits black forever (the old blanket raw mode hid this).
-  // ONE probe per title: drop the sandbox for this source and reload keeping
-  // position - honest copy, ad hosts still filtered app-wide on the APK.
-  try {
-    if (mirror !== "vidbolt" || window._boltRaw) return false;
-    const f = document.getElementById("player");
-    if (!f || !f.hasAttribute("sandbox")) return false;
-    window._boltRaw = true;
-    f.removeAttribute("sandbox");
-    const at = Math.max(0, Math.floor(pState.cur || window._boltStartAt || 0));
-    if (watchState.anime) { watchState.t = at; resumeAt = -1; }
-    else { resumeAt = at; watchState.t = 0; }
-    const ws = document.getElementById("watchStatus");
-    if (ws) ws.textContent = "Retrying VidBolt without the sandbox \u{2014} ad hosts stay filtered app-wide; popup blocking is off for this source.";
-    loadPlayer();
-    return true;
-  } catch(e){ return false; }
 }
 function boltSend(msg){
   try {
