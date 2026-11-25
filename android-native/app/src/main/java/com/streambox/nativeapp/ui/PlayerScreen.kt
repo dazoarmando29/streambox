@@ -1424,6 +1424,12 @@ private class PlayerMem(
     // wall clock of the last timeupdate (bridge thins to ~4Hz; the caption
     // lookup extrapolates between updates so text never lands late)
     var curAt by mutableStateOf(0L)
+    // Provider-message PULSE for the caption clock's stall evidence (web
+    // _provMsgAt parity, 0.220): stamped on EVERY provider message (even
+    // the throttled timeupdates) from the bridge binder thread - a plain
+    // volatile, never Compose state (no recomposition churn).
+    @Volatile
+    var lastProvMsgAt = 0L
     // the caption repaint clock (120ms) - on PlayerMem per the 0.76 rule
     var capTick by mutableStateOf(0L)
     // Caption media-clock ESTIMATOR (0.210, web capNow() parity): a plain
@@ -2932,10 +2938,13 @@ fun PlayerScreen(
         if (pm.stabSubs && pm.playing && pm.curAt > 0L && pm.capTick - pm.curAt > 3000L) {
             return@remember null
         }
-        // Caption clock ESTIMATOR (0.210, web capNow() parity): rate-scaled
-        // free-run between provider updates, learned transport-lag
-        // compensation (late messages NEVER move cues backward), smooth
-        // correction, snap only on real seeks (the app's seek/scrub state
+        // Caption clock ESTIMATOR v4 (0.220, web capNow v4 parity):
+        // rate-scaled free-run at the MEASURED speed (the claimed rate
+        // below is FALLBACK only - measured always wins), evidence-based
+        // stall freeze (provider pulsing but position frozen = freeze with
+        // the picture; sparse providers never false-freeze), message-gated
+        // transport-lag correction (late messages NEVER move cues
+        // backward), snap only on real seeks (the app's seek/scrub state
         // snaps explicitly), provider truth while paused/scrubbing, and an
         // absolute monotonic clamp while playing.
         val t = pm.capClock.now(
@@ -2945,6 +2954,7 @@ fun PlayerScreen(
             seeking = pm.scrub >= 0f || pm.pendingSeek >= 0f ||
                 System.currentTimeMillis() - pm.lastSeekCmdAt < 1500L,
             nowMs = pm.capTick,
+            provMsgAt = pm.lastProvMsgAt,
         ) + pm.subOffset // the offset ladder adjusts the offset AFTER the clock
         cueAt(f.cues, t)
     }
@@ -3422,6 +3432,10 @@ fun PlayerScreen(
                         }
                     }
                     addJavascriptInterface(SBBridge({ t, j ->
+                        // provider message pulse (0.220): the subtitle
+                        // clock's stall evidence - stamped BEFORE the
+                        // throttle so every message counts (web _provMsgAt)
+                        pm.lastProvMsgAt = System.currentTimeMillis()
                         if (t == "timeupdate") {
                             val tn = System.currentTimeMillis()
                             if (tn - pm.tuGate.get() < 250) return@SBBridge
