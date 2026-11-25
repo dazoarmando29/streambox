@@ -1026,7 +1026,7 @@
 
 <!-- ============ CONFIG: APIs ride our Cloudflare Worker ============ -->
 <script>
-  const BUILD_NUM = 245; // bump every release alongside version.txt
+  const BUILD_NUM = 246; // bump every release alongside version.txt
 /* every catalog call goes through our own Worker (streambox-api) — the TMDB
    key lives server-side there, so page source carries NO keys at all. */
 const TMDB_BASE = "https://streambox-api.dazoarmando.workers.dev/api/tmdb/3";
@@ -6313,6 +6313,7 @@ const SVG_SPK_OFF = "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=
 function ctlPaint(){
   // dirty-checked: timeupdate floods this 4-10x/sec on weak TV WebViews -
   // only the fields that changed may touch the DOM
+  window._provMsgAt = Date.now(); // provider message pulse (subtitle clock evidence)
   const L = window._pL || (window._pL = {});
   const paused = !!pState.paused, muted = !!pState.muted;
   const rate = pState.rate || 1;
@@ -8539,47 +8540,71 @@ function paintSubsUI(){
   try { paintCapStyleUI(); } catch(e){}
 }
 function capNow(){
-  // Media-clock ESTIMATOR (the "subtitles delayed / sometimes early" fix):
-  // provider timeupdates are THINNED and often transport-late (their data
-  // describes where the video WAS). The old clock hard-reset to every
-  // message, so each late message YANKED captions backward (visible delay)
-  // while wall-clock extrapolation between them jumped ahead (early flash).
-  // This estimator instead free-runs at the REAL playback rate and corrects
-  // toward staleness-compensated measurements:
-  //   - it learns the transport lag (est - msg) and aims at msg + lag
-  //   - late messages therefore never pull the timeline backward
-  //   - a genuine slow media clock is corrected SMOOTHLY (not per-message)
-  //   - seeks / episode jumps snap instantly (|innov| > 2.5s)
-  //   - paused/seeking: the provider value IS the truth
+  // Media-clock ESTIMATOR v4 (fixes "subtitles so fast / ahead of voices"):
+  // v2's per-message yank caused delay+early-flash; v3's free-run trusted a
+  // CLAIMED rate and its every-tick correction fought free-run. v4 composes
+  // the proven parts:
+  //   - MEASURED speed: d(cur)/d(wall) from provider messages wins over any
+  //     claimed rate (kills rate-lie runaway; follows real 1.5x/2x playback)
+  //   - EVIDENCE-BASED stall freeze: provider actively messaging yet the
+  //     position not moving = real stall -> clock freezes with the picture;
+  //     sparse-but-healthy providers (quiet between messages) NEVER freeze
+  //   - MESSAGE-GATED correction toward cur + learned transport lag (EMA):
+  //     smooth, never a yank, and never runs between messages (that would
+  //     fight free-run)
+  //   - snap-to-truth only for real jumps (|innov| > 2.5) with fast
+  //     re-measurement after; absolute monotonic clamp while playing
   try {
     const cur = pState.cur || 0;
     const now = Date.now();
-    const rate = (pState.rate && pState.rate > 0) ? pState.rate : 1;
     if (pState.paused || pState.seeking) {
-      window._capClock = { est: cur, at: now, raw: cur, lag: 0, last: cur };
+      window._capClock = { est: cur, at: now, raw: cur, rawAt: now, lastMsgAt: now, lag: 0, last: cur, rateEst: 0, rateN: 0 };
       return cur;
     }
     const c = window._capClock;
-    if (!c) { window._capClock = { est: cur, at: now, raw: cur, lag: 0, last: cur }; return cur; }
-    // free-run between measurements, scaled by the actual playback rate
-    let est = c.est + ((now - c.at) / 1000) * rate;
+    if (!c) { window._capClock = { est: cur, at: now, raw: cur, rawAt: now, lastMsgAt: now, lag: 0, last: cur, rateEst: 0, rateN: 0 }; return cur; }
+    const rateBefore = (c.rateN > 0 && c.rateEst >= 0) ? c.rateEst
+      : ((pState.rate && pState.rate > 0) ? pState.rate : 1);
+    // stall evidence (never fires for sparse-but-healthy providers):
+    //   fast: provider pulses ARE arriving but the position is frozen (1.2s)
+    //   slow: total position silence for 8s
+    const staleFor = now - (c.rawAt || now);
+    const msgFresh = (now - (window._provMsgAt || 0)) < 1500;
+    const stalled = (msgFresh && staleFor > 1200) || staleFor > 8000;
+    let est = stalled ? c.est : c.est + ((now - c.at) / 1000) * rateBefore;
     if (cur !== c.raw) {
-      // apparent transport staleness: how far ahead our clock already is
-      const lag = Math.max(0, est - cur);
-      c.lag = (c.lag || 0) * 0.85 + lag * 0.15;
-      const target = cur + c.lag;      // where the media really is now
+      // ---- a REAL provider measurement arrived (message-gated) ----
+      const dw = (now - (c.rawAt || now)) / 1000;
+      const dc = cur - c.raw;
+      if (dw > 0.05 && dw < 10 && dc >= 0 && dc / dw < 8) {
+        const inst = dc / dw;
+        if ((c.rateN || 0) === 0) c.rateEst = inst;
+        else if (Math.abs(inst - c.rateEst) > 0.25) c.rateEst = c.rateEst * 0.2 + inst * 0.8; // fast adopt
+        else c.rateEst = c.rateEst * 0.6 + inst * 0.4;
+        c.rateN = (c.rateN || 0) + 1;
+      }
+      const rate = (c.rateN > 0 && c.rateEst >= 0) ? c.rateEst : rateBefore;
+      // transport-lag learning: the residual of free-run ahead of this stale
+      // message is the transport delay - absorb it smoothly, capped so it can
+      // never mask real drift (beyond the cap the snap self-heals)
+      const lagGuess = Math.max(0, Math.min(2.0, est - cur));
+      c.lag = (c.lag || 0) * 0.8 + lagGuess * 0.2;
+      const target = cur + c.lag;
       const innov = target - est;
       if (Math.abs(innov) > 2.5) {
-        est = cur;                     // seek / jump: snap to truth
+        est = cur;                      // seek / jump / drift beyond repair
         c.lag = 0;
+        c.rateEst = 0; c.rateN = 0;     // re-measure speed from scratch
         c.last = est;
       } else {
-        est += innov * 0.3;            // smooth correction, never a yank
+        est += innov * 0.3;             // smooth correction, never a yank
       }
       c.raw = cur;
+      c.rawAt = now;
+      c.lastMsgAt = now;
     }
-    // ABSOLUTE monotonic guarantee while playing: a single rogue/echoed
-    // message can never pull captions backward (only a real seek can)
+    // ABSOLUTE monotonic guarantee while playing: a rogue/echoed message can
+    // never pull captions backward (only a real seek snap can)
     if (c.last != null && est < c.last) est = c.last;
     c.last = est;
     c.est = est; c.at = now;

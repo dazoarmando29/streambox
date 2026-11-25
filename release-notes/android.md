@@ -1,13 +1,11 @@
-The StreamBox Smart Subtitle Update - the right subtitles, at the right time, automatically.
+The StreamBox Subtitle Speed Fix - captions now move at the speed of the voices.
 
-What's new
-- Smart Subtitle Chooser: subtitle selection is no longer "most downloads wins". Candidates are ranked by release and edition match (WEB-DL/BluRay/HDTV, REPACK/PROPER, Extended/Director's Cut...), verified history and real timing evidence - download popularity is only a tiebreaker. Wrong episodes, wrong languages, forced-only and commentary tracks are rejected outright. Confidence shows as honest labels (Recommended Match / Previously Confirmed / Different Release / Timing Unverified) - never an invented accuracy percentage
-- Adaptive Auto-Sync: constant delays, slow drift across a two-hour movie, and different cuts/intros are corrected automatically - constant offset, two-point drift calibration (frame-rate mismatches like 23.976 vs 25 snap only with real evidence), and segmented piecewise correction for material with added intros or recaps. Corrections are remembered PER RELEASE: your sync for one cut never leaks onto another. Manual taps always win over automatic guesses
-- Your controls in Subs > Smart Subtitles: Find Better Match, Resync Subtitles, Subs Too Early / Too Late, Sync This Line Now (one-tap fix while a line is on screen), Remember This Match, Reset Synchronization, Dialogue Sync (optional, consent-gated, owned media only - honestly reports "unavailable" on provider players where audio cannot be reached)
-- Candidate files are validated before applying (corrupt, overlapping, duplicate or ad-filled files fall through to the next choice), with a strict budget of two downloads per automatic attempt and full quota protection across Wyzie/TSDB/BetaSeries
+What is fixed
+- "Subtitles so fast / ahead of the dialogue" on movies, TV shows, anime (AniPM) and K-dramas (VidBolt) - FIXED. Root cause: the caption clock free-ran at the CLAIMED playback speed and, worse, whenever the video buffered or the provider reported a wrong speed, the clock kept racing ahead while the picture was frozen. The clock now MEASURES the video's true speed from the provider's own position updates (measured beats claimed - verified: a provider claiming 1.5x while playing at 1x now holds captions at 1x), FREEZES with the picture the instant buffering stalls it (verified: zero drift through a 5-second stall), and re-measures instantly after seeks or speed changes (verified: real 1.5x playback tracks at 1.5x). Subtitle timing corrections remain remembered per release, and Sync This Line Now still fine-tunes anything left
+- The same clock logic is QA-locked (four locks on the estimator) so this class can never regress on any title, and it is being mirrored to the native Android app
+
+Also included in this train
+- The full Smart Subtitle suite stays green (23/23), plus the anti-stutter StabilityGuard and the anti-delay clock suites
 
 Honest limits
-- Dialogue-listening sync needs a speech service you configure yourself (off by default, nothing transmitted otherwise) and cannot run inside third-party player frames - the app says so instead of pretending
-- Automated verification: 23/23 subtitle suite tests, plus the earlier subtitle-clock and stability suites, all green before release
-
-Also in this train (native app 0.210): the native subtitle clock now matches the web estimator exactly - rate-correct, immune to late provider messages, never yanks captions backward.
+- Captions can only be as accurate as the position data a provider sends; where a provider embeds its own burned-in captions, those are the provider's own (the app says so) - our styled captions take over the moment a subtitle file is loaded
